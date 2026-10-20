@@ -214,12 +214,14 @@ a fixed memory discount from `vae_tiling: true`, or assume this mode uses less
 memory than the default cached decoder. Other model families can use different
 tiling controls. This setting flow was checked in code, not by GPU generation.
 
-Hardware IDs describe variants such as H100 SXM 80 GB. `memory_gb` is nominal
-**decimal GB per device** (`1 GB = 1e9 bytes`); convert to GiB with
-`memory_gb * 1e9 / 1024**3`. Use `memory_type: dedicated` for discrete VRAM or
+Hardware IDs describe variants such as H100 SXM 80 GB. The authored
+`memory.nominal` preserves `GB` or `GiB`; the build exports normalized decimal
+`memory_gb` (`1 GB = 1e9 bytes`), converted to GiB with
+`memory_gb * 1e9 / 1024**3`. Use `memory.type: dedicated` for discrete VRAM or
 `unified` for capacity shared with the CPU. Neither means measured free memory.
 `supported_dtypes` describes hardware format capability, not FastVideo kernel
-support; omission means unknown. `ui_id` connects a variant to an existing UI choice.
+support; omission means unknown. `aliases` connect a variant to existing UI IDs
+and search names.
 
 Use checkpoint `model_index.json`/component `config.json` files, tensor headers
 or indexes, and the FastVideo loader to establish composition, counts, and geometry.

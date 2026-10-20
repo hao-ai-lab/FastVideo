@@ -3,7 +3,8 @@
  * deployments. Analytical results are not measurements and never mark a recipe as verified.
  *
  * Inputs use the static capacity catalog exported by build-cookbook-capacity.mjs:
- * model.components is a mapping by role, hardware uses memory_gb/memory_type, and examples
+ * model.components is a mapping by role, hardware uses memory.nominal/memory.type (the
+ * normalizer also accepts legacy memory_gb/memory_type for custom callers), and examples
  * preserve the native baseline. Execution settings are resolved from the serving configuration.
  */
 
@@ -589,7 +590,7 @@ export function estimateMemory({
     memory: {
       type: device.memoryType,
       nominalGiB: device.nominalGiB,
-      budgetGiB: device.memoryType === "unified" ? capacity : null,
+      budgetGiB: device.budgetGiB ?? null,
       budgetSource: device.budgetSource,
       partition: device.partition?.id ?? null,
     },
