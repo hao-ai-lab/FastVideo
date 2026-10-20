@@ -52,9 +52,29 @@ function groupTitle(path: string) {
     "generator.engine.compile": "Compilation",
     "default_request.sampling": "Request defaults",
     "generator.pipeline.experimental": "Decoder",
+    "generator.pipeline.components": "Encoder",
     streaming: "Streaming",
   };
   return titles[path] ?? path.split(".").at(-1)?.replaceAll("_", " ");
+}
+
+/** Short chip labels for component choices whose values are file paths. */
+const CHOICE_LABELS: Record<string, Record<string, string>> = {
+  "generator.pipeline.experimental.h3_vae_nvfp4_decoder": {
+    null: "Original",
+    "./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors": "NVFP4 36L · quality",
+    "./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors": "NVFP4 8L · fast",
+  },
+  "generator.pipeline.components.text_encoder_weights": {
+    null: "Bundled",
+    "./fasth3-nvfp4-encoder/text_encoder": "NVFP4 encoder",
+  },
+};
+
+function choiceLabel(path: string, choice: Value) {
+  const label = CHOICE_LABELS[path]?.[String(choice)];
+  if (label) return label;
+  return typeof choice === "boolean" ? (choice ? "On" : "Off") : String(choice);
 }
 
 function errorText(error: unknown) {
@@ -122,7 +142,7 @@ function FieldControl({
               aria-pressed={value === choice}
               onClick={() => update(field.path, JSON.stringify(choice), field)}
             >
-              {typeof choice === "boolean" ? (choice ? "On" : "Off") : String(choice)}
+              {choiceLabel(field.path, choice)}
             </button>
           ))}
           {nullable && !choices.includes(null) && (
@@ -580,7 +600,7 @@ function Editor({
               </div>
             )}
             <p className="matrix-note">
-              Weights and encoders come from the maintained recipe. Choose the video decoder under Decoder.
+              Transformer weights come from the maintained recipe. Swap the text encoder and video decoder below.
             </p>
           </MatrixRow>
         )}

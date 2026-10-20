@@ -30,6 +30,7 @@ JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean", t
 EXPERIMENTAL_DECLARATIONS = {
     "generator.pipeline.experimental.flow_shift": (PipelineConfig, "flow_shift"),
     "generator.pipeline.experimental.video_decode_backend": (FastVideoArgs, "video_decode_backend"),
+    "generator.pipeline.experimental.h3_vae_nvfp4_decoder": (FastVideoArgs, "h3_vae_nvfp4_decoder"),
 }
 
 

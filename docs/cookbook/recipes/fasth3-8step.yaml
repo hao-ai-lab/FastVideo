@@ -13,6 +13,8 @@ deployments:
     # Existing FastH3 V2 installation command: docs/cookbook/openai-api.md.
     requirements:
       - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
+      - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options:
       - server.*
       - generator.engine.num_gpus
@@ -21,6 +23,8 @@ deployments:
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
       - generator.pipeline.experimental.video_decode_backend
+      - generator.pipeline.experimental.h3_vae_nvfp4_decoder
+      - generator.pipeline.components.text_encoder_weights
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width

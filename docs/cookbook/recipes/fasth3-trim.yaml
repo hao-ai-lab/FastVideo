@@ -20,6 +20,7 @@ deployments:
       - Install FastVideo using the DGX Spark guide before running these commands.
       - Based on the released one-Spark inference recipe. This serving adaptation and edited hardware combinations have not been GPU-validated.
       - The checkpoint includes NVFP4 weights and encoder, a lightweight video VAE, and its trained eight-forward schedule. No local CompactH3 assembly is needed.
+      - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
     options:
       - server.*
       - generator.engine.num_gpus
@@ -28,12 +29,18 @@ deployments:
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
       - generator.pipeline.experimental.video_decode_backend
+      - generator.pipeline.experimental.h3_vae_nvfp4_decoder
       - default_request.prompt
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width
       - default_request.sampling.seed
     overrides:
+      generator.pipeline.experimental.h3_vae_nvfp4_decoder:
+        enum:
+          - null
+          - ./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors
+        description: The bundled VAE has 26 blocks, so only the 8-block fast tier fits.
       default_request.prompt:
         title: Prompt
         type: string
