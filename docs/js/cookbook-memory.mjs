@@ -561,6 +561,10 @@ export function estimateMemory({
     notes.push(
       `Using the ${device.partition.label} partition; the full ${device.nominalGiB.toFixed(1)} GiB is not available.`,
     );
+  } else if (device.allocationGiB !== null) {
+    notes.push(
+      `Using a ${device.allocationGiB.toFixed(1)} GiB provisioned allocation; the full ${device.nominalGiB.toFixed(1)} GiB is not available.`,
+    );
   }
   if (device.custom) notes.push("Custom hardware specification; not catalog-verified.");
   if (!Array.isArray(device.supported_dtypes) || !device.supported_dtypes.length) {
