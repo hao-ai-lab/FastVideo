@@ -155,7 +155,7 @@ hardware:
     sources:
       - url: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/a100-80gb-datasheet-update-nvidia-us-1521051-r2-web.pdf
         checked: 2026-10-19
-      - url: https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/a100.html
+      - url: https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/supported-mig-profiles.html
         checked: 2026-10-19
 
   l40s-48gb:
