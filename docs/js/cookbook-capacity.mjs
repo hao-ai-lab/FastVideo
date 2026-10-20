@@ -95,7 +95,8 @@ function validateHardwareDevice(hardware) {
             text(partition.label) &&
             Number.isFinite(partition.memory_gb) &&
             partition.memory_gb > 0 &&
-            partition.memory_gb < hardware.memory_gb,
+            // A full-card profile such as A100 7g.80gb equals the card; none may exceed it.
+            partition.memory_gb <= hardware.memory_gb,
         ),
       `Invalid partitions for ${hardware.id}`,
     );

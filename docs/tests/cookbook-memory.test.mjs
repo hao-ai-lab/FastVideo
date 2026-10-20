@@ -256,6 +256,15 @@ test("a disabled VAE feature cache returns unknown", () => {
   assert.match(result.reason, /feature caching/i);
 });
 
+test("trajectory capture returns unknown instead of a dense estimate", () => {
+  assert.notEqual(estimate().status, "unknown");
+  for (const flag of ["return_trajectory_latents", "return_trajectory_decoded"]) {
+    const result = estimate({ request: { sampling: config().default_request.sampling, runtime: { [flag]: true } } });
+    assert.equal(result.status, "unknown");
+    assert.match(result.reason, /trajectory/i);
+  }
+});
+
 test("layerwise offload requires block counts", () => {
   const model = wanModel((item) => {
     delete item.components.transformer.block_count;

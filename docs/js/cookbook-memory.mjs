@@ -396,8 +396,11 @@ function applyUnifiedMemoryPolicy(execution, device) {
   };
 }
 
-function checkCoverage({ workload, model, device, execution, sampling, components }) {
+function checkCoverage({ workload, model, device, execution, sampling, runtime = {}, components }) {
   const unknown = (reason) => ({ status: "unknown", reason });
+  if (runtime.return_trajectory_latents || runtime.return_trajectory_decoded) {
+    return unknown("Trajectory capture keeps a tensor per denoising step; it is not modeled.");
+  }
   if (!device) return unknown("Select a catalogued hardware variant or enter a custom device with capacity.");
   if (device.backend !== "cuda") return unknown(`${device.name} is not a CUDA device.`);
   if (device.gpu_count > 1) {
@@ -520,6 +523,7 @@ export function estimateMemory({
 }) {
   const resolvedExecution = resolveExecution({ model, config, env });
   const sampling = request?.sampling ?? config.default_request?.sampling ?? {};
+  const runtime = request?.runtime ?? config.default_request?.runtime ?? {};
   const components = normalizeComponents(model);
   const device = normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryGb, partitionId });
   const execution = applyUnifiedMemoryPolicy(resolvedExecution, device);
@@ -529,6 +533,7 @@ export function estimateMemory({
     device,
     execution,
     sampling,
+    runtime,
     components,
   });
   if (gap) return gap;
@@ -860,6 +865,22 @@ export function matchEvidence({ model, example, config, request, env = example?.
       default_request: { sampling: currentRequest.sampling ?? currentConfig?.default_request?.sampling },
     };
     differences.push(...configDifferences(model, recordedConfig, currentSamplingConfig));
+    const trajectory = (runtime) => ({
+      latents: Boolean(runtime?.return_trajectory_latents),
+      decoded: Boolean(runtime?.return_trajectory_decoded),
+    });
+    const recordedTrajectory = trajectory(run.context.request.runtime);
+    const currentTrajectory = trajectory(currentRequest.runtime ?? currentConfig?.default_request?.runtime);
+    if (
+      recordedTrajectory.latents !== currentTrajectory.latents ||
+      recordedTrajectory.decoded !== currentTrajectory.decoded
+    ) {
+      differences.push({
+        path: "request.runtime.trajectory",
+        recorded: recordedTrajectory,
+        current: currentTrajectory,
+      });
+    }
     const envDifference = difference("context.env", memoryEnv(run.context.env), memoryEnv(currentEnv));
     if (envDifference) differences.push(envDifference);
     const revisionsMatch = revisionDifferences(run.context.revisions, revisions);
@@ -968,7 +989,7 @@ export function assessCapacity({
     model,
     example,
     config,
-    request: { sampling },
+    request: { sampling, runtime: request?.runtime ?? config?.default_request?.runtime },
     env,
     hardware: device ?? hardware,
     revisions,

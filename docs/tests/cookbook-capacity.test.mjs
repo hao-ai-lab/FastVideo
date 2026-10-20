@@ -816,3 +816,18 @@ test(
     assert.equal(readFileSync(sentinel, "utf8"), "unchanged\n");
   },
 );
+
+test("the shipped hardware catalog passes the browser loader", async () => {
+  // Same shape exportCapacityCatalog writes to hardware.json.
+  const hardware = Object.values(buildCapacityCatalog().hardware);
+  const files = {
+    "https://docs.example/capacity/index.json": { hardware_url: "hardware.json", models: [] },
+    "https://docs.example/capacity/hardware.json": { version: 1, devices: hardware },
+  };
+  const fetcher = async (url) => ({ ok: url in files, status: 404, url, json: async () => files[url] });
+  const index = await loadCapacityIndex("https://docs.example/capacity/index.json", { fetcher });
+  const loaded = await loadCapacityHardware(index, { fetcher });
+  assert.equal(loaded.devices.length, hardware.length);
+  const a100 = loaded.devices.find((device) => device.id === "a100-sxm-80gb");
+  assert.ok(a100.partitions.some((partition) => partition.id === "7g.80gb" && partition.memory_gb === a100.memory_gb));
+});
