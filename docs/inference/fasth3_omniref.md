@@ -97,8 +97,13 @@ The Blackwell YAML examples also select FP4 attention and the prefix precision
 through `pipeline.experimental.h3_vsa_fp4`. Explicit YAML values take precedence
 over the corresponding environment flags. A missing native extension raises an
 error. To choose BF16 VSA for OmniRef's 128-token tiles, set
-`h3_vsa_fp4.enabled: false` and
-`FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`.
+`h3_vsa_fp4.enabled: false`. On the DGX Spark this runs the 128-token GB10
+CUDA kernel (`fastvideo_kernel.block_sparse_attn_sm121`, built when
+`TORCH_CUDA_ARCH_LIST` contains `12.1a` or `12.1` and CUDA is 13 or newer);
+leave `FASTVIDEO_H3_VSA_FINE_ATTENTION` unset there, since it replaces that
+kernel. On the other consumer cards, add
+`FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`, or leave it unset to run each
+128-token tile as two 64-token halves on the Triton kernels.
 
 The Blackwell profiles select the FP8 prefix split to protect the conditioning
 queries from FP4 rounding. The split runs prefix rows densely in bf16 after

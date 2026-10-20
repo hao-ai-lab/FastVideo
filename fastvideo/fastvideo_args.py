@@ -299,7 +299,7 @@ class FastVideoArgs:
     # VSA parameters. None means unset: __post_init__ fills the checkpoint's
     # trained value when the checkpoint fixes one, else 0.0 and 256.
     VSA_sparsity: float | None = None  # inference/validation sparsity
-    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = ptx_blackwell only
+    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = CUDA kernel or split Triton
 
     # V-MoBA parameters
     moba_config_path: str | None = None
@@ -908,7 +908,8 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.VSA_tile_size,
             help="VSA-H3 tile size in tokens (256, 128 or 64; default: the checkpoint's trained value, else 256); "
-            "64 runs the native Triton block-sparse path, 128 requires the ptx_blackwell kernel",
+            "64 runs the native Triton block-sparse path, 128 the ptx_blackwell (sm_100/sm_103) or GB10 "
+            "(sm_121) CUDA kernel, else each tile as two halves on the Triton path",
         )
 
         # Master port for distributed training/inference

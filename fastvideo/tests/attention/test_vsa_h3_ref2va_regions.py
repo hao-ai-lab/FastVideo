@@ -424,6 +424,21 @@ class _FakePtxBlackwell:
         return q.clone(), None
 
 
+class _FakeSm121:
+    """Stands in for fastvideo_kernel.block_sparse_attn_sm121 (the GB10 128-token forward)."""
+
+    def __init__(self, supported=True):
+        self.supported = supported
+        self.calls = []
+
+    def is_supported(self, q, variable_block_sizes):
+        return self.supported
+
+    def block_sparse_attn_sm121(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes):
+        self.calls.append(dict(q=q, q2k_num=q2k_num, vbs=variable_block_sizes))
+        return q.clone(), None
+
+
 def _fake_map_to_index(block_map):
     num = block_map.sum(dim=-1, dtype=torch.int32)
     idx = torch.full(block_map.shape, -1, dtype=torch.int32)
@@ -441,6 +456,8 @@ def tile128(monkeypatch, env_overrides):
         raise AssertionError("tile 128 must never fall back to the Triton-64 kernel")
 
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake)
+    # The GB10 kernel is absent unless a test installs its fake.
+    monkeypatch.setattr(vsa_h3, "_sm121", None)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", forbid_triton)
     # Tile 128 has no opt-in: it routes to the CUDA kernel with the switch off.
@@ -499,6 +516,43 @@ def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile1
                                 (meta.variable_block_sizes - 64).clamp(min=0)), dim=-1).flatten()
     torch.testing.assert_close(vbs, expected_vbs)
     assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_forward_tile128_uses_sm121_kernel_when_ptx_blackwell_unavailable(tile128, monkeypatch):
+    """On a GB10 the sm_121a forward takes the ptx_blackwell call: the padded partner tile and per-row counts."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    tile128.supported = False
+    sm121 = _FakeSm121()
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    _, out = _run_tile128(meta)
+    assert tile128.calls == [] and len(sm121.calls) == 1
+    call = sm121.calls[0]
+    assert call["q"].shape[2] == (n_tiles + 1) * 128
+    assert call["vbs"].dtype == torch.int32 and call["vbs"].numel() == n_tiles + 1 and call["vbs"][-1] == 0
+    assert (call["q2k_num"][..., n_tiles] == 0).all()
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_forward_tile128_prefers_ptx_blackwell_over_sm121(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    sm121 = _FakeSm121()
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    _run_tile128(meta)
+    assert len(tile128.calls) == 1 and sm121.calls == []
+
+
+def test_forward_tile128_falls_back_to_triton_when_sm121_unsupported(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    tile128.supported = False
+    sm121 = _FakeSm121(supported=False)
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
+    _run_tile128(meta)
+    assert len(calls) == 1 and sm121.calls == []
 
 
 @pytest.mark.parametrize("datacenter", [False, True])
@@ -585,6 +639,20 @@ def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides,
     forwards = getattr(vsa_h3._ptx_blackwell, "_FWD_BY_BLOCK", {}) if vsa_h3._ptx_blackwell is not None else {}
     if forwards.get(128) is None or vsa_h3.map_to_index is None:
         pytest.skip("requires a fastvideo_kernel build with the 128-token ptx_blackwell forward")
+    _check_real_tile128_forward_against_oracle(env_overrides, sparsity, ref_keep_rate)
+
+
+@pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
+def test_forward_tile128_real_sm121_kernel_matches_oracle(env_overrides, sparsity, ref_keep_rate):
+    """The real GB10 (sm_121a) 128-token forward on a multi-region layout against an FP32 masked-SDPA oracle."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 1):
+        pytest.skip("requires a GB10 GPU (DGX Spark, sm_121)")
+    if vsa_h3._sm121 is None or not vsa_h3._sm121._HAS_VSA_SM121 or vsa_h3.map_to_index is None:
+        pytest.skip("requires a fastvideo_kernel build with the sm_121a block-sparse forward")
+    _check_real_tile128_forward_against_oracle(env_overrides, sparsity, ref_keep_rate)
+
+
+def _check_real_tile128_forward_against_oracle(env_overrides, sparsity, ref_keep_rate):
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     device = torch.device("cuda")
     meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
