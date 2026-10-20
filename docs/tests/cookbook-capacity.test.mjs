@@ -46,11 +46,17 @@ function fixture(t) {
   const hardware = {
     hardware: {
       "example-gpu": {
-        name: "Fixture GPU",
-        memory_type: "dedicated",
-        memory_gb: 24,
+        name: "Fixture GPU 24 GB",
+        vendor: "nvidia",
+        kind: "gpu",
+        family: "fixture-gpu",
+        variant: "Fixture 24 GB",
+        form_factor: "desktop",
+        memory: { type: "dedicated", nominal: { value: 24, unit: "GB" } },
         backend: "cuda",
-        sources: [SOURCE],
+        supported_dtypes: ["fp32", "fp16", "bf16"],
+        aliases: ["fixture"],
+        sources: [{ url: SOURCE, checked: "2026-10-19" }],
       },
     },
   };
@@ -196,7 +202,10 @@ function referenceRun(f) {
 test("capacity export resolves shared metadata and preserves native example configuration", (t) => {
   const f = fixture(t);
   const data = buildCapacityCatalog({ root: f.root });
-  assert.deepEqual(data.hardware["example-gpu"], f.hardware.hardware["example-gpu"]);
+  assert.equal(data.hardware["example-gpu"].id, "example-gpu");
+  assert.equal(data.hardware["example-gpu"].memory_gb, 24);
+  assert.deepEqual(data.hardware["example-gpu"].aliases, ["fixture"]);
+  assert.equal(data.hardware["example-gpu"].memory.type, "dedicated");
   const model = data.models[0];
   assert.equal(model.id, "example-model");
   assert.equal(model.name, f.manifest.title);
@@ -437,13 +446,69 @@ test("hardware and components require source URLs and do not fix a runtime dtype
   f.save();
   assert.throws(() => buildCapacityCatalog({ root: f.root }), /source|URL/i);
   transformer(f).sources = [SOURCE];
-  f.hardware.hardware["example-gpu"].sources = ["not-a-url"];
+  f.hardware.hardware["example-gpu"].sources = [{ url: "not-a-url", checked: "2026-10-19" }];
   f.save();
   assert.throws(() => buildCapacityCatalog({ root: f.root }), /source|URL|https/i);
-  f.hardware.hardware["example-gpu"].sources = [SOURCE];
+  f.hardware.hardware["example-gpu"].sources = [{ url: SOURCE, checked: "2026-10-19" }];
   transformer(f).dtype = "bf16";
   f.save();
   assert.throws(() => buildCapacityCatalog({ root: f.root }), /dtype|unknown|unsupported/i);
+});
+
+test("the authored hardware inventory is sourced, unique and keeps unified memory explicit", () => {
+  const catalog = buildCapacityCatalog({ root: ROOT }).hardware;
+  const devices = Object.values(catalog);
+  assert.equal(devices.length, 50);
+  assert.equal(new Set(devices.map((device) => device.id)).size, devices.length);
+  const aliases = new Map();
+  for (const device of devices) {
+    assert.ok(device.sources.length > 0, `${device.id}: missing source`);
+    assert.match(device.sources[0].checked, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(["dedicated", "unified"].includes(device.memory.type), `${device.id}: memory type`);
+    assert.ok(device.memory.nominal.value > 0, `${device.id}: capacity`);
+    for (const alias of device.aliases) {
+      assert.equal(aliases.has(alias), false, `${alias} is assigned to ${aliases.get(alias)} and ${device.id}`);
+      aliases.set(alias, device.id);
+    }
+    for (const partition of device.partitions ?? []) {
+      assert.ok(partition.memory_gb > 0 && partition.memory_gb < device.memory_gb);
+      assert.match(partition.id, /^[a-z0-9][a-z0-9.-]*$/);
+    }
+  }
+  const spark = catalog["dgx-spark-gb10-128gb"];
+  assert.equal(spark.memory.type, "unified");
+  assert.equal(spark.memory_gb, 128);
+  assert.equal(spark.memory_type, undefined);
+  assert.equal(catalog["h100-sxm-80gb"].partitions.length, 3);
+  assert.equal(catalog["gb200-186gb"].gpu_count, 1);
+});
+
+test("hardware aliases, budgets and partitions cannot contradict the device", (t) => {
+  const f = fixture(t);
+  f.hardware.hardware["other-gpu"] = {
+    ...clone(f.hardware.hardware["example-gpu"]),
+    name: "Other GPU",
+    aliases: ["fixture"],
+  };
+  f.save();
+  assert.throws(() => buildCapacityCatalog({ root: f.root }), /alias|duplicate/i);
+  delete f.hardware.hardware["other-gpu"];
+  f.hardware.hardware["example-gpu"].memory.usable = { value: 25, unit: "GB" };
+  f.save();
+  assert.throws(() => buildCapacityCatalog({ root: f.root }), /usable/i);
+  f.hardware.hardware["example-gpu"].memory.usable = { value: 20, unit: "GB" };
+  f.hardware.hardware["example-gpu"].memory.policy = "Fixture application budget";
+  f.hardware.hardware["example-gpu"].partitions = [
+    { id: "1g.24gb", label: "1g.24gb", memory: { value: 24, unit: "GB" } },
+  ];
+  f.save();
+  assert.throws(() => buildCapacityCatalog({ root: f.root }), /partition/i);
+  delete f.hardware.hardware["example-gpu"].partitions;
+  delete f.hardware.hardware["example-gpu"].memory.usable;
+  delete f.hardware.hardware["example-gpu"].memory.policy;
+  f.hardware.hardware["example-gpu"].memory.type = "unified";
+  f.save();
+  assert.equal(buildCapacityCatalog({ root: f.root }).hardware["example-gpu"].memory.type, "unified");
 });
 
 test("hardware format names are known, unique and nonempty", (t) => {
@@ -623,7 +688,12 @@ test("exports use relative URLs and browser loaders resolve them under a deploym
   assert.equal(model.components.vae.decode_feature_multiplier, f.vaes.vaes["example-vae"].decode_feature_multiplier);
   assert.deepEqual(model.examples[0].base_config, f.config);
   const hardware = await loadCapacityHardware(loadedIndex, { fetcher, signal });
-  assert.deepEqual(hardware["example-gpu"], f.hardware.hardware["example-gpu"]);
+  assert.equal(hardware.version, 1);
+  assert.equal(hardware.devices.length, 1);
+  assert.equal(hardware.devices[0].id, "example-gpu");
+  assert.equal(hardware.devices[0].memory_gb, 24);
+  assert.deepEqual(hardware.devices[0].aliases, ["fixture"]);
+  assert.equal(hardware.url, new URL(index.hardware_url, indexUrl).href);
   assert.deepEqual(requested, [
     indexUrl,
     new URL(index.models[0].catalog_url, indexUrl).href,
@@ -660,7 +730,7 @@ test("browser loaders reject malformed or mismatched catalog responses", async (
   await assert.rejects(
     () =>
       loadCapacityHardware(index, {
-        fetcher: fetcher({ gpu: { name: "Invalid capacity", memory_type: "dedicated", memory_gb: -1 } }),
+        fetcher: fetcher({ version: 1, devices: [{ id: "gpu", name: "Invalid capacity" }] }),
       }),
     /hardware/i,
   );
