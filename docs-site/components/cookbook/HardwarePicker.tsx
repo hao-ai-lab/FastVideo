@@ -125,7 +125,15 @@ export default function HardwarePicker({
   }
 
   return (
-    <div className="hardware-picker">
+    <div
+      className="hardware-picker"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
       {record ? (
         <div className="hardware-selected">
           <div>

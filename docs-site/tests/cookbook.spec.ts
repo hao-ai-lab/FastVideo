@@ -577,6 +577,15 @@ test("catalog search renders one plain no-results message", async ({ page }) => 
   await expect(page.getByLabel("Device name", { exact: true })).toBeVisible();
 });
 
+test("hardware lookup closes with Escape and returns focus", async ({ page }) => {
+  await page.goto(route);
+  await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await expect(page.getByLabel("Search hardware", { exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Search hardware", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "+ Find or add a GPU", exact: true })).toBeFocused();
+});
+
 test("WebSocket deployments expose only the serving interface", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/ltx/ltx2-distilled");
   const modes = page.getByRole("group", { name: "Run mode" });
