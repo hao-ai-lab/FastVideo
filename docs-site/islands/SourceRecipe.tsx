@@ -484,17 +484,17 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                 </a>
               </div>
             </div>
-            <p className="matrix-note">
-              {mlx
-                ? hardwareLabel
+            {hardwareLabel ? (
+              <p className="matrix-note">
+                {mlx
                   ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
-                  : "No hardware target selected. Choosing a Mac records your target; it does not change the example."
-                : hardwareLabel
-                  ? `${hardwareLabel} is saved as your target. It does not change the example; use GPU count in the source settings.`
-                  : "No hardware target selected. Choosing a device records your setup path; it does not change the example."}
-            </p>
+                  : `${hardwareLabel} is saved as your target. It does not change the example; use GPU count in the source settings.`}
+              </p>
+            ) : null}
             <RecipeFacts
               validity={failure ? "invalid" : example ? "valid" : "loading"}
+              validityText={yamlSource ? "YAML parses" : "Example settings applied"}
+              validityDetail="This page checks that the YAML parses and that edited numeric fields are finite and supported by the example. It does not run the full recipe schema or runtime topology validation."
               fit="unknown"
               evidence="none"
               subject={yamlSource ? "configuration" : "example"}

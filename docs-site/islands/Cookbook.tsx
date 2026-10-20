@@ -510,15 +510,13 @@ function Editor({
               </a>
             </div>
           </div>
-          <p className="matrix-note">
-            {mlx
-              ? hardwareLabel
+          {hardwareLabel ? (
+            <p className="matrix-note">
+              {mlx
                 ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
-                : "No hardware target selected. Choosing a Mac records your target; it does not change the generated YAML."
-              : hardwareLabel
-                ? `${hardwareLabel} is saved as your target. It does not change the generated YAML; use GPU count and parallelism for the run.`
-                : "No hardware target selected. Choosing a device records your setup path; it does not change the generated YAML."}
-          </p>
+                : `${hardwareLabel} is saved as your target. It does not change the generated YAML; use GPU count and parallelism for the run.`}
+            </p>
+          ) : null}
           <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} fit="unknown" evidence="none" />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (

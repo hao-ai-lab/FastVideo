@@ -26,6 +26,7 @@ export default function HardwarePicker({
   const id = useId();
   const known = options.filter((option) => option.join(" ").toLowerCase().includes(search.toLowerCase()));
   const selected = value.startsWith("custom:") ? value.slice(7) : options.find(([key]) => key === value)?.[1];
+  const savedUnknown = !!value && !selected;
   function add() {
     const name = search.trim();
     if (!name) return;
@@ -77,7 +78,7 @@ export default function HardwarePicker({
         <button type="button" className="hardware-add" aria-expanded={adding} onClick={() => setAdding(!adding)}>
           + Find or add {backend === "mlx" ? "a Mac" : "a GPU"}
         </button>
-        {selected && (
+        {(selected || savedUnknown) && (
           <button type="button" className="hardware-clear" onClick={clear}>
             Clear hardware {purpose}
           </button>
@@ -85,7 +86,7 @@ export default function HardwarePicker({
       </div>
       {!selected && (
         <p className="hardware-current" role="status">
-          No hardware {purpose} selected.
+          {savedUnknown ? "Saved hardware target is not in this list." : `No hardware ${purpose} selected.`}
         </p>
       )}
       {adding && (

@@ -425,6 +425,13 @@ test("hardware is never preselected and a target does not change generated YAML"
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
 });
 
+test("a saved target missing from the list stays visible and clearable", async ({ page }) => {
+  await page.goto(`${route}?hardware=retired-gpu`);
+  await expect(page.getByText("Saved hardware target is not in this list.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await expect(page).not.toHaveURL(/hardware=/);
+});
+
 test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
   await page.goto(route);
   const facts = page.getByLabel("Recipe facts");

@@ -33,19 +33,25 @@ export default function RecipeFacts({
   evidence = "none",
   subject = "configuration",
   detail,
+  validityText,
+  validityDetail,
 }: {
   validity: Validity;
   fit?: Fit;
   evidence?: Evidence;
   subject?: "configuration" | "example";
   detail?: string;
+  validityText?: string;
+  validityDetail?: string;
 }) {
   const [open, setOpen] = useState(false);
   const id = `recipe-facts-${validity}-${fit}-${evidence}`;
   return (
     <div className="recipe-facts">
       <div className="recipe-fact-list" aria-label="Recipe facts">
-        <span data-state={validity}>{validity === "valid" ? `Valid ${subject}` : validityLabel[validity]}</span>
+        <span data-state={validity}>
+          {validity === "valid" ? (validityText ?? `Valid ${subject}`) : validityLabel[validity]}
+        </span>
         <span data-state={fit}>{fitLabel[fit]}</span>
         <span data-state={evidence}>{evidenceLabel[evidence]}</span>
       </div>
@@ -62,11 +68,12 @@ export default function RecipeFacts({
         <div className="recipe-facts-detail" id={id}>
           <p>
             <strong>{validityLabel[validity]}.</strong>{" "}
-            {validity === "valid"
-              ? "Selected values pass the recipe schema and runtime topology checks."
-              : validity === "invalid"
-                ? "Output is withheld until the highlighted fields are corrected."
-                : "Values are still being checked."}
+            {validityDetail ??
+              (validity === "valid"
+                ? "Selected values pass the recipe schema and runtime topology checks."
+                : validity === "invalid"
+                  ? "Output is withheld until the highlighted fields are corrected."
+                  : "Values are still being checked.")}
           </p>
           <p>
             <strong>{fitLabel[fit]}.</strong>{" "}
