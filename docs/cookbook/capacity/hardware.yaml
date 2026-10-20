@@ -736,6 +736,42 @@ hardware:
       - url: https://www.intel.com/content/www/us/en/products/sku/232876/intel-data-center-gpu-max-1550/specifications.html
         checked: 2026-10-19
 
+  apple-m1-pro-16gb:
+    name: Apple M1 Pro 16 GB
+    vendor: apple
+    kind: soc
+    family: apple-m1-pro
+    variant: 16 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 16, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m1-pro-16, m1pro]
+    sources:
+      - url: https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/
+        checked: 2026-10-19
+    notes: Unified memory is shared with the CPU and OS; 16 GB is not dedicated VRAM.
+
+  apple-m2-8gb:
+    name: Apple M2 8 GB
+    vendor: apple
+    kind: soc
+    family: apple-m2
+    variant: 8 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 8, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m2-8, m2]
+    sources:
+      - url: https://www.apple.com/newsroom/2022/06/apple-unveils-m2-with-breakthrough-performance-and-capability/
+        checked: 2026-10-19
+    notes: Unified memory is shared with the CPU and OS; 8 GB is not dedicated VRAM.
+
   apple-m4-max-36gb:
     name: Apple M4 Max 36 GB
     vendor: apple

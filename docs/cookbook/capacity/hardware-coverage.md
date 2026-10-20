@@ -5,8 +5,8 @@ support. A searchable device can still be unsupported by a model, backend, or
 kernel. Capacity is never inferred from a marketing family name.
 
 Batch 1 is the reviewable foundation in
-[hardware.yaml](hardware.yaml): **50 variants across 38 families** — 31 NVIDIA,
-6 AMD, 3 Intel, and 10 Apple entries; 38 dedicated-memory devices and 12
+[hardware.yaml](hardware.yaml): **52 variants across 40 families** — 31 NVIDIA,
+6 AMD, 3 Intel, and 12 Apple entries; 38 dedicated-memory devices and 14
 unified-memory systems. Every entry has a vendor source URL and a checked date.
 
 ## Batch 1 — shipped in this change
@@ -28,6 +28,7 @@ picker, then common consumer, workstation, and data-center variants.
 | 1 | NVIDIA DGX Spark GB10 | 128 GB, 64 GB OEM | Unified | FastH3 Spark baseline |
 | 1 | Apple M4 Max | 36, 48, 64, 128 GB | Unified | FastMetal tested 36 GB recipe |
 | 1 | Apple M5 Max / M5 Ultra | 48/64/128 GB; 96/256/512 GB | Unified | Current Mac Studio/MacBook Pro options |
+| 2 | Apple M1 Pro / M2 | 16 GB / 8 GB | Unified | M1 Pro FastMetal evidence; low-memory Apple systems |
 | 2 | NVIDIA RTX 50 series | 5080 16, 5070 Ti 16, 5070 12, 5060 Ti 16/8 | Dedicated | Common consumer cards |
 | 2 | NVIDIA RTX 40 series | 4080 Super 16, 4070 Ti Super 16, 4060 Ti 16/8 | Dedicated | Common consumer cards |
 | 2 | NVIDIA RTX 30 series | 3090 24, 3080 12/10 | Dedicated | Widely installed |
@@ -52,7 +53,7 @@ vendor source and checked date.
 - [ ] NVIDIA DGX Station / OEM Grace-Blackwell systems.
 - [ ] AMD Instinct MI250X, MI210, MI300A; Radeon RX 9060 XT, W6800.
 - [ ] Intel Arc B570, Flex 170/140.
-- [ ] Apple M3 Max/Ultra, M2 Max/Ultra, M4 Pro, and older configurable sizes.
+- [ ] Apple M3 Max/Ultra, M2 Max/Ultra, M4 Pro, and remaining older configurable sizes.
 - [ ] Additional MIG/vGPU profiles where a vendor documents the partition size.
 - [ ] Systems with a documented host-RAM configuration for offload estimates.
 
