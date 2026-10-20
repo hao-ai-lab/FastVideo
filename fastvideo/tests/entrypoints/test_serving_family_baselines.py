@@ -12,8 +12,11 @@ import yaml
 
 from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.api.flux import FluxSamplingParam
+from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.parser import parse_config
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.schema import GenerationRequest, ServeConfig
+from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
@@ -137,6 +140,20 @@ def test_flux_request_uses_flux_sampling_defaults() -> None:
     assert sampling.use_embedded_guidance is True
 
 
+def test_matrixgame2_request_uses_its_registered_sampling_defaults() -> None:
+    # The registered sampling-param class now applies to every family that declares one, not only FLUX.
+    request = parse_config(GenerationRequest, {"prompt": "a road"})
+    sampling = request_to_sampling_param(request, model_path="FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers")
+    assert isinstance(sampling, MatrixGame2SamplingParam)
+    assert (sampling.num_inference_steps, sampling.height, sampling.width, sampling.num_frames) == (3, 352, 640, 57)
+
+
+def test_local_directory_without_model_index_uses_base_sampling_defaults(tmp_path: Path) -> None:
+    request = parse_config(GenerationRequest, {"prompt": "a road"})
+    sampling = request_to_sampling_param(request, model_path=str(tmp_path))
+    assert type(sampling) is SamplingParam
+
+
 def test_flux_explicit_sampling_overrides_win_over_flux_defaults() -> None:
     request = parse_config(
         GenerationRequest,
@@ -177,7 +194,8 @@ def test_local_media_url_is_downloaded_and_tracked_for_cleanup(tmp_path: Path) -
     server, url = _serve_clip(b"local-clip")
     try:
         request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
-        created = asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        created = asyncio.run(
+            prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(allow_private_urls=True)))
         assert len(created) == 1
         assert Path(created[0]).read_bytes() == b"local-clip"
         discard_materialized_media(created)
@@ -211,7 +229,39 @@ def test_media_url_limit_is_configurable_and_removes_partial_file(tmp_path: Path
     try:
         request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
         with pytest.raises(RequestAdaptationError, match="4-byte limit"):
-            asyncio.run(prepare_reference_media("request", request, str(tmp_path), max_bytes=4))
+            asyncio.run(
+                prepare_reference_media("request",
+                                        request,
+                                        str(tmp_path),
+                                        max_bytes=4,
+                                        policy=MediaPolicy(allow_private_urls=True)))
+        assert not list((tmp_path / "uploads").glob("*"))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_media_policy_fields_are_validated_serve_fields() -> None:
+    config = parse_config(
+        ServeConfig,
+        {
+            "generator": {"model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"},
+            "server": {"media_roots": ["/data/media"], "allow_private_media_urls": True},
+        },
+    )
+    assert config.server.media_roots == ["/data/media"]
+    assert config.server.allow_private_media_urls is True
+    default = parse_config(ServeConfig, {"generator": {"model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"}})
+    assert default.server.media_roots == []
+    assert default.server.allow_private_media_urls is False
+
+
+def test_loopback_media_urls_are_rejected_by_default(tmp_path: Path) -> None:
+    server, url = _serve_clip(b"local-clip")
+    try:
+        request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
+        with pytest.raises(RequestAdaptationError, match="private or local address"):
+            asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
         assert not list((tmp_path / "uploads").glob("*"))
     finally:
         server.shutdown()

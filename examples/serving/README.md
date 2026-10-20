@@ -115,12 +115,27 @@ polling and deletion contract. The job's `media_type` is `audio/wav`, and
 `audio_start_in_s`/`audio_end_in_s`; do not send `size`, `width`, `height`, or
 `video_params`.
 
-MMAudio is video-to-audio and requires `video_reference` (a local path or
-URL). URLs may point at a local or cluster media service; this is a trusted
-deployment surface, not an untrusted-URL sanitizer. The server downloads at
-most 2 GiB per reference by default and removes that copy when the job
-finishes. Set `server.media_reference_max_bytes` in the serve YAML for longer
-clips. Stable Audio is text-to-audio. Stable Audio needs the optional inference
+MMAudio is video-to-audio and requires `video_reference` (a URL, or a local
+path the server allows). Stable Audio is text-to-audio.
+
+Media references from HTTP callers follow three server settings:
+
+```yaml
+server:
+  media_reference_max_bytes: 2147483648  # per downloaded reference (default 2 GiB)
+  media_roots: [/data/media]             # local paths callers may use (default: none)
+  allow_private_media_urls: false        # loopback/private/link-local URLs (default: off)
+```
+
+- Local paths are rejected unless they resolve inside a `media_roots` entry,
+  including through symlinks.
+- URLs must use http(s). Unless `allow_private_media_urls` is set, every
+  redirect hop must resolve to a public address. Turn it on only for trusted
+  internal media services.
+- Downloads count streamed bytes against the limit. The server removes its copy
+  when the job finishes, fails, or is cancelled; caller files are never deleted.
+
+Stable Audio needs the optional inference
 dependencies listed in `examples/inference/basic/basic_stable_audio.py`.
 
 ```bash

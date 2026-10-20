@@ -397,7 +397,11 @@ def request_to_sampling_param(
 
     from fastvideo.registry import get_sampling_param_cls_for_name
 
-    sampling_param_cls = get_sampling_param_cls_for_name(model_path, allow_remote=False) or SamplingParam
+    try:
+        sampling_param_cls = get_sampling_param_cls_for_name(model_path, allow_remote=False) or SamplingParam
+    except ValueError:
+        # A local directory without model_index.json has no registered family; use the base defaults.
+        sampling_param_cls = SamplingParam
     sampling_param = sampling_param_cls.from_pretrained(model_path)
     if request.state is not None:
         _validate_continuation_state(request.state)

@@ -14,10 +14,16 @@ class ServerConfig:
     output_dir: str = "outputs/"
     served_model_name: str | None = None
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+    # Directories whose files HTTP callers may reference by local path. Empty rejects local paths.
+    media_roots: list[str] = field(default_factory=list)
+    # Allows media URLs that resolve to loopback, private, or link-local addresses.
+    allow_private_media_urls: bool = False
 
     def __post_init__(self) -> None:
         if self.media_reference_max_bytes <= 0:
             raise ValueError("server.media_reference_max_bytes must be positive")
+        if any(not isinstance(root, str) or not root.strip() for root in self.media_roots):
+            raise ValueError("server.media_roots entries must be non-empty paths")
 
 
 @dataclass

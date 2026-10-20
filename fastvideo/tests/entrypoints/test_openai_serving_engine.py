@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
@@ -240,7 +241,15 @@ def test_wav_media_type_is_detected_from_output_path() -> None:
 def test_missing_video_reference_fails_during_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(tmp_path / "missing.mp4")})
     with pytest.raises(RequestAdaptationError, match="does not exist"):
-        asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
+
+
+def test_local_media_paths_need_a_configured_root(tmp_path: Path) -> None:
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+    request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(clip)})
+    with pytest.raises(RequestAdaptationError, match="server.media_roots"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
 
 
 def test_mmaudio_v2a_requires_video_reference(tmp_path: Path) -> None:
@@ -258,7 +267,7 @@ def test_mmaudio_v2a_requires_video_reference(tmp_path: Path) -> None:
 def test_missing_reference_fails_during_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="a fox", input_reference=str(tmp_path / "missing.png"))
     with pytest.raises(RequestAdaptationError, match="does not exist"):
-        asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
 
 
 def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:

@@ -20,10 +20,12 @@ contract are already shared. The response `media_type` is `audio/wav` and the
 downloaded file is WAV; clients must branch on `media_type`, not on the endpoint
 name. There is no separate audio job store.
 
-URL media references are a trusted local/cluster surface, not an untrusted-URL
-sanitizer. The server downloads at most `server.media_reference_max_bytes`
-(default 2 GiB) per reference and removes the server-owned copy when the job
-finishes; caller-owned local paths are never deleted.
+Media references are limited by the serve config. Local paths must sit under
+`server.media_roots` (empty by default), and private or loopback URLs need
+`server.allow_private_media_urls`. The server downloads at most
+`server.media_reference_max_bytes` (default 2 GiB) per reference and removes
+its copy when the job finishes, fails, or is cancelled; caller-owned files are
+never deleted. See `examples/serving/README.md`.
 
 ## Maintained serving baselines
 

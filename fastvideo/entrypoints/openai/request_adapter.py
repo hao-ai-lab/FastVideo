@@ -9,10 +9,14 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
-import aiofiles
-import httpx
-
-from fastvideo.entrypoints.openai.state import get_media_reference_max_bytes
+from fastvideo.entrypoints.openai.media_policy import (
+    MediaPolicy,
+    MediaPolicyError,
+    discard,
+    fetch_media,
+    resolve_local_media,
+)
+from fastvideo.entrypoints.openai.state import get_media_policy, get_media_reference_max_bytes
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     explicit_request_updates,
@@ -27,7 +31,7 @@ from fastvideo.entrypoints.openai.protocol import (
     UrlVideoReference,
     VideoGenerationRequest,
 )
-from fastvideo.entrypoints.openai.utils import save_image_to_path
+from fastvideo.entrypoints.openai.utils import image_suffix, save_base64_image_to_path
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vision_utils import load_image
 from fastvideo.registry import get_preset_selection
@@ -65,35 +69,36 @@ def _image_sources(request: VideoGenerationRequest) -> list[str]:
 
 def discard_materialized_media(paths: list[str]) -> None:
     for path in paths:
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            pass
+        discard(path)
 
 
-async def _download_media(source: str, target: str, *, max_bytes: int | None = None) -> None:
-    max_bytes = get_media_reference_max_bytes() if max_bytes is None else max_bytes
+async def _download_media(source: str,
+                          target: str,
+                          *,
+                          max_bytes: int | None = None,
+                          policy: MediaPolicy | None = None) -> None:
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client, \
-                client.stream("GET", source) as response:
-            response.raise_for_status()
-            written = 0
-            async with aiofiles.open(target, "wb") as output:
-                async for chunk in response.aiter_bytes():
-                    written += len(chunk)
-                    if written > max_bytes:
-                        raise RequestAdaptationError(f"Video reference is larger than the {max_bytes}-byte limit; "
-                                                     "raise server.media_reference_max_bytes in the serve config or "
-                                                     "provide a smaller clip.")
-                    await output.write(chunk)
-    except Exception:
-        discard_materialized_media([target])
-        raise
+        await fetch_media(source,
+                          target,
+                          max_bytes=get_media_reference_max_bytes() if max_bytes is None else max_bytes,
+                          policy=get_media_policy() if policy is None else policy)
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
 
 
-async def _materialize_video(source: str, target_base: str, *, max_bytes: int | None = None) -> str:
+def _local_media(source: str, policy: MediaPolicy) -> str:
+    try:
+        return resolve_local_media(source, policy)
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
+
+
+async def _materialize_video(source: str,
+                             target_base: str,
+                             *,
+                             max_bytes: int | None = None,
+                             policy: MediaPolicy | None = None) -> str:
+    policy = get_media_policy() if policy is None else policy
     source = source.strip()
     if not source:
         raise RequestAdaptationError("Video references must not be empty.")
@@ -102,9 +107,8 @@ async def _materialize_video(source: str, target_base: str, *, max_bytes: int | 
         if suffix not in _VIDEO_SUFFIXES:
             suffix = ".mp4"
         target = f"{target_base}{suffix}"
-        os.makedirs(os.path.dirname(target), exist_ok=True)
         try:
-            await _download_media(source, target, max_bytes=max_bytes)
+            await _download_media(source, target, max_bytes=max_bytes, policy=policy)
         except RequestAdaptationError:
             raise
         except Exception as error:
@@ -112,10 +116,18 @@ async def _materialize_video(source: str, target_base: str, *, max_bytes: int | 
         return target
     if source.lower().startswith("data:"):
         raise RequestAdaptationError("Data video references are not supported; provide a URL or local path.")
-    local_path = os.path.abspath(os.path.expanduser(source))
-    if not os.path.isfile(local_path):
-        raise RequestAdaptationError(f"Video reference does not exist: {source}")
-    return local_path
+    return _local_media(source, policy)
+
+
+async def _materialize_image_url(source: str, target_base: str, *, max_bytes: int | None, policy: MediaPolicy) -> str:
+    target = f"{target_base}{image_suffix(source)}"
+    try:
+        await _download_media(source, target, max_bytes=max_bytes, policy=policy)
+    except RequestAdaptationError:
+        raise
+    except Exception as error:
+        raise RequestAdaptationError(f"Unable to fetch image reference: {error}") from error
+    return target
 
 
 async def prepare_reference_media(
@@ -124,8 +136,10 @@ async def prepare_reference_media(
     output_dir: str,
     *,
     max_bytes: int | None = None,
+    policy: MediaPolicy | None = None,
 ) -> list[str]:
     """Materialize media references and return the files created for this request."""
+    policy = get_media_policy() if policy is None else policy
     _image_sources(request)
     _video_sources(request)
     uploads_dir = os.path.join(os.path.abspath(output_dir), "uploads")
@@ -143,17 +157,16 @@ async def prepare_reference_media(
         source = source.strip()
         if not source:
             raise RequestAdaptationError("Image references must not be empty.")
-        if is_remote(source):
-            target = os.path.join(uploads_dir, f"{request_id}_{index}")
+        target = os.path.join(uploads_dir, f"{request_id}_{index}")
+        if source.startswith("data:image"):
             try:
-                local_path = await save_image_to_path(source, target)
+                local_path = track(await save_base64_image_to_path(source, target))
             except Exception as error:
-                raise RequestAdaptationError(f"Unable to fetch image reference: {error}") from error
-            track(local_path)
+                raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
+        elif is_remote(source):
+            local_path = track(await _materialize_image_url(source, target, max_bytes=max_bytes, policy=policy))
         else:
-            local_path = os.path.abspath(os.path.expanduser(source))
-            if not os.path.isfile(local_path):
-                raise RequestAdaptationError(f"Image reference does not exist: {source}")
+            local_path = _local_media(source, policy)
         try:
             await asyncio.to_thread(load_image, local_path)
         except Exception as error:
@@ -181,24 +194,28 @@ async def prepare_reference_media(
                 remote = is_remote(reference.video_url)
                 reference.video_url = await _materialize_video(reference.video_url,
                                                                os.path.join(uploads_dir, f"{request_id}_video_{index}"),
-                                                               max_bytes=max_bytes)
+                                                               max_bytes=max_bytes,
+                                                               policy=policy)
                 if remote:
                     track(reference.video_url)
         if request.video_path:
             remote = is_remote(request.video_path)
             request.video_path = await _materialize_video(request.video_path,
                                                           os.path.join(uploads_dir, f"{request_id}_video_path"),
-                                                          max_bytes=max_bytes)
+                                                          max_bytes=max_bytes,
+                                                          policy=policy)
             if remote:
                 track(request.video_path)
         if request.video_url:
             remote = is_remote(request.video_url)
             request.video_url = await _materialize_video(request.video_url,
                                                          os.path.join(uploads_dir, f"{request_id}_video_url"),
-                                                         max_bytes=max_bytes)
+                                                         max_bytes=max_bytes,
+                                                         policy=policy)
             if remote:
                 track(request.video_url)
-    except Exception:
+    except BaseException:
+        # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
         discard_materialized_media(created)
         raise
     return created
