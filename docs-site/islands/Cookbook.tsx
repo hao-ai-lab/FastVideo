@@ -751,10 +751,14 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
   const [category, setCategory] = useState(initial.get("category") ?? "All models");
   const [family, setFamily] = useState(initial.get("family") ?? "All families");
   const [runtime, setRuntime] = useState(initial.get("runtime") ?? "all");
+  const [task, setTask] = useState(initial.get("task") ?? "All tasks");
   const [hardware, setHardware] = useState<HardwareSelection>(() => readHardwareSelection(initial));
   const [gpuCount, setGpuCount] = useState(() => readGpuCount(initial));
   const hardwareCatalog = useHardwareCatalog();
   const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
+  useEffect(() => {
+    if (!hardwareRecord && gpuCount > 1) setGpuCount(1);
+  }, [gpuCount, hardwareRecord]);
   useEffect(() => {
     const url = new URL(window.location.href);
     const search = url.searchParams;
@@ -766,10 +770,11 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     set("category", category === "All models" ? undefined : category);
     set("family", family === "All families" ? undefined : family);
     set("runtime", runtime === "all" ? undefined : runtime);
+    set("task", task === "All tasks" ? undefined : task);
     set("gpus", gpuCount > 1 ? String(gpuCount) : undefined);
     writeHardwareSelection(search, hardware);
     window.history.replaceState(null, "", url);
-  }, [category, family, gpuCount, hardware, query, runtime]);
+  }, [category, family, gpuCount, hardware, query, runtime, task]);
   const runtimeMatches = (platforms: string[]) => {
     if (runtime === "cuda") return platforms.includes("NVIDIA");
     if (runtime === "mlx") return platforms.includes("Apple Silicon");
@@ -781,6 +786,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     (model) =>
       (category === "All models" || model.category === category) &&
       (family === "All families" || model.family === family) &&
+      (task === "All tasks" || model.task === task) &&
       runtimeMatches(model.platforms) &&
       `${model.title} ${model.family} ${model.tags.join(" ")} ${model.description}`
         .toLowerCase()
@@ -795,6 +801,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     setCategory("All models");
     setFamily("All families");
     setRuntime("all");
+    setTask("All tasks");
     setHardware({ id: "" });
     setGpuCount(1);
   }
@@ -829,6 +836,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
           {visible.length} {visible.length === 1 ? "model" : "models"}
           {hardwareRecord ? ` · ${backendLabel(hardwareRecord.backend)} recipes` : ""}
           {runtime !== "all" ? ` · ${runtime === "mlx" ? "MLX" : "CUDA"} only` : ""}
+          {task !== "All tasks" ? ` · ${task}` : ""}
         </p>
         <div className="recipe-directory-selects">
           <label>
@@ -842,6 +850,15 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
                     .map((model) => model.family),
                 ),
               ].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Task</span>
+            <select aria-label="Task" value={task} onChange={(event) => setTask(event.target.value)}>
+              <option>All tasks</option>
+              {[...new Set(modelDirectory.map((model) => model.task))].sort().map((value) => (
                 <option key={value}>{value}</option>
               ))}
             </select>

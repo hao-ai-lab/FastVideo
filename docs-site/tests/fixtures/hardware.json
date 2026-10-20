@@ -44,7 +44,8 @@
           "url": "https://www.nvidia.com/en-us/data-center/h100/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 80
     },
     {
       "id": "geforce-rtx-5090-32gb",
@@ -70,7 +71,8 @@
           "url": "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 32
     },
     {
       "id": "rtx-pro-6000-blackwell-workstation-96gb",
@@ -96,7 +98,8 @@
           "url": "https://www.nvidia.com/en-us/design-visualization/desktop-graphics/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 96
     },
     {
       "id": "dgx-spark-gb10-128gb",
@@ -122,7 +125,8 @@
           "url": "https://www.nvidia.com/en-us/products/workstations/dgx-spark/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 128
     },
     {
       "id": "apple-m4-max-128gb",
@@ -139,7 +143,7 @@
           "unit": "GB"
         }
       },
-      "backend": "mlx",
+      "backend": "metal",
       "gpu_count": 1,
       "aliases": ["m4 max", "macbook m4 max"],
       "supported_dtypes": ["fp32", "fp16", "bf16"],
@@ -148,7 +152,9 @@
           "url": "https://www.apple.com/macbook-pro/specs/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 128,
+      "usable_memory_gb": 96
     },
     {
       "id": "apple-m3-ultra-192gb",
@@ -165,7 +171,7 @@
           "unit": "GB"
         }
       },
-      "backend": "mlx",
+      "backend": "metal",
       "gpu_count": 1,
       "aliases": ["m3 ultra", "mac studio m3 ultra"],
       "supported_dtypes": ["fp32", "fp16", "bf16"],
@@ -174,7 +180,8 @@
           "url": "https://www.apple.com/mac-studio/specs/",
           "checked": "2026-10-19"
         }
-      ]
+      ],
+      "memory_gb": 192
     }
   ]
 }

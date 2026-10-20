@@ -76,7 +76,9 @@ function memoryUnit(value: unknown): MemoryUnit {
 }
 
 function backend(value: unknown, fallback = "cuda"): string {
-  return value === "mlx" || value === "cuda" ? value : fallback;
+  if (value === "mlx" || value === "metal") return "mlx";
+  if (value === "cuda" || value === "rocm") return value;
+  return fallback;
 }
 
 /** Accepts the generated `{ version, devices: [] }` asset and the older mapping forms. */
@@ -149,8 +151,8 @@ function recordsFrom(payload: unknown): HardwareRecord[] {
       variant: text(item.variant, 80),
       form_factor: text(item.form_factor, 40),
       gpu_count: positive(item.gpu_count),
-      host_ram_gb: positive(host?.value) ?? positive(item.host_ram_gb),
-      usable_budget_gb: positive(usable?.value) ?? positive(item.usable_budget_gb),
+      host_ram_gb: positive(host?.value) ?? positive(item.host_memory_gb) ?? positive(item.host_ram_gb),
+      usable_budget_gb: positive(usable?.value) ?? positive(item.usable_memory_gb) ?? positive(item.usable_budget_gb),
     });
   }
   return records.sort((a, b) => a.name.localeCompare(b.name));

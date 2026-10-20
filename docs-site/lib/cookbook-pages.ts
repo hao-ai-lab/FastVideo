@@ -97,6 +97,24 @@ const backendModels: Record<string, string> = {
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
 };
+const TASK_GROUPS: Array<[RegExp, string]> = [
+  [/world/, "Text to world"],
+  [/video\/text to audio|video.*to audio/, "Video to audio"],
+  [/text to audio/, "Text to audio"],
+  [/text to image/, "Text to image"],
+  [/reference media to video/, "Reference to video"],
+  [/first\/last frame to video/, "Image to video"],
+  [/text or image to video/, "Text/image to video"],
+  [/image to video/, "Image to video"],
+  [/super-resolution/, "Video upscale"],
+  [/video/, "Text to video"],
+];
+/** A small discovery vocabulary derived from the recipe task, not a capability claim. */
+export function taskLabel(value: string): string {
+  const normalized = value.toLowerCase();
+  return TASK_GROUPS.find(([pattern]) => pattern.test(normalized))?.[1] ?? "Text to video";
+}
+
 export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.model))]
   .map((model) => {
     const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
@@ -137,6 +155,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       category: family.category,
       description: backend?.description ?? first.summary,
       tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
+      task: taskLabel(backend?.tags[0] ?? first.task),
       platforms: [...new Set(recipes.flatMap((recipe) => recipe.gpu_types))],
       configurable: !!backend,
       featured: backend?.featured ?? false,

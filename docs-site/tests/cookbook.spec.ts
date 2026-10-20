@@ -116,10 +116,12 @@ test("deployment changes reset edits and support MLX and streaming", async ({ pa
   await settings(page, "Serving");
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("8000");
   await page.goto("/FastVideo/cookbook/ltx/ltx2-distilled");
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel("Client command", { exact: true })).toContainText("/health");
   await page.locator(".recipe-request-code > summary").click();
   await expect(page.getByText(/WebSocket URL:/)).toBeVisible();
   await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel("Client command", { exact: true })).toContainText("input_reference");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Wan2.1 I2V 14B");
 });
@@ -477,6 +479,8 @@ test("catalog lookup resolves aliases, variants, and unified memory without pool
   await page.getByLabel("Search hardware", { exact: true }).fill("GB10");
   await page.getByRole("radio", { name: /DGX Spark/ }).click();
   await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+  await expect(page.locator(".hardware-selected")).toContainText("Apple MLX");
+  await expect(page.locator(".hardware-selected")).toContainText("Usable budget: 96 GB");
   await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
   await settings(page, "Hardware");
   await page.getByLabel("GPU count", { exact: true }).fill("8");
@@ -490,6 +494,8 @@ test("MLX lookup uses unified memory and a custom Mac stays reusable", async ({ 
   await page.getByLabel("Search hardware", { exact: true }).fill("M4 Max");
   await page.getByRole("radio", { name: /Apple M4 Max/ }).click();
   await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+  await expect(page.locator(".hardware-selected")).toContainText("Apple MLX");
+  await expect(page.locator(".hardware-selected")).toContainText("Usable budget: 96 GB");
   await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
   await expect(page.getByRole("button", { name: "Clear hardware target", exact: true })).toBeVisible();
 });
@@ -507,6 +513,18 @@ test("hardware-first directory filter carries the target into a model page", asy
   await expect(page).toHaveURL(/hardware=apple-m4-max-128gb/);
   await expect(page.getByText("Apple M4 Max 128 GB", { exact: true })).toBeVisible();
   await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+});
+
+test("task discovery filters the directory and round-trips through the URL", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Task", { exact: true }).selectOption("Image to video");
+  await expect(page).toHaveURL(/task=Image\+to\+video/);
+  await expect(page.locator(".recipe-card").filter({ hasText: "Wan2.1 I2V 14B" })).toBeVisible();
+  await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Task", { exact: true })).toHaveValue("Image to video");
+  await page.getByLabel("Task", { exact: true }).selectOption("All tasks");
+  await expect(page).not.toHaveURL(/task=/);
 });
 
 test("directory filters round-trip through the URL", async ({ page }) => {
