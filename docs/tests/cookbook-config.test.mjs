@@ -99,10 +99,20 @@ test("browser bundle exposes reusable methods and its error class with no DOM or
   );
   assert.deepEqual(Object.keys(context.FastVideoConfigCookbook).sort(), [
     "CookbookValidationError",
+    "WORKLOADS",
+    "assessCapacity",
+    "estimateMemory",
     "getOptions",
+    "loadCapacityHardware",
+    "loadCapacityIndex",
+    "loadCapacityModel",
     "loadDeployment",
     "loadIndex",
+    "matchEvidence",
+    "recommendCapacity",
     "resolveConfig",
+    "resolveExecution",
+    "sampleRequest",
   ]);
   const api = context.FastVideoConfigCookbook;
   assert.equal(api.resolveConfig(catalog(), { "server.port": 9000 }).config.server.port, 9000);
@@ -473,6 +483,30 @@ test("sample requests follow effective alias, host and port without repinning re
   assert.equal(resolveConfig(image).clientRequest.input_reference, "/absolute/path/to/first-frame.png");
 });
 
+test("sample requests follow shared workload media", () => {
+  const expectations = {
+    t2i: { endpoint: /\/v1\/images\/generations/, output: /--output output\.json/, reference: null },
+    t2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: null },
+    v2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: "video_reference" },
+  };
+  for (const [workload, expected] of Object.entries(expectations)) {
+    const data = catalog();
+    data.workload = workload;
+    const result = resolveConfig(data);
+    assert.match(result.clientCommand, expected.endpoint);
+    assert.match(result.clientCommand, expected.output);
+    assert.equal(result.clientRequest.input_reference, undefined);
+    if (expected.reference) {
+      assert.deepEqual(result.clientRequest.video_reference, { video_url: "/absolute/path/to/input.mp4" });
+    } else {
+      assert.equal(result.clientRequest.video_reference, undefined);
+    }
+  }
+  const invalid = catalog();
+  invalid.workload = "t2x";
+  assert.throws(() => resolveConfig(invalid), /Unsupported workload/);
+});
+
 test("LoRA sample requests use the startup adapter instead of an edited server alias", () => {
   const data = catalog();
   const components = { lora_path: "/models/adapter.safetensors", lora_nickname: "my-adapter" };
@@ -483,6 +517,14 @@ test("LoRA sample requests use the startup adapter instead of an edited server a
   assert.equal(Object.hasOwn(resolveConfig(data, edits).clientRequest, "model"), false);
   components.lora_path = null;
   assert.equal(resolveConfig(data, edits).clientRequest.model, "different-server-name");
+});
+
+test("sample requests honor an explicitly configured prompt", () => {
+  const data = catalog();
+  data.controls.push({ path: "default_request.prompt", schema: { type: "string" } });
+  const result = resolveConfig(data, { "default_request.prompt": "A potter finishes a blue bowl." });
+  assert.equal(result.clientRequest.prompt, "A potter finishes a blue bowl.");
+  assert.match(result.clientCommand, /A potter finishes a blue bowl/);
 });
 
 test("environment variables are present and shell quoted without evaluation", () => {

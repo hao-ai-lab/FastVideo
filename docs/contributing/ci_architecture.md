@@ -60,7 +60,7 @@ Three Buildkite entry pipelines share the validated graph:
 |---|---|---|
 | `pr-fastcheck` | Automatic pull-request webhook | Six Fastcheck lanes |
 | `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, scheduled SSIM, explicit Full Suite, Fastcheck reruns, or one direct lane |
-| `fastvideo-performance-lane` | Weekly scheduler | Direct performance lane |
+| `fastvideo-performance-lane` | GitHub weekly scheduler | Direct performance lane |
 
 Each entry pipeline starts with the same trusted `pipeline-upload` job on the
 `ci-runner` queue. The `ci` pipeline's incoming GitHub webhook is disabled;
@@ -204,6 +204,95 @@ inside that range.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
+
+`ci-scheduled-performance.yml` triggers the performance pipeline every Sunday
+at 23:00 America/Los_Angeles, passing the immutable `github.sha`. Its two UTC
+schedules select the matching Pacific offset so it runs once across daylight
+saving time. After this workflow lands, disable the legacy Buildkite schedule
+under **Settings → Schedules → FastVideo scheduled performance benchmarks →
+Edit → Enabled**. That schedule submits the literal `HEAD`, which the trusted
+runner rejects before upload. The GitHub `BUILDKITE_API_TOKEN` must have
+`write_builds` access to the performance pipeline.
+
+The performance lane recognizes main-branch API builds from the dedicated
+performance pipeline with `TEST_SCOPE=direct` as scheduled-main runs. They
+refresh eligible baselines after successful tests and still produce comparison
+reports after test failures. PR performance runs use strict baseline reads and
+keep reports as Buildkite artifacts without requiring upload credentials.
+Scheduled-main publishing requires an operator-provisioned token with write
+access to `FastVideo/performance-tracking`.
+
+The gated FLUX.1-dev SSIM and golden tests and FLUX.2-klein-9B SSIM test are explicitly paused until their
+model access is provisioned. Their pytest skips are not FLUX quality validation;
+the other SSIM and golden tests and the suites' fail-fast behavior remain active.
+The SD3.5 golden and SSIM tests are also explicitly paused at the maintainer's
+request while their gated checkpoint access is unavailable.
+
+MatrixGame 3 explicitly selects FA2 for its existing GB200 reference. That
+reference was published in dataset commit `e1a6e64` and was not part of the
+later FA4 refresh. Unchanged main with FA2 reproduces its video SHA-256
+`1d1d26a59481e37a9e838a628d875e196211c2236e8f9a370e0a9f73e97300c7`;
+FA4 scores 0.96636 against its unchanged 0.98 requirement. The test compares
+the current generation's returned path so older files cannot mask that check.
+
+The missing GB200 HunyuanVideo 1.5 I2V and Kandinsky 6 references were generated
+from unchanged upstream commit `d5253fd71055927f12aa6c4aa679b93a00238851`
+with Torch 2.12.0, CUDA 13 and FA4. Their checkpoint revisions are pinned in
+the tests and recorded alongside the videos. Independent upstream repeats and
+the candidate both scored 1.0 for Hunyuan and 0.98395 for Kandinsky against
+the first upstream outputs, preserving the existing 0.95 and 0.98 thresholds.
+Kandinsky remains required; its authorized complete snapshot is prepared in
+the shared CI cache without exposing an authentication token to PR code.
+
+LingBot Fast's missing GB200 reference uses the same upstream commit and
+runtime, with checkpoint revision `98583eb0fd66f481f73383428d65d2867c878e51`.
+Two unchanged-upstream runs with CPU offloading disabled produced identical
+video hashes. Its fixed FSDP CPU-offloaded run scored SSIM 1.0 against that
+reference, preserving the 0.70 requirement. The generation stage leaves FSDP
+parameter placement to FSDP instead of moving the whole model to the GPU.
+
+### Provisioning Required Hugging Face Models
+
+Gated access belongs to the individual HF account, not its organization or
+token. An operator must request and obtain model access for the CI identity
+before configuring authentication. A valid token without model access still
+returns 403. Keep required models such as Kandinsky 6 strict until their
+weights and quality references are provisioned.
+
+The permanent operator rollout is:
+
+1. Approve every required gated repository for one maintained CI identity.
+2. Configure [HF CI/CD access through OIDC](https://huggingface.co/docs/hub/trusted-publishers)
+   for the trusted Buildkite preparation step, restricting issuer and job
+   claims to the intended organization and pipelines. A fine-grained read-only
+   token in the operator's secret store is an alternative. Keep performance
+   publishing credentials separate and restricted to the tracking dataset and
+   trusted main runs.
+3. Before leasing GPUs, check access to all required pinned manifests and
+   weight files together and check that their device/backend references exist.
+   Report every missing dependency in one preflight result; do not turn access
+   failures into passing quality gates.
+4. Fetch immutable model revisions into the runner-owned cache through trusted
+   code. Remove authentication before starting PR code, and keep download locks
+   and cache writes under the runner's identity. PR jobs consume the prepared
+   snapshots rather than depending on an interactive login or another user's
+   writable cache.
+   When multiple operators prepare the shared cache, use its existing group
+   with `umask 0002`. Check group write access on each prepared model's cache,
+   snapshot, blob and `.locks` directories, not only the cache root. Verify
+   manifest resolution as the CI worker identity before running the lane.
+   A readable weight file alone is insufficient: Hub downloads also create
+   metadata and lock files. For example, Stable Audio's pinned revision is
+   `26609645c363fc81829282fcfe6356340346c1d4`; provision its complete snapshot,
+   including `model_index.json`, component configs and tokenizer files.
+5. For a missing SSIM reference, generate and inspect output from unchanged
+   upstream source on the CI GPU/backend/runtime, retain its provenance, and
+   publish only the reviewed new reference. Verify the candidate independently
+   before enabling the required gate; never use candidate output to clear a
+   regression failure.
+
+See [HF gated-model access](https://huggingface.co/docs/hub/models-gated) and
+the [testing guide](testing.md) for access and reference maintenance details.
 
 ## `/merge` Request Flow
 
@@ -409,8 +498,8 @@ The docs job:
 1. Installs Python and Node documentation dependencies.
 2. Runs lint, formatting checks and tests for documentation tooling.
 3. Generates required static assets.
-4. Builds the MkDocs site and checks its assets and documentation links.
-5. Uploads the site artifact and publishes only from `main`.
+4. Builds the Blume site, validates routes and assets, and tests navigation and cookbook interactions.
+5. Uploads `docs-site/dist/` as the Pages artifact and publishes only from `main`, at the existing `https://haoailab.com/FastVideo/` URL.
 
 ### Docker Images
 
@@ -461,8 +550,11 @@ The reusable implementation lives in
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `community-issue-labeler.yml` | Issue opened or edited | Adds scope/platform labels from issue keywords. |
-| `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors. |
-| `community-stale.yml` | Daily schedule | Marks and closes stale issues and PRs, with exemption labels. |
+
+None of these automations post comments or messages on issues or pull
+requests; they only set labels. Issues and pull requests are never marked
+stale or closed automatically. Keep it that way: new automation must report
+through checks, commit statuses, or labels instead of PR/issue comments.
 
 ## File Reference
 
@@ -473,6 +565,7 @@ The reusable implementation lives in
 | `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
 | `.github/workflows/ci-trigger-full-suite.yml` | Change-aware merge-gate trigger for `ready` PRs and new pushes |
 | `.github/workflows/ci-scheduled-ssim.yml` | Weekly complete SSIM trigger on `main` |
+| `.github/workflows/ci-scheduled-performance.yml` | Weekly performance trigger with an immutable source SHA |
 | `.github/scripts/plan_merge_ci.py` | Trusted changed-path to integration-lane planner |
 | `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |
 | `.buildkite/pipeline.yml` | Static 20-lane Slurm Buildkite graph |

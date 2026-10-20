@@ -1,0 +1,43 @@
+# OpenAI-compatible server for Wan2.1 T2V 14B at 720p. This is the base
+# 50-step model, not the distilled FastWan variant.
+#   fastvideo serve --config examples/serving/openai_wan21_t2v_14b.yaml
+generator:
+  model_path: Wan-AI/Wan2.1-T2V-14B-Diffusers
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: true
+      vae: true
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_wan21_t2v_14b
+  served_model_name: wan21-t2v-14b
+
+default_request:
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  sampling:
+    seed: 1024
+    num_frames: 81
+    height: 720
+    width: 1280
+    fps: 16
+    num_inference_steps: 50
+    guidance_scale: 5.0
+  output:
+    return_frames: false

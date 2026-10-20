@@ -113,7 +113,6 @@ class ComponentLoader(ABC):
             # Wan-S2V speech conditioning: wav2vec2 encoder + its feature extractor.
             "audio_encoder": (AudioEncoderLoader, "transformers"),
             "audio_processor": (AudioProcessorLoader, "transformers"),
-            "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
             "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
@@ -623,23 +622,6 @@ class ImageEncoderLoader(TextEncoderLoader):
         )
 
 
-class VisionLanguageEncoderLoader(ComponentLoader):
-    """Loader for vision-language autoregressive encoders."""
-
-    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
-        from fastvideo.distributed.parallel_state import get_local_torch_device
-        from fastvideo.models.encoders.glm_image_ar_loader import (GlmImageARLoader)
-
-        logger.info("Loading vision-language encoder from %s", model_path)
-        target_device = get_local_torch_device()
-        loader = GlmImageARLoader(
-            model_path,
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=fastvideo_args.trust_remote_code,
-        ).to(target_device).eval()
-        return loader
-
-
 class ProcessorLoader(ComponentLoader):
     """Loader for HF processors that pair with vision-language encoders."""
 
@@ -845,6 +827,36 @@ class VAELoader(ComponentLoader):
                 return directory
         return None
 
+    @staticmethod
+    def _h3_nvfp4_decoder_path(class_name: str | None, fastvideo_args: FastVideoArgs) -> str | None:
+        """The NVFP4 decoder to swap in: the serve-config field, else ``FASTVIDEO_H3_VAE_NVFP4_DECODER``."""
+        if class_name != "AutoencoderKLMiniMaxH3":
+            return None
+        return getattr(fastvideo_args, "h3_vae_nvfp4_decoder", None) or envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.get()
+
+    @staticmethod
+    def _apply_h3_nvfp4_decoder(vae: nn.Module, path: str, target_device: torch.device) -> None:
+        """Swap in an exported NVFP4 MiniMax-H3 decoder (``h3_vae_nvfp4_decoder``)."""
+        from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import (
+            apply_nvfp4_decoder_checkpoint,
+            freeze_nvfp4_linears,
+            load_nvfp4_decoder_checkpoint,
+        )
+
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"NVFP4 H3 decoder {path} does not exist")
+        loaded_blocks = len(vae.decoder.transformer_blocks)
+        # The swap runs where the VAE was built (the CPU, see ``_h3_nvfp4_decoder_path``); a pre-packed
+        # file never allocates the quantized linears' full-precision weights, a bf16 file packs on the GPU.
+        device = next(vae.parameters()).device
+        metadata = apply_nvfp4_decoder_checkpoint(vae, load_nvfp4_decoder_checkpoint(path, device), freeze=False)
+        vae.to(target_device)
+        if target_device.type == "cuda":
+            # Frozen layers hold only packed FP4 weights; packing needs the CUDA FP4 kernels.
+            freeze_nvfp4_linears(vae.decoder)
+        logger.info("MiniMax-H3 VAE decoder: NVFP4 %s (%d of %d blocks, act_scale=%s), bf16 decode autocast", path,
+                    len(vae.decoder.transformer_blocks), loaded_blocks, metadata.get("act_scale"))
+
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
@@ -966,7 +978,11 @@ class VAELoader(ComponentLoader):
                 vae_config = fastvideo_args.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(vae_config).to(target_device)
+                vae = vae_cls(vae_config)
+                # An NVFP4 H3 decoder is swapped in on the CPU first, so the dense decoder it replaces
+                # never reaches the GPU; the VAE moves to the target device after the swap.
+                if not self._h3_nvfp4_decoder_path(class_name, fastvideo_args):
+                    vae = vae.to(target_device)
 
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -974,9 +990,13 @@ class VAELoader(ComponentLoader):
         if class_name == "AutoencoderKLMiniMaxH3":
             from fastvideo.models.vaes.minimax_h3_int8_convrot import (
                 dense_vae_safetensors,
-                find_int8_convrot_vae_path,
+                int8_convrot_overlay_to_apply,
             )
-            int8_convrot_path = find_int8_convrot_vae_path(model_path)
+            int8_convrot_path = int8_convrot_overlay_to_apply(model_path)
+            if int8_convrot_path is not None and self._h3_nvfp4_decoder_path(class_name, fastvideo_args):
+                logger.info("Skipping MiniMax-H3 INT8 ConvRot VAE overlay %s: the NVFP4 decoder replaces the "
+                            "decoder", int8_convrot_path)
+                int8_convrot_path = None
             safetensors_list = dense_vae_safetensors(safetensors_list)
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
@@ -1014,9 +1034,13 @@ class VAELoader(ComponentLoader):
         # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
         strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE"}
         vae.load_state_dict(loaded, strict=strict_load)
+        del loaded
         if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
             from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
             overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
+        nvfp4_decoder = self._h3_nvfp4_decoder_path(class_name, fastvideo_args)
+        if nvfp4_decoder:
+            self._apply_h3_nvfp4_decoder(vae, nvfp4_decoder, target_device)
         if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
                 and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
             vae.optimize_memory_format()
@@ -1212,6 +1236,11 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
+        if getattr(fastvideo_args, "h3_vsa_fp4", None):
+            from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+            if not isinstance(dit_config, MiniMaxH3Config):
+                raise ValueError("h3_vsa_fp4 is only supported by MiniMax-H3")
+            dit_config.vsa_fp4 = dict(fastvideo_args.h3_vsa_fp4)
 
         # Generator-only QAT for DMD distillation: the teacher (real_score) and
         # critic (fake_score) transformers load with this flag set and must stay

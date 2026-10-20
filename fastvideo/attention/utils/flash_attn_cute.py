@@ -67,7 +67,7 @@ def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
     # capability gate, not a runtime fallback):
     #   * the backward asserts sm90+ (L40S/sm_89 dies on its arch check);
     #   * GQA fails CuTeDSL JIT in pack_gqa ("ValueError: Operation creation
-    #     failed", observed on sm_89 with HunyuanGameCraft/LTX2).
+    #     failed", observed on sm_89 with LTX2).
     if q.shape[-2] != k.shape[-2]:
         return True
     return torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))

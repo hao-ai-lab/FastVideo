@@ -46,6 +46,7 @@ def run_training_from_config(
     )
     from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.config import load_run_config
+    from fastvideo.train.utils.minimax_h3_compile import minimax_h3_student_compile
 
     # Enable deterministic mode for reproducibility.
     torch.backends.cudnn.benchmark = False
@@ -54,19 +55,15 @@ def run_training_from_config(
     cfg = load_run_config(config_path, overrides=overrides)
     tc = cfg.training
 
-    model_path_lower = str(tc.model_path).lower()
-
-    # Auto-set attention backend for model families that require a specific
-    # backend at load time, unless the user already overrode it explicitly.
-    if tc.vsa_sparsity > 0.0:
+    # Auto-set the VSA attention backend when VSA sparsity is enabled,
+    # unless the user already overrode it explicitly.
+    is_minimax_h3 = any(
+        str(role.get("_target_", "")).startswith("fastvideo.train.models.minimax_h3.") for role in cfg.models.values())
+    # H3 roles select sparse student and dense teacher/critic independently.
+    if tc.vsa_sparsity > 0.0 and not is_minimax_h3:
         os.environ.setdefault(
             "FASTVIDEO_ATTENTION_BACKEND",
             "VIDEO_SPARSE_ATTN",
-        )
-    elif ("turbodiffusion" in model_path_lower or "turbowan" in model_path_lower):
-        os.environ.setdefault(
-            "FASTVIDEO_ATTENTION_BACKEND",
-            "SLA_ATTN",
         )
 
     maybe_init_distributed_environment_and_model_parallel(
@@ -97,6 +94,12 @@ def run_training_from_config(
     ckpt_config = CheckpointConfig(
         save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
         keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
+        start_step=int(tc.checkpoint.checkpointing_start_step or 0),
+        save_inference_on_validation=tc.checkpoint.save_inference_checkpoint_on_validation,
+        inference_role=tc.checkpoint.inference_checkpoint_role,
+        inference_dtype=tc.checkpoint.inference_checkpoint_dtype,
+        inference_checkpoints_total_limit=tc.checkpoint.inference_checkpoints_total_limit,
+        require_complete_training_checkpoint=tc.checkpoint.require_complete_training_checkpoint,
     )
 
     checkpoint_manager = CheckpointManager(
@@ -108,13 +111,14 @@ def run_training_from_config(
         raw_config=cfg.raw,
     )
 
-    trainer.run(
-        method,
-        dataloader=dataloader,
-        max_steps=tc.loop.max_train_steps,
-        start_step=start_step,
-        checkpoint_manager=checkpoint_manager,
-    )
+    with minimax_h3_student_compile(cfg, method):
+        trainer.run(
+            method,
+            dataloader=dataloader,
+            max_steps=tc.loop.max_train_steps,
+            start_step=start_step,
+            checkpoint_manager=checkpoint_manager,
+        )
 
 
 def main(

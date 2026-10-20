@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -722,7 +723,7 @@ def test_real_load_modules_defers_nothing_when_the_pipeline_opts_out(monkeypatch
     assert sorted(loaded) == ["scheduler", "transformer", "vae"]
 
 
-def test_building_the_real_h3_stages_materializes_nothing():
+def test_building_the_real_h3_stages_materializes_nothing(tmp_path):
     # `DenoisingStage.__init__` in the shared stage set reads
     # `transformer.hidden_size` to pick an attention backend, which would pull
     # the DiT in during post_init. H3's stages must not acquire that habit.
@@ -748,7 +749,7 @@ def test_building_the_real_h3_stages_materializes_nothing():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    args = FastVideoArgs(model_path=str(tmp_path), pipeline_config=MiniMaxH3PipelineConfig(), lazy_module_load=True)
 
     pipeline._add_stages(args, ref2va=False)
 
@@ -766,7 +767,7 @@ def test_building_the_real_h3_stages_materializes_nothing():
     assert id(pipeline.modules["vae"]) in decode_held
 
 
-def test_h3_lazy_release_drops_dit_before_vae_decode():
+def test_h3_lazy_release_drops_dit_before_vae_decode(tmp_path):
     from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
 
@@ -783,7 +784,7 @@ def test_h3_lazy_release_drops_dit_before_vae_decode():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    args = FastVideoArgs(model_path=str(tmp_path), pipeline_config=MiniMaxH3PipelineConfig(), lazy_module_load=True)
     pipeline._add_stages(args, ref2va=False)
     schedule = pipeline._build_lazy_release_schedule()
     names = {pipeline._stages[index]._pipeline_stage_name: modules for index, modules in schedule.items()}

@@ -1,8 +1,8 @@
 # OpenAI-compatible FastH3 server for one DGX Spark (one GB10).
 # Install: docs/getting_started/installation/spark.md
 #
-# GB10 has no FA4 / sm_100a VSA kernel. Prefix the serve command with:
-#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
+# GB10 has no FA4 / ptx_blackwell VSA kernel. Prefix the serve command with:
+#   FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
 #
 # default_request.sampling is an example. Legal H3 frame counts are 17n+5,
 # max 345 (15 s). A 345-frame request on one Spark can OOM; prefer 124 or 243,

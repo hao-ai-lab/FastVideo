@@ -5,7 +5,7 @@ With vsa_ref_policy="p2_multi_region" every Ref2VA reference video is its own
 sparse region, tiled in place at its packed offset, while text, audio, and
 image references stay dense. Each video query keeps its own top-k of every
 region: the reference keep rate may differ from the target's. The kernel
-route for 128-token tiles is exercised through a stand-in for the sm_100a
+route for 128-token tiles is exercised through a stand-in for the ptx_blackwell
 extension; real kernels are not needed.
 """
 
@@ -403,14 +403,14 @@ def test_build_multi_region_missing_ref_keep_rate():
 
 
 # ---------------------------------------------------------------------------
-# 128-token tiles: sm_100a/sm_103a CUDA only
+# 128-token tiles: ptx_blackwell only
 # ---------------------------------------------------------------------------
 
 _HEADS, _DIM = 2, 128
 
 
-class _FakeSm100a:
-    """Stands in for fastvideo_kernel.block_sparse_attn_sm100a."""
+class _FakePtxBlackwell:
+    """Stands in for fastvideo_kernel.block_sparse_attn_ptx_blackwell."""
 
     def __init__(self, supported=True):
         self.supported = supported
@@ -419,7 +419,7 @@ class _FakeSm100a:
     def is_supported(self, q, variable_block_sizes):
         return self.supported
 
-    def block_sparse_attn_sm100a(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes, need_lse=True):
+    def block_sparse_attn_ptx_blackwell(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes, need_lse=True):
         self.calls.append(dict(q=q, q2k_num=q2k_num, vbs=variable_block_sizes, need_lse=need_lse))
         return q.clone(), None
 
@@ -435,16 +435,16 @@ def _fake_map_to_index(block_map):
 
 @pytest.fixture()
 def tile128(monkeypatch, env_overrides):
-    fake = _FakeSm100a()
+    fake = _FakePtxBlackwell()
 
     def forbid_triton(*args, **kwargs):
         raise AssertionError("tile 128 must never fall back to the Triton-64 kernel")
 
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", forbid_triton)
     # Tile 128 has no opt-in: it routes to the CUDA kernel with the switch off.
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     return fake
 
 
@@ -479,17 +479,54 @@ def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
     assert len(tile128.calls) == 1
 
 
-def test_forward_tile128_unavailable_cuda_kernel(tile128, monkeypatch):
+def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    n_tiles = meta.variable_block_sizes.numel()
+    tile128.supported = False
+    calls = []
+
+    def triton(q, k, v, mask, variable_block_sizes):
+        calls.append((q, mask, variable_block_sizes))
+        return torch.zeros_like(q), None
+
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", triton)
+    _, out = _run_tile128(meta)
+    assert len(calls) == 1
+    q, mask, vbs = calls[0]
+    assert q.shape[2] == n_tiles * 128
+    assert mask.shape[-2:] == (2 * n_tiles, 2 * n_tiles)
+    expected_vbs = torch.stack((meta.variable_block_sizes.clamp(max=64),
+                                (meta.variable_block_sizes - 64).clamp(min=0)), dim=-1).flatten()
+    torch.testing.assert_close(vbs, expected_vbs)
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+@pytest.mark.parametrize("datacenter", [False, True])
+def test_forward_tile128_fallback_warns_only_on_datacenter_blackwell(tile128, monkeypatch, datacenter):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False
-    with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
+    warnings = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", lambda q, k, v, mask, vbs: (torch.zeros_like(q), None))
+    monkeypatch.setattr(vsa_h3, "_is_datacenter_blackwell", lambda device: datacenter)
+    monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
+    _run_tile128(meta)
+    assert len(warnings) == int(datacenter)
+    if datacenter:
+        assert "falling back to the slower Triton tile-64 kernels" in warnings[0]
+
+
+def test_forward_tile128_unavailable_cuda_kernel_and_triton(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    tile128.supported = False
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", None)
+    with pytest.raises(RuntimeError, match="tile 128 requires the ptx_blackwell block-sparse kernel"):
         _run_tile128(meta)
-    monkeypatch.setattr(vsa_h3, "_sm100a", None)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", None)
     with pytest.raises(RuntimeError, match="not installed"):
         _run_tile128(meta)
 
 
-def test_forward_tile128_route_resolved_once_per_device(tile128):
+def test_forward_tile128_route_resolved_once_per_device(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     probes = []
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
@@ -499,20 +536,24 @@ def test_forward_tile128_route_resolved_once_per_device(tile128):
         query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
         impl.forward(query, key, value, None, meta)
     assert len(tile128.calls) == 3 and probes == [_CPU]
-    # A failed probe is cached too, and every later call still fails closed.
+    # A failed probe is cached too; later calls take the Triton fallback without probing again.
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) and False
     impl = _impl(_DIM)
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
     query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
-            impl.forward(query, key, value, None, meta)
+        impl.forward(query, key, value, None, meta)
+    assert len(calls) == 2
     assert probes == [_CPU, _CPU]
 
 
-def test_forward_tile128_requires_no_grad(tile128):
+def test_forward_tile128_requires_native_backward(tile128, monkeypatch):
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell_backward_is_supported", lambda *_: False)
     meta = _build_r2v(sparsity=0.5, tile_size=128)
-    with pytest.raises(NotImplementedError, match="no-grad inference"):
+    with pytest.raises(RuntimeError, match="forward and backward"):
         _run_tile128(meta, requires_grad=True)
     assert tile128.calls == []
 
@@ -520,7 +561,7 @@ def test_forward_tile128_requires_no_grad(tile128):
 def test_forward_tile128_rejects_regional_fullgraph_compile(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     impl = _impl(_DIM)
-    impl._regional_compile_sm100a_enabled = True
+    impl._regional_compile_ptx_blackwell_enabled = True
     monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
     q = torch.zeros(1, meta.variable_block_sizes.numel() * 128, _HEADS, _DIM, dtype=torch.bfloat16)
     with pytest.raises(RuntimeError, match="requires 64-token tiles"):
@@ -538,14 +579,14 @@ def test_build_tile128_uses_4x4x8_tiles():
 
 
 @pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
-def test_forward_tile128_real_sm100a_kernel_matches_oracle(env_overrides, sparsity, ref_keep_rate):
+def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides, sparsity, ref_keep_rate):
     """The real 128-token CUDA forward on a multi-region layout against an FP32 masked-SDPA oracle."""
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
         pytest.skip("requires an sm_100a/sm_103a GPU (B200, B300, GB200, GB300)")
-    forwards = getattr(vsa_h3._sm100a, "_FWD_BY_BLOCK", {}) if vsa_h3._sm100a is not None else {}
+    forwards = getattr(vsa_h3._ptx_blackwell, "_FWD_BY_BLOCK", {}) if vsa_h3._ptx_blackwell is not None else {}
     if forwards.get(128) is None or vsa_h3.map_to_index is None:
-        pytest.skip("requires a fastvideo_kernel build with the 128-token sm_100a forward")
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+        pytest.skip("requires a fastvideo_kernel build with the 128-token ptx_blackwell forward")
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     device = torch.device("cuda")
     meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
     n_tiles = meta.variable_block_sizes.numel()

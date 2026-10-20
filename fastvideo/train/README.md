@@ -32,3 +32,5 @@ See `examples/train/` for configs and launch scripts.
 ## Guides
 
 - [Attn-QAT on the modular trainer](../../docs/training/attn_qat.md)
+
+- [MiniMax-H3 PDD/DMPDD training and preprocessing](../../docs/training/omniref_dmpdd.md)

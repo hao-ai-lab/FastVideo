@@ -25,7 +25,8 @@ from eager are the reduction order inside mean/variance (last-ulp fp32) and
 that product-rounding case.
 
 Inference-only: callers must gate on ``torch.is_grad_enabled()``; there is no
-backward. Disable globally with FASTVIDEO_DISABLE_FUSED_NORM=1.
+backward. Enable with FASTVIDEO_ENABLE_FUSED_NORM=1; the default preserves the
+eager numerical path. FASTVIDEO_DISABLE_FUSED_NORM=1 overrides the opt-in.
 """
 
 from __future__ import annotations
@@ -158,7 +159,7 @@ def fused_path_supported(
     norm: torch.nn.Module,
 ) -> bool:
     """Cheap eligibility check; any False falls back to the eager path."""
-    if not _HAS_TRITON or envs.FASTVIDEO_DISABLE_FUSED_NORM.get():
+    if not _HAS_TRITON or not envs.FASTVIDEO_ENABLE_FUSED_NORM.get() or envs.FASTVIDEO_DISABLE_FUSED_NORM.get():
         return False
     if torch.is_grad_enabled():
         return False

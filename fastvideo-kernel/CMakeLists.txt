@@ -479,19 +479,19 @@ if(BUILD_CXX_KERNELS)
         list(APPEND _VSA_FWD_ARCHS "sm_103a")
     endif()
     if(_VSA_FWD_GENCODE)
-        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (${_VSA_FWD_ARCHS}; 64- and 128-token blocks)")
-        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
-                                      csrc/attention/block_sparse_blk128_sm100a.cu)
-        set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
-                                    csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
+        message(STATUS "fastvideo-kernel: building block_sparse_ptx_blackwell (${_VSA_FWD_ARCHS}; 64- and 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_blackwell.cu
+                                      csrc/attention/block_sparse_blk128_blackwell.cu)
+        set_source_files_properties(csrc/attention/block_sparse_blackwell.cu
+                                    csrc/attention/block_sparse_blk128_blackwell.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
     # VSA block-sparse attention BACKWARD, 64- and 128-token blocks: the same images as the forward.
     if(_VSA_FWD_GENCODE)
-        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu
-                                      csrc/attention/block_sparse_bwd_blk128_sm100a.cu)
-        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu
-                                    csrc/attention/block_sparse_bwd_blk128_sm100a.cu PROPERTIES
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_blackwell.cu
+                                      csrc/attention/block_sparse_bwd_blk128_blackwell.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_blackwell.cu
+                                    csrc/attention/block_sparse_bwd_blk128_blackwell.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
 
@@ -511,7 +511,7 @@ if(BUILD_CXX_KERNELS)
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
     if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
-        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_PTX_BLACKWELL)
     endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)

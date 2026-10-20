@@ -249,6 +249,103 @@ def test_full_ssim_has_a_weekly_slurm_schedule():
     assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
 
 
+def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
+    import json
+    import os
+    import subprocess
+    import tempfile
+
+    workflow = yaml.safe_load((REPO_ROOT / '.github/workflows/ci-scheduled-performance.yml').read_text())
+    job = workflow['jobs']['trigger']
+    assert "github.repository == 'hao-ai-lab/FastVideo'" in job['if']
+    assert "github.ref == 'refs/heads/main'" in job['if']
+    step = job['steps'][-1]
+    assert step['env']['SOURCE_SHA'] == '${{ github.sha }}'
+    with tempfile.TemporaryDirectory() as root:
+        curl = Path(root) / 'curl'
+        curl.write_text('#!/bin/bash\nwhile [[ $# -gt 0 ]]; do\n'
+                        '  if [[ "$1" == --data-raw ]]; then printf "%s" "$2"; exit 0; fi\n'
+                        '  shift\ndone\nexit 1\n')
+        curl.chmod(0o755)
+        env = {
+            'PATH': root + os.pathsep + os.environ['PATH'],
+            'BUILDKITE_API_TOKEN': 'test-only',
+            'SOURCE_BRANCH': 'main',
+            'BK_ORG': 'fastvideo',
+            'BK_PIPELINE': step['env']['BK_PIPELINE'],
+        }
+        for commit in ('HEAD', 'abc123', 'g' * 40, 'a' * 40):
+            env['SOURCE_SHA'] = commit
+            result = subprocess.run(['bash', '-c', step['run']], env=env, text=True, capture_output=True)
+            if commit != 'a' * 40:
+                assert result.returncode != 0
+                assert not result.stdout
+                continue
+            assert result.returncode == 0, result.stderr
+            payload = json.loads(result.stdout)
+            assert payload['commit'] == commit
+            assert payload['branch'] == 'main'
+            assert payload['env']['TEST_TYPE'] == 'performance'
+            assert payload['env']['TEST_SCOPE'] == 'direct'
+            assert payload['env']['FULL_SUITE'] == 'false'
+            assert payload['env']['PR_NUMBER'] == 'false'
+
+
+def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
+    import os
+    import subprocess
+    import tempfile
+
+    lane = (REPO_ROOT / '.buildkite/scripts/lanes/performance.sh').read_text()
+    lane = lane.replace('export PERF_REPORTS_DIR=/workspace/artifacts/performance',
+                        'export PERF_REPORTS_DIR="$TEST_REPORTS_DIR"')
+    cases = (
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'schedule', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'full', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'direct', 'false', 'unknown', 'pass'),
+        ('feature', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'unknown', 'pass'),
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', '1958', 'pr', 'never'),
+    )
+    with tempfile.TemporaryDirectory() as root:
+        directory = Path(root)
+        mocks = {
+            'nvidia-smi': '#!/bin/sh\nexit 0\n',
+            'pytest': '#!/bin/sh\nexit "$TEST_PYTEST_RC"\n',
+            'python': '#!/bin/sh\nprintf "%s|%s|%s|%s\\n" "$1" "$PERF_RUN_SOURCE" '
+            '"$PERF_UPLOAD_POLICY" "${PERF_PYTEST_RC:-}" >> "$TEST_CALLS_FILE"\n',
+        }
+        for name, contents in mocks.items():
+            executable = directory / name
+            executable.write_text(contents)
+            executable.chmod(0o755)
+        calls = directory / 'calls.txt'
+        for branch, source, pipeline, scope, pr, run_source, policy in cases:
+            for pytest_rc in (0, 1):
+                calls.unlink(missing_ok=True)
+                env = {
+                    'PATH': root + os.pathsep + os.environ['PATH'],
+                    'BUILDKITE_BRANCH': branch,
+                    'BUILDKITE_SOURCE': source,
+                    'BUILDKITE_PIPELINE_SLUG': pipeline,
+                    'BUILDKITE_PULL_REQUEST': pr,
+                    'TEST_SCOPE': scope,
+                    'TEST_PYTEST_RC': str(pytest_rc),
+                    'TEST_CALLS_FILE': str(calls),
+                    'TEST_REPORTS_DIR': str(directory / 'reports'),
+                }
+                result = subprocess.run(['bash', '-c', lane], cwd=root, env=env, text=True, capture_output=True)
+                assert result.returncode == pytest_rc, result.stderr
+                records = [line.split('|') for line in calls.read_text().splitlines()]
+                assert all(record[1:3] == [run_source, policy] for record in records)
+                comparisons = [record for record in records if record[0].endswith('/compare_baseline.py')]
+                if pytest_rc == 0 or policy == 'always':
+                    assert len(comparisons) == 1
+                    assert comparisons[0][3] == str(pytest_rc)
+                else:
+                    assert not comparisons
+
+
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
     pipeline_text = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
     steps = _pipeline_steps()
@@ -360,3 +457,17 @@ def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
     missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
     assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")
+
+
+def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
+    lane = (REPO_ROOT / '.buildkite/scripts/lanes/dreamverse.sh').read_text()
+    pattern = re.search(r"--grep-invert='([^']+)'", lane).group(1)
+    for mode in ('t2va', 'fl2va', 'ref2va'):
+        title = f'{mode} sends validated assets and plays a clearly labeled sample'
+        assert re.search(pattern, title), f'ARM64 Chromium cannot decode this playback test: {title}'
+    assert not re.search(pattern, "proxies a media upload larger than Next's default 10 MiB body limit")
+    assert not re.search(pattern, 'accepts a custom prompt and enters the streaming state')
+    arm_branch = lane.rsplit('if [[ $machine_arch =~ ^(aarch64|arm64)$ ]]; then', 1)[1].split('\nelse')[0]
+    firefox_command = re.search(r'npm run e2e(?:\\\n|[^\n])*', arm_branch).group(0)
+    assert '--project=firefox' in firefox_command
+    assert '--grep' not in firefox_command

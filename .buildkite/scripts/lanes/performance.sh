@@ -9,9 +9,12 @@ mkdir -p "$PERF_REPORTS_DIR"
 
 if [[ ${BUILDKITE_PULL_REQUEST:-false} =~ ^[1-9][0-9]*$ ]]; then
   export PERF_RUN_SOURCE=pr
-  export PERF_UPLOAD_POLICY=pass
+  export PERF_UPLOAD_POLICY=never
 elif [ "${BUILDKITE_BRANCH:-}" = main ] \
-  && { [ "${BUILDKITE_SOURCE:-}" = schedule ] || [ "${TEST_SCOPE:-}" = full ]; }; then
+  && { [ "${BUILDKITE_SOURCE:-}" = schedule ] || [ "${TEST_SCOPE:-}" = full ] \
+    || { [ "${BUILDKITE_SOURCE:-}" = api ] \
+      && [ "${BUILDKITE_PIPELINE_SLUG:-}" = fastvideo-performance-lane ] \
+      && [ "${TEST_SCOPE:-}" = direct ]; }; }; then
   export PERF_RUN_SOURCE=scheduled_main
   export PERF_UPLOAD_POLICY=always
 elif [ "${TEST_SCOPE:-}" = direct ]; then

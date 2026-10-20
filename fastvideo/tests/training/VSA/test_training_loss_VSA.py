@@ -16,7 +16,6 @@ from fastvideo.training.runner import main
 from fastvideo.utils import build_parser
 
 wandb_name = "test_training_loss_VSA"
-reference_wandb_summary_file = "fastvideo/tests/training/VSA/h100_reference_wandb_summary_VSA.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -83,7 +82,9 @@ def test_distributed_training():
     if "H100" not in device_name and "B200" not in device_name:
         raise ValueError(f"VSA training regression supports H100 and the GB200 Slurm CI target, got: {device_name}")
 
-    reference_wandb_summary = json.load(open(reference_wandb_summary_file))
+    reference_name = "gb200_reference_wandb_summary_VSA.json" if "B200" in device_name else "h100_reference_wandb_summary_VSA.json"
+    reference_path = current_file.with_name(reference_name)
+    reference_wandb_summary = json.load(open(reference_path))
     wandb_summary = json.load(open(summary_file))
 
     fields_and_thresholds = {'avg_step_time': 15, 'grad_norm': 0.5, 'step_time': 15, 'train_loss': 0.04}

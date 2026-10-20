@@ -8,7 +8,7 @@
 #   source examples/inference/optimizations/spark_pair_env.sh
 #   export RAY_ADDRESS=<qsfp-head>:6379
 #   export FASTVIDEO_HOST_IP=<qsfp-head>
-#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+#   FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 #     FASTVIDEO_VAE_PARALLEL_DECODE=1 FASTVIDEO_STAGE_LOGGING=1 \
 #     fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml
 generator:

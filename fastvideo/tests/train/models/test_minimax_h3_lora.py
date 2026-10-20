@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exact adapter-coverage contracts for MiniMax H3 LoRA training."""
 
+import dataclasses
 from types import SimpleNamespace
+from typing import Any
 
 import torch
 
@@ -9,9 +11,31 @@ from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.lora.linear import BaseLayerWithLoRA
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3Transformer3DModel
-from fastvideo.train.models.minimax_h3.minimax_h3 import MiniMaxH3LoraModel
+from fastvideo.train.models.minimax_h3.minimax_h3 import MiniMaxH3LoraModel, MiniMaxH3Model
 from fastvideo.train.models.minimax_h3.minimax_h3_ref2va import MiniMaxH3Ref2VALoraModel
 from fastvideo.train.utils.lora import enable_lora_training, finalize_lora_training
+
+
+@dataclasses.dataclass
+class _TrainingConfig:
+    """The TrainingConfig fields the H3 role plugin reads, as a dataclass it may copy per role."""
+
+    pipeline_config: Any
+    data: Any
+    model: Any
+
+
+def _training_config() -> _TrainingConfig:
+    return _TrainingConfig(
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(uniform_parameter_dtype=False)),
+        data=SimpleNamespace(
+            train_batch_size=1,
+            training_cfg_rate=0.0,
+            preprocessed_data_type="t2va",
+            seed=42,
+        ),
+        model=SimpleNamespace(enable_gradient_checkpointing_type=None),
+    )
 
 
 _H3_LORA_TARGETS = [
@@ -45,16 +69,7 @@ def test_h3_plugin_applies_lora_before_component_loader_returns(monkeypatch) -> 
         return transformer
 
     monkeypatch.setattr("fastvideo.train.models.minimax_h3.minimax_h3.load_module_from_path", _load_module_from_path)
-    training_config = SimpleNamespace(
-        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(uniform_parameter_dtype=False)),
-        data=SimpleNamespace(
-            train_batch_size=1,
-            training_cfg_rate=0.0,
-            preprocessed_data_type="t2va",
-            seed=42,
-        ),
-        model=SimpleNamespace(enable_gradient_checkpointing_type=None),
-    )
+    training_config = _training_config()
 
     model = MiniMaxH3LoraModel(
         init_from="unused",
@@ -73,6 +88,39 @@ def test_h3_plugin_applies_lora_before_component_loader_returns(monkeypatch) -> 
     assert model.transformer.to_q.lora_A.requires_grad
     assert model.transformer.to_q.lora_B.requires_grad
     assert not model.transformer.to_q.base_layer.weight.requires_grad
+
+
+def test_h3_lora_dtype_policy_stays_with_the_lora_role(monkeypatch) -> None:
+    # Roles load in YAML order from one shared config. A LoRA student must not
+    # take the FP32 projection groups away from full-weight roles built after it.
+    uniform_dtype_by_load: list[bool] = []
+
+    def _load_module_from_path(**kwargs):
+        uniform_dtype_by_load.append(kwargs["training_config"].pipeline_config.dit_config.uniform_parameter_dtype)
+        transformer = _TinyH3Transformer()
+        transform = kwargs.get("pre_fsdp_model_transform")
+        if transform is not None:
+            transform(transformer)
+        return transformer
+
+    monkeypatch.setattr("fastvideo.train.models.minimax_h3.minimax_h3.load_module_from_path", _load_module_from_path)
+    training_config = _training_config()
+
+    MiniMaxH3LoraModel(
+        init_from="unused",
+        training_config=training_config,
+        lora={
+            "enable": True,
+            "rank": 2,
+            "alpha": 2,
+            "target_modules": ["to_q"],
+        },
+        expected_lora_layers=1,
+    )
+    MiniMaxH3Model(init_from="unused", training_config=training_config, trainable=False)
+
+    assert uniform_dtype_by_load == [True, False]
+    assert training_config.pipeline_config.dit_config.uniform_parameter_dtype is False
 
 
 def test_h3_lora_exact_target_coverage_and_no_cpu_snapshots() -> None:

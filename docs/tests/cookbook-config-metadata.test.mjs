@@ -522,7 +522,7 @@ test("ordinary YAML anchors reuse authored runtime options", (t) => {
   assert.equal(buildCatalogs(f.options)[0].controls[0].schema.minimum, 1);
 });
 
-test("guide output references MkDocs pages and rejects paths outside docs", (t) => {
+test("guide output references documentation pages and rejects paths outside docs", (t) => {
   const f = fixture(t),
     path = join(f.root, "docs/guides/My model.md");
   mkdirSync(dirname(path), { recursive: true });

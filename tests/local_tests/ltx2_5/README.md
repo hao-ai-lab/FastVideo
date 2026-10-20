@@ -31,12 +31,8 @@ an approved secret in the HAO AI Lab Modal workspace.
 The source clone is reproducible from the repository root:
 
 ```bash
-python3 .agents/skills/add-model-01-prep/scripts/clone_reference_repo.py \
-  https://github.com/Lightricks/LTX-2.git \
-  LTX-2-Reference \
-  --branch v1.2.0 \
-  --commit d151147788a9284cca791edc6ce898007e727fe6 \
-  --update-gitignore
+git clone --branch v1.2.0 https://github.com/Lightricks/LTX-2.git LTX-2-Reference
+git -C LTX-2-Reference checkout d151147788a9284cca791edc6ce898007e727fe6
 ```
 
 The local FastVideo `.venv` does not currently contain PyTorch. Do not change

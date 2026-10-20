@@ -105,8 +105,8 @@ Detect artefact type by inspecting the file's imports / helper call:
 - **pixel** (`.mp4`) — file imports
   `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
   from `fastvideo.tests.ssim.inference_similarity_utils`, OR uses the
-  legacy custom-inline helper pattern (see `test_gamecraft`,
-  `test_longcat`, etc.). Default to pixel when both heuristics fail.
+  legacy custom-inline helper pattern (see `test_gen3c`). Default to pixel
+  when both heuristics fail.
 
 Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
 and 6 are artefact-type-agnostic — `_iter_reference_files`,

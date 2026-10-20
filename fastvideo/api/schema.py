@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+DEFAULT_MEDIA_REFERENCE_MAX_BYTES = 2 * 1024**3
+
 
 @dataclass
 class ServerConfig:
@@ -11,6 +13,17 @@ class ServerConfig:
     port: int = 8000
     output_dir: str = "outputs/"
     served_model_name: str | None = None
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+    # Directories whose files HTTP callers may reference by local path. Empty rejects local paths.
+    media_roots: list[str] = field(default_factory=list)
+    # Allows media URLs that resolve to loopback, private, or link-local addresses.
+    allow_private_media_urls: bool = False
+
+    def __post_init__(self) -> None:
+        if self.media_reference_max_bytes <= 0:
+            raise ValueError("server.media_reference_max_bytes must be positive")
+        if any(not isinstance(root, str) or not root.strip() for root in self.media_roots):
+            raise ValueError("server.media_roots entries must be non-empty paths")
 
 
 @dataclass
@@ -158,8 +171,6 @@ class InputConfig:
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
     action_path: str | None = None
-    refine_from: str | None = None
-    stage1_video: Any | None = None
 
 
 @dataclass
@@ -173,13 +184,13 @@ class SamplingConfig:
     height_sr: int = 1072
     width_sr: int = 1920
     fps: int = 24
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None

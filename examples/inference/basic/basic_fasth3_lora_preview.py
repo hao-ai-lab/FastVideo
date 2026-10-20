@@ -4,7 +4,7 @@
 This is the LoRA counterpart of ``basic_fasth3.py``. Both routes share the
 same performance profile: four DiT forwards, regional fullgraph DiT compile,
 H3 fusions, compiled and sequence-parallel video VAE decode, replicated DiT,
-pinned CPU offload, FA4, and the sm100a tile-64 kernel for VSA adapters.
+pinned CPU offload, FA4, and the ptx_blackwell tile-64 kernel for VSA adapters.
 
 The FastH3 adapters include low-rank factors plus exact dense deltas. Some also
 provide the VSA compression gate that is absent from the base checkpoint. Pass

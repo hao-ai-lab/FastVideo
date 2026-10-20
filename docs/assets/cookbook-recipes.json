@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 17,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -160,53 +160,6 @@
       "limitations": [
         "Native MLX FastMetal T2V on 36 GB+ unified memory. Same --fast, --fast-spatial, and --refine flags as the 1.3B script."
       ]
-    },
-    {
-      "id": "turbodiffusion-wan21-1-3b-t2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "TurboWan2.1 1.3B",
-      "summary": "A TurboDiffusion-accelerated Wan2.1 1.3B text-to-video run from its maintained single-GPU example.",
-      "model": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under video_samples_turbodiffusion/",
-      "related": ["turbodiffusion-wan21-14b-t2v", "turbowan22-i2v"]
-    },
-    {
-      "id": "turbodiffusion-wan21-14b-t2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "TurboWan2.1 14B",
-      "summary": "TurboDiffusion acceleration applied to the 14B Wan2.1 text-to-video checkpoint; the checked-in source is configured for two GPUs.",
-      "model": "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion_14b.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion_14b.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 2, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under video_samples_turbodiffusion_14B/",
-      "related": ["turbodiffusion-wan21-1-3b-t2v", "turbowan22-i2v"]
-    },
-    {
-      "id": "turbowan22-i2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Image to video",
-      "label": "TurboWan2.2 A14B",
-      "summary": "A one-to-four-step image-to-video path using TurboDiffusion and the SLA attention backend from its maintained example.",
-      "model": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion_i2v.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion_i2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 2, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "related": ["turbodiffusion-wan21-14b-t2v"]
     },
     {
       "id": "ltx2-distilled-t2v",
@@ -477,53 +430,6 @@
       "limitations": ["FLUX.1 is loadable by ID but registers no model_family in fastvideo/registry.py; it is grouped under FLUX for documentation only."]
     },
     {
-      "id": "glm-image-t2i",
-      "family": "glm_image",
-      "stage": "inference",
-      "task": "Text to image",
-      "label": "GLM-Image",
-      "summary": "GLM-Image text-to-image generation from its maintained example.",
-      "model": "zai-org/GLM-Image",
-      "source": "examples/inference/basic/basic_glm_image.py",
-      "command": "python examples/inference/basic/basic_glm_image.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at image_output/landscape.png",
-      "related": ["glm-image-edit"]
-    },
-    {
-      "id": "glm-image-edit",
-      "family": "glm_image",
-      "stage": "inference",
-      "task": "Image editing",
-      "label": "GLM-Image editing",
-      "summary": "Edit an input image with an instruction prompt using GLM-Image, from its maintained editing example.",
-      "model": "zai-org/GLM-Image",
-      "source": "examples/inference/basic/edit_glm_image.py",
-      "command": "python examples/inference/basic/edit_glm_image.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at image_output/edited.png (input: assets/images/couple.jpg)",
-      "related": ["glm-image-t2i"]
-    },
-    {
-      "id": "zimage-turbo-t2i",
-      "family": "zimage",
-      "stage": "inference",
-      "task": "Text to image",
-      "label": "Z-Image Turbo",
-      "summary": "Z-Image Turbo text-to-image on a single GPU from its maintained example.",
-      "model": "Tongyi-MAI/Z-Image-Turbo",
-      "source": "examples/inference/basic/basic_zimage.py",
-      "command": "python examples/inference/basic/basic_zimage.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at outputs/zimage/zimage_turbo.png"
-    },
-    {
       "id": "sd35-medium-t2i",
       "family": "sd35",
       "stage": "inference",
@@ -646,10 +552,10 @@
       "serving": {
         "source": "examples/serving/openai_fasth3_spark.yaml",
         "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
-        "env": "FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3",
+        "env": "FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3",
         "audio": true
       },
-      "command": "FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml",
+      "command": "FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml",
       "gpu_types": ["NVIDIA"],
       "hardware": {
         "platform": "cuda",
@@ -661,7 +567,7 @@
       "expected_artifact": "MP4 under outputs/fasth3_spark/",
       "modes": ["T2VA", "1-Spark"],
       "limitations": [
-        "Install from the DGX Spark guide, not the generic CUDA extra. GB10 has no FA4 / sm_100a VSA kernel; keep FASTVIDEO_FA4=0 and FASTVIDEO_VSA_SM100A=0.",
+        "Install from the DGX Spark guide, not the generic CUDA extra. GB10 has no FA4 / sm_100a VSA kernel; keep FASTVIDEO_FA4=0 and FASTVIDEO_VSA_PTX_BLACKWELL=0.",
         "Legal num_frames values are 17n+5, capped at 345 (15 s). Native 16:9 sizes include 832x480 and 1344x768.",
         "Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Do not pass --no-lazy-module-load on this box.",
         "A 345-frame request on one Spark can OOM. Prefer 124 or 243 frames, TAEH3 decode, or two Sparks over QSFP."
@@ -679,7 +585,7 @@
       "summary": "Run one FastH3 clip across two GB10s with Ray sequence parallel over QSFP RoCE. Sequential load and lazy module load stay on because SP replicates the DiT on each node.",
       "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
       "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
-      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
       "gpu_types": ["NVIDIA"],
       "hardware": {
         "platform": "cuda",
@@ -695,77 +601,6 @@
       "limitations": [
         "Requires a two-node Ray cluster on the QSFP interconnect. There is no cookbook server for this path; use Python / generate.",
         "Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."
-      ]
-    },
-    {
-      "id": "compacth3-rtx5090",
-      "group": "compacth3-rtx5090",
-      "group_label": "CompactH3 on RTX 5090",
-      "group_task": "4-step 42-block text to video + audio",
-      "family": "minimax_h3",
-      "stage": "inference",
-      "task": "Few-step text to video (with audio)",
-      "label": "CompactH3 NVFP4 on RTX 5090",
-      "summary": "Run the 42-block CompactH3 NVFP4 DiT with the NVFP4 Qwen3-VL encoder, Comfy int8-convrot VAE, and SageAttention3 FP4 on one 32 GB RTX 5090. Sequential load parks the encoder in pinned host RAM.",
-      "model": "./CompactH3",
-      "source": "examples/inference/basic/basic_compacth3_rtx5090.yaml",
-      "serving": {
-        "source": "examples/serving/openai_compacth3_rtx5090.yaml",
-        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
-        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
-        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
-      },
-      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {
-        "platform": "cuda",
-        "gpu_count": 1,
-        "evidence": "source-configured"
-      },
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 under outputs/compacth3_rtx5090/",
-      "modes": ["T2VA", "CompactH3 NVFP4", "RTX 5090"],
-      "limitations": [
-        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
-        "32 GB cannot keep the NVFP4 encoder and DiT on the GPU together. Keep h3_sequential_load on and lazy_module_load off.",
-        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
-        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768; 1344x768 on 32 GB is unmeasured."
-      ]
-    },
-    {
-      "id": "compacth3-rtx-pro6000",
-      "group": "compacth3-rtx-pro6000",
-      "group_label": "CompactH3 on RTX PRO 6000",
-      "group_task": "4-step 42-block text to video + audio",
-      "family": "minimax_h3",
-      "stage": "inference",
-      "task": "Few-step text to video (with audio)",
-      "label": "CompactH3 NVFP4 on RTX PRO 6000 Blackwell",
-      "summary": "Run CompactH3 NVFP4 with the encoder, DiT, and int8-convrot VAE resident on one 96 GB RTX PRO 6000 Blackwell. The checked-in example is 1344x768 and 124 frames (5.17 s) with VAE torch.compile. Use 832x480 for clip-queue playground traffic.",
-      "model": "./CompactH3",
-      "source": "examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
-      "serving": {
-        "source": "examples/serving/openai_compacth3_rtx_pro6000.yaml",
-        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
-        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
-        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
-      },
-      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {
-        "platform": "cuda",
-        "gpu_count": 1,
-        "evidence": "source-configured"
-      },
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 under outputs/compacth3_rtx_pro6000/",
-      "modes": ["T2VA", "CompactH3 NVFP4", "RTX PRO 6000"],
-      "limitations": [
-        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
-        "96 GB keeps the encoder, DiT, and VAE on GPU. Do not enable h3_sequential_load or lazy_module_load on this box.",
-        "Enable compile.vae_enabled. Leave inference_torch_compile off: FlashInfer and Sage3 custom ops cannot be compiled.",
-        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
-        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768. Dense CompactH3 has zero VSA gates; the pipeline raises if VIDEO_SPARSE_ATTN_H3 is loaded with all-zero to_gate_compress weights."
       ]
     },
     {
@@ -915,38 +750,6 @@
       "limitations": ["Supply a compatible FastH3 adapter. The script infers dense or VSA attention from the adapter payload unless you override it."]
     },
     {
-      "id": "longcat-t2v",
-      "family": "longcat",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "LongCat Video T2V",
-      "summary": "LongCat Video text-to-video at 480p (50 steps), with distilled and 720p refinement passes included in the same maintained script.",
-      "model": "FastVideo/LongCat-Video-T2V-Diffusers",
-      "source": "examples/inference/basic/basic_longcat_t2v.py",
-      "command": "python examples/inference/basic/basic_longcat_t2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under outputs_video/longcat_t2v_basic/, longcat_t2v_distill/, and longcat_t2v_refine_720p/",
-      "related": ["longcat-i2v"]
-    },
-    {
-      "id": "longcat-i2v",
-      "family": "longcat",
-      "stage": "inference",
-      "task": "Image to video",
-      "label": "LongCat Video I2V",
-      "summary": "LongCat Video image-to-video with optional distilled and refinement passes, from its maintained example.",
-      "model": "FastVideo/LongCat-Video-I2V-Diffusers",
-      "source": "examples/inference/basic/basic_longcat_i2v.py",
-      "command": "python examples/inference/basic/basic_longcat_i2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under outputs_video/longcat_i2v_basic/ and longcat_i2v_distill/",
-      "related": ["longcat-t2v"]
-    },
-    {
       "id": "stable-audio-open-t2a",
       "family": "stable_audio",
       "stage": "inference",
@@ -1029,6 +832,93 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 videos under video_samples_matrixgame3/",
       "related": ["matrix-game-2"]
+    },
+    {
+      "id": "fasth3-trim-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Text to video with audio",
+      "label": "FastH3 Trim",
+      "summary": "Eight-step video and synchronized audio with the released NVFP4 transformer, text encoder, and lightweight VAE.",
+      "model": "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4",
+      "source": "examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
+      "command": "FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "serving": {
+        "source": "examples/serving/openai_fasth3_trim_spark.yaml",
+        "install": "Install FastVideo following the DGX Spark installation guide.",
+        "audio": true
+      }
+    },
+    {
+      "id": "fasth3-omniref-rtx5090",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX 5090",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-5090 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-rtx-pro6000",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX PRO 6000",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-pro-6000 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on DGX Spark",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile spark --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
     }
   ]
 }
