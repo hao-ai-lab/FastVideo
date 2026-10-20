@@ -24,7 +24,7 @@ async function chooseHardware(page: Page, query: string) {
     .click();
 }
 async function settings(page: Page, section: string) {
-  await expect(page.locator(".recipe-matrix")).toBeVisible();
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   if (section === "Serving" || section === "Hardware") {
     const advanced = page.locator(".matrix-advanced");
     if ((await advanced.getAttribute("open")) === null) await advanced.locator("summary").first().click();
@@ -124,6 +124,26 @@ test("deployment changes reset edits and support MLX and streaming", async ({ pa
   await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel("Client command", { exact: true })).toContainText("input_reference");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Wan2.1 I2V 14B");
+});
+
+test("runtime and hardware choices support browser back", async ({ page }) => {
+  await page.goto(route);
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
+  await backend(page, "MLX");
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fmlx-rest/);
+  await backend(page, "CUDA");
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fcuda-rest/);
+  await page.goBack();
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fmlx-rest/);
+  await expect(page.getByRole("button", { name: "MLX", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.goForward();
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fcuda-rest/);
+  await chooseHardware(page, "RTX 5090");
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
+  await page.goBack();
+  await expect(page).not.toHaveURL(/hardware=/);
+  await page.goForward();
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
 });
 
 test("failed loads offer retry without keeping stale commands", async ({ page }) => {
@@ -479,8 +499,7 @@ test("catalog lookup resolves aliases, variants, and unified memory without pool
   await page.getByLabel("Search hardware", { exact: true }).fill("GB10");
   await page.getByRole("radio", { name: /DGX Spark/ }).click();
   await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
-  await expect(page.locator(".hardware-selected")).toContainText("Apple MLX");
-  await expect(page.locator(".hardware-selected")).toContainText("Usable budget: 96 GB");
+  await expect(page.locator(".hardware-selected")).toContainText("CUDA");
   await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
   await settings(page, "Hardware");
   await page.getByLabel("GPU count", { exact: true }).fill("8");

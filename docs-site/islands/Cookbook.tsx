@@ -289,8 +289,13 @@ function Editor({
     setHardware(selection);
     const url = new URL(window.location.href);
     writeHardwareSelection(url, selection);
-    window.history.replaceState(null, "", url);
+    window.history.pushState(null, "", url);
   }
+  useEffect(() => {
+    const restore = () => setHardware(readHardwareSelection(new URL(window.location.href).searchParams));
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   const modes = mlx || catalog.runtime.interface === "websocket" ? ["serving"] : ["sdk", "inference", "serving"];
   const modeNote = mlx
     ? "Apple Silicon runs through the native MLX server in this recipe. There is no CUDA CLI or Python SDK launch for this deployment."
@@ -685,8 +690,21 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
     setError("");
     const url = new URL(window.location.href);
     url.searchParams.set("deployment", value);
-    window.history.replaceState(null, "", url);
+    window.history.pushState(null, "", url);
   }
+  useEffect(() => {
+    const restore = () => {
+      const requested = new URL(window.location.href).searchParams.get("deployment");
+      const available = index?.models.find((item) => item.id === modelId)?.deployments ?? [];
+      const next = available.find((deployment) => deployment.id === requested)?.id ?? available[0]?.id;
+      if (!next) return;
+      setSelected(next);
+      setCatalog(undefined);
+      setError("");
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [index, modelId]);
   const model = index?.models.find((model) => model.id === modelId);
   if (!modelId) return <RecipeDirectory index={index} error={error} retry={() => setRetry(retry + 1)} />;
   const directoryModel = modelDirectory.find((model) => model.id === modelId);
