@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""sm_100a VSA forward: CLC work-item scheduler under slot reuse.
+"""ptx_blackwell VSA forward: CLC work-item scheduler under slot reuse.
 
 The persistent forward steals not-yet-launched CTAs with clusterlaunchcontrol.try_cancel and
 hands the 16-byte responses through a two-slot ring. The ring is only exercised when the grid
@@ -13,13 +13,13 @@ and a tile written from the wrong work item as a value mismatch.
 import pytest
 import torch
 
-from fastvideo_kernel import block_sparse_attn_sm100a as vsa
+from fastvideo_kernel import block_sparse_attn_ptx_blackwell as vsa
 
 HEAD_DIM = 128
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}
-    or not vsa._HAS_VSA_SM100A,
+    or not vsa._HAS_VSA_PTX_BLACKWELL,
     reason="requires data-center Blackwell (sm_100a/sm_103a) and a built fastvideo_kernel extension",
 )
 
@@ -47,10 +47,10 @@ def test_clc_slot_reuse_never_drops_or_misplaces_a_tile(block, num_blocks):
     ctas = heads * num_blocks // 2
     assert ctas >= 3 * torch.cuda.get_device_properties(0).multi_processor_count, ctas
 
-    out_g, lse_g = (t.clone() for t in vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=True))
+    out_g, lse_g = (t.clone() for t in vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=True))
     assert torch.isfinite(out_g).all() and torch.isfinite(lse_g).all()
     for _ in range(3):
-        out, lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=True)
+        out, lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=True)
         assert torch.equal(out, out_g) and torch.equal(lse, lse_g), "forward is not bitwise deterministic"
         del out, lse
 
@@ -64,7 +64,7 @@ def test_clc_slot_reuse_never_drops_or_misplaces_a_tile(block, num_blocks):
         poison_out = torch.full_like(q, nan)
         out_ptr, lse_ptr = poison_out.data_ptr(), poison_lse.data_ptr()
         del poison_out, poison_lse
-        out, lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=True)
+        out, lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=True)
         assert out.data_ptr() == out_ptr and lse.data_ptr() == lse_ptr, "allocator did not reuse the poisoned blocks"
         wrong = (out != out_g).view(tile_shape).any(-1) | (lse != lse_g).view(1, heads, num_blocks, block).any(-1)
         if bool(wrong.any()):

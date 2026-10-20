@@ -276,7 +276,7 @@ any GPU work begins. The model directory needs `transformer`, `text_encoder`,
 and `modular_model_index.json`. See [Download weights](#download-weights) for
 the complete checkpoint.
 
-**`FastH3's sm100a route needs fastvideo-kernel built with the Blackwell VSA
+**`FastH3's ptx_blackwell route needs fastvideo-kernel built with the Blackwell VSA
 extension`.** Startup checks for the fast sparse-attention kernel before
 loading any weights. Follow [Install](#install) to build it, or set
 `inference.vsa_kernel: triton` in your config to use the slower fallback.

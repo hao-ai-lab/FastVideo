@@ -106,12 +106,12 @@ Check `ray status` on the head: `0.0/2.0 GPU` idle.
 
 Run the driver on the **head**, same venv, same QSFP IP.
 
-`basic_fasth3.py` defaults target a four-GPU GB200 profile: 768×1344, `sm100a`
+`basic_fasth3.py` defaults target a four-GPU GB200 profile: 768×1344, `ptx_blackwell`
 VSA, FA4, four GPUs. On Sparks you must override the kernel flags. Height,
 width, frames, steps, seed, and prompt are yours. Change them. Legal
 `num_frames` values are `17n+5`, capped at 362.
 
-GB10 has no FA4 / sm_100a VSA kernel, so `--vsa-kernel triton --no-fa4` stays
+GB10 has no FA4 / ptx_blackwell VSA kernel, so `--vsa-kernel triton --no-fa4` stays
 required on this box. `--execution-backend ray` is optional when `RAY_ADDRESS`
 is already set.
 
@@ -141,7 +141,7 @@ Config-first equivalent. Edit the YAML the same way, `request.sampling` is not
 locked:
 
 ```bash
-FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 FASTVIDEO_VAE_PARALLEL_DECODE=1 FASTVIDEO_STAGE_LOGGING=1 \
 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml
@@ -149,7 +149,7 @@ fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yam
 
 Stop the cluster when you are done: `ray stop` on both nodes.
 
-## Released V2 and Trim NVFP4 stacks
+## Released V2, FastH3-QAD-v2 and Trim NVFP4 stacks
 
 The public eight-forward V2 and Trim stacks include the NVFP4 encoder and
 lightweight video VAE. Use the environment above plus the release kernel
@@ -158,13 +158,17 @@ settings, then run one of these configs from the head:
 ```bash
 export FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass
 export FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1
-export FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+export FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_v2_nvfp4.yaml
+# Or basic_fasth3_spark_pair_qad_v2_nvfp4.yaml for FastH3-QAD-v2.
 # Or basic_fasth3_spark_pair_pruned_nvfp4.yaml for FastH3 Trim.
 ```
 
-Both configs use their released Hugging Face model paths, `h3_dit_vsa`,
+The configs select separate Hugging Face checkpoints for V2, FastH3-QAD-v2 and Trim.
+V2 and FastH3-QAD-v2 enable native FP4 attention in YAML; the extension must be built
+for GB10. FastH3-QAD-v2 also selects the FP8 prefix split for text and audio queries.
+The examples use `h3_dit_vsa`,
 832x480, 124 frames, seed 1234, VSA 0.8 and 64-token tiles. All components
 stay resident; lazy/sequential loading and compilation are disabled for
 these compact stacks. The older BF16/Preview memory guidance below applies
@@ -207,8 +211,8 @@ frames.
 
 The first VAE decode still pays `torch.compile`. Later `generate()` calls in
 the same workers are cheaper. GB10 regional DiT compile stays off because the
-sm_100a VSA kernel is not on this chip, so denoise is slower than a GB200
-`sm100a` run at the same geometry.
+`ptx_blackwell` kernel is not on this chip, so denoise is slower than a GB200
+run at the same geometry.
 
 ## Troubleshooting
 

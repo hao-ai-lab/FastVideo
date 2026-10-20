@@ -26,8 +26,8 @@ inference:
 
   vsa_sparsity: 0.9
   vsa_tile_size: 64
-  # sm100a is the Blackwell VSA kernel; `triton` is the ~2.5x slower fallback.
-  vsa_kernel: sm100a
+  # ptx_blackwell is the Blackwell VSA kernel; `triton` is the ~2.5x slower fallback.
+  vsa_kernel: ptx_blackwell
   fa4: true
   h3_fusions: true
   inference_torch_compile: true

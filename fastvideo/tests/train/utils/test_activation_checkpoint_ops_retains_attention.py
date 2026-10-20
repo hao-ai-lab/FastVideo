@@ -27,8 +27,8 @@ _RETAINED_OP_MODULES = {
     "fastvideo::_flash_attn_cute_fp4_forward": "fastvideo.attention.utils.flash_attn_cute",
     "fastvideo::_flash_attn_no_pad_forward": "fastvideo.attention.utils.flash_attn_no_pad",
     "fastvideo::_flash_attn_varlen_qk_no_pad_forward": "fastvideo.attention.utils.flash_attn_no_pad",
+    "fastvideo_kernel::block_sparse_attn_ptx_blackwell": "fastvideo_kernel.block_sparse_attn",
     "fastvideo_kernel::block_sparse_attn_sm90": "fastvideo_kernel.block_sparse_attn",
-    "fastvideo_kernel::block_sparse_attn_sm100a": "fastvideo_kernel.block_sparse_attn",
     "fastvideo_kernel::block_sparse_attn_triton": "fastvideo_kernel.block_sparse_attn",
 }
 

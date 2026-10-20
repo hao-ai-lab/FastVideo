@@ -2,6 +2,7 @@
 
 ## Contact
 
+- **Contact name:** William Lin
 - **Contact email:** wlsaidhi@gmail.com
 - **Bug reports and feature requests:** open a
   [GitHub issue](https://github.com/hao-ai-lab/FastVideo/issues).

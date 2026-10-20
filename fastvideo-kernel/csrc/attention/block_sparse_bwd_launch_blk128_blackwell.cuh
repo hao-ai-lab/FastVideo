@@ -1,12 +1,12 @@
-// block_sparse_bwd_launch_sm100a_blk128.cuh -- host surface of the 128-token VSA block-sparse
+// block_sparse_bwd_launch_blk128_blackwell.cuh -- host surface of the 128-token VSA block-sparse
 // backward drop: argument struct, workspace sizes, the support predicate and the stream-chained
 // launch (preprocess -> main -> postprocess, each a programmatic dependent launch of the one
 // before). Tensor maps are encoded per call (a torch caller hands us fresh pointers every time).
-#ifndef BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_BLK128_CUH
-#define BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_BLK128_CUH
+#ifndef BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_BLK128_CUH
+#define BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_BLK128_CUH
 
 #include <cmath>
-#include "block_sparse_bwd_kernel_sm100a_blk128.cuh"
+#include "block_sparse_bwd_kernel_blk128_blackwell.cuh"
 
 #ifndef VSA_BHSD
 #define VSA_BHSD false
@@ -149,7 +149,7 @@ __host__ inline cudaLaunchConfig_t pdl_launch_config(dim3 grid, dim3 block, size
   return cfg;
 }
 
-__host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaBwdArgs& args,
+__host__ inline cudaError_t launch_block_sparse_bwd_ptx_blackwell(const BlockSparseVsaBwdArgs& args,
                                                            cudaStream_t stream) {
   const cudaError_t supported = block_sparse_bwd_supported(args);
   if (supported != cudaSuccess) {
@@ -228,4 +228,4 @@ __host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaB
 
 using namespace vsa_bwd_blk128;
 
-#endif  // BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_BLK128_CUH
+#endif  // BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_BLK128_CUH

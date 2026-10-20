@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""sm_100a/sm_103a (data-center Blackwell) CUDA block-sparse VSA backward.
+"""ptx_blackwell block-sparse VSA backward for data-center Blackwell (sm_100a / sm_103a).
 
-Companion of ``block_sparse_attn_sm100a`` (the forward): consumes the forward's ``lse`` in the
+Companion of ``block_sparse_attn_ptx_blackwell`` (the forward): consumes the forward's ``lse`` in the
 Triton "M format" (``max(qk * sm_scale * log2e) + log2(l)``, ``[B, H, S]`` fp32) unchanged and
 FastVideo's k2q index metadata, returns ``(dq, dk, dv)`` in bf16 with the inputs' layout and the
 Triton backward's scaling (dq and dk carry sm_scale, dv does not). Two kernels, picked by the
-metadata's block size: 64-token blocks (``block_sparse_sm100a_bwd``) and 128-token blocks
-(``block_sparse_sm100a_blk128_bwd``); any other configuration falls back to Triton via
+metadata's block size: 64-token blocks (``block_sparse_ptx_blackwell_bwd``) and 128-token blocks
+(``block_sparse_ptx_blackwell_blk128_bwd``); any other configuration falls back to Triton via
 ``is_supported``.
 """
 
@@ -19,14 +19,14 @@ try:
     # (its __init__ is empty, so hasattr on the package fails with the kernel built and present).
     from fastvideo_kernel._C import fastvideo_kernel_ops as _C
     _BWD_BY_BLOCK = {
-        64: getattr(_C, "block_sparse_sm100a_bwd", None),
-        128: getattr(_C, "block_sparse_sm100a_blk128_bwd", None),
+        64: getattr(_C, "block_sparse_ptx_blackwell_bwd", None),
+        128: getattr(_C, "block_sparse_ptx_blackwell_blk128_bwd", None),
     }
-    _HAS_VSA_BWD_SM100A = any(_BWD_BY_BLOCK.values())
+    _HAS_VSA_BWD_PTX_BLACKWELL = any(_BWD_BY_BLOCK.values())
 except ImportError:  # pragma: no cover - extension not built
     _C = None
     _BWD_BY_BLOCK = {}
-    _HAS_VSA_BWD_SM100A = False
+    _HAS_VSA_BWD_PTX_BLACKWELL = False
 
 _SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
 HEAD_DIM = 128
@@ -36,20 +36,20 @@ BHSD = True
 
 
 def set_extension(module) -> None:
-    """Use an already-loaded extension module exposing ``block_sparse_sm100a_bwd`` and / or
-    ``block_sparse_sm100a_blk128_bwd``.
+    """Use an already-loaded extension module exposing ``block_sparse_ptx_blackwell_bwd`` and / or
+    ``block_sparse_ptx_blackwell_blk128_bwd``.
 
     A standalone build of the binding .cu files (for example through
     ``torch.utils.cpp_extension.load`` with a ten-line pybind wrapper) can be injected here, so
     the backend can be exercised without rebuilding the fastvideo_kernel wheel.
     """
-    global _C, _BWD_BY_BLOCK, _HAS_VSA_BWD_SM100A
+    global _C, _BWD_BY_BLOCK, _HAS_VSA_BWD_PTX_BLACKWELL
     _C = module
     _BWD_BY_BLOCK = {
-        64: getattr(module, "block_sparse_sm100a_bwd", None),
-        128: getattr(module, "block_sparse_sm100a_blk128_bwd", None),
+        64: getattr(module, "block_sparse_ptx_blackwell_bwd", None),
+        128: getattr(module, "block_sparse_ptx_blackwell_blk128_bwd", None),
     }
-    _HAS_VSA_BWD_SM100A = any(_BWD_BY_BLOCK.values())
+    _HAS_VSA_BWD_PTX_BLACKWELL = any(_BWD_BY_BLOCK.values())
 
 
 def _seqlen(q: torch.Tensor) -> int:
@@ -77,7 +77,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     Per-row k2q counts may be anything in [0, num_q_blocks], including 0: unselected kv blocks
     get exactly-zero dk/dv rows.
     """
-    if not _HAS_VSA_BWD_SM100A or not q.is_cuda:
+    if not _HAS_VSA_BWD_PTX_BLACKWELL or not q.is_cuda:
         return False
     if torch.cuda.get_device_capability(q.device) not in _SUPPORTED_COMPUTE_CAPABILITIES:
         return False
@@ -99,7 +99,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     return True
 
 
-def block_sparse_attn_backward_sm100a_from_k2q(
+def block_sparse_attn_backward_ptx_blackwell_from_k2q(
     grad_o: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -119,7 +119,7 @@ def block_sparse_attn_backward_sm100a_from_k2q(
     block = _block_size(q, variable_block_sizes)
     backward = _BWD_BY_BLOCK.get(block)
     if backward is None:
-        raise RuntimeError(f"block_sparse_attn_backward_sm100a: no kernel for {block}-token "
+        raise RuntimeError(f"block_sparse_attn_backward_ptx_blackwell: no kernel for {block}-token "
                            f"blocks (built: {sorted(b for b, f in _BWD_BY_BLOCK.items() if f)})")
     sm_scale = 1.0 / (q.shape[-1]**0.5)
     idx = k2q_idx.to(torch.int32).contiguous()
@@ -130,7 +130,7 @@ def block_sparse_attn_backward_sm100a_from_k2q(
     return res[0], res[1], res[2]
 
 
-def block_sparse_attn_backward_sm100a(
+def block_sparse_attn_backward_ptx_blackwell(
     grad_o: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -158,5 +158,5 @@ def block_sparse_attn_backward_sm100a(
     if num.dim() != 3:
         num = num.view(batch, heads, -1)
     k2q_idx, k2q_num = invert_indices(idx, num, num_kv_blocks)
-    return block_sparse_attn_backward_sm100a_from_k2q(grad_o, q, k, v, o, lse, k2q_idx, k2q_num,
-                                                      variable_block_sizes)
+    return block_sparse_attn_backward_ptx_blackwell_from_k2q(grad_o, q, k, v, o, lse, k2q_idx, k2q_num,
+                                                             variable_block_sizes)

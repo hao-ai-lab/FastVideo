@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Checks for the VSA-H3 tile-64 sm_100a/sm_103a route and odd-tile transport.
+"""Checks for the VSA-H3 tile-64 ptx_blackwell route and odd-tile transport.
 
-The opt-in third kernel route (``FASTVIDEO_VSA_SM100A=1``) must (a) stay off by
+The opt-in third kernel route (``FASTVIDEO_VSA_PTX_BLACKWELL=1``) must (a) stay off by
 default, (b) engage only when the extension is present, the device qualifies,
 and the forward carries no grad, (c) add one zero-valid partner for an odd
 logical tile count, and (d) strip that partner before any fallback or returned
@@ -16,8 +16,9 @@ import torch
 import fastvideo.attention.backends.video_sparse_attn_h3 as vsa_h3
 import fastvideo.envs as envs
 import fastvideo.logger as fastvideo_logger
-from fastvideo.attention.backends.video_sparse_attn_h3 import (VSA_SM100A_ENV, MiniMaxH3VSAImpl,
-                                                               MiniMaxH3VSAMetadataBuilder, _sm100a_unavailable_reason)
+from fastvideo.attention.backends.video_sparse_attn_h3 import (VSA_PTX_BLACKWELL_ENV, MiniMaxH3VSAImpl,
+                                                               MiniMaxH3VSAMetadataBuilder,
+                                                               _ptx_blackwell_unavailable_reason)
 
 # Small tile-64 geometry: 2 prefix segments + a (4,4,8)-token video grid.
 _SPEC = dict(raw_latent_shape=(4, 8, 16), patch_size=(1, 2, 2), prefix_segments=(70, 30))
@@ -52,8 +53,8 @@ def _tiled_qkv(meta, requires_grad=False):
         torch.randn(1, s_pad, _HEADS, _DIM, dtype=torch.bfloat16, requires_grad=requires_grad) for _ in range(3))
 
 
-class _FakeSm100a:
-    """Stands in for fastvideo_kernel.block_sparse_attn_sm100a."""
+class _FakePtxBlackwell:
+    """Stands in for fastvideo_kernel.block_sparse_attn_ptx_blackwell."""
 
     def __init__(self, supported=True):
         self.supported = supported
@@ -65,12 +66,12 @@ class _FakeSm100a:
         self.support_calls.append((q, variable_block_sizes))
         return self.supported
 
-    def block_sparse_attn_sm100a(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes, need_lse=True):
+    def block_sparse_attn_ptx_blackwell(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes, need_lse=True):
         self.calls.append(dict(q=q, q2k_idx=q2k_idx, q2k_num=q2k_num, vbs=variable_block_sizes,
                                need_lse=need_lse))
         return q.clone(), None
 
-    def block_sparse_attn_sm100a_from_mask(self, q, k, v, block_map, variable_block_sizes):
+    def block_sparse_attn_ptx_blackwell_from_mask(self, q, k, v, block_map, variable_block_sizes):
         self.mask_calls.append(dict(q=q, block_map=block_map, vbs=variable_block_sizes))
         return q.clone(), None
 
@@ -100,9 +101,9 @@ class _FakeTriton:
 @pytest.fixture()
 def routed(monkeypatch):
     """Backend with both kernel entries faked; returns (fakes, run)."""
-    fake_sm = _FakeSm100a()
+    fake_sm = _FakePtxBlackwell()
     fake_triton = _FakeTriton()
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fake_triton)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
     meta = _build_meta()
@@ -118,24 +119,24 @@ def routed(monkeypatch):
 def test_reason_covers_every_precondition():
     q = torch.randn(1, _HEADS, 128, _DIM)
     vbs = torch.full((2, ), 64, dtype=torch.long)
-    assert "not installed" in _sm100a_unavailable_reason(None, q, vbs, grad_mode=False)
-    ok = _FakeSm100a(supported=True)
-    assert "require grad" in _sm100a_unavailable_reason(ok, q, vbs, grad_mode=True)
-    bad = _FakeSm100a(supported=False)
-    assert "is_supported" in _sm100a_unavailable_reason(bad, q, vbs, grad_mode=False)
-    assert _sm100a_unavailable_reason(ok, q, vbs, grad_mode=False) is None
+    assert "not installed" in _ptx_blackwell_unavailable_reason(None, q, vbs, grad_mode=False)
+    ok = _FakePtxBlackwell(supported=True)
+    assert "require grad" in _ptx_blackwell_unavailable_reason(ok, q, vbs, grad_mode=True)
+    bad = _FakePtxBlackwell(supported=False)
+    assert "is_supported" in _ptx_blackwell_unavailable_reason(bad, q, vbs, grad_mode=False)
+    assert _ptx_blackwell_unavailable_reason(ok, q, vbs, grad_mode=False) is None
 
 
 def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch, env_overrides):
-    fake_sm = _FakeSm100a(supported=True)
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
     unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
     assert unsupported is None
-    assert impl._regional_compile_sm100a_enabled is True
+    assert impl._regional_compile_ptx_blackwell_enabled is True
     assert len(fake_sm.support_calls) == 1
     probe_q, probe_vbs = fake_sm.support_calls[0]
     assert probe_q.shape == (1, 1, 128, _DIM)
@@ -147,29 +148,29 @@ def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch, env_
 
 
 def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch, env_overrides):
-    fake_sm = _FakeSm100a(supported=True)
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
     unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
     assert unsupported is not None
-    assert VSA_SM100A_ENV in unsupported
+    assert VSA_PTX_BLACKWELL_ENV in unsupported
     assert impl._compile_layer_idx is not None
-    assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_ptx_blackwell_enabled is False
     assert fake_sm.support_calls == []
 
 
 def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch, env_overrides):
 
-    class _IndexOnlySm100a:
+    class _IndexOnlyPtxBlackwell:
 
         def is_supported(self, q, variable_block_sizes):
             raise AssertionError("missing mask entry must be rejected before the support probe")
 
-    monkeypatch.setattr(vsa_h3, "_sm100a", _IndexOnlySm100a())
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", _IndexOnlyPtxBlackwell())
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     warnings = []
     monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
@@ -178,19 +179,19 @@ def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch, env_overr
 
     assert unsupported is not None
     assert impl._compile_layer_idx is not None
-    assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_ptx_blackwell_enabled is False
     assert len(warnings) == 1
     assert "compatibility route" in warnings[0]
 
 
 def test_mask_dispatch_uses_local_compatibility_route_for_older_kernel_wheel(monkeypatch):
-    class _RawOnlySm100a:
+    class _RawOnlyPtxBlackwell:
 
-        def block_sparse_attn_sm100a(self, *args, **kwargs):
+        def block_sparse_attn_ptx_blackwell(self, *args, **kwargs):
             raise AssertionError("raw entry must remain behind the compatibility custom op")
 
-    fake_sm = _RawOnlySm100a()
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    fake_sm = _RawOnlyPtxBlackwell()
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
     monkeypatch.setattr(vsa_h3, "map_to_index", lambda mask: (mask, mask))
     calls = []
 
@@ -198,23 +199,23 @@ def test_mask_dispatch_uses_local_compatibility_route_for_older_kernel_wheel(mon
         calls.append((block_map, variable_block_sizes))
         return q + 1
 
-    monkeypatch.setattr(vsa_h3, "_h3_vsa_sm100a_from_mask_compat", compat)
+    monkeypatch.setattr(vsa_h3, "_h3_vsa_ptx_blackwell_from_mask_compat", compat)
     q = torch.zeros(1, 1, 128, _DIM)
     mask = torch.ones(1, 1, 2, 2, dtype=torch.bool)
     vbs = torch.full((2, ), 64, dtype=torch.int32)
 
-    out, lse = vsa_h3._sm100a_from_mask(q, q, q, mask, vbs)
+    out, lse = vsa_h3._ptx_blackwell_from_mask(q, q, q, mask, vbs)
 
-    assert vsa_h3._sm100a_has_compile_safe_mask_route(fake_sm)
+    assert vsa_h3._ptx_blackwell_has_compile_safe_mask_route(fake_sm)
     torch.testing.assert_close(out, q + 1)
     assert lse is None and calls == [(mask, vbs)]
 
 
 def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch, env_overrides):
     """Capture must not revisit env/capability checks or raw map_to_index."""
-    fake_sm = _FakeSm100a(supported=True)
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
     impl.prepare_for_regional_compile(torch.device("cpu"))
@@ -239,10 +240,10 @@ def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch, env_overrid
         return q.clone(), None
 
     monkeypatch.setattr(fake_sm, "is_supported", fail_eager_dispatch)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_eager_dispatch)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", compile_safe_from_mask)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask", compile_safe_from_mask)
     monkeypatch.setattr(vsa_h3, "map_to_index", fail_eager_dispatch)
-    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell_unavailable_reason", fail_eager_dispatch)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
 
     def run(q, k, v):
@@ -259,9 +260,9 @@ def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch, env_overrid
 
 def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_overrides(monkeypatch, env_overrides):
     """Fifty H3 blocks must not specialize the shared graph on layer_idx."""
-    fake_sm = _FakeSm100a(supported=True)
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
     meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
     assert meta.dense_layers_tensor.tolist() == [0, 17]
@@ -289,16 +290,18 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
         implementations.append(impl)
 
     monkeypatch.setattr(fake_sm, "is_supported", fail_eager_dispatch)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_eager_dispatch)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", compile_safe_from_mask)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask", compile_safe_from_mask)
     monkeypatch.setattr(vsa_h3, "map_to_index", fail_eager_dispatch)
-    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell_unavailable_reason", fail_eager_dispatch)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
+
+    from fastvideo.forward_context import set_forward_context
 
     torch._dynamo.reset()
     try:
         compiled = [torch.compile(impl.forward, backend="eager", fullgraph=True) for impl in implementations]
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             for layer_idx, run in enumerate(compiled):
                 actual = run(q, k, v, None, meta)
                 expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
@@ -308,10 +311,10 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
 
 
 def test_generic_compile_reuses_graph_across_layer_indices_and_stays_on_triton(monkeypatch, env_overrides):
-    """Pipeline compile must share one graph without selecting sm_100a."""
-    fake_sm = _FakeSm100a(supported=True)
-    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    """Pipeline compile must share one graph without selecting ptx_blackwell."""
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
     meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
     q, k, v = _tiled_qkv(meta)
@@ -320,14 +323,14 @@ def test_generic_compile_reuses_graph_across_layer_indices_and_stays_on_triton(m
         del k, v, variable_block_sizes
         return q + block_map.all().to(q.dtype), None
 
-    def fail_sm100a(*args, **kwargs):
-        raise AssertionError("generic torch.compile unexpectedly selected sm_100a")
+    def fail_ptx_blackwell(*args, **kwargs):
+        raise AssertionError("generic torch.compile unexpectedly selected ptx_blackwell")
 
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fake_triton)
-    monkeypatch.setattr(fake_sm, "is_supported", fail_sm100a)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_sm100a)
-    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", fail_sm100a)
-    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_sm100a)
+    monkeypatch.setattr(fake_sm, "is_supported", fail_ptx_blackwell)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell", fail_ptx_blackwell)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask", fail_ptx_blackwell)
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell_unavailable_reason", fail_ptx_blackwell)
 
     implementations = []
     for layer_idx in range(20):
@@ -364,7 +367,7 @@ def test_generic_compile_reuses_graph_across_layer_indices_and_stays_on_triton(m
 
 def test_default_off_routes_triton(routed, env_overrides):
     fake_sm, fake_triton, run, _ = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     run()
     assert fake_triton.calls == 1
     assert fake_sm.calls == []
@@ -372,7 +375,7 @@ def test_default_off_routes_triton(routed, env_overrides):
 
 def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, _ = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
 
     run(requires_grad=True)
@@ -381,9 +384,9 @@ def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeyp
     assert fake_sm.calls == []
 
 
-def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch, env_overrides):
+def test_env_on_routes_ptx_blackwell_with_index_metadata(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, meta = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     messages = []
     monkeypatch.setattr(vsa_h3.logger, "info_once", messages.append)
     out = run()
@@ -396,14 +399,14 @@ def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch, env_overr
     assert call["q2k_idx"].shape[-1] == n_tiles and call["q2k_idx"].dtype == torch.int32
     assert call["vbs"].dtype == torch.int32
     assert call["need_lse"] is False
-    assert messages == ["MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel"]
+    assert messages == ["MiniMax-H3 VSA tile-64 forward: using the ptx_blackwell block-sparse kernel"]
     # BHSD kernel result comes back in the backend's BSHD layout
     assert out.shape == (1, n_tiles * 64, _HEADS, _DIM)
 
 
-def test_sm100a_engagement_receipt_logs_once_without_stacklevel_conflict(routed, monkeypatch, env_overrides):
+def test_ptx_blackwell_engagement_receipt_logs_once_without_stacklevel_conflict(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, _ = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     records = []
 
     def capture_log(level, msg, *args, **kwargs):
@@ -420,17 +423,17 @@ def test_sm100a_engagement_receipt_logs_once_without_stacklevel_conflict(routed,
     assert fake_triton.calls == 0
     assert len(fake_sm.calls) == 2
     assert records == [(logging.INFO,
-                        "MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel", (),
+                        "MiniMax-H3 VSA tile-64 forward: using the ptx_blackwell block-sparse kernel", (),
                         {"stacklevel": 2})]
 
 
 def test_env_on_grad_inputs_fall_back_to_triton(routed, env_overrides):
     fake_sm, fake_triton, run, _ = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     run(requires_grad=True)
     assert fake_triton.calls == 1
     assert fake_sm.calls == []
-    # ...but the same process still routes no-grad forwards to sm_100a
+    # ...but the same process still routes no-grad forwards to ptx_blackwell
     run(requires_grad=False)
     assert len(fake_sm.calls) == 1
 
@@ -438,7 +441,7 @@ def test_env_on_grad_inputs_fall_back_to_triton(routed, env_overrides):
 def test_env_on_unsupported_warns_once_and_falls_back(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, _ = routed
     fake_sm.supported = False
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     warnings = []
     monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
     run()
@@ -447,13 +450,13 @@ def test_env_on_unsupported_warns_once_and_falls_back(routed, monkeypatch, env_o
     assert fake_sm.calls == []
     assert len(warnings) == 2  # warning_once dedups by message; both carry the same one line
     assert warnings[0] == warnings[1]
-    assert VSA_SM100A_ENV in warnings[0] and "is_supported" in warnings[0]
+    assert VSA_PTX_BLACKWELL_ENV in warnings[0] and "is_supported" in warnings[0]
 
 
 def test_env_on_missing_module_warns_and_falls_back(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, _ = routed
-    monkeypatch.setattr(vsa_h3, "_sm100a", None)
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", None)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     warnings = []
     monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
     run()
@@ -464,7 +467,7 @@ def test_env_on_missing_module_warns_and_falls_back(routed, monkeypatch, env_ove
 def test_env_on_no_grad_context_detaches_route_from_leaf_flags(routed, env_overrides):
     """A requires_grad leaf under torch.no_grad() is still a no-grad forward."""
     fake_sm, fake_triton, run, meta = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
     q, k, v = _tiled_qkv(meta, requires_grad=True)
     with torch.no_grad():
@@ -481,16 +484,16 @@ def test_env_on_no_grad_context_detaches_route_from_leaf_flags(routed, env_overr
         (True, True, 0),
     ],
 )
-def test_preprocess_adds_partner_only_for_odd_no_grad_sm100a(
+def test_preprocess_adds_partner_only_for_odd_no_grad_ptx_blackwell(
     env_overrides,
     env_enabled,
     requires_grad,
     extra_tiles,
 ):
     if env_enabled:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     else:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
     meta = _build_meta()
     n_tiles = meta.variable_block_sizes.numel()
     assert n_tiles % 2 == 1
@@ -512,9 +515,9 @@ def test_preprocess_adds_partner_only_for_odd_no_grad_sm100a(
         assert torch.count_nonzero(tiled[:, n_tiles * 64:]) == 0
 
 
-def test_odd_partner_is_visible_only_to_sm100a_transport(routed, env_overrides):
+def test_odd_partner_is_visible_only_to_ptx_blackwell_transport(routed, env_overrides):
     fake_sm, fake_triton, _, meta = routed
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
     raw_qkv = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
     tiled_qkv = impl.preprocess_qkv(raw_qkv, meta)
@@ -542,7 +545,7 @@ def test_odd_partner_is_visible_only_to_sm100a_transport(routed, env_overrides):
 def test_unsupported_odd_route_strips_partner_before_triton(routed, monkeypatch, env_overrides):
     fake_sm, _, _, meta = routed
     fake_sm.supported = False
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3.logger, "warning_once", lambda *_args, **_kwargs: None)
     calls = []
 
@@ -568,7 +571,7 @@ def test_unsupported_odd_route_strips_partner_before_triton(routed, monkeypatch,
 
 
 def test_geometry_change_clears_reused_partner_tile(env_overrides):
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     builder = MiniMaxH3VSAMetadataBuilder()
     even_meta = _build_meta(prefix_segments=(70, 70), builder=builder)
     odd_meta = _build_meta(prefix_segments=(70, 30), builder=builder)
@@ -604,11 +607,11 @@ def test_forward_rejects_non_contract_transport_shapes(routed):
         impl.forward(logical, logical, logical, partner, meta)
 
 
-def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch, env_overrides):
+def test_real_ptx_blackwell_odd_route_matches_triton_oracle(monkeypatch, env_overrides):
     """Exercise the padded route through the actual data-center Blackwell extension."""
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
         pytest.skip("requires a GB200/B300 (sm_100a/sm_103a) compute node")
-    if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
+    if vsa_h3._ptx_blackwell is None or not vsa_h3._ptx_blackwell._HAS_VSA_PTX_BLACKWELL:
         pytest.skip("requires a fastvideo_kernel build containing data-center Blackwell VSA")
 
     device = torch.device("cuda")
@@ -619,7 +622,7 @@ def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch, env_overrides)
     raw_qkv = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
 
     with torch.inference_mode():
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
         triton_tiled = impl.preprocess_qkv(raw_qkv, meta)
         triton_query, triton_key, triton_value = triton_tiled.chunk(3, dim=0)
         triton_output = impl.postprocess_output(
@@ -629,27 +632,27 @@ def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch, env_overrides)
             raise AssertionError("odd no-grad VSA-H3 unexpectedly fell back to Triton-64")
 
         monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", reject_triton)
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
-        sm100a_tiled = impl.preprocess_qkv(raw_qkv, meta)
-        sm100a_query, sm100a_key, sm100a_value = sm100a_tiled.chunk(3, dim=0)
-        sm100a_output = impl.postprocess_output(
-            impl.forward(sm100a_query, sm100a_key, sm100a_value, None, meta), meta)
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+        ptx_blackwell_tiled = impl.preprocess_qkv(raw_qkv, meta)
+        ptx_blackwell_query, ptx_blackwell_key, ptx_blackwell_value = ptx_blackwell_tiled.chunk(3, dim=0)
+        ptx_blackwell_output = impl.postprocess_output(
+            impl.forward(ptx_blackwell_query, ptx_blackwell_key, ptx_blackwell_value, None, meta), meta)
         torch.cuda.synchronize()
 
-    assert sm100a_tiled.shape[1] == triton_tiled.shape[1] + 64
-    assert sm100a_output.shape == triton_output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
-    torch.testing.assert_close(sm100a_output.float(), triton_output.float(), atol=0.04, rtol=0.02)
+    assert ptx_blackwell_tiled.shape[1] == triton_tiled.shape[1] + 64
+    assert ptx_blackwell_output.shape == triton_output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    torch.testing.assert_close(ptx_blackwell_output.float(), triton_output.float(), atol=0.04, rtol=0.02)
 
 
-def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides):
+def test_real_ptx_blackwell_odd_preprocess_forward_postprocess_fullgraph(env_overrides):
     """Capture #1745's odd transport buffer mutation with real Inductor."""
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
         pytest.skip("requires a GB200/B300 (sm_100a/sm_103a) compute node")
-    if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
+    if vsa_h3._ptx_blackwell is None or not vsa_h3._ptx_blackwell._HAS_VSA_PTX_BLACKWELL:
         pytest.skip("requires a fastvideo_kernel build containing data-center Blackwell VSA")
 
     device = torch.device("cuda")
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     meta = _build_meta(device=device, sparsity=0.5)
     assert meta.variable_block_sizes.numel() % 2 == 1
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
@@ -663,9 +666,11 @@ def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides)
         output = impl.forward(query, key, value, None, meta)
         return impl.postprocess_output(output, meta)
 
+    from fastvideo.forward_context import set_forward_context
+
     torch._dynamo.reset()
     try:
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             compiled = torch.compile(run, fullgraph=True)
             output = compiled(raw_qkv)
             torch.cuda.synchronize()
@@ -674,3 +679,125 @@ def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides)
 
     assert output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     assert torch.isfinite(output).all()
+
+
+def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_overrides):
+    """Unseen prompt lengths reuse warm graphs and match the eager route exactly (#1940)."""
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.forward_context import set_forward_context
+
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(raw, meta):
+        tiled = impl.preprocess_qkv(raw, meta)
+        query, key, value, gate = tiled.chunk(4, dim=0)
+        return impl.postprocess_output(impl.forward(query, key, value, gate, meta), meta)
+
+    def check(text_rows_list):
+        parities = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            parities.add(meta.variable_block_sizes.numel() % 2)
+            raw = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(raw, meta)
+                expected = run(raw.clone(), meta)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return parities
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            # Dynamo may still specialize on bounded shape classes (tile-count
+            # parity); once both are warm, unseen lengths must reuse a graph.
+            assert check((17, 40, 64, 81, 100, 130)) == {0, 1}
+            warm_graphs = counter.frame_count
+            assert check((151, 200, 233, 300, 47, 113)) == {0, 1}
+        assert counter.frame_count == warm_graphs, (
+            f"unseen prompt lengths compiled {counter.frame_count - warm_graphs} new graphs")
+    finally:
+        torch._dynamo.reset()
+
+
+def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, env_overrides):
+    """Sequence lengths that do and don't divide by the SP degree reuse warm graphs (#1940).
+
+    ``DistributedAttention_VSA`` slices the SP padding off before the backend and pads the output back, so the
+    padded length (a function of ``total_seq_length % sp``) must not leak into the compiled graph's guards.
+    """
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.attention import layer as attn_layer
+    from fastvideo.forward_context import set_forward_context
+
+    sp_degree = 4
+
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    monkeypatch.setattr(attn_layer, "sequence_model_parallel_all_to_all_4D", lambda x, **_: x)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
+    torch.nn.Module.__init__(layer)
+    layer.attn_impl = impl
+    layer._compile_forward_enabled = True
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(q, k, v, total):
+        return layer(q, k, v, total)[0]
+
+    def check(text_rows_list):
+        pads = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            total = meta.total_seq_length
+            pad = -total % sp_degree
+            pads.add(pad)
+            q, k, v = (torch.randn(1, total + pad, _HEADS, _DIM, dtype=torch.bfloat16) for _ in range(3))
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(q, k, v, total)
+                expected = run(q, k, v, total)
+            assert actual.shape == (1, total + pad, _HEADS, _DIM)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return pads
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            warm_pads = check((17, 40, 64, 81, 100, 130))
+            assert 0 in warm_pads and len(warm_pads) > 1, "need lengths that do and don't divide by the SP degree"
+            warm_graphs = counter.frame_count
+            check((151, 200, 233, 300, 47, 113, 18, 19, 20))
+        assert counter.frame_count == warm_graphs, (
+            f"unseen padded lengths compiled {counter.frame_count - warm_graphs} new graphs")
+    finally:
+        torch._dynamo.reset()

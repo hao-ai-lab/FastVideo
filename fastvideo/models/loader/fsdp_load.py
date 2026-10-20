@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 import contextlib
+import copy
 import re
 from collections.abc import Callable, Generator
 from itertools import chain
+from types import FunctionType, MethodType
 from typing import Any
 
 import torch
@@ -66,9 +68,10 @@ def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
 
 def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: dict[str, str],
                            device: torch.device) -> None:
-    """Attach FP8 W8A8 checkpoint tensors to their FP8 linears as ``convert_model_to_fp8`` would (per channel)."""
+    """Load packed FP8 linears and preserve the checkpoint's dense linear weights."""
     from safetensors import safe_open
 
+    from fastvideo.layers.linear import UnquantizedLinearMethod
     from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
 
     modules = dict(model.named_modules())
@@ -91,7 +94,17 @@ def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: d
                                tensors[f"{prefix}.weight_scale"].reshape(-1).to(device=device, dtype=torch.float32),
                                persistent=False)
         module._parameters.pop("weight", None)
-    logger.info("Loaded %d pre-quantized FP8 linears", len(targets))
+    # The packed entries define the export's FP8 scope. A broad FP8Config can
+    # also tag intentionally dense layers, such as H3's text refiner. Reset
+    # their method before post-load conversion also quantizes those layers.
+    packed_modules = {target[:-len(".weight")] for target in targets.values()}
+    dense_linears = 0
+    for name, module in modules.items():
+        if (name not in packed_modules and isinstance(getattr(module, "quant_method", None), FP8QuantizeMethod)
+                and getattr(module, "weight", None) is not None):
+            module.quant_method = UnquantizedLinearMethod()
+            dense_linears += 1
+    logger.info("Loaded %d pre-quantized FP8 linears; preserved %d dense linears", len(targets), dense_linears)
 
 
 def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
@@ -227,6 +240,32 @@ def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | Non
     return unsupported if isinstance(unsupported, str) and unsupported else None
 
 
+def _adopt_nvfp4_export_skip_blocks(init_params: dict[str, Any], quant_config: Any,
+                                    export_path: str) -> dict[str, Any]:
+    """Match the NVFP4 config's bf16 blocks to the ones the packed export declares.
+
+    A mixed export (e.g. FastH3 OmniRef QAD keeps blocks 42-49 in bf16) leaves
+    those blocks' linears out of the packed file; they must not be tagged NVFP4,
+    or the loader would expect packed buffers for them. An empty
+    ``skip_blocks`` adopts the export's list; a different explicit list is an
+    error rather than a silent precision change.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import read_minimax_h3_nvfp4_dit_skip_blocks
+
+    export_blocks = read_minimax_h3_nvfp4_dit_skip_blocks(export_path)
+    config_blocks = tuple(getattr(quant_config, "skip_blocks", ()) or ())
+    if export_blocks == config_blocks:
+        return init_params
+    if config_blocks:
+        raise ValueError(f"NVFP4Config.skip_blocks={list(config_blocks)} but the packed export {export_path} keeps "
+                         f"blocks {list(export_blocks)} in bf16; drop skip_blocks to follow the export.")
+    logger.info("Packed NVFP4 DiT export keeps blocks %s in bf16; leaving their linears unquantized",
+                list(export_blocks))
+    transformer_config = copy.copy(init_params["config"])
+    transformer_config.quant_config = quant_config.with_skip_blocks(export_blocks)
+    return {**init_params, "config": transformer_config}
+
+
 def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_inference: bool) -> None:
     """Enforce the transformer-quantization allowlist for FSDP inference."""
     transformer_config = init_params.get("config")
@@ -310,11 +349,17 @@ def maybe_load_fsdp_model(
     weight_dir_list = dense_transformer_safetensors(weight_dir_list)
     quant_config = getattr(init_params.get("config"), "quant_config", None)
     packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
-    packed_nvfp4_export = (packed_candidate
-                           if getattr(quant_config, "layer_profile", None) in packed_profiles else None)
-    if packed_nvfp4_export is not None and lora_path is not None:
-        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot be combined with lora_path; "
-                         "merge the adapter before exporting, or load without the packed file.")
+    packed_layer_profile = getattr(quant_config, "layer_profile", None)
+    packed_nvfp4_export = packed_candidate if packed_layer_profile in packed_profiles else None
+    if packed_candidate is not None and packed_nvfp4_export is None:
+        # A packed export leaves its quantized linears out of the dense shards, so
+        # loading it with any other profile misses those weights.
+        raise ValueError(
+            f"{packed_candidate} is a packed MiniMax-H3 NVFP4 export, which keeps the quantized linears out of "
+            f"the dense shards, but the quantization profile is {packed_layer_profile!r}. Load it with an NVFP4 "
+            f"config (layer_profile one of {', '.join(packed_profiles)}), or point the run at a dense export.")
+    if packed_nvfp4_export is not None:
+        init_params = _adopt_nvfp4_export_skip_blocks(init_params, quant_config, packed_nvfp4_export)
 
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
@@ -405,11 +450,13 @@ def maybe_load_fsdp_model(
     # while each rank materializes its shard, or the full checkpoint and shards
     # peak together on the accelerator. Training keeps GPU-direct loading.
     # A packed NVFP4 export is always staged on CPU.
-    load_weights_to_cpu = _should_stage_transformer_weights_on_cpu(
+    # Layerwise offload passes device=cpu but disables dit_cpu_offload, so the
+    # device itself must select CPU staging or the iterator would fill the GPU.
+    load_weights_to_cpu = (device.type == "cpu" or _should_stage_transformer_weights_on_cpu(
         cpu_offload=cpu_offload,
         fsdp_inference=fsdp_inference,
         has_unified_memory=has_unified_memory,
-    ) or packed_nvfp4_export is not None
+    ) or packed_nvfp4_export is not None)
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
     logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
@@ -424,6 +471,10 @@ def maybe_load_fsdp_model(
             lora_param_names_mapping=lora_param_names_mapping_fn,
             strength=lora_strength,
         )
+    if dense_lora_patch is not None and packed_nvfp4_export is not None:
+        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot take an adapter with dense "
+                         "(.diff/.set_weight) payloads: they would have to be merged into the packed weights. "
+                         "Merge the adapter before exporting, or load without the packed file.")
     if dense_lora_patch is not None:
         # H3's compression gate is created only by the VSA attention backend. Loading a
         # VSA student under dense attention would otherwise warn about 50 unmatched
@@ -537,7 +588,7 @@ def maybe_load_fsdp_model(
         else:
             attention_count = _enable_regional_attention_compile(model)
             logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
-            _compile_model_regions(model, torch_compile_kwargs or {})
+            _compile_model_regions(model, torch_compile_kwargs or {}, isolate_regions=lora_path is not None)
     return model
 
 
@@ -639,7 +690,7 @@ def _regional_compile_unsupported_reason(
 
     The legacy VSA backend remains outside the fullgraph support envelope.
     MiniMax H3's VSA backend is supported only through the inference-only
-    sm_100a tile-64 route; its regional hook resolves loaded compression
+    ptx_blackwell tile-64 route; its regional hook resolves loaded compression
     gates and probes the kernel before block capture.
     """
     try:
@@ -698,9 +749,9 @@ def _regional_compile_unsupported_reason(
         if envs.FASTVIDEO_H3_VSA_PROBE.get():
             return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
                     "regional fullgraph compile cannot capture; this model stays eager")
-        if not envs.FASTVIDEO_VSA_SM100A.get():
-            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe sm_100a route "
-                    "(FASTVIDEO_VSA_SM100A=1); Triton/CuTe VSA stays eager")
+        if not envs.FASTVIDEO_VSA_PTX_BLACKWELL.get():
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe ptx_blackwell route "
+                    "(FASTVIDEO_VSA_PTX_BLACKWELL=1); Triton/CuTe VSA stays eager")
         if vsa_tile_size != 64:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
                     f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
@@ -724,7 +775,7 @@ def _enable_regional_attention_compile(model: nn.Module) -> int:
     return enabled_count
 
 
-def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
+def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any], *, isolate_regions: bool = False) -> int:
     """Compile repeated mathematical regions after FSDP setup.
 
     Only the selected module ``forward`` is replaced. This keeps activation
@@ -760,7 +811,16 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> 
             # mathematical regions. Keep their saved-tensor/recompute logic
             # eager and compile only the repeated block they own.
             compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
-            compile_target.forward = torch.compile(compile_target.forward, **kwargs)
+            forward = compile_target.forward
+            if isolate_regions:
+                # Variable LoRA ranks otherwise exhaust the cache shared by all instances of this code object.
+                function = forward.__func__
+                isolated = FunctionType(function.__code__.replace(co_name=f"{function.__name__}_{name}"),
+                                        function.__globals__, function.__name__, function.__defaults__,
+                                        function.__closure__)
+                isolated.__kwdefaults__ = function.__kwdefaults__
+                forward = MethodType(isolated, forward.__self__)
+            compile_target.forward = torch.compile(forward, **kwargs)
             compiled_count += 1
 
     if compiled_count == 0:
@@ -941,8 +1001,8 @@ def load_model_from_full_model_state_dict(
     named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
     named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
-                                                                           param_names_mapping)  # type: ignore
+    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
+        full_sd_iterator, param_names_mapping, skip_names=skip_param_names)  # type: ignore
     checkpoint_key_aliases = getattr(model, "_fastvideo_checkpoint_key_aliases", {})
     if checkpoint_key_aliases:
         for original_name, transformed_name in checkpoint_key_aliases.items():

@@ -552,10 +552,10 @@
       "serving": {
         "source": "examples/serving/openai_fasth3_spark.yaml",
         "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
-        "env": "FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3",
+        "env": "FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3",
         "audio": true
       },
-      "command": "FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml",
+      "command": "FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml",
       "gpu_types": ["NVIDIA"],
       "hardware": {
         "platform": "cuda",
@@ -567,7 +567,7 @@
       "expected_artifact": "MP4 under outputs/fasth3_spark/",
       "modes": ["T2VA", "1-Spark"],
       "limitations": [
-        "Install from the DGX Spark guide, not the generic CUDA extra. GB10 has no FA4 / sm_100a VSA kernel; keep FASTVIDEO_FA4=0 and FASTVIDEO_VSA_SM100A=0.",
+        "Install from the DGX Spark guide, not the generic CUDA extra. GB10 has no FA4 / sm_100a VSA kernel; keep FASTVIDEO_FA4=0 and FASTVIDEO_VSA_PTX_BLACKWELL=0.",
         "Legal num_frames values are 17n+5, capped at 345 (15 s). Native 16:9 sizes include 832x480 and 1344x768.",
         "Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Do not pass --no-lazy-module-load on this box.",
         "A 345-frame request on one Spark can OOM. Prefer 124 or 243 frames, TAEH3 decode, or two Sparks over QSFP."
@@ -585,7 +585,7 @@
       "summary": "Run one FastH3 clip across two GB10s with Ray sequence parallel over QSFP RoCE. Sequential load and lazy module load stay on because SP replicates the DiT on each node.",
       "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
       "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
-      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
       "gpu_types": ["NVIDIA"],
       "hardware": {
         "platform": "cuda",
@@ -842,7 +842,7 @@
       "summary": "Eight-step video and synchronized audio with the released NVFP4 transformer, text encoder, and lightweight VAE.",
       "model": "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4",
       "source": "examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
-      "command": "FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
+      "command": "FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
       "gpu_types": [
         "NVIDIA"
       ],
@@ -855,7 +855,8 @@
       "evidence": "Source-backed",
       "serving": {
         "source": "examples/serving/openai_fasth3_trim_spark.yaml",
-        "install": "Install FastVideo following the DGX Spark installation guide."
+        "install": "Install FastVideo following the DGX Spark installation guide.",
+        "audio": true
       }
     }
   ]

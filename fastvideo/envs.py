@@ -346,11 +346,12 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
     category="attention",
     doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
     "floating-point reduction order, so it is an inference-only opt-in.")
-FASTVIDEO_VSA_SM100A = EnvBool(
+FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
-    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
-    "fastvideo-kernel reads the same variable with the same rule.")
+    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel. "
+    "fastvideo-kernel reads the same variable with the same rule.",
+    deprecated_names=("FASTVIDEO_VSA_SM100A", ))
 FASTVIDEO_VSA_TRITON = EnvBool(
     False,
     category="attention",
@@ -586,7 +587,48 @@ FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
 FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
-                               "(sm_120, no-grad, single sequence-parallel rank).")
+                               "(sm_120 or GB10 sm_121, no-grad, eager inference).")
+FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
+    "",
+    choices=("", "fp8", "bf16"),
+    category="attention",
+    doc="Prefix split for the FP4 sparse attention kernel: keep the dense prefix query tiles (text, "
+    "reference and audio rows) off the FP4 kernel and run those rows densely with fp8 or bf16 Q/K and "
+    "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
+    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Use "
+    "64/128-token tiles. Empty keeps each row on the FP4 kernel.")
+FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
+    -1,
+    category="attention",
+    doc="Number of leading denoising steps that use the FP4 prefix split (see "
+    "FASTVIDEO_H3_VSA_FP4_PREFIX). -1 applies it to every step; 0 disables it. Early steps set the "
+    "global structure, so a small value keeps most of the split's quality benefit for a fraction of "
+    "its cost.")
+FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P = EnvBool(
+    False,
+    category="attention",
+    doc="Quantize the FP4 attention probabilities with the two-level scheme the QAD student trained "
+    "with (rowmax-derived s_P1, then per-block s_P2) instead of the kernel's single-level default.")
+FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
+    False,
+    category="attention",
+    doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
+    "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
+    0,
+    category="performance",
+    doc="Rows per chunk when the VSA FP4 gate branch expands the pooled compression output back "
+    "to token rows. 0 keeps the single full-size index_select; a positive value caps the transient "
+    "at chunk_rows*heads*head_dim and is bit-identical.")
+FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
+    "",
+    choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
+    category="attention",
+    doc="Replace tile-128 fine attention, preserving VSA selection and compression, with the Triton "
+    "emulator of the sparse FP4 kernel: emulator-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; "
+    "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
+    "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
+    "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -617,9 +659,21 @@ FASTVIDEO_H3_FP8_GRANULARITY = EnvChoice("tensor",
                                          choices=("tensor", "channel"),
                                          category="performance",
                                          doc="FP8 scaling granularity for FASTVIDEO_H3_FP8_ATTENTION.")
+FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
+                                     category="performance",
+                                     doc="Apply inference LoRA adapters as a bf16 side branch next to every "
+                                     "target linear instead of merging them, so the adapter strength can change "
+                                     "at runtime. Packed NVFP4 or FP8 linears without their original dense "
+                                     "weight always use the side branch.")
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
                                     doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
+    "off",
+    choices=("off", "table", "auto"),
+    category="performance",
+    doc="Run large cuDNN NVFP4 GEMMs over row chunks where its plan heuristic is slow: off, table (fixed "
+    "per-shape chunk counts) or auto (time 1/2/4 chunks once per shape; not deterministic across runs).")
 FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
                                    category="performance",
                                    doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "
@@ -668,6 +722,23 @@ FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
                                          doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
                                          "the sequence-parallel ranks in the parallel decode and keyframe encode; "
                                          "bitwise equal to the serial path.")
+FASTVIDEO_H3_VAE_NVFP4_FUSED = EnvBool(True,
+                                       category="performance",
+                                       doc="Run NVFP4 MiniMax-H3 VAE decoder blocks through the bit-exact fused "
+                                       "Triton kernels at inference.")
+FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH = EnvBool(True,
+                                            category="performance",
+                                            doc="Replay small fused NVFP4 MiniMax-H3 VAE decoder calls (at most "
+                                            "four 1797-token tiles) as per-shape CUDA graphs.")
+FASTVIDEO_H3_VAE_NVFP4_DECODER = EnvPath(None,
+                                         category="performance",
+                                         doc="Exported NVFP4 MiniMax-H3 video decoder (.pt, or .safetensors with "
+                                         "bf16 masters or pre-packed NVFP4 weights) that replaces the VAE decoder "
+                                         "at load; skips the INT8 ConvRot overlay.")
+FASTVIDEO_H3_VAE_INT8_OVERLAY = EnvBool(True,
+                                        category="performance",
+                                        doc="Apply the INT8 ConvRot decoder overlay when the MiniMax-H3 VAE folder "
+                                        "ships one; 0 decodes with the dense weights.")
 FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
                                            category="performance",
                                            doc="Share the INT8 activation rotation and quantization across the "

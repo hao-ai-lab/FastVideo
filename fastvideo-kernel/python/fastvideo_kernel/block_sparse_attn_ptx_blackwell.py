@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Data-center Blackwell CUDA block-sparse VSA forward.
 
-The historical ``sm100a`` module and symbol names are retained for compatibility, but the
-extension carries native sm_100a and sm_103a images and supports both device generations.
+``ptx_blackwell`` is the kernel's name, not an architecture: the extension carries native sm_100a and
+sm_103a images and supports both device generations.
 
 A third backend behind the same VSA op as the Triton and CuTe-DSL paths. This module is the
 forward: it returns ``(out, lse)`` with ``lse`` in exactly the form
 ``triton_block_sparse_attn_forward`` writes -- ``max(qk * qk_scale) + log2(l)``, ``[B, H, S]``
-fp32 -- so both ``block_sparse_attn_backward_triton`` and the sm_100a CUDA backward
-(``block_sparse_attn_bwd_sm100a``, 64- and 128-token blocks, sm_100a / sm_103a) run against it
+fp32 -- so both ``block_sparse_attn_backward_triton`` and the ptx_blackwell backward
+(``block_sparse_attn_bwd_ptx_blackwell``, 64- and 128-token blocks, sm_100a / sm_103a) run against it
 unchanged.
 
 The extension carries TWO instantiations of the kernel, for 64- and 128-token sparse blocks
@@ -27,14 +27,14 @@ try:
     # kernel built and present.
     from fastvideo_kernel._C import fastvideo_kernel_ops as _C
     _FWD_BY_BLOCK = {
-        64: getattr(_C, "block_sparse_sm100a_fwd", None),
-        128: getattr(_C, "block_sparse_sm100a_blk128_fwd", None),
+        64: getattr(_C, "block_sparse_ptx_blackwell_fwd", None),
+        128: getattr(_C, "block_sparse_ptx_blackwell_blk128_fwd", None),
     }
-    _HAS_VSA_SM100A = any(_FWD_BY_BLOCK.values())
+    _HAS_VSA_PTX_BLACKWELL = any(_FWD_BY_BLOCK.values())
 except ImportError:  # pragma: no cover - extension not built
     _C = None
     _FWD_BY_BLOCK = {}
-    _HAS_VSA_SM100A = False
+    _HAS_VSA_PTX_BLACKWELL = False
 
 _SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
 HEAD_DIM = 128
@@ -69,9 +69,9 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
         (= q2k_idx.shape[-1]) must be >= 1, which the host launcher re-checks.
       * variable_block_sizes: per-KV-block valid-token counts in [0, block]; keys at or past
         a block's count are masked. Integer metadata is converted to int32/contiguous by
-        ``block_sparse_attn_sm100a`` itself, so int64 inputs merely cost a cast.
+        ``block_sparse_attn_ptx_blackwell`` itself, so int64 inputs merely cost a cast.
     """
-    if not _HAS_VSA_SM100A or not q.is_cuda:
+    if not _HAS_VSA_PTX_BLACKWELL or not q.is_cuda:
         return False
     if torch.cuda.get_device_capability(q.device) not in _SUPPORTED_COMPUTE_CAPABILITIES:
         return False
@@ -91,11 +91,11 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
 
 
 @torch.library.custom_op(
-    "fastvideo_kernel::block_sparse_attn_sm100a_inference",
+    "fastvideo_kernel::block_sparse_attn_ptx_blackwell_inference",
     mutates_args=(),
     device_types="cuda",
 )
-def _block_sparse_attn_sm100a_inference(
+def _block_sparse_attn_ptx_blackwell_inference(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -103,7 +103,7 @@ def _block_sparse_attn_sm100a_inference(
     q2k_num: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> torch.Tensor:
-    """Opaque no-LSE launch used by the inference-only sm_100a/sm_103a route.
+    """Opaque no-LSE launch used by the inference-only ptx_blackwell route.
 
     The extension is exposed as a raw pybind function rather than a dispatcher
     op. Calling it directly makes Dynamo descend through a Python/C++ boundary
@@ -117,8 +117,8 @@ def _block_sparse_attn_sm100a_inference(
     return res[0]
 
 
-@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a_inference")
-def _block_sparse_attn_sm100a_inference_fake(
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_ptx_blackwell_inference")
+def _block_sparse_attn_ptx_blackwell_inference_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -131,18 +131,18 @@ def _block_sparse_attn_sm100a_inference_fake(
 
 
 @torch.library.custom_op(
-    "fastvideo_kernel::block_sparse_attn_sm100a_from_mask_inference",
+    "fastvideo_kernel::block_sparse_attn_ptx_blackwell_from_mask_inference",
     mutates_args=(),
     device_types="cuda",
 )
-def _block_sparse_attn_sm100a_from_mask_inference(
+def _block_sparse_attn_ptx_blackwell_from_mask_inference(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> torch.Tensor:
-    """Opaque mask compaction plus no-LSE sm_100a/sm_103a launch for inference.
+    """Opaque mask compaction plus no-LSE ptx_blackwell launch for inference.
 
     H3 naturally produces a bool block map. Its Triton ``map_to_index`` call
     must live behind the same opaque boundary as the raw pybind launch;
@@ -152,7 +152,7 @@ def _block_sparse_attn_sm100a_from_mask_inference(
     from fastvideo_kernel.triton_kernels.index import map_to_index
 
     q2k_idx, q2k_num = map_to_index(block_map)
-    return _block_sparse_attn_sm100a_inference(
+    return _block_sparse_attn_ptx_blackwell_inference(
         q,
         k,
         v,
@@ -162,8 +162,8 @@ def _block_sparse_attn_sm100a_from_mask_inference(
     )
 
 
-@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a_from_mask_inference")
-def _block_sparse_attn_sm100a_from_mask_inference_fake(
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_ptx_blackwell_from_mask_inference")
+def _block_sparse_attn_ptx_blackwell_from_mask_inference_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -173,7 +173,7 @@ def _block_sparse_attn_sm100a_from_mask_inference_fake(
     return torch.empty_like(q)
 
 
-def block_sparse_attn_sm100a_from_mask(
+def block_sparse_attn_ptx_blackwell_from_mask(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -181,7 +181,7 @@ def block_sparse_attn_sm100a_from_mask(
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, None]:
     """Inference forward from a bool block map, with compaction kept opaque."""
-    out = _block_sparse_attn_sm100a_from_mask_inference(
+    out = _block_sparse_attn_ptx_blackwell_from_mask_inference(
         q.contiguous(),
         k.contiguous(),
         v.contiguous(),
@@ -191,7 +191,7 @@ def block_sparse_attn_sm100a_from_mask(
     return out, None
 
 
-def block_sparse_attn_sm100a(
+def block_sparse_attn_ptx_blackwell(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -212,7 +212,7 @@ def block_sparse_attn_sm100a(
         # This is the production inference path. The custom op keeps the raw
         # pybind launch opaque to Dynamo while its fake kernel carries output
         # metadata through full-graph capture.
-        return _block_sparse_attn_sm100a_inference(q, k, v, idx, num, vbs), None
+        return _block_sparse_attn_ptx_blackwell_inference(q, k, v, idx, num, vbs), None
 
     # Preserve the established LSE-producing path for correctness tests and
     # any future forward/backward pairing; only inference needs the opaque op.
