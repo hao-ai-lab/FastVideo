@@ -86,6 +86,7 @@ CommonJS exports:
 | `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]`, including GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
 | `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
+| `WORKLOADS` | Frozen `t2v`/`i2v`/`t2i`/`t2a`/`v2a` input/output/endpoint/media metadata used by the builder and sample client |
 | `estimateMemory({config, workload, model, hardware, memoryBudgetGiB, partitionId, hostMemoryGb, headroom})` | Analytical one-device estimate with separate device and host budgets |
 | `assessCapacity({model, example, hardware, config, request, env, revisions, ...})` | `{status, basis, analytical, evidence, compatibility, notes}` combining analysis and applicable evidence |
 | `matchEvidence({model, example, config, request, env, hardware, revisions})` | `{applicable, unverified, rejected}` measured runs |
@@ -99,6 +100,8 @@ CommonJS exports:
 YAML rather than a full editable catalog. Its metadata supplies `model.id`,
 `workload`, and `runtime.interface`/`runtime.server_defaults`. It builds client
 instructions only; it does not validate the configuration or run a request.
+The shared workload map selects the canonical REST endpoint and output
+extension; it does not establish that a model supports that workload.
 
 For WebSocket deployments, `clientRequest` is `null` and `websocketUrl` is
 present. REST deployments return a request object and omit `websocketUrl`.
