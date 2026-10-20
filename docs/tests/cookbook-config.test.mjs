@@ -99,6 +99,7 @@ test("browser bundle exposes reusable methods and its error class with no DOM or
   );
   assert.deepEqual(Object.keys(context.FastVideoConfigCookbook).sort(), [
     "CookbookValidationError",
+    "assessCapacity",
     "estimateMemory",
     "getOptions",
     "loadCapacityHardware",
@@ -106,7 +107,10 @@ test("browser bundle exposes reusable methods and its error class with no DOM or
     "loadCapacityModel",
     "loadDeployment",
     "loadIndex",
+    "matchEvidence",
+    "recommendCapacity",
     "resolveConfig",
+    "resolveExecution",
     "sampleRequest",
   ]);
   const api = context.FastVideoConfigCookbook;

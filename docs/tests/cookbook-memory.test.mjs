@@ -1,65 +1,125 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCatalogs } from "../js/build-cookbook-config.mjs";
-import { resolveConfig } from "../js/cookbook-config.mjs";
+import { buildCapacityCatalog } from "../js/build-cookbook-capacity.mjs";
 import {
   BYTES_PER_WEIGHT,
   DEFAULT_HEADROOM,
-  WAN_RULE,
+  assessCapacity,
   estimateMemory,
+  matchEvidence,
+  recommendCapacity,
+  resolveExecution,
   resolveTopology,
 } from "../js/cookbook-memory.mjs";
 
 const GIB = 1024 ** 3;
-const NO_OFFLOAD = { dit_layerwise: false, text_encoder: false, vae: false };
+const NO_OFFLOAD = { dit: false, dit_layerwise: false, text_encoder: false, vae: false };
+const FASTWAN_OFFLOAD = { dit: false, dit_layerwise: true, text_encoder: true, vae: false };
 
+/** Wan2.1 T2V 1.3B: correct ordinary-Wan transformer and UMT5-XXL counts, not FastWan's VSA model. */
 const DIT = 1_418_996_800;
 const DIT_BLOCKS = 1_393_221_120;
 const TEXT = 5_680_910_336;
 const TEXT_BLOCKS = 4_630_757_376;
 const VAE = 73_296_659;
 
-/** Wan2.1 T2V 1.3B; block totals follow WanTransformerBlock and the UMT5-XXL encoder layer shapes. */
-function wanModel() {
-  return {
+function wanModel(change = () => {}) {
+  const model = {
+    id: "wan21",
+    name: "Wan2.1 T2V 1.3B",
+    model_id: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     memory_rules: "wan",
-    geometry: {
-      temporal_compression: 4,
-      spatial_compression: 8,
-      patch_size: [1, 2, 2],
-      hidden_size: 1536,
-      ffn_size: 8960,
-      vae_decoder_channels: 96,
-    },
-    components: [
-      {
-        role: "text_encoder",
+    components: {
+      transformer: {
+        ref: "wan2.1-t2v-1.3b-dit",
+        kind: "transformer",
+        parameter_count: DIT,
+        block_count: 30,
+        block_parameter_count: DIT_BLOCKS,
+        geometry: { hidden_size: 1536, ffn_size: 8960, patch_size: [1, 2, 2], gated_ffn: false },
+      },
+      text_encoder: {
+        ref: "umt5-xxl-encoder",
+        kind: "encoder",
         parameter_count: TEXT,
-        dtype: "fp32",
         block_count: 24,
         block_parameter_count: TEXT_BLOCKS,
-        streams_when_offloaded: true,
       },
-      { role: "transformer", parameter_count: DIT, dtype: "bf16", block_count: 30, block_parameter_count: DIT_BLOCKS },
-      { role: "vae", parameter_count: VAE, dtype: "fp32", activation_dtype: "bf16" },
-    ],
+      vae: {
+        ref: "wan2.1-vae-decoder",
+        kind: "vae",
+        parameter_count: VAE,
+        geometry: {
+          temporal_compression: 4,
+          spatial_compression: 8,
+          latent_channels: 16,
+          output_channels: 3,
+          vae_decoder_channels: 96,
+        },
+        decode_feature_multiplier: 48,
+      },
+    },
+    examples: [],
+    reference_runs: [],
+  };
+  change(model);
+  return model;
+}
+
+function hardware({
+  id = "test-80gb",
+  memory_gb = 80,
+  memory_type = "dedicated",
+  backend = "cuda",
+  dtypes = ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
+  host_memory_gb,
+  partitions,
+} = {}) {
+  return {
+    id,
+    name: `Test GPU ${memory_gb} GB`,
+    memory_type,
+    memory_gb,
+    backend,
+    supported_dtypes: dtypes,
+    ...(host_memory_gb === undefined ? {} : { host_memory_gb }),
+    ...(partitions === undefined ? {} : { partitions }),
   };
 }
 
-function gpu(value, { unit = "GiB", dtypes = ["fp32", "fp16", "bf16"] } = {}) {
-  return { name: "Test GPU", type: "discrete_gpu", memory_per_device: { value, unit }, supported_dtypes: dtypes };
+function config({ offload = FASTWAN_OFFLOAD, engine = {}, pipeline = {}, sampling, server = {} } = {}) {
+  return {
+    generator: {
+      model_path: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+      engine: { num_gpus: 1, offload, ...engine },
+      pipeline,
+    },
+    server: { host: "0.0.0.0", port: 8000, ...server },
+    default_request: { sampling: sampling ?? { num_frames: 81, height: 480, width: 832, seed: 1024, fps: 16 } },
+  };
 }
 
-function config({ offload = NO_OFFLOAD, engine = {}, pipeline = {}, sampling } = {}) {
+function example(base = config(), env = {}) {
   return {
-    generator: { engine: { num_gpus: 1, offload, ...engine }, pipeline },
-    default_request: { sampling: sampling ?? { num_frames: 81, height: 480, width: 832 } },
+    id: "cuda-rest",
+    deployment_id: "wan21/cuda-rest",
+    workload: "t2v",
+    runtime: "fastvideo-cuda-rest",
+    config: "examples/serving/openai_wan21.yaml",
+    env,
+    base_config: base,
   };
 }
 
 function estimate(options = {}) {
-  return estimateMemory({ config: config(), workload: "t2v", model: wanModel(), hardware: gpu(80), ...options });
+  return estimateMemory({
+    config: config(),
+    workload: "t2v",
+    model: wanModel(),
+    hardware: hardware({ memory_gb: 80 }),
+    ...options,
+  });
 }
 
 const gib = (parameters, dtype) => (parameters * BYTES_PER_WEIGHT[dtype]) / GIB;
@@ -78,177 +138,475 @@ test("each storage format has its byte size per weight", () => {
   assert.deepEqual(BYTES_PER_WEIGHT, { fp32: 4, fp16: 2, bf16: 2, fp8: 1, nvfp4: 0.5625 });
 });
 
-test("automatic parallel degrees resolve like FastVideoArgs", () => {
+test("automatic topology follows the native -1 sentinels", () => {
   assert.deepEqual(resolveTopology(), { gpus: 1, tpSize: 1, spSize: 1 });
-  assert.deepEqual(resolveTopology({ num_gpus: 4, parallelism: { tp_size: -1, sp_size: -1 } }), {
+  assert.deepEqual(resolveTopology({ num_gpus: 4 }), { gpus: 4, tpSize: 1, spSize: 4 });
+  assert.deepEqual(resolveTopology({ num_gpus: 4, parallelism: { tp_size: 2, sp_size: -1 } }), {
     gpus: 4,
-    tpSize: 1,
+    tpSize: 2,
     spSize: 4,
   });
-  assert.equal(resolveTopology({ num_gpus: 1, parallelism: { tp_size: 2, sp_size: 1 } }).gpus, 2);
 });
 
-test("component weights match the Wan 1.3B sizes in the VRAM design proposal", () => {
-  assert.equal(gib(DIT, "bf16").toFixed(2), "2.64");
-  assert.equal(gib(TEXT, "bf16").toFixed(2), "10.58");
-  assert.equal(gib(VAE, "fp32").toFixed(2), "0.27");
-});
-
-test("without offload every component stays resident in every phase", () => {
-  const total = gib(TEXT, "fp32") + gib(DIT, "bf16") + gib(VAE, "fp32");
-  assertWeights(estimate(), { encoding: total, denoising: total, decoding: total });
-});
-
-test("an offloaded component occupies the GPU only during its own phase", () => {
-  const model = wanModel();
-  delete model.components[0].streams_when_offloaded;
-  const result = estimate({
-    model,
-    config: config({ offload: { dit_layerwise: false, text_encoder: true, vae: true } }),
+test("native Wan precision defaults resolve without metadata dtypes", () => {
+  const execution = resolveExecution({ model: wanModel(), config: config({ offload: {} }) });
+  assert.deepEqual(execution.precision, {
+    transformer: "bf16",
+    text_encoder: ["fp32"],
+    image_encoder: ["fp32"],
+    vae: "fp32",
+    vae_decode: "bf16",
   });
-  assertWeights(result, {
-    encoding: gib(TEXT, "fp32") + gib(DIT, "bf16"),
-    denoising: gib(DIT, "bf16"),
-    decoding: gib(DIT, "bf16") + gib(VAE, "fp32"),
+  assert.equal(execution.offload.dit_layerwise, true);
+  assert.equal(execution.vae_tiling, false);
+});
+
+test("explicit serving precision and offload settings override family defaults", () => {
+  const execution = resolveExecution({
+    model: wanModel(),
+    config: config({
+      offload: { dit_layerwise: false, text_encoder: false, vae: false },
+      pipeline: {
+        experimental: {
+          dit_precision: "fp16",
+          text_encoder_precisions: ["bf16"],
+          vae_precision: "bf16",
+          vae_decode_precision: "fp32",
+        },
+      },
+    }),
   });
+  assert.equal(execution.precision.transformer, "fp16");
+  assert.deepEqual(execution.precision.text_encoder, ["bf16"]);
+  assert.equal(execution.precision.vae, "bf16");
+  assert.equal(execution.precision.vae_decode, "fp32");
+  assert.equal(execution.offload.dit_layerwise, false);
 });
 
-test("streaming offload keeps the weights outside the blocks plus two blocks", () => {
-  const result = estimate({ config: config({ offload: { dit_layerwise: true, text_encoder: true, vae: true } }) });
-  const ditOutsideBlocks = gib(DIT - DIT_BLOCKS, "bf16");
-  assertWeights(result, {
-    encoding: streamed(TEXT, TEXT_BLOCKS, 24, "fp32") + ditOutsideBlocks,
-    denoising: streamed(DIT, DIT_BLOCKS, 30, "bf16"),
-    decoding: ditOutsideBlocks + gib(VAE, "fp32"),
-  });
-});
-
-test("unset offload switches default on, so layerwise DiT offload replaces whole-model DiT offload", () => {
-  const result = estimate({ config: config({ offload: { dit: false, vae: false } }) });
-  close(result.phases.denoising.weightsGiB, streamed(DIT, DIT_BLOCKS, 30, "bf16") + gib(VAE, "fp32"));
-});
-
-test("whole-model DiT offload without layerwise streaming keeps the transformer resident", () => {
-  const result = estimate({ config: config({ offload: { ...NO_OFFLOAD, dit: true, text_encoder: true, vae: true } }) });
-  close(result.phases.decoding.weightsGiB, gib(DIT, "bf16") + gib(VAE, "fp32"));
-});
-
-test("lazy loading changes nothing for Wan because its pipeline defers no components", () => {
-  const lazy = estimate({ config: config({ offload: { ...NO_OFFLOAD, lazy_module_load: true } }) });
-  assert.deepEqual(lazy.phases, estimate().phases);
-});
-
-test("Wan working memory scales with tokens, hidden size, FFN size and decoded pixels", () => {
+test("startup, encoding, denoising and decoding keep only resident weights", () => {
   const result = estimate();
-  const tokens = 21 * 30 * 52;
-  const hidden = tokens * 1536 * 2;
-  const ffn = tokens * 8960 * 2;
-  const pixels = 480 * 832;
-  assert.equal((hidden / GIB).toFixed(3), "0.094");
-  close(result.phases.encoding.workingGiB, WAN_RULE.encodingWorkspaceGiB);
-  close(
-    result.phases.denoising.workingGiB,
-    Math.max(WAN_RULE.attentionHiddenTensors * hidden, WAN_RULE.ffnHiddenTensors * hidden + WAN_RULE.ffnTensors * ffn) /
-      GIB,
-  );
-  close(
-    result.phases.decoding.workingGiB,
-    (WAN_RULE.decodeFrameFeatures * 96 * pixels * 2 + 81 * 3 * pixels * (2 * 2 + 4)) / GIB,
-  );
-  const longer = estimate({ config: config({ sampling: { num_frames: 161, height: 480, width: 832 } }) });
-  assert.ok(longer.phases.denoising.workingGiB > result.phases.denoising.workingGiB);
-});
-
-test("the peak phase plus headroom decides fit against device memory", () => {
-  const result = estimate({ config: config({ offload: { dit_layerwise: true, text_encoder: true, vae: true } }) });
+  const ditOutside = gib(DIT - DIT_BLOCKS, "bf16");
   assert.equal(result.status, "fits");
   assert.equal(result.basis, "analytical");
+  assertWeights(result, {
+    startup: gib(DIT, "bf16") + gib(VAE, "fp32"),
+    encoding: gib(TEXT, "fp32") + ditOutside + gib(VAE, "fp32"),
+    denoising: streamed(DIT, DIT_BLOCKS, 30, "bf16") + gib(VAE, "fp32"),
+    decoding: ditOutside + gib(VAE, "fp32"),
+  });
   assert.equal(result.peakPhase, "encoding");
-  close(result.peakGiB, result.phases.encoding.totalGiB);
   close(result.requiredGiB, result.peakGiB * (1 + DEFAULT_HEADROOM.fraction) + DEFAULT_HEADROOM.reserveGiB);
-  const offload = { dit_layerwise: true, text_encoder: true, vae: true };
-  assert.equal(estimate({ config: config({ offload }), hardware: gpu(result.requiredGiB) }).status, "fits");
-  assert.equal(estimate({ config: config({ offload }), hardware: gpu(result.requiredGiB - 0.01) }).status, "exceeds");
+});
+
+test("a 24 GB device does not fit the fp32 UMT5 encoding phase", () => {
+  const result = estimate({ hardware: hardware({ memory_gb: 24 }) });
+  assert.equal(result.status, "exceeds");
+  assert.equal(result.peakPhase, "encoding");
+  close(result.capacityGiB, 24e9 / GIB);
+});
+
+test("whole-model DiT offload frees the transformer outside denoising", () => {
+  const result = estimate({
+    config: config({ offload: { dit: true, dit_layerwise: false, text_encoder: true, vae: false } }),
+  });
+  assertWeights(result, {
+    encoding: gib(TEXT, "fp32") + gib(VAE, "fp32"),
+    denoising: gib(DIT, "bf16") + gib(VAE, "fp32"),
+    decoding: gib(VAE, "fp32"),
+  });
+});
+
+test("disabling every offload keeps complete components resident and counts load-time startup", () => {
+  const result = estimate({ config: config({ offload: NO_OFFLOAD }) });
+  const complete = gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32");
+  assertWeights(result, { startup: complete, encoding: complete, denoising: complete, decoding: complete });
+  assert.equal(result.peakPhase, "decoding");
+});
+
+test("explicit precisions change storage and activation bytes", () => {
+  const result = estimate({
+    config: config({
+      pipeline: {
+        experimental: {
+          dit_precision: "fp16",
+          text_encoder_precisions: ["bf16"],
+          vae_precision: "bf16",
+          vae_decode_precision: "fp32",
+        },
+      },
+    }),
+  });
+  assertWeights(result, {
+    encoding: gib(TEXT, "bf16") + gib(DIT - DIT_BLOCKS, "fp16") + gib(VAE, "bf16"),
+    denoising: streamed(DIT, DIT_BLOCKS, 30, "fp16") + gib(VAE, "bf16"),
+    decoding: gib(DIT - DIT_BLOCKS, "fp16") + gib(VAE, "bf16"),
+  });
+  const pixels = 480 * 832;
   close(
-    estimate({ config: config({ offload }), headroom: { fraction: 0, reserveGiB: 0 } }).requiredGiB,
-    result.peakGiB,
+    result.phases.decoding.workingGiB,
+    (48 * 96 * pixels * BYTES_PER_WEIGHT.fp32 + 81 * 3 * pixels * (2 * BYTES_PER_WEIGHT.fp32 + 4)) / GIB,
   );
 });
 
-test("device memory honors decimal and binary units", () => {
-  close(estimate({ hardware: gpu(180, { unit: "GB" }) }).capacityGiB, 180e9 / GIB);
-  close(estimate({ hardware: gpu(80) }).capacityGiB, 80);
+test("the VAE decode multiplier comes from component metadata", () => {
+  const model = wanModel((item) => (item.components.vae.decode_feature_multiplier = 24));
+  const result = estimate({ model });
+  const pixels = 480 * 832;
+  const output = 81 * 3 * pixels * (2 * BYTES_PER_WEIGHT.bf16 + 4);
+  close(result.phases.decoding.workingGiB, (24 * 96 * pixels * BYTES_PER_WEIGHT.bf16 + output) / GIB);
 });
 
-test("VAE tiling adds a note because the decode estimate assumes untiled decoding", () => {
-  assert.deepEqual(estimate().notes, []);
-  assert.equal(estimate({ config: config({ pipeline: { vae_tiling: true } }) }).notes.length, 1);
+test("VAE tiling is disclosed but never treated as a measured discount", () => {
+  const result = estimate({ config: config({ pipeline: { vae_tiling: true } }) });
+  assert.ok(result.notes.some((note) => /tiling/.test(note)));
+  assert.equal(result.status, "fits");
 });
 
-test("requests outside the modeled coverage are unknown with a reason", () => {
-  const withModel = (change) => {
-    const model = wanModel();
-    change(model);
-    return { model };
-  };
-  const cases = {
-    "multiple GPUs": { config: config({ engine: { num_gpus: 2 } }) },
-    "FSDP inference": { config: config({ engine: { use_fsdp_inference: true } }) },
-    "unified memory": { hardware: { ...gpu(128), type: "unified_memory" } },
-    "unknown memory unit": { hardware: gpu(80, { unit: "TB" }) },
-    "no supported weight types": { hardware: { ...gpu(80), supported_dtypes: undefined } },
-    "image to video": { workload: "i2v" },
-    "missing request size": { config: config({ sampling: {} }) },
-    "several videos per prompt": {
-      config: config({ sampling: { num_frames: 81, height: 480, width: 832, num_videos_per_prompt: 2 } }),
-    },
-    "unknown working-memory rule": withModel((model) => (model.memory_rules = "ltx2")),
-    "missing geometry": withModel((model) => delete model.geometry.ffn_size),
-    "unmodeled component": withModel((model) =>
-      model.components.push({ role: "image_encoder", parameter_count: 1, dtype: "fp16" }),
-    ),
-    "missing VAE": withModel((model) => model.components.pop()),
-    "missing parameter count": withModel((model) => delete model.components[2].parameter_count),
-    "blocks without a block parameter count": withModel((model) => delete model.components[1].block_parameter_count),
-    "unknown precision": withModel((model) => (model.components[1].dtype = "int4")),
-    "text-encoder quantization": { config: config({ engine: { quantization: { text_encoder_quant: "fp8" } } }) },
-  };
-  for (const [name, options] of Object.entries(cases)) {
+test("multi-GPU, FSDP and lazy loading are unknown rather than pooled", () => {
+  const cases = [
+    ["multiple GPUs", { config: config({ engine: { num_gpus: 2 } }) }],
+    ["tensor parallel", { config: config({ engine: { num_gpus: 2, parallelism: { tp_size: 2 } } }) }],
+    ["FSDP", { config: config({ engine: { use_fsdp_inference: true } }) }],
+    ["lazy loading", { config: config({ engine: { offload: { lazy_module_load: true } } }) }],
+  ];
+  for (const [name, options] of cases) {
     const result = estimate(options);
     assert.equal(result.status, "unknown", name);
     assert.ok(result.reason.length > 0, name);
   }
 });
 
-test("NVFP4 weights need device support and a quantized parameter count", () => {
-  const quantized = 1_300_000_000;
-  const nvfp4 = config({
-    offload: { dit_layerwise: true, text_encoder: true, vae: true },
-    engine: { quantization: { transformer_quant: "NVFP4" } },
-  });
-  const blackwell = gpu(180, { unit: "GB", dtypes: ["fp32", "fp16", "bf16", "fp8", "nvfp4"] });
-
-  const unsupported = estimate({ config: nvfp4 });
-  assert.equal(unsupported.status, "unsupported");
-  assert.match(unsupported.reason, /nvfp4/);
-  assert.equal(estimate({ config: nvfp4, hardware: blackwell }).status, "unknown");
-
-  const model = wanModel();
-  model.components[1].quantized_parameter_count = quantized;
-  const result = estimate({ config: nvfp4, hardware: blackwell, model });
-  const packed = (quantized * 0.5625) / GIB;
-  const outsideBlocks = gib(DIT - DIT_BLOCKS, "bf16");
-  const denseBlocks = gib(DIT_BLOCKS - quantized, "bf16");
-  close(result.phases.denoising.weightsGiB, packed + outsideBlocks + (denseBlocks * 2) / 30);
-  close(result.phases.decoding.weightsGiB, packed + outsideBlocks + gib(VAE, "fp32"));
+test("VSA, compilation and quantization stop the analytical rule", () => {
+  const cases = [
+    ["VSA", { env: { FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN" } }],
+    ["VSA experiment", { config: config({ pipeline: { experimental: { VSA_sparsity: 0.8 } } }) }],
+    ["compile", { config: config({ engine: { compile: { enabled: true } } }) }],
+    ["transformer quantization", { config: config({ engine: { quantization: { transformer_quant: "NVFP4" } } }) }],
+    [
+      "retained weights",
+      { config: config({ engine: { quantization: { transformer_retain_original_weights: true } } }) },
+    ],
+    ["text quantization", { config: config({ engine: { quantization: { text_encoder_quant: "fp8" } } }) }],
+    ["unknown backend", { env: { FASTVIDEO_ATTENTION_BACKEND: "BSA_ATTN" } }],
+  ];
+  for (const [name, options] of cases) {
+    const result = estimate(options);
+    assert.equal(result.status, "unknown", name);
+    assert.ok(result.reason.length > 0, name);
+  }
 });
 
-test("the FastWan cookbook baseline produces a single-GPU estimate without changing its configuration", () => {
-  const catalog = buildCatalogs().find((item) => item.id === "fastwan21/cuda-rest");
-  const { config: resolved } = resolveConfig(catalog);
-  const before = JSON.stringify(resolved);
-  const result = estimateMemory({ config: resolved, workload: catalog.workload, model: wanModel(), hardware: gpu(24) });
-  assert.equal(JSON.stringify(resolved), before);
+test("unsupported weight formats are distinct from unknown coverage", () => {
+  const result = estimate({ hardware: hardware({ dtypes: ["fp16", "bf16"] }) });
+  assert.equal(result.status, "unsupported");
+  assert.match(result.reason, /fp32/);
+});
+
+test("missing geometry, counts, request size and modeled components stay unknown", () => {
+  const cases = [
+    ["unknown rule", wanModel((model) => (model.memory_rules = "ltx2"))],
+    ["missing geometry", wanModel((model) => delete model.components.transformer.geometry.ffn_size)],
+    ["missing count", wanModel((model) => delete model.components.vae.parameter_count)],
+    ["missing VAE", wanModel((model) => delete model.components.vae)],
+    ["unmodeled role", wanModel((model) => (model.components.audio_encoder = { kind: "encoder", parameter_count: 1 }))],
+    ["wrong kind", wanModel((model) => (model.components.vae.kind = "encoder"))],
+  ];
+  for (const [name, model] of cases) {
+    assert.equal(estimate({ model }).status, "unknown", name);
+  }
+  assert.equal(estimate({ config: config({ sampling: {} }) }).status, "unknown");
+  assert.equal(
+    estimate({
+      config: config({ sampling: { num_frames: 81, height: 480, width: 832, num_videos_per_prompt: 2 } }),
+    }).status,
+    "unknown",
+  );
+  assert.equal(
+    estimate({ config: config({ sampling: { num_frames: 81, height: 480, width: 832, batch_cfg: true } }) }).status,
+    "unknown",
+  );
+  assert.equal(estimate({ workload: "i2v" }).status, "unknown");
+});
+
+test("the FastWan catalog baseline is unknown because VSA and compilation are not modeled", () => {
+  const model = buildCapacityCatalog().models.find((item) => item.id === "fastwan21");
+  const result = assessCapacity({ model, example: model.examples[0], hardware: hardware({ memory_gb: 32 }) });
+  assert.equal(result.status, "unknown");
+  assert.match(result.reason, /VSA/);
+  assert.equal(result.compatibility, "unverified");
+});
+
+function referenceRun(base, { peak = 30, scope = "device" } = {}) {
+  return {
+    id: "run-1",
+    date: "2026-10-18",
+    hardware: "test-80gb",
+    gpu_count: 1,
+    outcome: "completed",
+    execution: "warm_request",
+    evidence_url: "https://example.test/run-1",
+    context: {
+      runtime: "fastvideo-cuda-rest",
+      deployment: "wan21/cuda-rest",
+      revisions: { fastvideo: "a".repeat(40), model: "b".repeat(40) },
+      config: structuredClone(base),
+      request: { sampling: structuredClone(base.default_request.sampling) },
+      env: { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" },
+    },
+    memory: {
+      metric: scope === "device" ? "device_used" : "torch_peak_reserved",
+      scope,
+      unit: "GiB",
+      per_gpu: [{ rank: 0, request_peak: peak, startup_peak: peak - 2 }],
+    },
+  };
+}
+
+const REVISIONS = { fastvideo: "a".repeat(40), model: "b".repeat(40) };
+
+test("unified memory uses an explicit application budget and never nominal capacity", () => {
+  const spark = {
+    id: "spark-128",
+    name: "Fixture unified system",
+    memory: { type: "unified", nominal: { value: 128, unit: "GB" } },
+    backend: "cuda",
+    supported_dtypes: ["fp32", "fp16", "bf16", "fp8"],
+  };
+  const withoutBudget = estimate({ hardware: spark });
+  assert.equal(withoutBudget.status, "fits");
+  assert.equal(withoutBudget.memory.budgetSource, "assumed_fraction");
+  assert.ok(withoutBudget.capacityGiB < 128);
+  assert.match(withoutBudget.notes.join(" "), /75% of unified memory/);
+  const withBudget = estimate({ hardware: spark, memoryBudgetGiB: 64 });
+  assert.equal(withBudget.status, "fits");
+  assert.equal(withBudget.capacityGiB, 64);
+  assert.equal(withBudget.memory.budgetGiB, 64);
+  assert.equal(withBudget.memory.type, "unified");
+  assert.equal(withBudget.hardware.capacity_gib, 64);
+  assert.equal(withBudget.host.status, "shared");
+  assert.match(withBudget.notes.join(" "), /shared with the CPU and OS/);
+  assert.equal(estimate({ hardware: spark, memoryBudgetGiB: 129 }).status, "unknown");
+});
+
+test("a selected partition never inherits the full device capacity", () => {
+  const partitioned = hardware({
+    id: "h100",
+    memory_gb: 80,
+    partitions: [{ id: "1g.10gb", label: "1g.10gb", memory_gb: 10 }],
+  });
+  const partition = estimate({ hardware: partitioned, partitionId: "1g.10gb" });
+  assert.ok(partition.capacityGiB < 10);
+  assert.equal(partition.status, "exceeds");
+  assert.equal(partition.memory.partition, "1g.10gb");
+  assert.equal(partition.hardware.capacity_gib, partition.capacityGiB);
+  assert.match(partition.notes.join(" "), /full 74\.5 GiB is not available/);
+  assert.equal(estimate({ hardware: partitioned, partitionId: "missing" }).status, "unknown");
+});
+
+test("custom hardware uses an explicit memory type and capacity", () => {
+  const custom = {
+    id: "custom",
+    name: "Custom accelerator",
+    custom: true,
+    memory: { type: "dedicated", nominal: { value: 48, unit: "GB" } },
+    backend: "cuda",
+    supported_dtypes: ["fp32", "fp16", "bf16", "fp8"],
+  };
+  const result = estimate({ hardware: custom });
   assert.equal(result.status, "fits");
-  close(result.phases.denoising.weightsGiB, streamed(DIT, DIT_BLOCKS, 30, "bf16") + gib(VAE, "fp32"));
+  assert.equal(result.hardware.custom, true);
+  assert.match(result.notes.join(" "), /not catalog-verified/);
+  assert.equal(estimate({ hardware: { ...custom, backend: "rocm" } }).status, "unknown");
+  assert.equal(estimate({ hardware: { ...custom, memory: undefined, memory_type: undefined } }).status, "unknown");
+  const unspecifiedFormats = { ...custom, supported_dtypes: undefined };
+  const defaultFormats = estimate({ hardware: unspecifiedFormats });
+  assert.equal(defaultFormats.status, "fits");
+  assert.match(defaultFormats.notes.join(" "), /assumes fp32, fp16, or bf16/);
+  assert.equal(
+    estimate({ hardware: { ...unspecifiedFormats, supported_dtypes: ["fp32", "fp16", "bf16", "fp8"] } }).status,
+    "fits",
+  );
+});
+
+test("host memory for offload is separate from device memory", () => {
+  const constrained = estimate({ hardware: hardware({ memory_gb: 80, host_memory_gb: 8 }) });
+  assert.equal(constrained.status, "exceeds");
+  assert.equal(constrained.host.status, "exceeds");
+  close(constrained.host.capacityGiB, (8 * 1e9) / GIB);
+  assert.ok(constrained.host.requiredGiB > constrained.host.capacityGiB);
+  const sufficient = estimate({ hardware: hardware({ memory_gb: 80, host_memory_gb: 64 }) });
+  assert.equal(sufficient.status, "fits");
+  assert.equal(sufficient.host.status, "fits");
+  const unknown = estimate({ hardware: hardware({ memory_gb: 80 }) });
+  assert.equal(unknown.status, "fits");
+  assert.equal(unknown.host.status, "unknown");
+  assert.match(unknown.notes.join(" "), /Host memory for offload is not specified/);
+  const noOffload = estimate({
+    hardware: hardware({ memory_gb: 80, host_memory_gb: 8 }),
+    config: config({ offload: NO_OFFLOAD }),
+  });
+  assert.equal(noOffload.host.status, "not_required");
+});
+
+test("evidence applies only when memory-relevant settings and revisions match", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const model = wanModel((item) => (item.reference_runs = [referenceRun(base)]));
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const match = matchEvidence({
+    model,
+    example: example(base, env),
+    config: base,
+    env,
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(match.applicable.length, 1);
+  assert.equal(match.unverified.length, 0);
+  assert.equal(match.rejected.length, 0);
+
+  const harmless = structuredClone(base);
+  harmless.server.port = 9000;
+  harmless.default_request.sampling.seed = 7;
+  harmless.default_request.sampling.fps = 24;
+  const still = matchEvidence({
+    model,
+    example: example(harmless, env),
+    config: harmless,
+    env,
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(still.applicable.length, 1);
+
+  const changed = structuredClone(base);
+  changed.default_request.sampling.height = 720;
+  const rejected = matchEvidence({
+    model,
+    example: example(changed, env),
+    config: changed,
+    env,
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(rejected.applicable.length, 0);
+  assert.equal(rejected.rejected.length, 1);
+  assert.ok(rejected.rejected[0].differences.some((item) => item.path === "default_request.sampling.height"));
+});
+
+test("evidence rejects another hardware layout or backend and reports unverified revisions", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const model = wanModel((item) => (item.reference_runs = [referenceRun(base)]));
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const otherHardware = matchEvidence({
+    model,
+    example: example(base, env),
+    config: base,
+    env,
+    hardware: hardware({ id: "other", memory_gb: 80 }),
+    revisions: REVISIONS,
+  });
+  assert.equal(otherHardware.rejected.length, 1);
+
+  const otherEnv = matchEvidence({
+    model,
+    example: example(base, { FASTVIDEO_ATTENTION_BACKEND: "TORCH_SDPA" }),
+    config: base,
+    env: { FASTVIDEO_ATTENTION_BACKEND: "TORCH_SDPA" },
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(otherEnv.rejected.length, 1);
+
+  const unverified = matchEvidence({
+    model,
+    example: example(base, env),
+    config: base,
+    env,
+    hardware: hardware({ id: "test-80gb" }),
+  });
+  assert.equal(unverified.applicable.length, 0);
+  assert.equal(unverified.unverified.length, 1);
+});
+
+test("a device-wide measurement can cover execution the analytical rule does not", () => {
+  const base = config({ engine: { compile: { enabled: true } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const model = wanModel();
+  const fitted = assessCapacity({
+    model,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(fitted.status, "unknown");
+
+  model.reference_runs = [referenceRun(base, { peak: 20 })];
+  const measured = assessCapacity({
+    model,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(measured.status, "fits");
+  assert.equal(measured.basis, "measured");
+  assert.equal(measured.compatibility, "completed");
+  close(measured.peakGiB, 20);
+
+  const allocatorOnly = structuredClone(model);
+  allocatorOnly.reference_runs[0].memory = referenceRun(base, { peak: 20, scope: "allocator" }).memory;
+  const allocatorResult = assessCapacity({
+    model: allocatorOnly,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(allocatorResult.status, "unknown");
+  assert.equal(allocatorResult.basis, undefined);
+});
+
+test("recommendations prefer measured fits, keep unknown explicit and never rank speed or quality", () => {
+  const fittedConfig = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const fitted = wanModel((model) => {
+    model.id = "fitted";
+    model.examples = [example(fittedConfig, env)];
+    model.reference_runs = [referenceRun(fittedConfig, { peak: 20 })];
+  });
+  const unknown = wanModel((model) => {
+    model.id = "unknown";
+    model.examples = [example(config({ engine: { compile: { enabled: true } } }), {})];
+  });
+  const recommendations = recommendCapacity({
+    models: [unknown, fitted],
+    hardware: hardware({ id: "test-80gb" }),
+    task: "t2v",
+    revisions: REVISIONS,
+  });
+  assert.equal(recommendations[0].model.id, "fitted");
+  assert.equal(recommendations[0].assessment.basis, "measured");
+  assert.equal(recommendations[1].model.id, "unknown");
+  assert.match(recommendations[1].reasons[0], /unknown/i);
+  assert.doesNotMatch(JSON.stringify(recommendations), /speed|quality|benchmark/i);
+});
+
+test("a lower-memory alternative reports concrete native edits and their new status", () => {
+  const base = config({ offload: { dit_layerwise: true, text_encoder: true, vae: false } });
+  const model = wanModel((item) => {
+    item.examples = [example(base)];
+  });
+  const [candidate] = recommendCapacity({
+    models: [model],
+    hardware: hardware({ id: "test-24gb", memory_gb: 24 }),
+    task: "t2v",
+  });
+  assert.equal(candidate.assessment.status, "exceeds");
+  assert.ok(candidate.lower_memory.length > 0);
+  for (const alternative of candidate.lower_memory) {
+    assert.ok(
+      alternative.changes.every(
+        (change) => change.path.startsWith("default_request.sampling.") || change.path === "generator.engine.offload",
+      ),
+    );
+    assert.equal(typeof alternative.required_gib, "number");
+  }
 });
