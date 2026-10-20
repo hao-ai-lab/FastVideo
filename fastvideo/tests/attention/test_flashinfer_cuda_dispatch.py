@@ -73,3 +73,50 @@ def test_flashinfer_warns_on_dtype_cast(monkeypatch, caplog) -> None:
     with caplog.at_level("WARNING"):
         CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.float32)
     assert any("cast" in record.message for record in caplog.records)
+
+
+def test_real_wan_config_reaches_flashinfer_dispatch(monkeypatch, env_overrides):
+    import fastvideo.envs as envs
+    import fastvideo.platforms as platforms
+    from fastvideo.attention.selector import get_attn_backend
+    from fastvideo.attention.backends.flashinfer import FlashInferBackend
+    from fastvideo.models.wan.config import WanVideoConfig
+    _patch_capability(monkeypatch, supported=True)
+    _install_fake_flashinfer(monkeypatch)
+    monkeypatch.setattr(platforms, "_current_platform", CudaPlatformBase())
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASHINFER"))
+    backend = get_attn_backend(128, torch.bfloat16,
+                               supported_attention_backends=WanVideoConfig()._supported_attention_backends)
+    assert backend is FlashInferBackend
+
+
+def test_wan_capabilities_preserve_defaults_and_other_models():
+    from fastvideo.configs.models.dits.base import DiTArchConfig
+    from fastvideo.models.wan.config import WanVideoArchConfig
+    before = DiTArchConfig()._supported_attention_backends
+    after = WanVideoArchConfig()._supported_attention_backends
+    assert after == (*before, AttentionBackendEnum.FLASHINFER)
+    assert AttentionBackendEnum.FLASHINFER not in before
+
+
+@pytest.mark.parametrize("backend", [AttentionBackendEnum.FLASHINFER,
+                                    AttentionBackendEnum.FLASH_ATTN,
+                                    AttentionBackendEnum.TORCH_SDPA])
+def test_causal_wan_rejects_flashinfer_before_weight_allocation(monkeypatch, backend):
+    from fastvideo.attention.selector import _component_attention_backend_scope
+    from fastvideo.models.wan import causal_transformer
+    from fastvideo.models.wan.config import WanVideoConfig
+    class WeightAllocationReached(Exception):
+        pass
+    def stop_at_first_layer(*args, **kwargs):
+        raise WeightAllocationReached
+    monkeypatch.setattr(causal_transformer, "PatchEmbed", stop_at_first_layer)
+    model_cls = causal_transformer.CausalWanTransformer3DModel
+    assert AttentionBackendEnum.FLASHINFER not in model_cls._supported_attention_backends
+    with _component_attention_backend_scope(backend):
+        if backend == AttentionBackendEnum.FLASHINFER:
+            with pytest.raises(NotImplementedError, match="causal Wan is not supported"):
+                model_cls(WanVideoConfig(), {})
+        else:
+            with pytest.raises(WeightAllocationReached):
+                model_cls(WanVideoConfig(), {})

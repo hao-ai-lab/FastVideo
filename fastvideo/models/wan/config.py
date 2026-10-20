@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.platforms import AttentionBackendEnum
+
+_WAN_ATTENTION_BACKENDS = DiTArchConfig._supported_attention_backends + (AttentionBackendEnum.FLASHINFER, )
 
 
 def is_blocks(n: str, m) -> bool:
@@ -13,6 +16,7 @@ def is_blocks(n: str, m) -> bool:
 
 @dataclass
 class WanVideoArchConfig(DiTArchConfig):
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = _WAN_ATTENTION_BACKENDS
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
     param_names_mapping: dict = field(

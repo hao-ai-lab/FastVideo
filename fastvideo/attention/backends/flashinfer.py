@@ -36,6 +36,9 @@ class FlashInferMetadata(AttentionMetadata):
 
 class FlashInferMetadataBuilder(AttentionMetadataBuilder):
 
+    def __init__(self) -> None:
+        pass
+
     def prepare(self):
         pass
 
@@ -81,6 +84,9 @@ def _mask_for_sample(attn_mask: torch.Tensor, sample: int, query_len: int, key_l
     if mask.dim() == 3:
         mask = mask[sample]
     elif mask.dim() == 4:
+        if mask.shape[1] != 1:
+            raise ValueError("FLASHINFER does not support per-head attention masks; "
+                             f"expected [B, 1, Q, K], got {attn_mask.shape}")
         mask = mask[sample, 0]
     else:
         raise ValueError(f"Unsupported FLASHINFER attention mask shape: {attn_mask.shape}")

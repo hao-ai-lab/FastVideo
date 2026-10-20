@@ -78,7 +78,6 @@ def _sdpa_reference(query: torch.Tensor,
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
 def test_flashinfer_real_cuda_kernel_matches_sdpa(dtype: torch.dtype, head_size: int) -> None:
-    """Launch the real single-GPU FlashInfer kernel for every supported head size."""
     _require_flashinfer_cuda()
     torch.manual_seed(0)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -98,7 +97,6 @@ def test_flashinfer_real_cuda_kernel_matches_sdpa(dtype: torch.dtype, head_size:
 
 @pytest.mark.parametrize("mode", ["causal", "cross_gqa", "causal_padding"])
 def test_flashinfer_real_cuda_kernel_attention_modes(mode: str) -> None:
-    """Exercise native causal, GQA/cross-attention, and combined custom masks."""
     _require_flashinfer_cuda()
     torch.manual_seed(1)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -138,3 +136,117 @@ def test_flashinfer_real_cuda_kernel_attention_modes(mode: str) -> None:
 
     torch.cuda.synchronize(device)
     torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
+
+
+def test_metadata_builder_instantiates_through_backend_api() -> None:
+    from fastvideo.attention.backends.abstract import AttentionMetadataBuilder
+    from fastvideo.attention.backends.flashinfer import FlashInferBackend
+    builder = FlashInferBackend.get_builder_cls()()
+    assert isinstance(builder, AttentionMetadataBuilder)
+    builder.prepare()
+    mask = torch.ones(2, 3, dtype=torch.bool)
+    metadata = builder.build(current_timestep=7, attn_mask=mask)
+    assert metadata.current_timestep == 7
+    assert metadata.attn_mask is mask
+
+
+@pytest.mark.parametrize("shared_head", [False, True])
+@pytest.mark.parametrize("additive", [False, True])
+def test_shared_masks_preserve_each_sample(shared_head, additive) -> None:
+    mask = torch.tensor([[[True, False, True], [False, True, True]],
+                         [[False, True, False], [True, True, False]]])
+    source = torch.where(mask, 0.0, float("-inf")) if additive else mask
+    if shared_head:
+        source = source[:, None]
+    for sample in range(2):
+        torch.testing.assert_close(_mask_for_sample(source, sample, 2, 3), mask[sample])
+
+
+def test_per_head_mask_rejected_before_kernel(monkeypatch) -> None:
+    prefill = types.ModuleType("flashinfer.prefill")
+    def unexpected_kernel(*args, **kwargs):
+        pytest.fail("per-head mask reached FlashInfer kernel")
+    prefill.single_prefill_with_kv_cache = unexpected_kernel
+    monkeypatch.setitem(sys.modules, "flashinfer.prefill", prefill)
+    query = torch.randn(2, 3, 4, 64, dtype=torch.bfloat16)
+    metadata = FlashInferMetadata(current_timestep=0, attn_mask=torch.ones(2, 4, 3, 3, dtype=torch.bool))
+    impl = FlashInferImpl(num_heads=4, head_size=64, causal=False, softmax_scale=0.125)
+    with pytest.raises(ValueError, match="per-head"):
+        impl.forward(query, query, query, metadata)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("shared_head", [False, True])
+def test_shared_mask_cuda_matches_flash_attention(dtype, shared_head) -> None:
+    _require_flashinfer_cuda()
+    flash_attn = pytest.importorskip("flash_attn")
+    torch.manual_seed(19)
+    q = torch.randn(2, 16, 2, 64, device="cuda", dtype=dtype)
+    k, v = torch.randn_like(q), torch.randn_like(q)
+    mask = torch.zeros(2, 16, 16, device="cuda", dtype=torch.bool)
+    mask[0, :, :11] = True
+    mask[1, :, :7] = True
+    metadata = FlashInferMetadata(current_timestep=0, attn_mask=mask[:, None] if shared_head else mask)
+    impl = FlashInferImpl(num_heads=2, head_size=64, causal=False, softmax_scale=0.2)
+    actual = impl.forward(q, k, v, metadata)
+    expected = torch.cat([
+        flash_attn.flash_attn_func(q[i:i + 1], k[i:i + 1, :length], v[i:i + 1, :length], softmax_scale=0.2)
+        for i, length in enumerate([11, 7])
+    ])
+    tolerance = 3e-2 if dtype == torch.bfloat16 else 1e-2
+    torch.testing.assert_close(actual, expected, atol=tolerance, rtol=tolerance)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("i2v", [False, True])
+def test_wan_attention_executes_flashinfer(monkeypatch, request, dtype, i2v) -> None:
+    _require_flashinfer_cuda()
+    request.getfixturevalue("distributed_setup")
+    import flashinfer.prefill as prefill
+    import fastvideo.envs as envs
+    from flash_attn import flash_attn_func
+    from fastvideo.forward_context import set_forward_context
+    from fastvideo.models.wan.config import WanVideoConfig
+    from fastvideo.models.wan.transformer import WanTransformerBlock
+    from fastvideo.platforms import AttentionBackendEnum
+
+    real_kernel = prefill.single_prefill_with_kv_cache
+    calls = []
+    tolerance = 3e-2 if dtype == torch.bfloat16 else 1e-2
+    def checked_kernel(q, k, v, **kwargs):
+        actual = real_kernel(q, k, v, **kwargs)
+        expected = flash_attn_func(q[None], k[None], v[None],
+                                  softmax_scale=kwargs["sm_scale"], causal=kwargs["causal"])[0]
+        torch.testing.assert_close(actual, expected, atol=tolerance, rtol=tolerance)
+        calls.append((q.shape, k.shape))
+        return actual
+    monkeypatch.setattr(prefill, "single_prefill_with_kv_cache", checked_kernel)
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASHINFER"), torch.device("cuda"):
+        block = WanTransformerBlock(
+            dim=256, ffn_dim=512, num_heads=2, cross_attn_norm=True,
+            added_kv_proj_dim=256 if i2v else None,
+            supported_attention_backends=WanVideoConfig()._supported_attention_backends,
+        ).to(dtype=dtype).eval()
+    assert block.attn1.backend == AttentionBackendEnum.FLASHINFER
+    assert block.attn2.attn.backend == AttentionBackendEnum.FLASHINFER
+    for param in block.parameters():
+        torch.nn.init.normal_(param, std=0.02)
+    q = torch.randn(1, 16, 2, 128, device="cuda", dtype=dtype)
+    k, v = torch.randn_like(q), torch.randn_like(q)
+    x = torch.randn(1, 16, 256, device="cuda", dtype=dtype)
+    context = torch.randn(1, 264 if i2v else 7, 256, device="cuda", dtype=dtype)
+    with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
+        self_output, _ = block.attn1(q, k, v)
+        cross_output = block.attn2(x, context, None)
+    assert self_output.shape == q.shape
+    assert cross_output.shape == x.shape
+    assert len(calls) == (3 if i2v else 2)
+
+
+def test_wan_cuda_skip_precedes_distributed_setup(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    class Request:
+        def getfixturevalue(self, name):
+            pytest.fail("distributed setup ran before the CUDA availability check")
+    with pytest.raises(pytest.skip.Exception, match="NVIDIA CUDA GPU"):
+        test_wan_attention_executes_flashinfer(monkeypatch, Request(), torch.float16, False)
