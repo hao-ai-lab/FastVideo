@@ -53,20 +53,67 @@ export async function loadCapacityModel(index, id, options = {}) {
   return data;
 }
 
+function validateHardwareDevice(hardware) {
+  requireValue(
+    object(hardware) &&
+      text(hardware.id) &&
+      text(hardware.name) &&
+      object(hardware.memory) &&
+      ["dedicated", "unified"].includes(hardware.memory.type) &&
+      object(hardware.memory.nominal) &&
+      Number.isFinite(hardware.memory.nominal.value) &&
+      ["GB", "GiB"].includes(hardware.memory.nominal.unit) &&
+      Number.isFinite(hardware.memory_gb) &&
+      hardware.memory_gb > 0 &&
+      Number.isSafeInteger(hardware.gpu_count) &&
+      hardware.gpu_count > 0 &&
+      ["cuda", "rocm", "metal", "sycl", "unknown"].includes(hardware.backend) &&
+      Array.isArray(hardware.aliases) &&
+      hardware.aliases.every(text),
+    `Invalid capacity hardware ${hardware?.id ?? "(missing id)"}`,
+  );
+  if (hardware.usable_memory_gb !== undefined)
+    requireValue(
+      Number.isFinite(hardware.usable_memory_gb) &&
+        hardware.usable_memory_gb > 0 &&
+        hardware.usable_memory_gb <= hardware.memory_gb,
+      `Invalid usable memory for ${hardware.id}`,
+    );
+  if (hardware.host_memory_gb !== undefined)
+    requireValue(
+      Number.isFinite(hardware.host_memory_gb) && hardware.host_memory_gb > 0,
+      `Invalid host memory for ${hardware.id}`,
+    );
+  if (hardware.partitions !== undefined) {
+    requireValue(
+      Array.isArray(hardware.partitions) &&
+        hardware.partitions.length > 0 &&
+        hardware.partitions.every(
+          (partition) =>
+            object(partition) &&
+            text(partition.id) &&
+            text(partition.label) &&
+            Number.isFinite(partition.memory_gb) &&
+            partition.memory_gb > 0 &&
+            partition.memory_gb < hardware.memory_gb,
+        ),
+      `Invalid partitions for ${hardware.id}`,
+    );
+  }
+}
+
 /** Hardware specifications are separate from model-specific successful run evidence. */
 export async function loadCapacityHardware(index, options = {}) {
   validateIndex(index);
   requireValue(text(index.url), "Capacity index requires its source URL");
-  const { data } = await fetchJson(new URL(index.hardware_url, index.url).href, options);
-  requireValue(object(data) && Object.keys(data).length > 0, "Invalid capacity hardware catalog");
-  for (const [id, hardware] of Object.entries(data))
-    requireValue(
-      object(hardware) &&
-        text(hardware.name) &&
-        ["dedicated", "unified"].includes(hardware.memory_type) &&
-        Number.isFinite(hardware.memory_gb) &&
-        hardware.memory_gb > 0,
-      `Invalid capacity hardware ${id}`,
-    );
-  return data;
+  const { data, url } = await fetchJson(new URL(index.hardware_url, index.url).href, options);
+  requireValue(object(data) && data.version === 1 && Array.isArray(data.devices), "Invalid capacity hardware catalog");
+  const ids = new Set();
+  for (const hardware of data.devices) {
+    validateHardwareDevice(hardware);
+    requireValue(!ids.has(hardware.id), `Duplicate capacity hardware ${hardware.id}`);
+    ids.add(hardware.id);
+  }
+  requireValue(data.devices.length > 0, "Invalid capacity hardware catalog");
+  return { version: data.version, devices: data.devices, url };
 }
