@@ -4,7 +4,7 @@ import sourceCatalog from "../../docs/assets/cookbook-recipes.json" with { type:
 export const recipePages = [
   {
     id: "fasth3-8step",
-    family: "FastH3",
+    family: "MiniMax H3",
     title: "FastH3 8-Step V2",
     mark: "H3",
     path: "/cookbook/minimax-h3/fasth3-8step",
@@ -14,12 +14,30 @@ export const recipePages = [
   },
   {
     id: "fasth3-trim",
-    family: "FastH3",
+    family: "MiniMax H3",
     title: "FastH3 Trim",
     mark: "H3",
     path: "/cookbook/minimax-h3/fasth3-trim",
     description: "The smaller FastH3 model for eight-step video generation with synchronized audio.",
     tags: ["Text to video", "Audio", "NVFP4", "8-step"],
+  },
+  {
+    id: "fasth3-preview",
+    family: "MiniMax H3",
+    title: "FastH3 Preview V0.2",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-preview",
+    description: "The few-step FastH3 preview checkpoint on CUDA or native Apple Silicon MLX.",
+    tags: ["Text to video", "Audio", "4-step"],
+  },
+  {
+    id: "fasth3-4step",
+    family: "MiniMax H3",
+    title: "FastH3 4-Step V1",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-4step",
+    description: "FastH3 V1 on one DGX Spark with offloaded encoders and lazy module loading.",
+    tags: ["Text to video", "Audio", "DGX Spark"],
   },
   {
     id: "fastwan21",
@@ -93,6 +111,8 @@ const familyInfo: Record<string, { title: string; path: string; logo: string; ca
 const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-FastH3-8-Step-V2": "fasth3-8step",
   "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4": "fasth3-trim",
+  "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
+  "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
@@ -147,7 +167,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
             : model === "MiniMaxAI/MiniMax-H3"
               ? "MiniMax H3"
               : first.label.split(" on ")[0]),
-      family: first.family === "minimax_h3" ? "FastH3" : (backend?.family ?? family.title),
+      family: backend?.family ?? family.title,
       familyPath: `/cookbook/${family.path}`,
       path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
       logo,
@@ -164,7 +184,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
   .sort(
     (a, b) =>
       Number(b.featured) - Number(a.featured) ||
-      Number(b.family === "FastH3") - Number(a.family === "FastH3") ||
+      Number(b.family === "MiniMax H3") - Number(a.family === "MiniMax H3") ||
       Number(b.configurable) - Number(a.configurable),
   );
 export type DirectoryModel = (typeof modelDirectory)[number];

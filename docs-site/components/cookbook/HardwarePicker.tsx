@@ -211,7 +211,7 @@ export default function HardwarePicker({
         <p className="hardware-picker-caption">
           {purpose === "filter"
             ? "Filters by runtime. Memory fit is not estimated."
-            : "Recorded with this page; it does not change generated configuration."}
+            : "Single-GPU devices set GPU count to 1. Nothing else in the configuration changes."}
         </p>
       ) : null}
       {open ? (

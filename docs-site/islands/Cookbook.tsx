@@ -1,4 +1,6 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { MotionConfig } from "motion/react";
+import { ArrowUpRight } from "lucide-react";
 import { Tabs } from "radix-ui";
 import { modelDirectory, recipePages, sitePath, type DirectoryModel } from "@/lib/cookbook-pages";
 import { Badge } from "@/components/ui/badge";
@@ -8,13 +10,18 @@ import { Textarea } from "@/components/ui/textarea";
 import SourceRecipe from "./SourceRecipe";
 import HardwarePicker from "@/components/cookbook/HardwarePicker";
 import ModelHeader from "@/components/cookbook/ModelHeader";
+import {
+  CardCurtain,
+  CardCurtainReveal,
+  CardCurtainRevealBody,
+  CardCurtainRevealDescription,
+  CardCurtainRevealFooter,
+  CardCurtainRevealTitle,
+} from "@/components/ui/card-curtain-reveal";
 import RecipeFacts from "@/components/cookbook/RecipeFacts";
 import { configAndLaunch, inferenceOutput, sdkCommand } from "@/lib/cookbook-commands";
 import {
-  backendLabel,
   gpuCountFrom,
-  memoryText,
-  readGpuCount,
   readHardwareSelection,
   resolveHardware,
   useHardwareCatalog,
@@ -44,6 +51,7 @@ function groupTitle(path: string) {
     "generator.engine.offload": "CPU offload",
     "generator.engine.compile": "Compilation",
     "default_request.sampling": "Request defaults",
+    "generator.pipeline.experimental": "Decoder",
     streaming: "Streaming",
   };
   return titles[path] ?? path.split(".").at(-1)?.replaceAll("_", " ");
@@ -240,7 +248,7 @@ function Editor({
   const groups = [...new Set(fields.map((field) => field.path.split(".").slice(0, -1).join(".")))];
   function update(path: string, raw: string | undefined, field: Field) {
     setNotice("");
-    const next = { ...edits };
+    let next = { ...edits };
     const errors = { ...parseErrors };
     delete errors[path];
     if (raw === undefined) delete next[path];
@@ -249,6 +257,15 @@ function Editor({
         next[path] = parseField(field, raw);
       } catch {
         errors[path] = "Enter a valid number or JSON value for this field.";
+      }
+    }
+    if (path === GPU_COUNT_PATH && typeof next[path] === "number") {
+      const fitted = fitParallelism(fields, next, next[path] as number);
+      if (fitted !== next) {
+        next = fitted;
+        for (const key of Object.keys(errors)) if (key.includes("parallelism")) delete errors[key];
+        setReset(reset + 1);
+        setNotice(`Parallelism set to automatic for ${next[path]} ${next[path] === 1 ? "GPU" : "GPUs"}.`);
       }
     }
     setEdits(next);
@@ -290,6 +307,14 @@ function Editor({
     const url = new URL(window.location.href);
     writeHardwareSelection(url, selection);
     window.history.pushState(null, "", url);
+    const record = resolveHardware(selection, hardwareCatalog.records);
+    const countField = fields.find((field) => field.path === GPU_COUNT_PATH);
+    if (record && countField && singleGpuDevice(record) && gpuCount > 1) {
+      setEdits(fitParallelism(fields, { ...edits, [GPU_COUNT_PATH]: 1 }, 1));
+      setParseErrors(Object.fromEntries(Object.entries(parseErrors).filter(([path]) => !path.includes("parallelism"))));
+      setReset(reset + 1);
+      setNotice(`Set to 1 GPU for ${record.name}. Raise GPU count if this machine has more.`);
+    }
   }
   useEffect(() => {
     const restore = () => setHardware(readHardwareSelection(new URL(window.location.href).searchParams));
@@ -541,7 +566,7 @@ function Editor({
             </div>
           </MatrixRow>
         )}
-        {model.family === "FastH3" && (
+        {model.family === "MiniMax H3" && (
           <MatrixRow title="Components">
             {model.id === "fasth3-trim" && (
               <div className="option-chips" aria-label="Recipe components">
@@ -555,7 +580,7 @@ function Editor({
               </div>
             )}
             <p className="matrix-note">
-              Components come from the maintained recipe. They are not individually selectable in the cookbook yet.
+              Weights and encoders come from the maintained recipe. Choose the video decoder under Decoder.
             </p>
           </MatrixRow>
         )}
@@ -761,6 +786,94 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
   );
 }
 
+const GPU_COUNT_PATH = "generator.engine.num_gpus";
+const SINGLE_GPU_FORM_FACTOR = /desktop|laptop|workstation|system|soc/;
+
+/** Desktop and workstation cards, DGX Spark, and Macs are one-GPU machines; datacenter parts keep the recipe default. */
+function singleGpuDevice(record: { form_factor?: string }) {
+  return SINGLE_GPU_FORM_FACTOR.test(record.form_factor ?? "");
+}
+
+/** Returns new edits where every fixed parallel size that no longer divides `gpus` becomes automatic. */
+function fitParallelism(fields: Field[], edits: Record<string, Value>, gpus: number): Record<string, Value> {
+  const stale = fields.filter((field) => {
+    if (!/\.parallelism\.[a-z_]+_size$/.test(field.path)) return false;
+    const size = edits[field.path] ?? field.value;
+    return typeof size === "number" && size > 0 && (size > gpus || gpus % size !== 0);
+  });
+  return stale.length ? { ...edits, ...Object.fromEntries(stale.map((field) => [field.path, -1])) } : edits;
+}
+
+/** Mirrors the editor: MLX and WebSocket deployments offer serving only. */
+function configurableModes(index: Index | undefined, modelId: string): string[] | undefined {
+  const deployments = index?.models.find((model) => model.id === modelId)?.deployments;
+  if (!deployments?.length) return undefined;
+  const servingOnly = (runtime: string) => runtime.includes("mlx") || runtime.includes("streaming");
+  return deployments.some((deployment) => !servingOnly(deployment.runtime))
+    ? ["Python SDK", "CLI", "Serving"]
+    : ["Serving"];
+}
+
+/** Mirrors the source recipe page: Python SDK and CLI always, serving when a recipe declares it. */
+function exampleModes(model: DirectoryModel): string[] {
+  return ["Python SDK", "CLI", ...(model.recipes.some((recipe) => recipe.serving) ? ["Serving"] : [])];
+}
+
+/** Rest state shows identity only; hover or keyboard focus opens a curtain over the details. */
+function RecipeCard({ model, href, modes }: { model: DirectoryModel; href: string; modes?: string[] }) {
+  const [focused, setFocused] = useState(false);
+  const details = useRef<HTMLDivElement>(null);
+  const [restOffset, setRestOffset] = useState(72);
+  useEffect(() => {
+    const element = details.current;
+    if (!element) return;
+    const measure = () => setRestOffset(element.offsetHeight + 8);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <a className="recipe-card" href={href} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
+      <CardCurtainReveal active={focused} className="recipe-card-reveal">
+        <CardCurtainRevealBody className="recipe-card-body">
+          <div className="recipe-card-top">
+            <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
+            <span className="recipe-card-kicker">{model.provider}</span>
+            {model.featured ? <span className="recipe-featured">Featured</span> : null}
+          </div>
+          <CardCurtainRevealTitle
+            as={model.configurable ? "h3" : "h4"}
+            hiddenOffset={restOffset}
+            className="recipe-card-title"
+          >
+            {model.title}
+          </CardCurtainRevealTitle>
+          <CardCurtainRevealDescription ref={details} className="recipe-card-details">
+            <p className="recipe-card-description">{model.description}</p>
+            <div className="recipe-tags">
+              <span>{model.category}</span>
+              {model.tags.slice(0, 2).map((tag) => (
+                <span key={tag}>{tag}</span>
+              ))}
+            </div>
+            {modes ? <p className="recipe-card-modes">{modes.join(" · ")}</p> : null}
+          </CardCurtainRevealDescription>
+          <CardCurtain className="recipe-card-curtain" />
+        </CardCurtainRevealBody>
+        <CardCurtainRevealFooter className="recipe-card-footer">
+          <span>
+            {model.platforms.map((platform) => (platform === "Apple Silicon" ? "MLX" : platform)).join(" · ")}
+          </span>
+          <span className="recipe-card-cta">
+            {model.configurable ? "Configure" : "View recipe"} <ArrowUpRight aria-hidden="true" />
+          </span>
+        </CardCurtainRevealFooter>
+      </CardCurtainReveal>
+    </a>
+  );
+}
+
 function RecipeDirectory({ index, error, retry }: { index?: Index; error: string; retry: () => void }) {
   const [initial] = useState(() =>
     typeof window === "undefined" ? new URLSearchParams() : new URL(window.location.href).searchParams,
@@ -770,13 +883,6 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
   const [family, setFamily] = useState(initial.get("family") ?? "All families");
   const [runtime, setRuntime] = useState(initial.get("runtime") ?? "all");
   const [task, setTask] = useState(initial.get("task") ?? "All tasks");
-  const [hardware, setHardware] = useState<HardwareSelection>(() => readHardwareSelection(initial));
-  const [gpuCount, setGpuCount] = useState(() => readGpuCount(initial));
-  const hardwareCatalog = useHardwareCatalog();
-  const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
-  useEffect(() => {
-    if (!hardwareRecord && gpuCount > 1) setGpuCount(1);
-  }, [gpuCount, hardwareRecord]);
   useEffect(() => {
     const url = new URL(window.location.href);
     const search = url.searchParams;
@@ -789,15 +895,11 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     set("family", family === "All families" ? undefined : family);
     set("runtime", runtime === "all" ? undefined : runtime);
     set("task", task === "All tasks" ? undefined : task);
-    set("gpus", gpuCount > 1 ? String(gpuCount) : undefined);
-    writeHardwareSelection(search, hardware);
     window.history.replaceState(null, "", url);
-  }, [category, family, gpuCount, hardware, query, runtime, task]);
+  }, [category, family, query, runtime, task]);
   const runtimeMatches = (platforms: string[]) => {
     if (runtime === "cuda") return platforms.includes("NVIDIA");
     if (runtime === "mlx") return platforms.includes("Apple Silicon");
-    if (hardwareRecord?.backend === "mlx") return platforms.includes("Apple Silicon");
-    if (hardwareRecord) return platforms.includes("NVIDIA");
     return true;
   };
   const visible = modelDirectory.filter(
@@ -810,165 +912,172 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
-  const hardwareParams = new URLSearchParams();
-  writeHardwareSelection(hardwareParams, hardware);
-  if (gpuCount > 1) hardwareParams.set("gpus", String(gpuCount));
-  const suffix = hardwareParams.size ? `?${hardwareParams.toString()}` : "";
   function clear() {
     setQuery("");
     setCategory("All models");
     setFamily("All families");
     setRuntime("all");
     setTask("All tasks");
-    setHardware({ id: "" });
-    setGpuCount(1);
   }
+  const configurable = visible.filter((model) => model.configurable);
+  const examples = visible.filter((model) => !model.configurable);
+  const exampleFamilies = [...new Set(examples.map((model) => model.family))];
+  const filtered =
+    !!query.trim() ||
+    category !== "All models" ||
+    family !== "All families" ||
+    runtime !== "all" ||
+    task !== "All tasks";
+  const categoryCount = (value: string) =>
+    modelDirectory.filter((model) => value === "All models" || model.category === value).length;
   return (
-    <div className="cookbook not-prose recipe-directory">
-      <div className="recipe-directory-tools">
-        <div className="recipe-family-filters" aria-label="Filter recipes by category">
-          {["All models", "Video", "Image", "Audio", "World"].map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={category === value}
-              onClick={() => {
-                setCategory(value);
-                setFamily("All families");
-              }}
-            >
-              {value}
-            </button>
-          ))}
+    <MotionConfig reducedMotion="user">
+      <div className="cookbook not-prose recipe-directory">
+        <div className="recipe-directory-tools">
+          <div className="recipe-family-filters" aria-label="Filter recipes by category">
+            {["All models", "Video", "Image", "Audio", "World"].map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={category === value}
+                onClick={() => {
+                  setCategory(value);
+                  setFamily("All families");
+                }}
+              >
+                {value}
+                <span className="recipe-filter-count" aria-hidden="true">
+                  {categoryCount(value)}
+                </span>
+              </button>
+            ))}
+          </div>
+          <Input
+            aria-label="Search recipes"
+            type="search"
+            placeholder="Search models…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
         </div>
-        <Input
-          aria-label="Search recipes"
-          type="search"
-          placeholder="Search models…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
-      <div className="recipe-directory-subbar">
-        <p role="status">
-          {visible.length} {visible.length === 1 ? "model" : "models"}
-          {hardwareRecord ? ` · ${backendLabel(hardwareRecord.backend)} recipes` : ""}
-          {runtime !== "all" ? ` · ${runtime === "mlx" ? "MLX" : "CUDA"} only` : ""}
-          {task !== "All tasks" ? ` · ${task}` : ""}
-        </p>
-        <div className="recipe-directory-selects">
-          <label>
-            <span>Family</span>
-            <select aria-label="Model family" value={family} onChange={(event) => setFamily(event.target.value)}>
-              <option>All families</option>
-              {[
-                ...new Set(
-                  modelDirectory
-                    .filter((model) => category === "All models" || model.category === category)
-                    .map((model) => model.family),
-                ),
-              ].map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Task</span>
-            <select aria-label="Task" value={task} onChange={(event) => setTask(event.target.value)}>
-              <option>All tasks</option>
-              {[...new Set(modelDirectory.map((model) => model.task))].sort().map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Runtime</span>
-            <select aria-label="Runtime" value={runtime} onChange={(event) => setRuntime(event.target.value)}>
-              <option value="all">All runtimes</option>
-              <option value="cuda">CUDA</option>
-              <option value="mlx">MLX</option>
-            </select>
-          </label>
+        <div className="recipe-directory-subbar">
+          <p role="status">
+            {visible.length} {visible.length === 1 ? "model" : "models"}
+            {configurable.length ? ` · ${configurable.length} configurable` : ""}
+            {runtime !== "all" ? ` · ${runtime === "mlx" ? "MLX" : "CUDA"} only` : ""}
+            {task !== "All tasks" ? ` · ${task}` : ""}
+            {filtered && visible.length ? (
+              <button type="button" className="recipe-clear" onClick={clear}>
+                Reset filters
+              </button>
+            ) : null}
+          </p>
+          <div className="recipe-directory-selects">
+            <label>
+              <span>Family</span>
+              <select aria-label="Model family" value={family} onChange={(event) => setFamily(event.target.value)}>
+                <option>All families</option>
+                {[
+                  ...new Set(
+                    modelDirectory
+                      .filter((model) => category === "All models" || model.category === category)
+                      .map((model) => model.family),
+                  ),
+                ].map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Task</span>
+              <select aria-label="Task" value={task} onChange={(event) => setTask(event.target.value)}>
+                <option>All tasks</option>
+                {[...new Set(modelDirectory.map((model) => model.task))].sort().map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Runtime</span>
+              <select aria-label="Runtime" value={runtime} onChange={(event) => setRuntime(event.target.value)}>
+                <option value="all">All runtimes</option>
+                <option value="cuda">CUDA</option>
+                <option value="mlx">MLX</option>
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
-      <div className="recipe-directory-hardware">
-        <span className="recipe-filter-label">Hardware</span>
-        <HardwarePicker
-          backend="cuda"
-          catalog={hardwareCatalog.records}
-          status={hardwareCatalog.status}
-          error={hardwareCatalog.error}
-          reload={hardwareCatalog.reload}
-          value={hardware}
-          onChange={setHardware}
-          gpuCount={gpuCount}
-          purpose="filter"
-        />
-        {hardwareRecord ? (
-          <label className="recipe-gpu-count">
-            <span>GPU count</span>
-            <Input
-              type="number"
-              min="1"
-              max="64"
-              step="1"
-              value={gpuCount}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                setGpuCount(Number.isInteger(value) && value > 0 && value <= 64 ? value : 1);
-              }}
-            />
-          </label>
+        {error ? (
+          <div role="alert" className="recipe-error">
+            <p>{error}</p>
+            <Button variant="outline" onClick={retry}>
+              Retry loading recipes
+            </Button>
+          </div>
+        ) : null}
+        {configurable.length ? (
+          <section className="recipe-section" aria-labelledby="recipe-configurable-heading">
+            <header className="recipe-section-head">
+              <h2 id="recipe-configurable-heading">Configurable recipes</h2>
+              <p>Edit settings, then copy one config for the Python SDK, the CLI, or an OpenAI-compatible server.</p>
+            </header>
+            <div className="recipe-card-grid recipe-card-grid-configurable">
+              {configurable.map((model) => (
+                <RecipeCard
+                  key={model.id}
+                  model={model}
+                  href={sitePath(model.path)}
+                  modes={configurableModes(index, model.id)}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {examples.length ? (
+          <section className="recipe-section" aria-labelledby="recipe-examples-heading">
+            <header className="recipe-section-head">
+              <h2 id="recipe-examples-heading">Example recipes</h2>
+              <p>
+                Maintained example scripts, grouped by model family. Adjust their documented settings and run them as
+                written.
+              </p>
+            </header>
+            {exampleFamilies.map((name) => {
+              const members = examples.filter((model) => model.family === name);
+              return (
+                <div className="recipe-family-group" key={name}>
+                  <div className="recipe-family-head">
+                    <h3>{name}</h3>
+                    <span>
+                      {members.length} {members.length === 1 ? "recipe" : "recipes"}
+                    </span>
+                    <a href={sitePath(members[0].familyPath)}>Family guide →</a>
+                  </div>
+                  <div className="recipe-card-grid">
+                    {members.map((model) => (
+                      <RecipeCard
+                        key={model.id}
+                        model={model}
+                        href={sitePath(model.path)}
+                        modes={exampleModes(model)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
+        {!visible.length ? (
+          <div className="recipe-empty">
+            <h2>No matching recipes</h2>
+            <p>Clear a filter or choose a different runtime.</p>
+            <Button variant="outline" onClick={clear}>
+              Clear filters
+            </Button>
+          </div>
         ) : null}
       </div>
-      {hardwareRecord ? (
-        <p className="recipe-directory-note">
-          Showing {backendLabel(hardwareRecord.backend)} recipes for {hardwareRecord.name} ({memoryText(hardwareRecord)}
-          ).
-        </p>
-      ) : null}
-      {error ? (
-        <div role="alert" className="recipe-error">
-          <p>{error}</p>
-          <Button variant="outline" onClick={retry}>
-            Retry loading recipes
-          </Button>
-        </div>
-      ) : null}
-      <div className="recipe-card-grid">
-        {visible.map((model) => (
-          <a className="recipe-card" key={model.id} href={`${sitePath(model.path)}${suffix}`}>
-            <div className="recipe-card-top">
-              <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
-              <span className="recipe-card-kicker">{model.provider}</span>
-              {model.featured ? <span className="recipe-featured">Featured</span> : null}
-            </div>
-            <h2>{model.title}</h2>
-            <p className="recipe-card-description">{model.description}</p>
-            <div className="recipe-tags">
-              <span>{model.category}</span>
-              {model.tags.slice(0, 2).map((tag) => (
-                <span key={tag}>{tag}</span>
-              ))}
-            </div>
-            <footer>
-              <span>
-                {model.platforms.map((platform) => (platform === "Apple Silicon" ? "MLX" : platform)).join(" · ")}
-              </span>
-              <span>{model.configurable ? "Configure →" : "View recipe →"}</span>
-            </footer>
-          </a>
-        ))}
-      </div>
-      {!visible.length ? (
-        <div className="recipe-empty">
-          <h2>No matching recipes</h2>
-          <p>Clear a filter or choose a different backend. Memory fit is not checked.</p>
-          <Button variant="outline" onClick={clear}>
-            Clear filters
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    </MotionConfig>
   );
 }

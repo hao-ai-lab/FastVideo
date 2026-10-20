@@ -339,8 +339,3 @@ export function gpuCountFrom(config: Record<string, unknown> | undefined): numbe
   }
   return 1;
 }
-
-export function readGpuCount(search: URLSearchParams): number {
-  const value = Number(search.get("gpus"));
-  return Number.isInteger(value) && value > 0 && value <= 64 ? value : 1;
-}

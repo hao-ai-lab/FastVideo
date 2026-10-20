@@ -465,19 +465,34 @@ test("custom devices persist and no preview control can block generated YAML", a
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
 });
 
-test("hardware is never preselected and a target does not change generated YAML", async ({ page }) => {
+test("hardware is never preselected; a single-GPU device sets one GPU with valid parallelism", async ({ page }) => {
   await page.goto(route);
   await expect(page.locator(".hardware-picker")).toBeVisible({ timeout: 30000 });
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
   await output(page, "config.yaml");
   const yaml = page.getByLabel("Generated YAML", { exact: true });
-  const baseline = await yaml.innerText();
+  await expect(yaml).toContainText('"num_gpus": 4');
   await chooseHardware(page, "RTX 5090");
   await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
   await expect(page.getByText(/GeForce RTX 5090 .*32 GB VRAM/)).toBeVisible();
-  await expect(yaml).toHaveText(baseline);
+  await expect(page.getByText(/Set to 1 GPU for .*RTX 5090/)).toBeVisible();
+  await expect(yaml).toContainText('"num_gpus": 1');
+  await expect(yaml).toContainText('"sp_size": -1');
+  await expect(yaml).not.toContainText('"hardware"');
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+});
+
+test("lowering the GPU count resets parallelism that no longer fits", async ({ page }) => {
+  await page.goto(route);
+  await output(page, "config.yaml");
+  const yaml = page.getByLabel("Generated YAML", { exact: true });
+  await page.getByLabel("GPU count", { exact: true }).fill("2");
+  await expect(page.getByText("Parallelism set to automatic for 2 GPUs.")).toBeVisible();
+  await expect(yaml).toContainText('"num_gpus": 2');
+  await expect(yaml).toContainText('"sp_size": -1');
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
 });
 
 test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
@@ -522,19 +537,15 @@ test("MLX lookup uses unified memory and a custom Mac stays reusable", async ({ 
   await expect(page.getByRole("button", { name: "Clear hardware target", exact: true })).toBeVisible();
 });
 
-test("hardware-first directory filter carries the target into a model page", async ({ page }) => {
+test("the directory filters by runtime without a hardware picker", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await page.getByRole("button", { name: "Choose hardware", exact: true }).click();
-  await page.getByLabel("Search hardware", { exact: true }).fill("M4 Max");
-  await page.getByRole("radio", { name: /Apple M4 Max/ }).click();
-  await expect(page.getByText(/Showing Apple MLX recipes for Apple M4 Max/)).toBeVisible();
+  await expect(page.locator(".recipe-directory .hardware-picker")).toHaveCount(0);
+  await page.getByLabel("Runtime", { exact: true }).selectOption("mlx");
+  await expect(page).toHaveURL(/runtime=mlx/);
   const card = page.locator(".recipe-card").filter({ hasText: "FastMetal 1.3B" });
   await expect(card).toBeVisible();
-  await expect(card).toHaveAttribute("href", /hardware=apple-m4-max-128gb/);
-  await card.click();
-  await expect(page).toHaveURL(/hardware=apple-m4-max-128gb/);
-  await expect(page.getByText("Apple M4 Max 128 GB", { exact: true })).toBeVisible();
-  await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+  await expect(card).toHaveAttribute("href", /\/cookbook\/wan\/models\/[^?]+$/);
+  await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
 });
 
 test("task discovery filters the directory and round-trips through the URL", async ({ page }) => {
