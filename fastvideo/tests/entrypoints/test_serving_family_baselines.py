@@ -25,8 +25,10 @@ from fastvideo.entrypoints.openai.request_adapter import (
 ROOT = Path(__file__).resolve().parents[3]
 
 BASELINES = {
+    "openai_wan21_t2v_14b.yaml": "t2v",
     "openai_wan22_i2v_a14b.yaml": "i2v",
     "openai_hunyuan15_t2v_480p.yaml": "t2v",
+    "openai_kandinsky5_t2v.yaml": "t2v",
     "openai_hunyuan15_i2v_480p.yaml": "i2v",
     "openai_kandinsky6_ti2va.yaml": "t2v",
     "openai_kandinsky6_ti2va_distilled.yaml": "t2v",

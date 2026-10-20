@@ -38,10 +38,12 @@ finishes; caller-owned local paths are never deleted.
 | `openai_compacth3_rtx_pro6000.yaml` | CompactH3 NVFP4 | `t2v` | CUDA REST | none | Source-backed; one RTX PRO 6000 |
 | `openai_fastwan21_1_3b.yaml` | FastWan2.1 1.3B | `t2v` | CUDA REST | `fastwan21` | Source-backed |
 | `openai_wan21_i2v_14b.yaml` | Wan2.1 I2V 14B | `i2v` | CUDA REST | `wan21-i2v` | Source-backed |
+| `openai_wan21_t2v_14b.yaml` | Wan2.1 T2V 14B | `t2v` | CUDA REST | `wan21-t2v-14b` | Source-backed; 720p base model |
 | `openai_wan22_t2v_a14b.yaml` | Wan2.2 T2V A14B | `t2v` | CUDA REST | none | Source-backed |
 | `openai_wan22_i2v_a14b.yaml` | Wan2.2 I2V A14B | `i2v` | CUDA REST | `wan22-i2v-a14b` | Source-backed |
 | `openai_wan22_ti2v_5b.yaml` | Wan2.2 TI2V 5B | `t2v` | CUDA REST | none | Source-backed |
 | `openai_hunyuan15_t2v_480p.yaml` | HunyuanVideo 1.5 T2V 480p | `t2v` | CUDA REST | `hunyuan15-t2v-480p` | Source-backed |
+| `openai_kandinsky5_t2v.yaml` | Kandinsky-5.0 T2V Lite | `t2v` | CUDA REST | `kandinsky5-t2v` | Source-backed |
 | `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | `i2v` | CUDA REST | `hunyuan15-i2v-480p` | Source-backed |
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va` | Source-backed |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va-distilled` | Source-backed |
@@ -62,7 +64,7 @@ The registry recognizes more model IDs than this table lists. These families
 still resolve through the typed API, but they do not have a checked-in serving
 configuration in this checkout:
 
-- Kandinsky 5 T2V/I2V, Kandinsky 6 VSR, Kandinsky 5 SR.
+- Kandinsky 5 I2V and other checkpoints, Kandinsky 6 VSR, Kandinsky 5 SR.
 - Cosmos, Cosmos 2.5, GEN3C, Helios, HyWorld, LingBot Video/World/World2.
 - MatrixGame 2/3 interactive generation.
 - Wan Fun InP/Control, Wan Animate, Wan S2V, Lucy Edit, Self-Forcing variants.

@@ -51,12 +51,13 @@ CUDA FastH3 8-Step V2 serving uses `examples/serving/openai_fasth3_8step.yaml`.
 
 ## Wan configs
 
-Four Wan CUDA configs mirror the working generate config or example for each
+Five Wan CUDA configs mirror the working generate config or example for each
 checkpoint:
 
 | Config | Model | GPUs | Served alias |
 | --- | --- | --- | --- |
 | `openai_fastwan21_1_3b.yaml` | FastWan2.1 T2V 1.3B (DMD, VSA) | 1 | `fastwan21-1.3b` |
+| `openai_wan21_t2v_14b.yaml` | Wan2.1 T2V 14B 720P | 1 | `wan21-t2v-14b` |
 | `openai_wan21_i2v_14b.yaml` | Wan2.1 I2V 14B 480P | 2 | `wan21-i2v-14b` |
 | `openai_wan22_t2v_a14b.yaml` | Wan2.2 T2V A14B | 2 | `wan22-t2v-a14b` |
 | `openai_wan22_ti2v_5b.yaml` | Wan2.2 TI2V 5B | 1 | `wan22-ti2v-5b` |
@@ -85,6 +86,7 @@ uncovered registry families.
 | --- | --- | --- | --- |
 | `openai_wan22_i2v_a14b.yaml` | Wan2.2 I2V A14B | image-to-video | 1 |
 | `openai_hunyuan15_t2v_480p.yaml` | HunyuanVideo 1.5 T2V 480p | text-to-video | 1 |
+| `openai_kandinsky5_t2v.yaml` | Kandinsky-5.0 T2V Lite | text-to-video | 1 |
 | `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | image-to-video | 1 |
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | text/image-to-video with audio | 1 |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | text/image-to-video with audio | 1 |
