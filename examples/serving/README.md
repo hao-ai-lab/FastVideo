@@ -75,7 +75,57 @@ source image through the OpenAI-compatible reference fields, for example
 The I2V 14B server requires one on every request; the TI2V 5B server treats
 its absence as text-to-video.
 
-Or submit, poll, and download with the OpenAI Python client:
+## Other families
+
+These configs are source-backed declarations; none is a hardware-fit claim.
+`docs/cookbook/serving-coverage.md` records the full baseline list and the
+uncovered registry families.
+
+| Config | Model | Task | GPUs |
+| --- | --- | --- | --- |
+| `openai_wan22_i2v_a14b.yaml` | Wan2.2 I2V A14B | image-to-video | 1 |
+| `openai_hunyuan15_t2v_480p.yaml` | HunyuanVideo 1.5 T2V 480p | text-to-video | 1 |
+| `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | image-to-video | 1 |
+| `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | text/image-to-video with audio | 1 |
+| `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | text/image-to-video with audio | 1 |
+| `openai_ltx2_distilled.yaml` | LTX2 Distilled | text-to-video with audio | 4 |
+| `openai_flux1_dev.yaml` | FLUX.1-dev | text-to-image | 1 |
+| `openai_flux2_dev.yaml` | FLUX.2-dev | text-to-image | 1 |
+| `openai_flux2_klein.yaml` | FLUX.2-klein-4B | text-to-image | 1 |
+| `openai_sd35.yaml` | SD3.5 Medium | text-to-image | 1 |
+| `openai_stable_audio.yaml` | Stable Audio Open 1.0 | text-to-audio | 1 |
+| `openai_mmaudio.yaml` | MMAudio large-44k-v2 | video-to-audio | 1 |
+
+Image servers use `/v1/images/generations` and `/v1/images/edits`. Send the
+model's advertised alias as `model` and set `FASTVIDEO_MODEL` for the sample
+clients. SD3.5 Medium is gated; accept its license and authenticate before
+starting the server.
+
+## Audio jobs
+
+Audio uses the same asynchronous job routes as video so clients keep one
+polling and deletion contract. The job's `media_type` is `audio/wav`, and
+`/v1/videos/{id}/content` returns WAV bytes. Set `seconds` or
+`audio_start_in_s`/`audio_end_in_s`; do not send `size`, `width`, `height`, or
+`video_params`.
+
+MMAudio is video-to-audio and requires `video_reference` (a local path or
+URL). Stable Audio is text-to-audio. Stable Audio needs the optional
+inference dependencies listed in `examples/inference/basic/basic_stable_audio.py`.
+
+```bash
+python -m pip install httpx
+FASTVIDEO_MODEL=stable-audio FASTVIDEO_SECONDS=6 \
+  python examples/serving/clients/audio.py
+FASTVIDEO_MODEL=mmaudio-large-44k-v2 \
+FASTVIDEO_VIDEO_REFERENCE=/path/to/clip.mp4 \
+  python examples/serving/clients/audio.py
+```
+
+Node and cURL clients are in `examples/serving/clients/audio.mjs` and
+`audio.sh`.
+
+Or submit, poll, and download video with the OpenAI Python client:
 
 ```bash
 python -m pip install openai==3.6.0
@@ -84,9 +134,10 @@ python examples/serving/clients/video.py
 
 The `clients/` directory also contains cURL and OpenAI JavaScript examples.
 They default to model `fasth3`; set `FASTVIDEO_MODEL` to the advertised alias
-when using the LoRA or Wan configs. Set `FASTVIDEO_BASE_URL` for another endpoint.
+when using a LoRA or another family config. Set `FASTVIDEO_BASE_URL` for another endpoint.
 These clients call your FastVideo server, not OpenAI's cloud. The SDK key
 `local` is a placeholder, not authentication. Keep the server on loopback or
 use an authenticated proxy for remote access.
 
-For a blocking call, `POST /v1/videos/sync` returns the MP4 body directly.
+For a blocking call, `POST /v1/videos/sync` returns the generated media body
+directly. Check its `Content-Type` before saving the response.

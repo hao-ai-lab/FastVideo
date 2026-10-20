@@ -8,6 +8,9 @@ import math
 import os
 from typing import Any
 
+import aiofiles
+import httpx
+
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     explicit_request_updates,
@@ -19,6 +22,7 @@ from fastvideo.entrypoints.openai.protocol import (
     FileImageReference,
     FileVideoReference,
     UrlImageReference,
+    UrlVideoReference,
     VideoGenerationRequest,
 )
 from fastvideo.entrypoints.openai.utils import save_image_to_path
@@ -54,13 +58,40 @@ def _image_sources(request: VideoGenerationRequest) -> list[str]:
     return sources
 
 
+async def _materialize_video(source: str, target_base: str) -> str:
+    source = source.strip()
+    if not source:
+        raise RequestAdaptationError("Video references must not be empty.")
+    if source.lower().startswith(("http://", "https://")):
+        suffix = os.path.splitext(source.split("?", 1)[0])[1] or ".mp4"
+        target = f"{target_base}{suffix}"
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client, \
+                    client.stream("GET", source) as response:
+                response.raise_for_status()
+                async with aiofiles.open(target, "wb") as output:
+                    async for chunk in response.aiter_bytes():
+                        await output.write(chunk)
+        except Exception as error:
+            raise RequestAdaptationError(f"Unable to fetch video reference: {error}") from error
+        return target
+    if source.lower().startswith("data:"):
+        raise RequestAdaptationError("Data video references are not supported; provide a URL or local path.")
+    local_path = os.path.abspath(os.path.expanduser(source))
+    if not os.path.isfile(local_path):
+        raise RequestAdaptationError(f"Video reference does not exist: {source}")
+    return local_path
+
+
 async def prepare_reference_media(
     request_id: str,
     request: VideoGenerationRequest,
     output_dir: str,
 ) -> None:
-    """Materialize and decode image references before a job reaches workers."""
+    """Materialize media references before a job reaches workers."""
     _image_sources(request)
+    _video_sources(request)
     uploads_dir = os.path.join(os.path.abspath(output_dir), "uploads")
 
     async def materialize(source: str, index: int) -> str:
@@ -98,6 +129,17 @@ async def prepare_reference_media(
         request.reference_url = await materialize(request.reference_url, index)
     elif request.reference_url == "":
         request.reference_url = None
+
+    for index, reference in enumerate(_as_list(request.video_reference)):
+        if isinstance(reference, UrlVideoReference):
+            reference.video_url = await _materialize_video(reference.video_url,
+                                                           os.path.join(uploads_dir, f"{request_id}_video_{index}"))
+    if request.video_path:
+        request.video_path = await _materialize_video(request.video_path,
+                                                      os.path.join(uploads_dir, f"{request_id}_video_path"))
+    if request.video_url:
+        request.video_url = await _materialize_video(request.video_url,
+                                                     os.path.join(uploads_dir, f"{request_id}_video_url"))
 
 
 def _video_sources(request: VideoGenerationRequest) -> list[str]:
@@ -288,6 +330,9 @@ def build_generation_request(
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
     validate_model_and_lora(request, args, served_model_name)
+    workload_type = getattr(args, "workload_type", "")
+    workload_value = str(getattr(workload_type, "value", workload_type) or "")
+    is_audio = workload_value.endswith("2a")
     kwargs: dict[str, Any] = {}
     if default_request is not None:
         kwargs.update(explicit_request_updates(default_request))
@@ -323,7 +368,7 @@ def build_generation_request(
         num_frames = request.num_frames if "num_frames" in body_set else request.video_params.num_frames
         if num_frames is not None:
             kwargs["num_frames"] = num_frames
-    elif "seconds" in body_set and request.seconds is not None:
+    elif not is_audio and "seconds" in body_set and request.seconds is not None:
         kwargs["num_frames"] = int(request.seconds) * int(kwargs["fps"])
 
     direct_fields = (
@@ -336,12 +381,25 @@ def build_generation_request(
         "enable_teacache",
         "max_sequence_length",
         "boundary_ratio",
+        "audio_start_in_s",
+        "audio_end_in_s",
     )
     for name in direct_fields:
         if name in body_set:
             value = getattr(request, name)
             if value is not None:
                 kwargs[name] = value
+    if is_audio and "seconds" in body_set and request.seconds is not None and "audio_end_in_s" not in body_set:
+        start = float(kwargs.get("audio_start_in_s") or 0.0)
+        kwargs["audio_start_in_s"] = start
+        kwargs["audio_end_in_s"] = start + float(int(request.seconds))
+    if is_audio:
+        if {"size", "width", "height", "video_params"} & body_set:
+            raise RequestAdaptationError("Audio generation does not accept size, width, height, or video_params.")
+        start = float(kwargs.get("audio_start_in_s") or 0.0)
+        end = kwargs.get("audio_end_in_s")
+        if end is not None and float(end) <= start:
+            raise RequestAdaptationError(f"audio_end_in_s ({end}) must be greater than audio_start_in_s ({start}).")
     if "n" in body_set or "num_outputs_per_prompt" in body_set:
         kwargs["num_videos_per_prompt"] = request.resolved_num_outputs
 
@@ -355,6 +413,8 @@ def build_generation_request(
         raise RequestAdaptationError("short_edge requires aspect_ratio.")
     _apply_aspect_ratio(kwargs, request, model_family=model_family)
     _apply_reference_inputs(kwargs, request, args, model_family=model_family)
+    if model_family == "mmaudio" and not workload_value.endswith("t2a") and not kwargs.get("video_path"):
+        raise RequestAdaptationError("MMAudio video-to-audio generation requires video_reference or video_path.")
 
     extension_fields = ("flow_shift", "sound_duration", "start_time_seconds")
     for name in extension_fields:
@@ -411,7 +471,9 @@ def build_generation_request(
                                          f"got {requested_num_frames}, next valid value is {aligned_num_frames}.")
         kwargs["num_frames"] = aligned_num_frames
 
-    output_path = os.path.join(os.path.abspath(output_dir), "videos", f"{request_id}.mp4")
+    media_dir = "audio" if is_audio else "videos"
+    extension = ".wav" if is_audio else ".mp4"
+    output_path = os.path.join(os.path.abspath(output_dir), media_dir, f"{request_id}{extension}")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     kwargs.update({
         "output_path": output_path,

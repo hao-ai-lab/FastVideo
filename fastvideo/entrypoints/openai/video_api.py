@@ -113,6 +113,8 @@ def _build_generation_kwargs(
             "enable_teacache",
             "max_sequence_length",
             "boundary_ratio",
+            "audio_start_in_s",
+            "audio_end_in_s",
     ):
         if name in body_set and getattr(req, name) is not None:
             kwargs[name] = getattr(req, name)
@@ -122,9 +124,11 @@ def _build_generation_kwargs(
         kwargs["image_path"] = req.input_reference
 
     kwargs.pop("output_path", None)
-    output_dir = os.path.join(os.path.abspath(get_output_dir()), "videos")
+    is_audio = _is_audio_workload()
+    output_dir = os.path.join(os.path.abspath(get_output_dir()), "audio" if is_audio else "videos")
     os.makedirs(output_dir, exist_ok=True)
-    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
+    extension = ".wav" if is_audio else ".mp4"
+    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}{extension}")
     kwargs["save_video"] = True
     return kwargs
 
@@ -133,6 +137,19 @@ def _result_value(result: Any, name: str, default: Any = None) -> Any:
     if isinstance(result, dict):
         return result.get(name, default)
     return getattr(result, name, default)
+
+
+def _is_audio_workload() -> bool:
+    try:
+        args = get_server_args()
+    except AssertionError:
+        return False
+    workload_type = getattr(args, "workload_type", "")
+    return str(getattr(workload_type, "value", workload_type) or "").endswith("2a")
+
+
+def _media_type_for_path(path: str) -> str:
+    return "audio/wav" if path.lower().endswith(".wav") else "video/mp4"
 
 
 def _remove_artifact(file_path: str | None) -> None:
@@ -162,8 +179,14 @@ def _make_video_job(
     generation_request: GenerationRequest,
 ) -> dict[str, Any]:
     sampling = request_to_sampling_param(generation_request, model_path=get_server_args().model_path)
-    size = f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None
-    seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
+    is_audio = _is_audio_workload()
+    size = None if is_audio else (f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None)
+    if is_audio and sampling.audio_end_in_s is not None:
+        start = sampling.audio_start_in_s or 0.0
+        seconds = max(1, int(round(sampling.audio_end_in_s - start)))
+    else:
+        seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
+    media_type = "audio/wav" if is_audio else "video/mp4"
     return {
         "id": request_id,
         "object": "video",
@@ -175,6 +198,7 @@ def _make_video_job(
         "size": size,
         "seconds": str(max(1, seconds)),
         "quality": req.quality or "default",
+        "media_type": media_type,
         # ``file_path`` is a FastVideo compatibility extension. vLLM-Omni's
         # public job shape uses ``file_name`` after completion.
         "file_path": None,
@@ -363,7 +387,7 @@ async def create_video(raw_request: Request) -> VideoResponse:
 
 @router.post("/sync")
 async def create_video_sync(raw_request: Request) -> FileResponse:
-    """Generate synchronously and return raw MP4 bytes with vLLM headers."""
+    """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_sync-{generate_request_id()}"
     generation_request = await _adapt_request(request_id, request)
@@ -380,10 +404,10 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
     elapsed = time.perf_counter() - started
     video_path = _result_value(result, "video_path") or generation_request.output.output_path
     if not video_path or not os.path.exists(video_path):
-        raise HTTPException(status_code=500, detail="FastVideo did not produce an MP4 file")
+        raise HTTPException(status_code=500, detail="FastVideo did not produce a media file")
     return FileResponse(
         video_path,
-        media_type="video/mp4",
+        media_type=_media_type_for_path(video_path),
         filename=os.path.basename(video_path),
         headers={
             "X-Request-Id": request_id,
@@ -470,7 +494,9 @@ async def download_video_content(video_id: str = Path(...), variant: str | None 
         raise HTTPException(status_code=404, detail="Generation is still in-progress")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Generated video file not found on disk")
-    return FileResponse(path=file_path, media_type="video/mp4", filename=os.path.basename(file_path))
+    return FileResponse(path=file_path,
+                        media_type=_media_type_for_path(file_path),
+                        filename=os.path.basename(file_path))
 
 
 __all__ = [

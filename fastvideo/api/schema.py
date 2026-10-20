@@ -171,6 +171,8 @@ class SamplingConfig:
     height_sr: int = 1072
     width_sr: int = 1920
     fps: int = 24
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
