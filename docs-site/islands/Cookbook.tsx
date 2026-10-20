@@ -723,9 +723,8 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
       const available = index?.models.find((item) => item.id === modelId)?.deployments ?? [];
       const next = available.find((deployment) => deployment.id === requested)?.id ?? available[0]?.id;
       if (!next) return;
+      // The deployment loader clears and reloads the catalog only when the deployment changes.
       setSelected(next);
-      setCatalog(undefined);
-      setError("");
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);

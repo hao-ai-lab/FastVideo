@@ -81,6 +81,12 @@ function backend(value: unknown, fallback = "cuda"): string {
   return fallback;
 }
 
+/** Catalog records keep backends the cookbook cannot run, so they never pose as CUDA targets. */
+function catalogBackend(value: unknown): string {
+  if (value === "sycl" || value === "unknown") return value;
+  return backend(value, "unknown");
+}
+
 /** Accepts the generated `{ version, devices: [] }` asset and the older mapping forms. */
 function recordsFrom(payload: unknown): HardwareRecord[] {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
@@ -137,7 +143,7 @@ function recordsFrom(payload: unknown): HardwareRecord[] {
       memory_type: type,
       memory_gb: capacity,
       memory_unit: memoryUnit(nominal?.unit ?? item.memory_unit),
-      backend: backend(item.backend),
+      backend: catalogBackend(item.backend),
       supported_dtypes: Array.isArray(item.supported_dtypes)
         ? item.supported_dtypes.filter((dtype): dtype is string => typeof dtype === "string")
         : undefined,
@@ -260,7 +266,10 @@ export function resolveHardware(selection: HardwareSelection, records: HardwareR
       host_ram_gb: custom.host_ram_gb,
     };
   }
-  return records.find((record) => record.id === selection.id);
+  return (
+    records.find((record) => record.id === selection.id) ??
+    records.find((record) => record.aliases?.includes(selection.id))
+  );
 }
 
 /** A query-only selector shared by the hardware picker and tests. */
@@ -313,6 +322,8 @@ export function memoryContext(record: HardwareRecord): string {
 export function backendLabel(value: string): string {
   if (value === "mlx") return "Apple MLX";
   if (value === "rocm") return "ROCm";
+  if (value === "sycl") return "Intel SYCL";
+  if (value === "unknown") return "Unknown backend";
   return "CUDA";
 }
 

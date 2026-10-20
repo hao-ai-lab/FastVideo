@@ -495,6 +495,26 @@ test("lowering the GPU count resets parallelism that no longer fits", async ({ p
   await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
 });
 
+test("browser back after a hardware-only change keeps the editor loaded", async ({ page }) => {
+  await page.goto(route);
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await chooseHardware(page, "RTX 5090");
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
+  await page.goBack();
+  await expect(page).not.toHaveURL(/hardware=/);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await expect(page.getByText("Loading deployment settings…")).toHaveCount(0);
+});
+
+test("hardware links resolve catalog aliases and non-CUDA devices are not CUDA targets", async ({ page }) => {
+  await page.goto(`${route}?hardware=5090`);
+  await expect(page.locator(".hardware-selected")).toContainText("RTX 5090");
+  await page.getByRole("button", { name: "Change hardware", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("Arc B580");
+  await expect(page.getByRole("radio", { name: /Arc B580/ })).toHaveCount(0);
+});
+
 test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
   await page.goto(route);
   const facts = page.getByLabel("Recipe facts");
