@@ -1,16 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 """Declaration checks for family serving baselines; no model weights are loaded."""
 
+import asyncio
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
+import fastvideo.envs as envs
+from fastvideo.api.compat import request_to_sampling_param
+from fastvideo.api.flux import FluxSamplingParam
 from fastvideo.api.parser import parse_config
-from fastvideo.api.schema import ServeConfig
+from fastvideo.api.schema import GenerationRequest, ServeConfig
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
-from fastvideo.entrypoints.openai.request_adapter import build_generation_request
+from fastvideo.entrypoints.openai.request_adapter import (
+    RequestAdaptationError,
+    build_generation_request,
+    discard_materialized_media,
+    prepare_reference_media,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -85,3 +96,85 @@ def test_mmaudio_uses_operator_duration_and_video_reference(tmp_path: Path) -> N
     assert adapted.sampling.audio_end_in_s == 4.0
     assert adapted.inputs.video_path == str(video)
     assert adapted.output.output_path == str(tmp_path / "audio" / "audio_test.wav")
+
+
+def test_flux_request_uses_flux_sampling_defaults() -> None:
+    request = parse_config(GenerationRequest, {"prompt": "a red fox"})
+    sampling = request_to_sampling_param(request, model_path="black-forest-labs/FLUX.1-dev")
+    assert isinstance(sampling, FluxSamplingParam)
+    assert sampling.num_inference_steps == 28
+    assert sampling.guidance_scale == 3.5
+    assert sampling.use_embedded_guidance is True
+
+
+def test_flux_explicit_sampling_overrides_win_over_flux_defaults() -> None:
+    request = parse_config(
+        GenerationRequest,
+        {
+            "prompt": "a red fox",
+            "sampling": {
+                "num_inference_steps": 4,
+                "guidance_scale": 2.0,
+                "use_embedded_guidance": False,
+            },
+        },
+    )
+    sampling = request_to_sampling_param(request, model_path="black-forest-labs/FLUX.1-dev")
+    assert sampling.num_inference_steps == 4
+    assert sampling.guidance_scale == 2.0
+    assert sampling.use_embedded_guidance is False
+
+
+def _serve_clip(payload: bytes) -> tuple[ThreadingHTTPServer, str]:
+    class Handler(BaseHTTPRequestHandler):
+
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}/clip.mp4"
+
+
+def test_local_media_url_is_downloaded_and_tracked_for_cleanup(tmp_path: Path) -> None:
+    server, url = _serve_clip(b"local-clip")
+    try:
+        request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
+        created = asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        assert len(created) == 1
+        assert Path(created[0]).read_bytes() == b"local-clip"
+        discard_materialized_media(created)
+        assert not Path(created[0]).exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_media_url_limit_is_configurable_and_removes_partial_file(tmp_path: Path, env_overrides) -> None:
+    server, url = _serve_clip(b"larger-than-four")
+    try:
+        env_overrides.enter_context(envs.FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES.override(4))
+        request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
+        with pytest.raises(RequestAdaptationError, match="4-byte limit"):
+            asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        assert not list((tmp_path / "uploads").glob("*"))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_discard_materialized_media_removes_only_downloaded_files(tmp_path: Path) -> None:
+    downloaded = tmp_path / "request_video.mp4"
+    downloaded.write_bytes(b"temporary")
+    caller_owned = tmp_path / "caller.mp4"
+    caller_owned.write_bytes(b"keep")
+    discard_materialized_media([str(downloaded)])
+    assert not downloaded.exists()
+    assert caller_owned.exists()

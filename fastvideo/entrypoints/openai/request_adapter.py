@@ -7,10 +7,12 @@ import asyncio
 import math
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 import aiofiles
 import httpx
 
+import fastvideo.envs as envs
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     explicit_request_updates,
@@ -33,6 +35,9 @@ from fastvideo.registry import get_preset_selection
 
 class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
+
+
+_VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"})
 
 
 def _as_list(value: Any | list[Any] | None) -> list[Any]:
@@ -58,21 +63,50 @@ def _image_sources(request: VideoGenerationRequest) -> list[str]:
     return sources
 
 
+def discard_materialized_media(paths: list[str]) -> None:
+    for path in paths:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+async def _download_media(source: str, target: str) -> None:
+    max_bytes = envs.FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES.get()
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client, \
+                client.stream("GET", source) as response:
+            response.raise_for_status()
+            written = 0
+            async with aiofiles.open(target, "wb") as output:
+                async for chunk in response.aiter_bytes():
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise RequestAdaptationError(
+                            f"Video reference is larger than the {max_bytes}-byte limit; "
+                            "raise FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES or provide a smaller clip.")
+                    await output.write(chunk)
+    except Exception:
+        discard_materialized_media([target])
+        raise
+
+
 async def _materialize_video(source: str, target_base: str) -> str:
     source = source.strip()
     if not source:
         raise RequestAdaptationError("Video references must not be empty.")
     if source.lower().startswith(("http://", "https://")):
-        suffix = os.path.splitext(source.split("?", 1)[0])[1] or ".mp4"
+        suffix = os.path.splitext(urlparse(source).path)[1].lower()
+        if suffix not in _VIDEO_SUFFIXES:
+            suffix = ".mp4"
         target = f"{target_base}{suffix}"
         os.makedirs(os.path.dirname(target), exist_ok=True)
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client, \
-                    client.stream("GET", source) as response:
-                response.raise_for_status()
-                async with aiofiles.open(target, "wb") as output:
-                    async for chunk in response.aiter_bytes():
-                        await output.write(chunk)
+            await _download_media(source, target)
+        except RequestAdaptationError:
+            raise
         except Exception as error:
             raise RequestAdaptationError(f"Unable to fetch video reference: {error}") from error
         return target
@@ -88,22 +122,32 @@ async def prepare_reference_media(
     request_id: str,
     request: VideoGenerationRequest,
     output_dir: str,
-) -> None:
-    """Materialize media references before a job reaches workers."""
+) -> list[str]:
+    """Materialize media references and return the files created for this request."""
     _image_sources(request)
     _video_sources(request)
     uploads_dir = os.path.join(os.path.abspath(output_dir), "uploads")
+    created: list[str] = []
+
+    def track(path: str) -> str:
+        if path not in created:
+            created.append(path)
+        return path
+
+    def is_remote(source: str) -> bool:
+        return source.lower().startswith(("http://", "https://", "data:image"))
 
     async def materialize(source: str, index: int) -> str:
         source = source.strip()
         if not source:
             raise RequestAdaptationError("Image references must not be empty.")
-        if source.lower().startswith(("http://", "https://", "data:image")):
+        if is_remote(source):
             target = os.path.join(uploads_dir, f"{request_id}_{index}")
             try:
                 local_path = await save_image_to_path(source, target)
             except Exception as error:
                 raise RequestAdaptationError(f"Unable to fetch image reference: {error}") from error
+            track(local_path)
         else:
             local_path = os.path.abspath(os.path.expanduser(source))
             if not os.path.isfile(local_path):
@@ -114,32 +158,45 @@ async def prepare_reference_media(
             raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
         return local_path
 
-    index = 0
-    references = _as_list(request.image_reference)
-    for reference in references:
-        if isinstance(reference, UrlImageReference):
-            reference.image_url = await materialize(reference.image_url, index)
+    try:
+        index = 0
+        for reference in _as_list(request.image_reference):
+            if isinstance(reference, UrlImageReference):
+                reference.image_url = await materialize(reference.image_url, index)
+                index += 1
+        if request.input_reference:
+            request.input_reference = await materialize(request.input_reference, index)
             index += 1
-    if request.input_reference:
-        request.input_reference = await materialize(request.input_reference, index)
-        index += 1
-    elif request.input_reference == "":
-        request.input_reference = None
-    if request.reference_url:
-        request.reference_url = await materialize(request.reference_url, index)
-    elif request.reference_url == "":
-        request.reference_url = None
+        elif request.input_reference == "":
+            request.input_reference = None
+        if request.reference_url:
+            request.reference_url = await materialize(request.reference_url, index)
+        elif request.reference_url == "":
+            request.reference_url = None
 
-    for index, reference in enumerate(_as_list(request.video_reference)):
-        if isinstance(reference, UrlVideoReference):
-            reference.video_url = await _materialize_video(reference.video_url,
-                                                           os.path.join(uploads_dir, f"{request_id}_video_{index}"))
-    if request.video_path:
-        request.video_path = await _materialize_video(request.video_path,
-                                                      os.path.join(uploads_dir, f"{request_id}_video_path"))
-    if request.video_url:
-        request.video_url = await _materialize_video(request.video_url,
-                                                     os.path.join(uploads_dir, f"{request_id}_video_url"))
+        for index, reference in enumerate(_as_list(request.video_reference)):
+            if isinstance(reference, UrlVideoReference):
+                remote = is_remote(reference.video_url)
+                reference.video_url = await _materialize_video(reference.video_url,
+                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"))
+                if remote:
+                    track(reference.video_url)
+        if request.video_path:
+            remote = is_remote(request.video_path)
+            request.video_path = await _materialize_video(request.video_path,
+                                                          os.path.join(uploads_dir, f"{request_id}_video_path"))
+            if remote:
+                track(request.video_path)
+        if request.video_url:
+            remote = is_remote(request.video_url)
+            request.video_url = await _materialize_video(request.video_url,
+                                                         os.path.join(uploads_dir, f"{request_id}_video_url"))
+            if remote:
+                track(request.video_url)
+    except Exception:
+        discard_materialized_media(created)
+        raise
+    return created
 
 
 def _video_sources(request: VideoGenerationRequest) -> list[str]:
