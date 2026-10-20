@@ -297,8 +297,7 @@ class WanSelfAttention(nn.Module):
                                    supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                                                  AttentionBackendEnum.FLASHINFER,
                                                                  AttentionBackendEnum.TORCH_SDPA,
-                                                                 AttentionBackendEnum.ATTN_QAT_INFER,
-                                                                 AttentionBackendEnum.FLASHINFER))
+                                                                 AttentionBackendEnum.ATTN_QAT_INFER))
 
     def forward(self, x: torch.Tensor, context: torch.Tensor, context_lens: int):
         r"""
@@ -731,7 +730,7 @@ class WanTransformerBlock_VSA(nn.Module):
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
-    _supported_attention_backends = WanVideoConfig()._supported_attention_backends + (AttentionBackendEnum.FLASHINFER,)
+    _supported_attention_backends = WanVideoConfig()._supported_attention_backends
     param_names_mapping = WanVideoConfig().param_names_mapping
     reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping

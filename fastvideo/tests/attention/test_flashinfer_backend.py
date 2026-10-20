@@ -54,6 +54,7 @@ def test_forward_preserves_bshd_contract_and_arguments(env_overrides, monkeypatc
 
 def test_cudnn_forward_flattens_batch_and_passes_token_offsets(env_overrides, monkeypatch) -> None:
     env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
+    monkeypatch.setattr(FlashInferImpl, "_check_cudnn_device", staticmethod(lambda device: None))
     FlashInferImpl._cudnn_workspaces.clear()
     calls = []
 
@@ -297,21 +298,35 @@ def test_wan_cuda_skip_precedes_distributed_setup(monkeypatch):
     with pytest.raises(pytest.skip.Exception, match="NVIDIA CUDA GPU"):
         test_wan_attention_executes_flashinfer(monkeypatch, Request(), torch.float16, False)
 @pytest.mark.parametrize("batch_size", [1, 2])
-def test_flashinfer_real_cudnn_kernel_matches_sdpa(env_overrides, monkeypatch, batch_size: int) -> None:
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal", [False, True])
+def test_flashinfer_real_cudnn_kernel_matches_sdpa(env_overrides, batch_size, dtype, causal) -> None:
     """Launch FlashInfer's dedicated batched cuDNN SDPA entry point."""
     _require_flashinfer_cuda()
+    if torch.cuda.get_device_capability() < (9, 0):
+        pytest.skip("FlashInfer cuDNN THD prefill requires Hopper (sm90) or newer")
     pytest.importorskip("flashinfer.prefill").cudnn_batch_prefill_with_kv_cache
     env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     torch.manual_seed(2)
     device = torch.device("cuda", torch.cuda.current_device())
-    query = torch.randn(batch_size, 128, 4, 128, device=device, dtype=torch.bfloat16)
-    key = torch.randn(batch_size, 192, 2, 128, device=device, dtype=torch.bfloat16)
+    query = torch.randn(batch_size, 128, 4, 128, device=device, dtype=dtype)
+    key = torch.randn(batch_size, 128 if causal else 192, 2, 128, device=device, dtype=dtype)
     value = torch.randn_like(key)
     scale = 128**-0.5
-    impl = FlashInferImpl(num_heads=4, num_kv_heads=2, head_size=128, causal=False, softmax_scale=scale)
+    impl = FlashInferImpl(num_heads=4, num_kv_heads=2, head_size=128, causal=causal, softmax_scale=scale)
 
     actual = impl.forward(query, key, value, FlashInferMetadata(current_timestep=0))
-    expected = _sdpa_reference(query, key, value, scale=scale)
+    expected = _sdpa_reference(query, key, value, scale=scale, causal=causal)
 
     torch.cuda.synchronize(device)
-    torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
+    tolerance = 3e-2 if dtype == torch.bfloat16 else 1e-2
+    torch.testing.assert_close(actual, expected, atol=tolerance, rtol=tolerance)
+
+
+def test_direct_cudnn_forward_rejects_unsupported_gpu(env_overrides, monkeypatch):
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
+    impl = FlashInferImpl(num_heads=4, head_size=128, causal=False, softmax_scale=0.125)
+    query = types.SimpleNamespace(device=torch.device("cuda:0"))
+    with pytest.raises(RuntimeError, match="Hopper.*sm90"):
+        impl._forward_cudnn(query, query, query, False)

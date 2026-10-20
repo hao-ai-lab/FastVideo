@@ -130,7 +130,14 @@ class FlashInferImpl(AttentionImpl):
             raise ValueError("FlashInfer cuDNN prefill requires head size 128 in FastVideo; "
                              f"got {head_size}. Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
 
+    @staticmethod
+    def _check_cudnn_device(device: torch.device) -> None:
+        if device.type != "cuda" or torch.cuda.get_device_capability(device) < (9, 0):
+            raise RuntimeError("FLASHINFER cuDNN THD prefill requires Hopper (sm90) or newer. "
+                               "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
+
     def _forward_cudnn(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, causal: bool) -> torch.Tensor:
+        self._check_cudnn_device(query.device)
         from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache
 
         batch_size, query_len = query.shape[:2]
