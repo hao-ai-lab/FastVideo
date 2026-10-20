@@ -11,8 +11,8 @@ owners; it is not an HTTP reference and does not restate endpoint behavior.
   document.
 - **Docs-site owner:** the HTTP reference route, copyable client examples, and
   reference navigation. Keep it separate from the Python SDK/CLI reference.
-- **Capacity owner (this lane):** hardware identity, memory estimates, and
-  evidence applicability. These fields never prove HTTP or model capability.
+- **Capacity owner:** hardware identity, memory estimates, and evidence
+  applicability. These fields never prove HTTP or model capability.
 
 OpenAPI is a schema description. It does not establish OpenAI API or SDK
 behavioral compatibility. Claim compatibility only for an exact endpoint,
@@ -38,7 +38,7 @@ FastAPI's default 422 schema when the mounted application does not return it.
 ## Workload IDs
 
 Use these shared IDs in runtime `workloads`, recipe/deployment `workload`, and
-capability rows. B owns the server-side implementation and endpoint mapping; C
+capability rows. The server owner implements endpoints and the docs-site owner
 renders from the declared input/output media rather than assuming video.
 
 | ID | Input | Output | Minimal semantics |
