@@ -44,7 +44,7 @@ finishes; caller-owned local paths are never deleted.
 | `openai_wan22_ti2v_5b.yaml` | Wan2.2 TI2V 5B | `t2v` | CUDA REST | none | Source-backed |
 | `openai_hunyuan15_t2v_480p.yaml` | HunyuanVideo 1.5 T2V 480p | `t2v` | CUDA REST | `hunyuan15-t2v-480p` | Source-backed |
 | `openai_kandinsky5_t2v.yaml` | Kandinsky-5.0 T2V Lite | `t2v` | CUDA REST | `kandinsky5-t2v` | Source-backed |
-| `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | `i2v` | CUDA REST | `hunyuan15-i2v-480p` | Source-backed |
+| `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | `i2v` | CUDA REST | `hunyuan15-i2v-480p` | Source-backed; preset renders 720x1280 |
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va` | Source-backed |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va-distilled` | Source-backed |
 | `openai_ltx2_distilled.yaml` | LTX2 Distilled | `t2v` | CUDA REST | `ltx2-distilled/cuda-rest` | Source-backed |
