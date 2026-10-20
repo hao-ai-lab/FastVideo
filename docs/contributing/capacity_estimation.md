@@ -248,10 +248,11 @@ load alone is insufficient. Record the effective request, including inherited de
 | `hardware`, `gpu_count` | Hardware catalog ID and actual device count |
 | `outcome`, `execution` | `completed`; `first_request` or `warm_request` |
 | `evidence_url` | Accessible HTTP(S) logs or benchmark evidence |
+| `context.runtime`, `context.deployment` | Serving runtime ID and the cookbook deployment ID used for the run; the deployment must exist and use that runtime |
 | `context.revisions` | `fastvideo` and `model`; optional `components` mapping by role |
 | `context.config` | Complete effective serving configuration, inline; matching model and GPU count |
 | `context.request` | Normalized request with `sampling.height`, `sampling.width`, and `sampling.num_frames` as positive integers |
-| `context.env` | Optional environment settings affecting the run, including backend selections |
+| `context.env` | Complete launch environment snapshot mapped to strings; use `{}` when none was set |
 | `memory` | Optional measurements described below |
 
 Prefer immutable code/checkpoint revisions; pin separately replaced components.
@@ -261,9 +262,12 @@ snapshot. Validation checks structure and identity, not completeness of runtime 
 
 ### Memory measurements
 
-If present, `memory` requires a `metric` (`torch_peak_allocated`,
-`torch_peak_reserved`, or `device_used`), `unit: GiB`, and a `per_gpu` entry for
-each rank `0` through `gpu_count - 1`, without duplicates. Every entry requires
+If present, `memory` requires a `metric`, matching `scope`, `unit: GiB`, and a
+`per_gpu` entry for each rank `0` through `gpu_count - 1`, without duplicates.
+`torch_peak_allocated` and `torch_peak_reserved` cover the PyTorch caching
+allocator (`scope: allocator`) and exclude the CUDA context and other processes.
+`device_used` covers whole-device usage (`scope: device`) and can support a fit
+comparison; allocator peaks cannot establish device fit by themselves. Every entry requires
 `request_peak`; `startup_peak` and named `stages` are optional. All peaks must be
 positive finite numbers; stage peaks use the same metric and cannot exceed `request_peak`.
 
@@ -272,6 +276,7 @@ This fragment uses **hypothetical values to illustrate the format**, not Wan mea
 ```yaml
 memory:
   metric: torch_peak_allocated
+  scope: allocator
   unit: GiB
   per_gpu:
     - rank: 0

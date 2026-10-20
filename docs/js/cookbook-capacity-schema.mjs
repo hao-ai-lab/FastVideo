@@ -1,5 +1,11 @@
 /** Shared validation for optional capacity fields in existing cookbook model manifests. */
 const ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+export const WEIGHT_FORMATS = new Set(["fp32", "fp16", "bf16", "fp8", "nvfp4"]);
+export const MEASUREMENT_SCOPES = {
+  torch_peak_allocated: "allocator",
+  torch_peak_reserved: "allocator",
+  device_used: "device",
+};
 export const CAPACITY_ROLES = {
   transformer: "transformer",
   transformer_2: "transformer",
@@ -55,10 +61,11 @@ function environment(value, context) {
 }
 
 function measurements(memory, gpuCount, context) {
-  keys(memory, ["metric", "unit", "per_gpu"], [], context);
+  keys(memory, ["metric", "unit", "scope", "per_gpu"], [], context);
+  requireValue(Object.hasOwn(MEASUREMENT_SCOPES, memory.metric), `${context}: unknown memory metric`);
   requireValue(
-    ["torch_peak_allocated", "torch_peak_reserved", "device_used"].includes(memory.metric),
-    `${context}: unknown memory metric`,
+    MEASUREMENT_SCOPES[memory.metric] === memory.scope,
+    `${context}: scope must be ${MEASUREMENT_SCOPES[memory.metric]} for ${memory.metric}`,
   );
   requireValue(memory.unit === "GiB", `${context}: memory unit must be GiB`);
   requireValue(
@@ -88,7 +95,7 @@ function measurements(memory, gpuCount, context) {
   }
 }
 
-function referenceRuns(model, hardware) {
+function referenceRuns(model, hardware, examples) {
   requireValue(Array.isArray(model.reference_runs), `${model.id}: reference_runs must be a list (empty is allowed)`);
   const ids = new Set();
   for (const run of model.reference_runs) {
@@ -117,7 +124,18 @@ function referenceRuns(model, hardware) {
     requireValue(run.outcome === "completed", `${at}: outcome must describe a completed generation`);
     requireValue(["first_request", "warm_request"].includes(run.execution), `${at}: unknown execution condition`);
     url(run.evidence_url, `${at}.evidence_url`);
-    keys(run.context, ["revisions", "config", "request"], ["env"], `${at}.context`);
+    keys(run.context, ["runtime", "deployment", "revisions", "config", "request", "env"], [], `${at}.context`);
+    requireValue(text(run.context.runtime), `${at}: record the serving runtime`);
+    requireValue(text(run.context.deployment), `${at}: record the cookbook deployment`);
+    if (examples !== undefined) {
+      const example = examples.find((item) => item.deployment_id === run.context.deployment);
+      requireValue(example, `${at}: unknown deployment ${run.context.deployment}`);
+      requireValue(
+        example.runtime === run.context.runtime,
+        `${at}: runtime ${run.context.runtime} does not match deployment ${example.deployment_id}`,
+      );
+    }
+    environment(run.context.env, `${at}.env`);
     keys(run.context.revisions, ["fastvideo", "model"], ["components"], `${at}.revisions`);
     requireValue(
       text(run.context.revisions.fastvideo) && text(run.context.revisions.model),
@@ -148,13 +166,12 @@ function referenceRuns(model, hardware) {
         integer(run.context.request.sampling[key]),
         `${at}: request sampling.${key} must be a positive integer`,
       );
-    if (run.context.env !== undefined) environment(run.context.env, `${at}.env`);
     if (run.memory !== undefined) measurements(run.memory, run.gpu_count, `${at}.memory`);
   }
 }
 
 /** Validate authored structure without resolving shared hardware/component catalogs. */
-export function validateCapacityMetadata(capacity, { modelId, hardware, context = "capacity" } = {}) {
+export function validateCapacityMetadata(capacity, { modelId, hardware, examples, context = "capacity" } = {}) {
   keys(capacity, ["memory_rules", "components"], ["sources", "reference_runs"], context);
   identifier(capacity.memory_rules, `${context}.memory_rules`);
   requireValue(
@@ -181,5 +198,6 @@ export function validateCapacityMetadata(capacity, { modelId, hardware, context 
       reference_runs: Object.hasOwn(capacity, "reference_runs") ? capacity.reference_runs : [],
     },
     hardware,
+    examples,
   );
 }

@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
 import { ROOT, buildCatalogs, readYaml, within } from "./build-cookbook-config.mjs";
-import { CAPACITY_ROLES, validateCapacityMetadata } from "./cookbook-capacity-schema.mjs";
+import { CAPACITY_ROLES, WEIGHT_FORMATS, validateCapacityMetadata } from "./cookbook-capacity-schema.mjs";
 
 const ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const GROUPS = { transformers: "transformer", encoders: "encoder", vaes: "vae" };
@@ -78,9 +78,9 @@ function hardwareRecords(document, context) {
       requireValue(
         Array.isArray(hardware.supported_dtypes) &&
           hardware.supported_dtypes.length > 0 &&
-          hardware.supported_dtypes.every(text) &&
+          hardware.supported_dtypes.every((value) => WEIGHT_FORMATS.has(value)) &&
           new Set(hardware.supported_dtypes).size === hardware.supported_dtypes.length,
-        `${at}: supported_dtypes must be a nonempty unique text list`,
+        `${at}: supported_dtypes must be a nonempty unique list of ${[...WEIGHT_FORMATS].join(", ")}`,
       );
     sources(hardware.sources, `${at}.sources`);
   }
@@ -186,7 +186,12 @@ export function buildCapacityCatalog({
       })),
       reference_runs: manifest.capacity.reference_runs ?? [],
     };
-    validateCapacityMetadata(manifest.capacity, { modelId: model.model_id, hardware, context: `${path}: capacity` });
+    validateCapacityMetadata(manifest.capacity, {
+      modelId: model.model_id,
+      hardware,
+      examples: model.examples,
+      context: `${path}: capacity`,
+    });
     for (const [role, selection] of Object.entries(model.components)) {
       const refs = [selection.ref, ...(selection.alternatives ?? [])];
       for (const ref of refs) {

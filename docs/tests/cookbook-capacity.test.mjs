@@ -174,6 +174,8 @@ function referenceRun(f) {
     execution: "warm_request",
     evidence_url: "https://example.test/fixture-run",
     context: {
+      runtime: "fixture-rest",
+      deployment: "example-model/cuda-rest",
       revisions: { fastvideo: "a".repeat(40), model: "b".repeat(40) },
       config,
       request: { sampling: { height: 480, width: 832, num_frames: 81 } },
@@ -182,6 +184,7 @@ function referenceRun(f) {
     memory: {
       metric: "torch_peak_reserved",
       unit: "GiB",
+      scope: "allocator",
       per_gpu: [
         { rank: 0, request_peak: 8, startup_peak: 10, stages: { denoising_stage: 7, decoding_stage: 8 } },
         { rank: 1, request_peak: 7, stages: { denoising_stage: 6, decoding_stage: 7 } },
@@ -442,6 +445,23 @@ test("hardware and components require source URLs and do not fix a runtime dtype
   assert.throws(() => buildCapacityCatalog({ root: f.root }), /dtype|unknown|unsupported/i);
 });
 
+test("hardware format names are known, unique and nonempty", (t) => {
+  const f = fixture(t);
+  const hardware = f.hardware.hardware["example-gpu"];
+  for (const value of [["bf16", "bf16"], ["bf16", "int2"], ["bf16", ""], []]) {
+    hardware.supported_dtypes = value;
+    f.save();
+    assert.throws(() => buildCapacityCatalog({ root: f.root }), /supported_dtypes/);
+  }
+  hardware.supported_dtypes = ["fp32", "bf16", "nvfp4"];
+  f.save();
+  assert.deepEqual(buildCapacityCatalog({ root: f.root }).hardware["example-gpu"].supported_dtypes, [
+    "fp32",
+    "bf16",
+    "nvfp4",
+  ]);
+});
+
 test("capacity identity and examples follow the existing manifest deployments and baseline", (t) => {
   const f = fixture(t);
   f.manifest.title = "Updated title";
@@ -558,6 +578,12 @@ test("reference runs reject inconsistent hardware, configuration and measurement
     ["failed execution", (run) => (run.outcome = "oom")],
     ["missing evidence", (run) => delete run.evidence_url],
     ["evidence URL must be text", (run) => (run.evidence_url = [run.evidence_url])],
+    ["missing runtime", (run) => delete run.context.runtime],
+    ["unknown deployment", (run) => (run.context.deployment = "example-model/other")],
+    ["runtime does not match deployment", (run) => (run.context.runtime = "other-rest")],
+    ["missing env snapshot", (run) => delete run.context.env],
+    ["missing measurement scope", (run) => delete run.memory.scope],
+    ["measurement scope disagrees with metric", (run) => (run.memory.scope = "device")],
   ];
   for (const [name, change] of cases) {
     const run = referenceRun(f);
