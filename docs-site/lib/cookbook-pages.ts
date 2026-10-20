@@ -10,7 +10,6 @@ export const recipePages = [
     path: "/cookbook/minimax-h3/fasth3-8step",
     description: "Distilled MiniMax-H3 video generation with synchronized audio.",
     tags: ["Text to video", "Audio", "8-step"],
-    featured: true,
   },
   {
     id: "fasth3-trim",
@@ -38,6 +37,16 @@ export const recipePages = [
     path: "/cookbook/minimax-h3/fasth3-4step",
     description: "FastH3 V1 on one DGX Spark with offloaded encoders and lazy module loading.",
     tags: ["Text to video", "Audio", "DGX Spark"],
+  },
+  {
+    id: "fasth3-omniref",
+    family: "MiniMax H3",
+    title: "FastH3 OmniRef",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-omniref",
+    description: "Video and audio from a prompt plus ordered image, video, and audio references.",
+    tags: ["Reference to video", "Audio", "NVFP4"],
+    featured: true,
   },
   {
     id: "fastwan21",
@@ -113,6 +122,7 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4": "fasth3-trim",
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
+  "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",

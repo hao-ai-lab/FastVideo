@@ -151,6 +151,10 @@
             "href": "/cookbook/minimax-h3/models/minimax-h3-t2v"
           },
           {
+            "label": "FastH3 OmniRef",
+            "href": "/cookbook/minimax-h3/fasth3-omniref"
+          },
+          {
             "label": "FastH3 8-Step V2",
             "href": "/cookbook/minimax-h3/fasth3-8step"
           },

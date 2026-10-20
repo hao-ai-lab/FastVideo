@@ -48,8 +48,19 @@ export function inferenceOutput(result: Result, imagePath?: string) {
   const generator = result.config.generator as Record<string, Value>;
   const pipeline = generator.pipeline as Record<string, Value> | undefined;
   const inputs = { ...((defaults.inputs ?? {}) as Record<string, Value>) };
-  if (imagePath !== undefined) inputs.image_path = imagePath.trim();
-  const images = Array.isArray(inputs.image_path) ? inputs.image_path : [inputs.image_path];
+  const components = pipeline?.components as Record<string, Value> | undefined;
+  // Ref2VA pipelines read ordered references, not a first-frame image.
+  const ref2va = /ref2va/i.test(String(components?.override_pipeline_cls_name ?? ""));
+  if (imagePath !== undefined && imagePath.trim()) {
+    if (ref2va) inputs.references = [{ source: imagePath.trim(), media_type: "image" }];
+    else inputs.image_path = imagePath.trim();
+  } else if (imagePath !== undefined && !ref2va) inputs.image_path = imagePath.trim();
+  const references = Array.isArray(inputs.references) ? (inputs.references as Record<string, Value>[]) : [];
+  const images = ref2va
+    ? references.map((reference) => reference.source)
+    : Array.isArray(inputs.image_path)
+      ? inputs.image_path
+      : [inputs.image_path];
   if (pipeline?.workload_type === "i2v" && !images.some((image) => typeof image === "string" && image.trim())) {
     throw new Error("Enter a source image path before copying a CLI or Python SDK example.");
   }

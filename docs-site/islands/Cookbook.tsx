@@ -528,7 +528,7 @@ function Editor({
                   if (catalog.id !== deployment.id) selectRuntime(deployment.id);
                 }}
               >
-                {deployment.runtime.includes("mlx") ? "MLX" : "CUDA"}
+                {deploymentLabel(deployment, deployments)}
               </button>
             ))}
           </div>
@@ -794,7 +794,7 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
                 aria-pressed={selected === deployment.id}
                 onClick={() => select(deployment.id)}
               >
-                {deployment.runtime.includes("mlx") ? "MLX" : "CUDA"}
+                {deploymentLabel(deployment, model?.deployments ?? [])}
               </button>
             ))}
           </div>
@@ -821,6 +821,15 @@ function fitParallelism(fields: Field[], edits: Record<string, Value>, gpus: num
     return typeof size === "number" && size > 0 && (size > gpus || gpus % size !== 0);
   });
   return stale.length ? { ...edits, ...Object.fromEntries(stale.map((field) => [field.path, -1])) } : edits;
+}
+
+type DeploymentChoice = { runtime: string; label: string };
+
+/** Backend name when it is unique; the deployment's hardware label when several share a backend. */
+function deploymentLabel(deployment: DeploymentChoice, deployments: DeploymentChoice[]) {
+  const backend = (item: DeploymentChoice) => (item.runtime.includes("mlx") ? "MLX" : "CUDA");
+  if (deployments.filter((item) => backend(item) === backend(deployment)).length < 2) return backend(deployment);
+  return deployment.label.replace(/\s*REST$/i, "");
 }
 
 /** Mirrors the editor: MLX and WebSocket deployments offer serving only. */

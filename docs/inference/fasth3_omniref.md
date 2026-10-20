@@ -12,6 +12,18 @@ This page covers running the NVFP4 stack on one consumer Blackwell device
 (RTX 5090, RTX PRO 6000, DGX Spark) and the closest equivalent on an RTX 4090,
 which has no FP4 hardware.
 
+## At a glance
+
+| | |
+|---|---|
+| Checkpoint | [FastVideo/FastH3-OmniRef-NVFP4-QAD](https://huggingface.co/FastVideo/FastH3-OmniRef-NVFP4-QAD) |
+| Inputs | A prompt plus ordered references: up to 9 images, 3 videos and 3 audio clips, 12 in total |
+| Output | Video with synchronized stereo audio at 24 fps |
+| Clip length | 124, 243 or 362 frames (5, 10 or 15 seconds) |
+| Sampling | 8 fused transformer forwards, guidance 1.0 |
+| Local hardware | RTX 5090, RTX PRO 6000 and DGX Spark (NVFP4); RTX 4090 (FP8) |
+| Cookbook | [MiniMax H3 cookbook](../cookbook/minimax-h3.md) |
+
 ## Composing the model directory
 
 The NVFP4 checkpoint is
@@ -113,6 +125,28 @@ sits 4.3 dB farther from the bf16 attention reference on every frame (20.96 vs
 25.26 dB PSNR; SSIM 0.785 vs 0.852; structural correlation 0.864 vs 0.945).
 Use the 36L decoder for the best-quality clip and the 8L decoder on memory-bound
 devices; both run the FP8 split.
+
+## Serving
+
+`examples/serving/openai_fasth3_omniref_{rtx5090,rtx_pro6000,spark}.yaml` serve
+the same stacks through the OpenAI-compatible API; their `generator` blocks match
+the inference recipes above. Start one with the environment from its header:
+
+```bash
+fastvideo serve --config examples/serving/openai_fasth3_omniref_spark.yaml
+```
+
+Requests send ordered `image_reference`, `video_reference` and audio references.
+The server reads local paths only under `server.media_roots`. These serving
+configurations follow the maintained inference recipes and have not yet been
+validated as servers on each device.
+
+Select the NVFP4 decoder per configuration with
+`generator.pipeline.experimental.h3_vae_nvfp4_decoder`, pointing at a file from
+[FastVideo/FastH3-NVFP4-VAE-Decoder](https://huggingface.co/FastVideo/FastH3-NVFP4-VAE-Decoder);
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` remains the fallback. The composed directory
+holds base MiniMax-H3's full 36-block VAE, so both the 36-block quality tier and
+the 8-block fast tier apply.
 
 ## Environment
 

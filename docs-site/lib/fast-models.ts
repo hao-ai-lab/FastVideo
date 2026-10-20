@@ -2,11 +2,23 @@ export const families = [
   {
     name: "FastH3",
     mark: "H3",
-    summary: "Distilled MiniMax-H3 video with synchronized audio.",
+    summary: "Distilled MiniMax-H3 video with synchronized audio, from text or ordered references.",
     collection: "https://huggingface.co/collections/FastVideo/fasth3-v2",
     guide: "/cookbook/minimax-h3",
-    detail: "8-step V2 \u00b7 FP8 and NVFP4 exports",
+    detail: "OmniRef \u00b7 8-step V2 \u00b7 QAD v2 \u00b7 FP8 and NVFP4 exports \u00b7 NVFP4 VAE decoder",
     models: [
+      {
+        id: "FastH3-OmniRef-NVFP4-QAD",
+        url: "https://huggingface.co/FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      },
+      {
+        id: "FastH3-QAD-v2",
+        url: "https://huggingface.co/FastVideo/FastH3-QAD-v2",
+      },
+      {
+        id: "FastH3-NVFP4-VAE-Decoder",
+        url: "https://huggingface.co/FastVideo/FastH3-NVFP4-VAE-Decoder",
+      },
       {
         id: "FastVideo-FastH3-8-Step-V2",
         url: "https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2",

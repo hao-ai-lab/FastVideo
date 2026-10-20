@@ -858,6 +858,67 @@
         "install": "Install FastVideo following the DGX Spark installation guide.",
         "audio": true
       }
+    },
+    {
+      "id": "fasth3-omniref-rtx5090",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX 5090",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-5090 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-rtx-pro6000",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX PRO 6000",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-pro-6000 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on DGX Spark",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile spark --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
     }
   ]
 }

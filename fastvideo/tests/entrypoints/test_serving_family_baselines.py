@@ -43,6 +43,9 @@ BASELINES = {
     "openai_sd35.yaml": "t2i",
     "openai_stable_audio.yaml": "t2a",
     "openai_mmaudio.yaml": "v2a",
+    "openai_fasth3_omniref_rtx5090.yaml": "i2v",
+    "openai_fasth3_omniref_rtx_pro6000.yaml": "i2v",
+    "openai_fasth3_omniref_spark.yaml": "i2v",
 }
 
 
@@ -67,6 +70,18 @@ def test_family_baseline_declares_workload_and_parses(name: str, workload: str) 
     config = _load(name)
     assert config.generator.pipeline.workload_type == workload
     assert config.server.served_model_name
+
+
+@pytest.mark.parametrize("device", ["rtx5090", "rtx_pro6000", "spark"])
+def test_omniref_serving_matches_its_maintained_inference_recipe(device: str) -> None:
+    served = yaml.safe_load((ROOT / "examples" / "serving" / f"openai_fasth3_omniref_{device}.yaml").read_text())
+    recipe = yaml.safe_load(
+        (ROOT / "examples" / "inference" / "basic" / f"basic_fasth3_omniref_{device}.yaml").read_text())
+    assert served["generator"] == recipe["generator"]
+    assert served["generator"]["pipeline"]["components"]["override_pipeline_cls_name"] == (
+        "MiniMaxH3Ref2VAModularPipeline")
+    for key in ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale"):
+        assert served["default_request"]["sampling"][key] == recipe["request"]["sampling"][key], key
 
 
 def test_hunyuan_i2v_480p_keeps_the_registered_checkpoint_semantics(tmp_path: Path) -> None:
