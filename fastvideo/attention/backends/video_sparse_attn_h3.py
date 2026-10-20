@@ -54,10 +54,12 @@ logs one warning and falls back.
 
 Tile 128 prefers the same ptx_blackwell forward, which carries a 128-token
 block instantiation. It needs no opt-in, pads an odd tile count with the same
-zero-valid partner tile, and runs no-grad forwards only. When the extension or
-device cannot run it, each 128-token tile splits into two contiguous 64-token
-halves on the Triton kernels; if those are not installed either, the call fails
-closed.
+zero-valid partner tile, and runs no-grad forwards only. On a GB10 (DGX Spark,
+sm_121), where that kernel cannot run, the 128-token sm_121a forward
+(``fastvideo_kernel.block_sparse_attn_sm121``) takes the call, which needs no
+partner tile. When neither the extension nor the device can run one of them,
+each 128-token tile splits into two contiguous 64-token halves on the Triton
+kernels; if those are not installed either, the call fails closed.
 """
 
 import functools
@@ -84,6 +86,12 @@ try:
     from fastvideo_kernel import block_sparse_attn_ptx_blackwell as _ptx_blackwell
 except ImportError:
     _ptx_blackwell = None
+
+try:
+    # Optional, the same way: the GB10 (sm_121a) 128-token forward.
+    from fastvideo_kernel import block_sparse_attn_sm121 as _sm121
+except ImportError:
+    _sm121 = None
 
 import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
@@ -561,6 +569,23 @@ def _is_datacenter_blackwell(device: torch.device) -> bool:
     return device.type == "cuda" and torch.cuda.get_device_capability(device)[0] == 10
 
 
+def _is_gb10(device: torch.device) -> bool:
+    """sm_121 (DGX Spark), the device the sm_121a tile-128 kernel targets."""
+    return device.type == "cuda" and torch.cuda.get_device_capability(device) == (12, 1)
+
+
+def _sm121_unavailable_reason(query_bhsd: torch.Tensor, variable_block_sizes: torch.Tensor) -> str | None:
+    """Why the GB10 (sm_121a) 128-token forward cannot run here, or None if it can."""
+    if _sm121 is None:
+        return "fastvideo_kernel.block_sparse_attn_sm121 is not installed"
+    if map_to_index is None:
+        return "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+    if not _sm121.is_supported(query_bhsd, variable_block_sizes):
+        return ("block_sparse_attn_sm121.is_supported returned False (needs a GB10 and a fastvideo-kernel built "
+                "with TORCH_CUDA_ARCH_LIST containing 12.1a and CUDA >= 13, bf16, head_dim 128)")
+    return None
+
+
 @functools.cache
 def _fine_attention_from_name(name: str) -> Any:
     kind, _, mode = name.partition("-")
@@ -610,12 +635,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_ptx_blackwell_enabled: bool | None = None
-        # Tile-128 route per (device, dtype, head size): None when the CUDA
-        # kernel can run it, else why not. The kernel's predicate otherwise
-        # depends only on the tile-128 buffer contract (contiguous BHSD,
-        # 128-token blocks, an even tile count with the partner tile, integer
-        # tile sizes), which every call meets, so it is evaluated once.
-        self._tile128_route: dict[tuple[torch.device, torch.dtype, int], str | None] = {}
+        # Tile-128 route per (device, dtype, head size): the kernel that runs
+        # it ("ptx_blackwell", "sm121" or "split", see _tile128_route) and why
+        # the faster ones cannot (None for ptx_blackwell). The kernels'
+        # predicates otherwise depend only on the tile-128 buffer contract
+        # (contiguous BHSD, 128-token blocks, the partner tile where
+        # ptx_blackwell needs one, integer tile sizes), which every call meets,
+        # so they are evaluated once; only the sm121 kernel's launch-size
+        # limits are checked per call.
+        self._tile128_routes: dict[tuple[torch.device, torch.dtype, int], tuple[str, str | None]] = {}
         # Optional replacement of the fine block-sparse kernel only (selection,
         # mask and the gated compression branch are unchanged). Called as
         # ``fn(query, key, value, mask, metadata) -> [B, S, H, D]`` on the
@@ -679,6 +707,45 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             logger.warning_once(f"VSA-H3 regional compile is unavailable and will stay eager: {reason}")
         return reason
 
+    def _tile128_route(self, device: torch.device, dtype: torch.dtype, head_size: int,
+                       compiling: bool) -> tuple[str, str | None]:
+        """The no-grad tile-128 route on this device: ``(kernel, reason)``.
+
+        ``kernel`` is "ptx_blackwell" (sm_100/sm_103, an even tile count),
+        "sm121" (GB10, any tile count) or "split" (each tile as two halves on
+        the Triton tile-64 kernels); ``reason`` says why the faster kernels
+        cannot run, None for ptx_blackwell. Resolved once per key on a
+        two-tile probe, before ``tile()`` decides whether to add the partner
+        tile only ptx_blackwell needs.
+        """
+        route_key = (device, dtype, head_size)
+        route = self._tile128_routes.get(route_key)
+        if route is not None:
+            return route
+        probe_query = torch.empty((1, 1, 2 * 128, head_size), device=device, dtype=dtype)
+        probe_block_sizes = torch.full((2, ), 128, device=device, dtype=torch.int32)
+        reason = _ptx_blackwell_unavailable_reason(_ptx_blackwell, probe_query, probe_block_sizes, grad_mode=False)
+        if reason is None and map_to_index is None:
+            reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+        if reason is None:
+            route = ("ptx_blackwell", None)
+        else:
+            sm121_reason = _sm121_unavailable_reason(probe_query, probe_block_sizes)
+            if sm121_reason is None:
+                route = ("sm121", reason)
+            else:
+                route = ("split", f"ptx_blackwell: {reason}; sm_121a: {sm121_reason}")
+                # These GPUs should have a native kernel; a broken build would
+                # otherwise only show up as a slow run.
+                if not compiling and _is_datacenter_blackwell(device):
+                    logger.warning_once(f"VSA-H3 tile 128 on a data-center Blackwell GPU is falling back to "
+                                        f"the slower Triton tile-64 kernels: {reason}.")
+                elif not compiling and _is_gb10(device):
+                    logger.warning_once(f"VSA-H3 tile 128 on a GB10 is falling back to the slower Triton tile-64 "
+                                        f"kernels: {sm121_reason}.")
+        self._tile128_routes[route_key] = route
+        return route
+
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
 
@@ -687,9 +754,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         sites in ``forward()`` read it immediately). A grad-tracking forward
         instead receives a fresh buffer and leaves the holder untouched, so
         the builder never retains autograd state across steps. Odd no-grad
-        ptx_blackwell requests (tile 128 always, tile 64 when opted in) carry one
-        additional all-zero tile internally; metadata and all observable
-        outputs retain the logical geometry.
+        ptx_blackwell requests (tile 128 when it routes there, tile 64 when
+        opted in) carry one additional all-zero tile internally; metadata and
+        all observable outputs retain the logical geometry.
         """
         compiling = torch.compiler.is_compiling()
         regional_compiling = compiling and self._regional_compile_ptx_blackwell_enabled is True
@@ -706,9 +773,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             ptx_blackwell_requested = False
         else:
             ptx_blackwell_requested = envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
-        # Tile 128 has no route other than the ptx_blackwell CUDA kernel.
-        ptx_blackwell_route = attn_metadata.tile_elems == 128 or (attn_metadata.tile_elems == 64
-                                                                  and ptx_blackwell_requested)
+        # Tile 128 picks its kernel by device; only ptx_blackwell needs the partner tile.
+        # An eager fine-attention override reads the logical rows and runs no kernel.
+        if attn_metadata.tile_elems == 128 and self.fine_attention_override is not None and not compiling:
+            ptx_blackwell_route = False
+        elif attn_metadata.tile_elems == 128:
+            ptx_blackwell_route = (not grad_mode and not regional_compiling and self._tile128_route(
+                x.device, x.dtype, int(x.shape[-1]), compiling)[0] == "ptx_blackwell")
+        else:
+            ptx_blackwell_route = attn_metadata.tile_elems == 64 and ptx_blackwell_requested
         if regional_compiling:
             # Pad arithmetically so odd and even tile counts share one graph.
             needs_ptx_blackwell_pair, kernel_tiles = False, n_tiles + n_tiles % 2
@@ -917,30 +990,32 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # fwd/bwd pairing is possible, but it is not built here.
             grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad)
             use_ptx_blackwell = False
+            use_sm121 = False
             split_tile128 = False
             if tile_elems == 128:
-                # The CUDA kernel's 128-token instantiation needs no opt-in; without it,
-                # the Triton tile-64 kernels run each tile as two halves.
+                # The CUDA kernel's 128-token instantiation needs no opt-in; on a GB10
+                # its sm_121a counterpart runs the call; without either, the
+                # Triton tile-64 kernels run each tile as two halves.
                 if grad_mode:
                     raise NotImplementedError("VSA-H3 tile 128 supports no-grad inference forwards only.")
-                route_key = (q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]))
-                if route_key not in self._tile128_route:
-                    reason = _ptx_blackwell_unavailable_reason(_ptx_blackwell, q_bhsd,
-                                                               ptx_blackwell_variable_block_sizes, grad_mode)
-                    if reason is None and map_to_index is None:
-                        reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
-                    if reason is not None and not compiling and _is_datacenter_blackwell(q_bhsd.device):
-                        # These GPUs should have the native kernel; a broken build
-                        # would otherwise only show up as a slow run.
-                        logger.warning_once(f"VSA-H3 tile 128 on a data-center Blackwell GPU is falling back to "
-                                            f"the slower Triton tile-64 kernels: {reason}.")
-                    self._tile128_route[route_key] = reason
-                reason = self._tile128_route[route_key]
-                if reason is None:
+                kernel, reason = self._tile128_route(q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]), compiling)
+                if kernel == "sm121" and not _sm121.within_launch_limits(q_bhsd, n_tiles + pair_tiles):
+                    # Too large for one launch (batch * heads, rows or tiles); this call only.
+                    if not compiling:
+                        logger.warning_once("VSA-H3 tile 128: a call exceeds the GB10 kernel's launch limits; "
+                                            "it runs on the Triton tile-64 kernels")
+                    kernel, reason = "split", f"{reason}; sm_121a: the call exceeds its launch limits"
+                if kernel == "ptx_blackwell" and (n_tiles + pair_tiles) % 2 != 0:
+                    # Only tile() adds the partner tile; a call that skipped it cannot run there.
+                    kernel, reason = "split", "ptx_blackwell: an odd tile count without the partner tile"
+                if kernel == "ptx_blackwell":
                     use_ptx_blackwell = True
+                elif kernel == "sm121":
+                    use_sm121 = True
                 elif block_sparse_attn_64_bhsd is None:
-                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel or "
-                                       f"the Triton tile-64 kernels: {reason}.")
+                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel "
+                                       f"(sm_100/sm_103), the GB10 block-sparse kernel (fastvideo-kernel built for "
+                                       f"sm_121a) or the Triton tile-64 kernels: {reason}.")
                 else:
                     split_tile128 = True
             elif regional_compiling:
@@ -1003,6 +1078,21 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         ptx_blackwell_variable_block_sizes.to(torch.int32),
                         need_lse=False,
                     )
+            elif use_sm121:
+                # The GB10 counterpart of the call above: the same mask and
+                # per-row counts, output only. It takes any tile count, so
+                # tile() adds no partner tile on this route.
+                if not compiling:
+                    logger.info_once("MiniMax-H3 VSA tile-128 forward: using the GB10 (sm_121a) block-sparse kernel")
+                q2k_idx, q2k_num = map_to_index(ptx_blackwell_mask)
+                out_bhsd, _ = _sm121.block_sparse_attn_sm121(
+                    q_bhsd,
+                    k_bhsd,
+                    v_bhsd,
+                    q2k_idx,
+                    q2k_num,
+                    ptx_blackwell_variable_block_sizes.to(torch.int32),
+                )
             else:
                 if has_ptx_blackwell_pair:
                     q_bhsd = q_bhsd[:, :, :logical_seq_len]
@@ -1011,7 +1101,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     if not sm89_strided:
                         q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
                 if split_tile128:
-                    # No sm_100a kernel on this device: run each 128-token tile as two
+                    # No sm_100a or sm_121a kernel on this device: run each 128-token tile as two
                     # contiguous 64-token halves on the Triton kernels. Every half inherits
                     # its tile's mask entries, and a partial tile's valid tokens fill the
                     # first half before the second, so the selection is unchanged.
@@ -1037,7 +1127,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         mask,
                         attn_metadata.variable_block_sizes,
                     )
-            if has_ptx_blackwell_pair and use_ptx_blackwell:
+            if has_ptx_blackwell_pair and (use_ptx_blackwell or use_sm121):
                 out_bhsd = out_bhsd[:, :, :logical_seq_len]
             out = out_bhsd.transpose(1, 2).contiguous()
             # Fine attention is complete. Release its layout copies before the

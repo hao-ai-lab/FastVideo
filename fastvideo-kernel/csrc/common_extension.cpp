@@ -52,6 +52,12 @@ extern std::vector<torch::Tensor> block_sparse_ptx_blackwell_blk128_bwd(
     torch::Tensor variable_block_sizes, double sm_scale);
 #endif
 
+#ifdef FASTVIDEO_KERNEL_COMPILE_BLOCK_SPARSE_VSA_SM121
+extern std::vector<torch::Tensor> block_sparse_sm121_blk128_fwd(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor q2k_idx, torch::Tensor q2k_num,
+    torch::Tensor variable_block_sizes);
+#endif
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "FastVideo CUDA Kernels";
 
@@ -68,6 +74,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("block_sparse_ptx_blackwell_blk128_bwd",
           torch::wrap_pybind_function(block_sparse_ptx_blackwell_blk128_bwd),
           "VSA block-sparse attention backward, 128-token blocks (Blackwell sm100a/sm103a)");
+#endif
+
+#ifdef FASTVIDEO_KERNEL_COMPILE_BLOCK_SPARSE_VSA_SM121
+    m.def("block_sparse_sm121_blk128_fwd",
+          torch::wrap_pybind_function(block_sparse_sm121_blk128_fwd),
+          "VSA block-sparse attention forward, 128-token blocks, inference only (GB10 / DGX Spark, sm121a)");
 #endif
 
 #ifdef TK_COMPILE_ST_ATTN

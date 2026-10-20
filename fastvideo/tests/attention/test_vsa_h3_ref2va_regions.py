@@ -424,6 +424,25 @@ class _FakePtxBlackwell:
         return q.clone(), None
 
 
+class _FakeSm121:
+    """Stands in for fastvideo_kernel.block_sparse_attn_sm121 (the GB10 128-token forward)."""
+
+    def __init__(self, supported=True, within_limits=True):
+        self.supported = supported
+        self.within_limits = within_limits
+        self.calls = []
+
+    def is_supported(self, q, variable_block_sizes):
+        return self.supported
+
+    def within_launch_limits(self, q, num_blocks):
+        return self.within_limits
+
+    def block_sparse_attn_sm121(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes):
+        self.calls.append(dict(q=q, q2k_num=q2k_num, vbs=variable_block_sizes))
+        return q.clone(), None
+
+
 def _fake_map_to_index(block_map):
     num = block_map.sum(dim=-1, dtype=torch.int32)
     idx = torch.full(block_map.shape, -1, dtype=torch.int32)
@@ -441,6 +460,8 @@ def tile128(monkeypatch, env_overrides):
         raise AssertionError("tile 128 must never fall back to the Triton-64 kernel")
 
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake)
+    # The GB10 kernel is absent unless a test installs its fake.
+    monkeypatch.setattr(vsa_h3, "_sm121", None)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", forbid_triton)
     # Tile 128 has no opt-in: it routes to the CUDA kernel with the switch off.
@@ -482,6 +503,7 @@ def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
 def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
     tile128.supported = False
     calls = []
 
@@ -490,7 +512,9 @@ def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile1
         return torch.zeros_like(q), None
 
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", triton)
-    _, out = _run_tile128(meta)
+    tiled, out = _run_tile128(meta)
+    # The split route needs no partner tile either.
+    assert tiled.shape[1] == n_tiles * 128
     assert len(calls) == 1
     q, mask, vbs = calls[0]
     assert q.shape[2] == n_tiles * 128
@@ -501,26 +525,119 @@ def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile1
     assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
 
 
-@pytest.mark.parametrize("datacenter", [False, True])
-def test_forward_tile128_fallback_warns_only_on_datacenter_blackwell(tile128, monkeypatch, datacenter):
+def test_forward_tile128_uses_sm121_kernel_when_ptx_blackwell_unavailable(tile128, monkeypatch):
+    """On a GB10 the sm_121a forward takes the call with the logical tile count: no partner tile, even when odd."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    tile128.supported = False
+    sm121 = _FakeSm121()
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    tiled, out = _run_tile128(meta)
+    assert tiled.shape[1] == n_tiles * 128
+    assert tile128.calls == [] and len(sm121.calls) == 1
+    call = sm121.calls[0]
+    assert call["q"].shape[2] == n_tiles * 128
+    assert call["vbs"].dtype == torch.int32 and call["vbs"].numel() == n_tiles
+    assert call["q2k_num"].shape[-1] == n_tiles
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_forward_tile128_sm121_call_past_launch_limits_runs_split(tile128, monkeypatch):
+    """A call too large for one GB10 launch takes the Triton split route instead of failing in the binding."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    tile128.supported = False
+    sm121 = _FakeSm121(within_limits=False)
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
+    _, out = _run_tile128(meta)
+    assert sm121.calls == [] and len(calls) == 1 and calls[0][2] == n_tiles * 128
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_forward_tile128_odd_call_without_partner_tile_runs_split(tile128, monkeypatch):
+    """ptx_blackwell needs an even tile count; a call that skipped tile()'s partner tile falls back to Triton."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
+    impl = _impl(_DIM)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+    query, key, value = impl.preprocess_qkv(raw, meta)[:, :n_tiles * 128].chunk(3, dim=0)
+    out = impl.forward(query, key, value, None, meta)
+    assert tile128.calls == [] and len(calls) == 1 and calls[0][2] == n_tiles * 128
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_tile128_fine_attention_override_skips_kernel_routing(tile128):
+    """An eager override runs no kernel: tile() neither probes the route nor adds the partner tile."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    probes, calls = [], []
+    tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
+    impl = _impl(_DIM)
+    impl.fine_attention_override = lambda q, k, v, mask, metadata: calls.append(q.shape) or torch.zeros_like(q)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+    tiled = impl.preprocess_qkv(raw, meta)
+    assert tiled.shape[1] == n_tiles * 128 and probes == []
+    query, key, value = tiled.chunk(3, dim=0)
+    out = impl.forward(query, key, value, None, meta)
+    assert len(calls) == 1 and tile128.calls == [] and probes == []
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_forward_tile128_prefers_ptx_blackwell_over_sm121(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    sm121 = _FakeSm121()
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    _run_tile128(meta)
+    assert len(tile128.calls) == 1 and sm121.calls == []
+
+
+def test_forward_tile128_falls_back_to_triton_when_sm121_unsupported(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    tile128.supported = False
+    sm121 = _FakeSm121(supported=False)
+    monkeypatch.setattr(vsa_h3, "_sm121", sm121)
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
+    _run_tile128(meta)
+    assert len(calls) == 1 and sm121.calls == []
+
+
+@pytest.mark.parametrize("device_kind", ["other", "datacenter", "gb10"])
+def test_forward_tile128_fallback_warns_only_where_a_native_kernel_belongs(tile128, monkeypatch, device_kind):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False
     warnings = []
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", lambda q, k, v, mask, vbs: (torch.zeros_like(q), None))
-    monkeypatch.setattr(vsa_h3, "_is_datacenter_blackwell", lambda device: datacenter)
+    monkeypatch.setattr(vsa_h3, "_is_datacenter_blackwell", lambda device: device_kind == "datacenter")
+    monkeypatch.setattr(vsa_h3, "_is_gb10", lambda device: device_kind == "gb10")
     monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
     _run_tile128(meta)
-    assert len(warnings) == int(datacenter)
-    if datacenter:
-        assert "falling back to the slower Triton tile-64 kernels" in warnings[0]
+    assert len(warnings) == int(device_kind != "other")
+    if device_kind == "datacenter":
+        assert "data-center Blackwell GPU is falling back to the slower Triton tile-64 kernels" in warnings[0]
+    elif device_kind == "gb10":
+        assert "on a GB10 is falling back to the slower Triton tile-64 kernels" in warnings[0]
+        assert "block_sparse_attn_sm121 is not installed" in warnings[0]
 
 
 def test_forward_tile128_unavailable_cuda_kernel_and_triton(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", None)
-    with pytest.raises(RuntimeError, match="tile 128 requires the ptx_blackwell block-sparse kernel"):
+    with pytest.raises(RuntimeError, match="tile 128 requires the ptx_blackwell block-sparse kernel") as error:
         _run_tile128(meta)
+    assert "GB10 block-sparse kernel (fastvideo-kernel built for sm_121a)" in str(error.value)
+    assert "sm_121a: fastvideo_kernel.block_sparse_attn_sm121 is not installed" in str(error.value)
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", None)
     with pytest.raises(RuntimeError, match="not installed"):
         _run_tile128(meta)
@@ -578,14 +695,44 @@ def test_build_tile128_uses_4x4x8_tiles():
 
 
 @pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
-def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides, sparsity, ref_keep_rate):
+def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate):
     """The real 128-token CUDA forward on a multi-region layout against an FP32 masked-SDPA oracle."""
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
         pytest.skip("requires an sm_100a/sm_103a GPU (B200, B300, GB200, GB300)")
     forwards = getattr(vsa_h3._ptx_blackwell, "_FWD_BY_BLOCK", {}) if vsa_h3._ptx_blackwell is not None else {}
     if forwards.get(128) is None or vsa_h3.map_to_index is None:
         pytest.skip("requires a fastvideo_kernel build with the 128-token ptx_blackwell forward")
+    _check_real_tile128_forward_against_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate,
+                                               kernel_module=vsa_h3._ptx_blackwell,
+                                               entry="block_sparse_attn_ptx_blackwell",
+                                               route="ptx_blackwell")
+
+
+@pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
+def test_forward_tile128_real_sm121_kernel_matches_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate):
+    """The real GB10 (sm_121a) 128-token forward on a multi-region layout against an FP32 masked-SDPA oracle."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 1):
+        pytest.skip("requires a GB10 GPU (DGX Spark, sm_121)")
+    if vsa_h3._sm121 is None or not vsa_h3._sm121._HAS_VSA_SM121 or vsa_h3.map_to_index is None:
+        pytest.skip("requires a fastvideo_kernel build with the sm_121a block-sparse forward")
+    _check_real_tile128_forward_against_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate,
+                                               kernel_module=vsa_h3._sm121,
+                                               entry="block_sparse_attn_sm121",
+                                               route="sm121")
+
+
+def _check_real_tile128_forward_against_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate, *, kernel_module,
+                                               entry, route):
+    """Also proves the route: the Triton split route matches the oracle too, so a silent fallback must fail."""
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
+    launches = []
+    real_entry = getattr(kernel_module, entry)
+
+    def spy(*args, **kwargs):
+        launches.append(args[0].shape)
+        return real_entry(*args, **kwargs)
+
+    monkeypatch.setattr(kernel_module, entry, spy)
     device = torch.device("cuda")
     meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
     n_tiles = meta.variable_block_sizes.numel()
@@ -595,9 +742,12 @@ def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides,
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
     with torch.inference_mode():
         tiled = impl.preprocess_qkv(raw, meta)
-        assert tiled.shape[1] == (n_tiles + n_tiles % 2) * 128
+        assert impl._tile128_routes[(raw.device, torch.bfloat16, _DIM)][0] == route
+        # Only ptx_blackwell needs an even tile count.
+        assert tiled.shape[1] == (n_tiles + (n_tiles % 2 if route == "ptx_blackwell" else 0)) * 128
         query, key, value = tiled.chunk(3, dim=0)
         actual = impl.postprocess_output(impl.forward(query, key, value, None, meta), meta)
+        assert len(launches) == 1, f"the {route} kernel must run exactly once, ran {len(launches)} times"
         # The mask the backend selected: pooled scores of the logical tiles.
         logical_query, logical_key, logical_value = (t[:, :logical] for t in (query, key, value))
         scores = torch.matmul(_pool_tiles(logical_query, meta.variable_block_sizes, 128),

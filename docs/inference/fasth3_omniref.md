@@ -97,8 +97,13 @@ The Blackwell YAML examples also select FP4 attention and the prefix precision
 through `pipeline.experimental.h3_vsa_fp4`. Explicit YAML values take precedence
 over the corresponding environment flags. A missing native extension raises an
 error. To choose BF16 VSA for OmniRef's 128-token tiles, set
-`h3_vsa_fp4.enabled: false` and
-`FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`.
+`h3_vsa_fp4.enabled: false`. On the DGX Spark this runs the 128-token GB10
+CUDA kernel (`fastvideo_kernel.block_sparse_attn_sm121`, built when
+`TORCH_CUDA_ARCH_LIST` contains `12.1a` or `12.1` and CUDA is 13 or newer);
+leave `FASTVIDEO_H3_VSA_FINE_ATTENTION` unset there, since it replaces that
+kernel. On the other consumer cards, add
+`FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`, or leave it unset to run each
+128-token tile as two 64-token halves on the Triton kernels.
 
 The Blackwell profiles select the FP8 prefix split to protect the conditioning
 queries from FP4 rounding. The split runs prefix rows densely in bf16 after
@@ -154,10 +159,11 @@ missing native kernel raises rather than silently selecting another mode.
    query tiles, per-token FP8 Q/K for prefix tiles, bf16 P.V and K smoothing.
    Needs no consumer-Blackwell extension but is slower, and its numerics differ
    from the native kernel (which also quantizes P.V).
-3. **bf16 VSA**: set `FASTVIDEO_H3_VSA_FP4=0` and
+3. **bf16 VSA**: set `FASTVIDEO_H3_VSA_FP4=0`. On the DGX Spark, leave
+   `FASTVIDEO_H3_VSA_FINE_ATTENTION` unset so the GB10 CUDA kernel runs the
+   128-token tiles. On the other consumer CUDA GPUs, including sm_89, add
    `FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`. This runs unquantized
-   attention on the same tiles with Triton on consumer CUDA GPUs, including
-   sm_89.
+   attention on the same tiles with Triton.
 
 A nonempty fine-attention override takes priority over
 `FASTVIDEO_H3_VSA_FP4=1`. These overrides use the eager path; disable inference

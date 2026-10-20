@@ -486,6 +486,26 @@ if(BUILD_CXX_KERNELS)
                                     csrc/attention/block_sparse_blk128_blackwell.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
+    # VSA block-sparse attention FORWARD for the GB10 (DGX Spark), 128-token blocks: an mma.sync + TMA kernel
+    # for sm_121a, the device the tcgen05 kernel above cannot run on. Inference only (no LSE). Every spelling of
+    # the GB10 counts: "12.1" without the suffix (the GB10 Docker image builds that), "12.1f" and "12.1+PTX",
+    # since this one source carries its own sm_121a image.
+    set(ENABLE_VSA_SM121A OFF)
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(12\\.1[af]?|121[af]?|sm_121[af]?)(\\+PTX)?([; ,]|$)")
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+            set(ENABLE_VSA_SM121A ON)
+        else()
+            # A warning: the GB10 then runs tile-128 VSA on the slower split-Triton route.
+            message(WARNING "fastvideo-kernel: skipping block_sparse_sm121 (sm_121a needs CUDA >= 13.0, have "
+                            "${CMAKE_CUDA_COMPILER_VERSION}); tile-128 VSA on a GB10 falls back to Triton")
+        endif()
+    endif()
+    if(ENABLE_VSA_SM121A)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm121 (sm_121a; 128-token blocks, forward)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_blk128_sm121.cu)
+        set_source_files_properties(csrc/attention/block_sparse_blk128_sm121.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_121a,code=sm_121a")
+    endif()
     # VSA block-sparse attention BACKWARD, 64- and 128-token blocks: the same images as the forward.
     if(_VSA_FWD_GENCODE)
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_blackwell.cu
@@ -512,6 +532,9 @@ if(BUILD_CXX_KERNELS)
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
     if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_PTX_BLACKWELL)
+    endif()
+    if(ENABLE_VSA_SM121A)
+        list(APPEND COMPILE_DEFS FASTVIDEO_KERNEL_COMPILE_BLOCK_SPARSE_VSA_SM121)
     endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
@@ -640,6 +663,7 @@ message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
 message(STATUS "  + Ulysses NCCL-device all-to-all:             ${ENABLE_ULYSSES_A2A}")
+message(STATUS "  + VSA tile-128 forward, GB10 (sm_121a):       ${ENABLE_VSA_SM121A}")
 message(STATUS "fp4attn/fp4quant (sm_120a CUDA >= 12.8; sm_121a CUDA >= 13):  ${ENABLE_ATTN_QAT_INFER}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")
