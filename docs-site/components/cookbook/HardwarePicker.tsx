@@ -133,7 +133,8 @@ export default function HardwarePicker({
             </span>
             {record.usable_budget_gb ? (
               <span className="hardware-selected-meta">
-                Your budget: {record.usable_budget_gb} {record.memory_unit}
+                {value.id === "custom" ? "Your budget" : "Usable budget"}: {record.usable_budget_gb}{" "}
+                {record.memory_unit}
               </span>
             ) : null}
             {record.host_ram_gb && record.memory_type !== "unified" ? (
