@@ -82,7 +82,8 @@ FASTVIDEO_ATTENTION_BACKEND=FLASHINFER \
 FASTVIDEO_FLASHINFER_PREFILL_BACKEND=cudnn python example.py
 ```
 
-The cuDNN path is inference-only, currently requires head size 128, and does
+The cuDNN THD path is inference-only, requires Hopper (sm90) or newer and
+head size 128, and does
 not accept arbitrary custom attention masks. It supports dense self-attention,
 cross-attention, GQA, and causal attention. FastVideo raises an error instead
 of silently selecting another kernel when these constraints are not met.
