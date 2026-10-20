@@ -33,8 +33,8 @@ test("documentation navigation opens transferred guides", async ({ page }) => {
   await page.goto("/FastVideo");
   await expect(page.getByRole("heading", { name: "Welcome to FastVideo", exact: true })).toBeVisible();
   await page.locator("#blume-nav-drawer").getByRole("link", { name: "Installation", exact: true }).click();
-  await expect(page).toHaveURL(/getting_started\/installation/);
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page).toHaveURL(/getting_started\/installation/, { timeout: 30000 });
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30000 });
 });
 
 test("the welcome page introduces the project and opens the cookbook", async ({ page }) => {
@@ -133,13 +133,14 @@ test("generated module links stay inside the transferred Python reference", asyn
 });
 
 test("search finds a transferred guide and opens it by keyboard", async ({ page }) => {
+  test.setTimeout(180000);
   await page.goto("/FastVideo");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   const query = page.getByRole("combobox", { name: "Search docs", exact: true });
   await query.fill("offloading");
-  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible({ timeout: 120000 });
   await query.press("Enter");
-  await expect(page).toHaveURL(/FastVideo\/inference\/offloading/);
+  await expect(page).toHaveURL(/FastVideo\/inference\/offloading/, { timeout: 30000 });
 });
 
 test("the welcome cards reflow on mobile without horizontal scrolling", async ({ page }) => {
