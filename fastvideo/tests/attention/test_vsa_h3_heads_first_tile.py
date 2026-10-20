@@ -38,6 +38,8 @@ def _metadata(seq: int, n_tiles: int, tile_elems: int) -> SimpleNamespace:
 def _impl() -> vsa.MiniMaxH3VSAImpl:
     impl = object.__new__(vsa.MiniMaxH3VSAImpl)
     impl._regional_compile_ptx_blackwell_enabled = None
+    # tile() resolves the tile-128 route to decide on the ptx_blackwell partner tile.
+    impl._tile128_routes = {}
     return impl
 
 

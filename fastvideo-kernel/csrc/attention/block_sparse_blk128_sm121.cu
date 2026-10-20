@@ -58,8 +58,11 @@ std::vector<torch::Tensor> block_sparse_sm121_blk128_fwd(torch::Tensor q, torch:
               "q2k_num must be [", batch, ", ", heads, ", ", blocks, "], got ", q2k_num.sizes());
   // The grid is (num_blocks, batch * heads).
   TORCH_CHECK(batch * heads <= 65535, "batch * heads must be at most 65535, got ", batch * heads);
-  TORCH_CHECK(blocks <= std::numeric_limits<int>::max() && q2k_idx.size(3) <= std::numeric_limits<int>::max(),
-              "too many blocks: ", blocks, " (max_kv ", q2k_idx.size(3), ")");
+  // TMA addresses K and V by int32 row, and the walker packs its start entry into 22 bits.
+  TORCH_CHECK(batch * heads * seq <= std::numeric_limits<int32_t>::max(),
+              "batch * heads * seqlen must be below 2^31, got ", batch * heads * seq);
+  TORCH_CHECK(blocks < (int64_t{1} << 22) && q2k_idx.size(3) < (int64_t{1} << 22), "too many blocks: ", blocks,
+              " (max_kv ", q2k_idx.size(3), "); both must be below 2^22");
 
   auto out = torch::empty_like(q);
   if (q.numel() == 0) return {out};

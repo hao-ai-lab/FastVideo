@@ -27,6 +27,7 @@
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
 
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -38,7 +39,7 @@ namespace vsa_sm121 {
 struct Vsa128Args {
 	const void* q;              // [BH, S, 128] bf16; a tile's padding rows may hold anything, they are not read
 	const void* k;              // [BH, S, 128] bf16
-	const void* v;              // [BH, S, 128] bf16
+	const void* v;              // [BH, S, 128] bf16; a tile's padding keys may hold anything, K and V both
 	void* out;                  // [BH, S, 128] bf16; every element is written
 	const int32_t* q2k_idx;     // [BH, T, max_kv]: each query tile's selected key tiles; entries past its count are not read
 	const int32_t* q2k_num;     // [BH, T]: how many key tiles each query tile selects
@@ -359,13 +360,33 @@ __device__ __forceinline__ void store_p(uint32_t dst, const float (&p)[8][4], in
                      :: "r"(addr), "r"(a0), "r"(a1), "r"(a2), "r"(a3) : "memory");
     }
 }
-__device__ __forceinline__ void pv(float (&o)[16][4], const uint32_t (&p)[4][4], const uint32_t (&v_addr)[4]) {
+// A B fragment register's bf16 pair of keys (the lower key in the lower half), given how many keys from the
+// pair's first one on are valid: both kept, the lower one only, or neither.
+__device__ __forceinline__ uint32_t valid_keys(uint32_t b, int valid) {
+    return valid>=2 ? b : (valid==1 ? (b&0x0000ffffu) : 0u);
+}
+// Masked: the chunk holds fewer than 64 valid keys. P is zero past them, but the V rows there are whatever the
+// caller's padding holds, and 0 * NaN or 0 * Inf would still reach O: skip the 16-key steps that lie wholly past
+// the valid keys, and zero the invalid rows of the one that straddles them.
+template<bool Masked>
+__device__ __forceinline__ void pv(float (&o)[16][4], const uint32_t (&p)[4][4], const uint32_t (&v_addr)[4],
+                                   int keys, int lane) {
 #pragma unroll
     for (int kk=0; kk<4; ++kk) {
+        if constexpr (Masked) {
+            if (16*kk>=keys) break;
+        }
+        // b[0], b[2] hold keys 16kk + c + {0, 1}; b[1], b[3] those 8 further on (c = 2 * (lane % 4)). `valid`
+        // counts the valid keys from 16kk + c on.
+        const int valid=keys-16*kk-2*(lane&3);
 #pragma unroll
         for (int dd=0; dd<8; ++dd) {
             uint32_t b[4];
             ptx::ldmatrix_x4_trans(b,v_addr[dd&3]+2048*kk+BoxBytes*(dd>>2));
+            if constexpr (Masked) {
+                b[0]=valid_keys(b[0],valid); b[1]=valid_keys(b[1],valid-8);
+                b[2]=valid_keys(b[2],valid); b[3]=valid_keys(b[3],valid-8);
+            }
             ptx::mma_bf16_16816(o[2*dd],p[kk],b[0],b[1]);
             ptx::mma_bf16_16816(o[2*dd+1],p[kk],b[2],b[3]);
         }
@@ -516,11 +537,13 @@ __global__ __launch_bounds__(Threads,1) void forward(const Vsa128Args args,
         // prevents PV output staging from overwriting QK's K alias too early.
         asm volatile("bar.sync 0, 512;" ::: "memory");
     } else {
-        int pending=0;
+        // Each V slot's valid key count, eight bits per slot.
+        int pending=0, vkeys=0;
 #pragma unroll
         for (int s=0;s<3;++s) {
             if (fill.next()) {
                 ++pending;
+                vkeys|=fill.keys()<<(8*s);
                 if (local_tid==0) load_operand(base+VOffset+s*OperandBytes,&vmap,fill,head_row,operand_full(1,s));
             }
         }
@@ -555,11 +578,14 @@ __global__ __launch_bounds__(Threads,1) void forward(const Vsa128Args args,
                 uint32_t vaddr[4];
 #pragma unroll
                 for (int j=0;j<4;++j) vaddr[j]=base+VOffset+stage*OperandBytes+vlane[j];
-                pv(o,pf,vaddr);
+                const int keys=(vkeys>>(8*stage))&255;
+                if (keys<Chunk) pv<true>(o,pf,vaddr,keys,lane);
+                else pv<false>(o,pf,vaddr,keys,lane);
             }
             // All three V slots were prefetched. Refill exactly the slot just
             // read with i+3, not A3's i+2 slot (stage+2)%3.
             if (fill.next()) {
+                vkeys=(vkeys&~(255<<(8*stage)))|(fill.keys()<<(8*stage));
                 const uint32_t counter=operand_counter(1,stage);
                 if (last_reader(counter,lane)) {
                     if (lane==0) {
@@ -596,20 +622,26 @@ inline cudaError_t launch(const Vsa128Args& args,cudaStream_t stream) {
     CUtensorMap kmap,vmap;
     if (split128::encode_map(&kmap,args.k,rows)!=CUDA_SUCCESS ||
         split128::encode_map(&vmap,args.v,rows)!=CUDA_SUCCESS) return cudaErrorInvalidValue;
-    cudaError_t err=cudaFuncSetAttribute(split128::forward,cudaFuncAttributeMaxDynamicSharedMemorySize,split128::SharedBytes);
-    if (err!=cudaSuccess) return err;
     // One CTA per SM fits (99 KB of shared memory each): the SMs are the
-    // CTAs that run at once. A device property, read once per device.
+    // CTAs that run at once. Read once per device, after the per-device
+    // shared-memory attribute is set; 0 means not yet. Threads that race on a
+    // device's first launch each set the same attribute and store the same
+    // count, and a thread never sees another device's count.
+    constexpr int MaxDevices=64;
+    static std::atomic<int> sm_count[MaxDevices];
     int device=0;
-    err=cudaGetDevice(&device);
+    cudaError_t err=cudaGetDevice(&device);
     if (err!=cudaSuccess) return err;
-    static int slots_device=-1, slots=1;
-    if (device!=slots_device) {
+    if (device<0 || device>=MaxDevices) return cudaErrorInvalidDevice;
+    int slots=sm_count[device].load(std::memory_order_acquire);
+    if (slots==0) {
+        err=cudaFuncSetAttribute(split128::forward,cudaFuncAttributeMaxDynamicSharedMemorySize,split128::SharedBytes);
+        if (err!=cudaSuccess) return err;
         int sms=0;
         err=cudaDeviceGetAttribute(&sms,cudaDevAttrMultiProcessorCount,device);
         if (err!=cudaSuccess) return err;
         slots=sms>0 ? sms : 1;
-        slots_device=device;
+        sm_count[device].store(slots,std::memory_order_release);
     }
     split128::forward<<<dim3(args.tiles,args.batch_heads),split128::Threads,split128::SharedBytes,stream>>>(args,kmap,vmap,slots);
     return cudaGetLastError();

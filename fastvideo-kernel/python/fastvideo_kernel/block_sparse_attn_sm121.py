@@ -28,6 +28,22 @@ _HAS_VSA_SM121 = _FWD is not None
 _SUPPORTED_COMPUTE_CAPABILITIES = {(12, 1)}
 BLOCK = 128
 HEAD_DIM = 128
+# Launch limits: the grid's y dimension is batch * heads; TMA addresses K and V by int32 row; the
+# kernel packs a walk's start entry (< num_blocks) into 22 bits.
+_MAX_BATCH_HEADS = 65535
+_MAX_ROWS = 2**31 - 1
+_MAX_BLOCKS = 2**22 - 1
+
+
+def within_launch_limits(q: torch.Tensor, num_blocks: int) -> bool:
+    """True iff one launch can cover q's [B, H, S, 128] shape with num_blocks blocks.
+
+    The part of ``is_supported`` that depends on the size of the call, not on the device, dtype or
+    layout, so callers that cache ``is_supported`` per device must still check it per call.
+    ``map_to_index`` makes q2k_idx's last dimension num_blocks, which this bounds too.
+    """
+    batch_heads = q.shape[0] * q.shape[1]
+    return batch_heads <= _MAX_BATCH_HEADS and batch_heads * q.shape[2] <= _MAX_ROWS and num_blocks <= _MAX_BLOCKS
 
 
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
@@ -37,12 +53,14 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
       * the extension carries the sm_121a kernel and q is on a GB10 (compute capability 12.1);
       * q is a contiguous 4-D bf16 BHSD tensor with head_dim 128 and seqlen == num_blocks * 128,
         num_blocks = variable_block_sizes.numel(); any num_blocks, odd included;
-      * variable_block_sizes is an integer CUDA tensor.
+      * variable_block_sizes is an integer CUDA tensor;
+      * the call is within the launch limits (``within_launch_limits``): batch * heads <= 65535,
+        batch * heads * seqlen < 2^31 and num_blocks < 2^22.
     What the kernel accepts beyond that, and is tested to handle: per-row counts q2k_num in
     [0, max_kv], non-uniform across rows (a row with count 0 gets exactly-zero output); q2k_idx
     entries are only read below each row's count (map_to_index's -1 padding is never read); any
     variable_block_sizes in [0, 128] (keys at or past a block's count are masked, and query rows
-    past it are written zero).
+    past it are written zero); padding rows of q, k and v that hold anything, NaN and Inf included.
     """
     if not _HAS_VSA_SM121 or not q.is_cuda:
         return False
@@ -55,7 +73,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
         return False
     if not variable_block_sizes.is_cuda or variable_block_sizes.dtype not in (torch.int32, torch.int64):
         return False
-    return True
+    return within_launch_limits(q, num_blocks)
 
 
 @torch.library.custom_op(

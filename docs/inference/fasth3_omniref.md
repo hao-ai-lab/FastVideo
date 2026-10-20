@@ -159,10 +159,11 @@ missing native kernel raises rather than silently selecting another mode.
    query tiles, per-token FP8 Q/K for prefix tiles, bf16 P.V and K smoothing.
    Needs no consumer-Blackwell extension but is slower, and its numerics differ
    from the native kernel (which also quantizes P.V).
-3. **bf16 VSA**: set `FASTVIDEO_H3_VSA_FP4=0` and
+3. **bf16 VSA**: set `FASTVIDEO_H3_VSA_FP4=0`. On the DGX Spark, leave
+   `FASTVIDEO_H3_VSA_FINE_ATTENTION` unset so the GB10 CUDA kernel runs the
+   128-token tiles. On the other consumer CUDA GPUs, including sm_89, add
    `FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`. This runs unquantized
-   attention on the same tiles with Triton on consumer CUDA GPUs, including
-   sm_89.
+   attention on the same tiles with Triton.
 
 A nonempty fine-attention override takes priority over
 `FASTVIDEO_H3_VSA_FP4=1`. These overrides use the eager path; disable inference

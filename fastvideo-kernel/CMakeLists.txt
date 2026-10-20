@@ -487,15 +487,17 @@ if(BUILD_CXX_KERNELS)
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
     # VSA block-sparse attention FORWARD for the GB10 (DGX Spark), 128-token blocks: an mma.sync + TMA kernel
-    # for sm_121a, the device the tcgen05 kernel above cannot run on. Inference only (no LSE). "12.1" without the
-    # suffix counts too (the GB10 Docker image builds that), since this one source carries its own sm_121a image.
+    # for sm_121a, the device the tcgen05 kernel above cannot run on. Inference only (no LSE). Every spelling of
+    # the GB10 counts: "12.1" without the suffix (the GB10 Docker image builds that), "12.1f" and "12.1+PTX",
+    # since this one source carries its own sm_121a image.
     set(ENABLE_VSA_SM121A OFF)
-    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(12\\.1a?|121a?|sm_121a?)([; ,]|$)")
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(12\\.1[af]?|121[af]?|sm_121[af]?)(\\+PTX)?([; ,]|$)")
         if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
             set(ENABLE_VSA_SM121A ON)
         else()
-            message(STATUS "fastvideo-kernel: skipping block_sparse_sm121 (sm_121a needs CUDA >= 13.0, have "
-                           "${CMAKE_CUDA_COMPILER_VERSION})")
+            # A warning: the GB10 then runs tile-128 VSA on the slower split-Triton route.
+            message(WARNING "fastvideo-kernel: skipping block_sparse_sm121 (sm_121a needs CUDA >= 13.0, have "
+                            "${CMAKE_CUDA_COMPILER_VERSION}); tile-128 VSA on a GB10 falls back to Triton")
         endif()
     endif()
     if(ENABLE_VSA_SM121A)

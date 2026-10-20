@@ -135,6 +135,37 @@ def test_deterministic():
     assert torch.equal(first, second)
 
 
+@pytest.mark.parametrize("fill", [float("nan"), float("inf")])
+def test_padding_keys_holding_nan_or_inf_do_not_leak(fill):
+    """Padding rows of K and V may hold anything: P is zero there, and 0 * NaN must not reach the output."""
+    q, k, v, idx, num, vbs = make_case(num_blocks=6, topk=3, ragged=True, seed=23)
+    assert (vbs % 64 != 0).any(), "the case must have partial 64-key chunks"
+    expected, has = reference(q, k, v, idx, num, vbs)
+    valid = (torch.arange(BLOCK, device="cuda")[None] < vbs[:, None]).reshape(-1)
+    for t in (q, k, v):
+        t[:, :, ~valid] = fill
+    out = run_with_nan_pool(q, k, v, idx, num, vbs)
+    assert torch.isfinite(out).all()
+    assert (out[~has] == 0).all()
+    torch.testing.assert_close(out.float()[has], expected[has], atol=0.02, rtol=0.02)
+
+
+def test_launch_limits(monkeypatch):
+    """Sizes one launch cannot cover: is_supported says so instead of the binding raising."""
+    def meta(*shape):
+        return torch.empty(shape, device="meta", dtype=torch.bfloat16)
+
+    assert vsa.within_launch_limits(meta(1, 65535, 2 * BLOCK, HEAD_DIM), 2)
+    assert not vsa.within_launch_limits(meta(2, 32768, 2 * BLOCK, HEAD_DIM), 2)
+    assert not vsa.within_launch_limits(meta(1, 2, 2**30, HEAD_DIM), 2**23)
+    assert not vsa.within_launch_limits(meta(1, 1, 2**22 * BLOCK, HEAD_DIM), 2**22)
+    assert vsa.within_launch_limits(meta(1, 1, (2**22 - 1) * BLOCK, HEAD_DIM), 2**22 - 1)
+    q, _, _, _, _, vbs = make_case(num_blocks=2, topk=1, heads=4)
+    assert vsa.is_supported(q, vbs)
+    monkeypatch.setattr(vsa, "_MAX_BATCH_HEADS", 3)
+    assert not vsa.is_supported(q, vbs)
+
+
 def test_is_supported_rejects_what_it_cannot_run():
     q, k, v, idx, num, vbs = make_case(num_blocks=2, topk=1)
     assert vsa.is_supported(q, vbs)
