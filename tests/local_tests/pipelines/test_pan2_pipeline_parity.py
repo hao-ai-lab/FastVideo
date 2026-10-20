@@ -12,16 +12,15 @@ Runs on CPU when no GPU is present. Set ``PAN2_TINY_MODEL_DIR`` to a local copy 
 
 from __future__ import annotations
 
-import os
 import socket
+from contextlib import ExitStack
 
 import PIL.Image
 import pytest
 import torch
 
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-
-from tests.local_tests.pan2.reference import load_reference_components, reference_generate, tiny_model_dir  # noqa: E402
+from fastvideo import envs
+from tests.local_tests.pan2.reference import load_reference_components, reference_generate, tiny_model_dir
 
 HEIGHT, WIDTH, NUM_FRAMES = 64, 96, 9
 NUM_INFERENCE_STEPS = 3
@@ -51,37 +50,35 @@ def pan2_runtime():
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.pipelines import build_pipeline
 
-    monkeypatch = pytest.MonkeyPatch()
-    if not torch.cuda.is_available():
-        # On a GPU-less Linux host fastvideo resolves the local device to mps; run on CPU instead. Swapping the code
-        # object reaches every module that imported the function by name.
-        def _cpu_device() -> torch.device:
-            return torch.device("cpu")
+    with ExitStack() as stack:
+        stack.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+        monkeypatch = stack.enter_context(pytest.MonkeyPatch.context())
+        if not torch.cuda.is_available():
+            # Reach modules that imported the device helper by name on a GPU-less Linux host.
+            def _cpu_device() -> torch.device:
+                return torch.device("cpu")
 
-        monkeypatch.setattr(parallel_state.get_local_torch_device, "__code__", _cpu_device.__code__)
-    for name, value in (("MASTER_ADDR", "127.0.0.1"), ("MASTER_PORT", str(_free_port())), ("RANK", "0"),
-                        ("WORLD_SIZE", "1"), ("LOCAL_RANK", "0")):
-        monkeypatch.setenv(name, os.environ.get(name, value))
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
+            monkeypatch.setattr(parallel_state.get_local_torch_device, "__code__", _cpu_device.__code__)
+        for name, value in (("MASTER_ADDR", "127.0.0.1"), ("MASTER_PORT", str(_free_port())), ("RANK", "0"),
+                            ("WORLD_SIZE", "1"), ("LOCAL_RANK", "0")):
+            stack.enter_context(envs.override_external(name, value))
+        stack.callback(cleanup_dist_env_and_memory)
+        maybe_init_distributed_environment_and_model_parallel(1, 1)
 
-    pipeline_config = PAN2PipelineConfig(dit_precision="bf16",
-                                         vae_precision="fp32",
-                                         text_encoder_precisions=("fp32", ))
-    args = FastVideoArgs(model_path=str(model_dir),
-                         num_gpus=1,
-                         pipeline_config=pipeline_config,
-                         dit_cpu_offload=False,
-                         text_encoder_cpu_offload=False,
-                         vae_cpu_offload=False,
-                         use_fsdp_inference=False)
-    pipeline = build_pipeline(args)
-    device = parallel_state.get_local_torch_device()
-    try:
+        pipeline_config = PAN2PipelineConfig(dit_precision="bf16",
+                                             vae_precision="fp32",
+                                             text_encoder_precisions=("fp32", ))
+        args = FastVideoArgs(model_path=str(model_dir),
+                             num_gpus=1,
+                             pipeline_config=pipeline_config,
+                             dit_cpu_offload=False,
+                             dit_layerwise_offload=False,
+                             text_encoder_cpu_offload=False,
+                             vae_cpu_offload=False,
+                             use_fsdp_inference=False)
+        pipeline = build_pipeline(args)
+        device = parallel_state.get_local_torch_device()
         yield pipeline, args, model_dir, device
-    finally:
-        del pipeline
-        cleanup_dist_env_and_memory()
-        monkeypatch.undo()
 
 
 def _fastvideo_generate(pipeline, args, image, guidance_scale: float = GUIDANCE_SCALE):

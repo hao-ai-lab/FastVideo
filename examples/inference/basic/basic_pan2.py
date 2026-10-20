@@ -22,12 +22,12 @@ def main():
         num_gpus=int(os.environ.get("PAN2_NUM_GPUS", "1")),
         use_fsdp_inference=False,
         dit_cpu_offload=False,
+        dit_layerwise_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
     )
 
-    # Defaults come from the pan2 preset: 704x1248, 313 frames (13 s at 24 fps), 50 steps, guidance 3.0.
     generator.generate_video(
         PROMPT,
         image_path=IMAGE_PATH,

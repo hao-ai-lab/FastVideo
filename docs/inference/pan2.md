@@ -1,6 +1,6 @@
-# PAN2 Text/Image to Video
+# PAN 2 Text/Image to Video
 
-PAN2 is a 29B mixture-of-transformers video DiT with separate video and text streams, a Qwen3.5 text encoder and the
+PAN 2 is a 29B mixture-of-transformers video DiT with separate video and text streams, a Qwen3.5 text encoder and the
 Wan2.2 VAE. One pipeline serves text-to-video and image-to-video: pass `image_path` to condition on a first frame and
 leave it out for text only.
 
@@ -21,7 +21,7 @@ from the `pan2_t2v` and `pan2_i2v` presets:
 | Steps | 50, uniform sigmas from 1 to 0 with flow shift 7 |
 | Guidance | 3.0, classifier-free guidance with an empty negative prompt |
 
-PAN2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
+PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
 prompts work, with weaker results.
 
 ## Usage
@@ -37,6 +37,7 @@ generator = VideoGenerator.from_pretrained(
     "IFM/PAN2",
     num_gpus=1,
     dit_cpu_offload=False,
+    dit_layerwise_offload=False,
     text_encoder_cpu_offload=True,
 )
 generator.generate_video(
@@ -54,6 +55,27 @@ VAE into the first latent frame of the conditioning input.
 With `num_gpus > 1`, FastVideo runs Ulysses sequence parallelism: the video tokens are sharded across ranks and the
 text tokens are replicated. The number of GPUs must divide the 32 attention heads. Sequence-parallel padding of the
 video tokens is trimmed before attention, so no attention mask is needed.
+
+Padding is always excluded, without an opt-in setting. At 704x1248 with 313 frames, the 67,782 video tokens need
+two padding tokens at SP=4. They are removed before joining the text tokens in every attention block. This provides
+the same exclusion as vLLM-Omni's unconditional padding mask in
+[revision `e0c4c731`](https://github.com/vllm-project/vllm-omni/commit/e0c4c73158a5e4f44eda8eaa8879f7fd9cedbd74).
+The trimmed sequence can use either FlashAttention or Torch SDPA.
+
+```bash
+PAN2_NUM_GPUS=4 python examples/inference/basic/basic_pan2.py
+```
+
+## Memory and offloading
+
+The example keeps the DiT on the GPUs and offloads the text encoder between requests. Sequence parallelism shards
+video tokens; each rank still holds the DiT weights. Increasing `num_gpus` alone does not shard those weights.
+For devices that cannot hold the DiT, see [CPU offloading](offloading.md) for `dit_cpu_offload` and
+`dit_layerwise_offload`. Hardware recipes and timings reported by vLLM-Omni use its own offload implementation;
+they have not been validated for FastVideo.
+
+The full `IFM/PAN2` checkpoint is not public yet. Local parity tests use the public random-weight
+`wuqing157/tiny-pan2-modular-pipe` checkpoint; it verifies the integration and produces noise rather than useful video.
 
 ## Differences from the vLLM-Omni integration
 
