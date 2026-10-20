@@ -364,6 +364,44 @@ function referenceRun(base, { peak = 30, scope = "device" } = {}) {
 
 const REVISIONS = { fastvideo: "a".repeat(40), model: "b".repeat(40) };
 
+test("measured evidence on the full card does not apply to a selected partition", () => {
+  const partitioned = hardware({
+    id: "h100",
+    memory_gb: 80,
+    partitions: [{ id: "1g.10gb", label: "1g.10gb", memory_gb: 10 }],
+  });
+  const base = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const model = wanModel();
+  const ex = example(base, env);
+  const run = referenceRun(base);
+  run.hardware = "h100";
+  model.reference_runs = [run];
+  const fullCard = assessCapacity({
+    model,
+    example: ex,
+    hardware: partitioned,
+    env: ex.env,
+    revisions: REVISIONS,
+    partitionId: "1g.10gb",
+  });
+  assert.equal(fullCard.evidence.applicable.length, 0);
+  assert.equal(fullCard.evidence.rejected[0].differences[0].path, "hardware_partition");
+  assert.notEqual(fullCard.basis, "measured");
+  run.hardware_partition = "1g.10gb";
+  const partitionedRun = assessCapacity({
+    model,
+    example: ex,
+    hardware: partitioned,
+    env: ex.env,
+    revisions: REVISIONS,
+    partitionId: "1g.10gb",
+  });
+  assert.equal(partitionedRun.evidence.applicable.length, 1);
+  assert.equal(partitionedRun.basis, "measured");
+  assert.equal(partitionedRun.status, "exceeds");
+});
+
 test("unified memory uses an explicit application budget and never nominal capacity", () => {
   const spark = {
     id: "spark-128",
