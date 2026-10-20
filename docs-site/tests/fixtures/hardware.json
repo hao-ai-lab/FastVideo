@@ -1,0 +1,64 @@
+{
+  "h100-sxm-80gb": {
+    "name": "NVIDIA H100 SXM 80 GB",
+    "ui_id": "h100",
+    "memory_type": "dedicated",
+    "memory_gb": 80,
+    "backend": "cuda",
+    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8"],
+    "aliases": ["H100 SXM", "H100 80GB"],
+    "form_factor": "SXM",
+    "sources": ["https://www.nvidia.com/en-us/data-center/h100/"]
+  },
+  "geforce-rtx-5090-32gb": {
+    "name": "NVIDIA GeForce RTX 5090 32 GB (desktop)",
+    "ui_id": "rtx5090",
+    "memory_type": "dedicated",
+    "memory_gb": 32,
+    "backend": "cuda",
+    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
+    "aliases": ["RTX 5090", "5090"],
+    "form_factor": "desktop",
+    "sources": ["https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/"]
+  },
+  "rtx-pro-6000-blackwell-workstation-96gb": {
+    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB",
+    "ui_id": "rtx",
+    "memory_type": "dedicated",
+    "memory_gb": 96,
+    "backend": "cuda",
+    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
+    "aliases": ["RTX 6000", "PRO 6000", "Blackwell Workstation"],
+    "form_factor": "workstation",
+    "sources": ["https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/"]
+  },
+  "dgx-spark-gb10-128gb": {
+    "name": "NVIDIA DGX Spark GB10 128 GB",
+    "ui_id": "spark",
+    "memory_type": "unified",
+    "memory_gb": 128,
+    "backend": "cuda",
+    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
+    "aliases": ["DGX Spark", "GB10", "Spark"],
+    "form_factor": "desktop",
+    "sources": ["https://www.nvidia.com/en-us/products/workstations/dgx-spark/"]
+  },
+  "apple-m4-max-128gb": {
+    "name": "Apple M4 Max 128 GB",
+    "memory_type": "unified",
+    "memory_gb": 128,
+    "backend": "mlx",
+    "aliases": ["M4 Max", "Apple Silicon"],
+    "form_factor": "laptop or desktop",
+    "sources": ["https://support.apple.com/en-us/121553"]
+  },
+  "apple-m3-ultra-192gb": {
+    "name": "Apple M3 Ultra 192 GB",
+    "memory_type": "unified",
+    "memory_gb": 192,
+    "backend": "mlx",
+    "aliases": ["M3 Ultra", "Mac Studio"],
+    "form_factor": "desktop",
+    "sources": ["https://www.apple.com/mac-studio/specs/"]
+  }
+}

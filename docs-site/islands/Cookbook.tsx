@@ -11,6 +11,17 @@ import ModelHeader from "@/components/cookbook/ModelHeader";
 import RecipeFacts from "@/components/cookbook/RecipeFacts";
 import { configAndLaunch, inferenceOutput, sdkCommand } from "@/lib/cookbook-commands";
 import {
+  backendLabel,
+  gpuCountFrom,
+  memoryText,
+  readGpuCount,
+  readHardwareSelection,
+  resolveHardware,
+  useHardwareCatalog,
+  writeHardwareSelection,
+  type HardwareSelection,
+} from "@/lib/hardware";
+import {
   api,
   guideUrl,
   parseField,
@@ -199,10 +210,10 @@ function Editor({
   const [showEnv, setShowEnv] = useState(false);
   const [showClient, setShowClient] = useState(false);
   const [outputTab, setOutputTab] = useState("commands");
-  const [hardware, setHardware] = useState(() => {
-    const requested = new URL(window.location.href).searchParams.get("hardware");
-    return requested && requested !== "unspecified" ? requested : "";
-  });
+  const [hardware, setHardware] = useState<HardwareSelection>(() =>
+    readHardwareSelection(new URL(window.location.href).searchParams),
+  );
+  const hardwareCatalog = useHardwareCatalog();
   const [edits, setEdits] = useState<Record<string, Value>>({});
   const [parseErrors, setParseErrors] = useState<Record<string, string>>({});
   const [reset, setReset] = useState(0);
@@ -262,22 +273,8 @@ function Editor({
     setNotice("Downloaded config.yaml.");
   }
   const mlx = catalog.runtime.backend === "mlx";
-  const generator = catalog.base_config.generator as { engine?: { quantization?: { transformer_quant?: string } } };
-  const nvfp4 = generator?.engine?.quantization?.transformer_quant === "NVFP4";
-  const hardwareOptions = (
-    mlx
-      ? [["apple", "Apple Silicon", "Unified memory"]]
-      : [
-          ["b200", "B200", "Data center"],
-          ["gb200", "GB200", "Data center"],
-          ["h100", "H100", "Data center"],
-          ["rtx5090", "RTX 5090", "GeForce"],
-          ["rtx", "RTX PRO 6000", "Workstation"],
-          ["spark", "DGX Spark", "GB10"],
-        ]
-  ).filter(([id]) => !nvfp4 || id !== "h100");
-  const selectedHardware = hardwareOptions.find(([value]) => value === hardware);
-  const hardwareLabel = hardware.startsWith("custom:") ? hardware.slice(7) : selectedHardware?.[1];
+  const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
+  const gpuCount = gpuCountFrom(result?.config);
   const model = modelDirectory.find((model) => model.id === catalog.id.split("/")[0])!;
   const renderField = (field: Field) => (
     <FieldControl
@@ -288,11 +285,10 @@ function Editor({
       failure={parseErrors[field.path] || (field.path === failedPath ? failure : undefined)}
     />
   );
-  function chooseHardware(value: string) {
-    setHardware(value);
+  function chooseHardware(selection: HardwareSelection) {
+    setHardware(selection);
     const url = new URL(window.location.href);
-    if (value) url.searchParams.set("hardware", value);
-    else url.searchParams.delete("hardware");
+    writeHardwareSelection(url, selection);
     window.history.replaceState(null, "", url);
   }
   const modes = mlx || catalog.runtime.interface === "websocket" ? ["serving"] : ["sdk", "inference", "serving"];
@@ -488,10 +484,14 @@ function Editor({
           </div>
           <div className="hardware-resource-grid">
             <HardwarePicker
-              backend={mlx ? "mlx" : "nvidia"}
-              options={hardwareOptions}
+              backend={mlx ? "mlx" : "cuda"}
+              catalog={hardwareCatalog.records}
+              status={hardwareCatalog.status}
+              error={hardwareCatalog.error}
+              reload={hardwareCatalog.reload}
               value={hardware}
               onChange={chooseHardware}
+              gpuCount={gpuCount}
             />
             <div className="matrix-resources">
               <span className="matrix-resource-title">Resources</span>
@@ -501,7 +501,7 @@ function Editor({
                 href={sitePath(
                   mlx
                     ? "/getting_started/installation/mlx"
-                    : hardware === "spark"
+                    : hardwareRecord?.name.toLowerCase().includes("dgx spark")
                       ? "/getting_started/installation/spark"
                       : "/getting_started/installation/gpu",
                 )}
@@ -510,13 +510,6 @@ function Editor({
               </a>
             </div>
           </div>
-          {hardwareLabel ? (
-            <p className="matrix-note">
-              {mlx
-                ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
-                : `${hardwareLabel} is saved as your target. It does not change the generated YAML; use GPU count and parallelism for the run.`}
-            </p>
-          ) : null}
           <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} fit="unknown" evidence="none" />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (
@@ -751,15 +744,60 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
 }
 
 function RecipeDirectory({ index, error, retry }: { index?: Index; error: string; retry: () => void }) {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("All models");
-  const [family, setFamily] = useState("All families");
+  const [initial] = useState(() =>
+    typeof window === "undefined" ? new URLSearchParams() : new URL(window.location.href).searchParams,
+  );
+  const [query, setQuery] = useState(initial.get("q") ?? "");
+  const [category, setCategory] = useState(initial.get("category") ?? "All models");
+  const [family, setFamily] = useState(initial.get("family") ?? "All families");
+  const [runtime, setRuntime] = useState(initial.get("runtime") ?? "all");
+  const [hardware, setHardware] = useState<HardwareSelection>(() => readHardwareSelection(initial));
+  const [gpuCount, setGpuCount] = useState(() => readGpuCount(initial));
+  const hardwareCatalog = useHardwareCatalog();
+  const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const search = url.searchParams;
+    const set = (key: string, value: string | undefined) => {
+      if (value) search.set(key, value);
+      else search.delete(key);
+    };
+    set("q", query.trim() || undefined);
+    set("category", category === "All models" ? undefined : category);
+    set("family", family === "All families" ? undefined : family);
+    set("runtime", runtime === "all" ? undefined : runtime);
+    set("gpus", gpuCount > 1 ? String(gpuCount) : undefined);
+    writeHardwareSelection(search, hardware);
+    window.history.replaceState(null, "", url);
+  }, [category, family, gpuCount, hardware, query, runtime]);
+  const runtimeMatches = (platforms: string[]) => {
+    if (runtime === "cuda") return platforms.includes("NVIDIA");
+    if (runtime === "mlx") return platforms.includes("Apple Silicon");
+    if (hardwareRecord?.backend === "mlx") return platforms.includes("Apple Silicon");
+    if (hardwareRecord) return platforms.includes("NVIDIA");
+    return true;
+  };
   const visible = modelDirectory.filter(
     (model) =>
       (category === "All models" || model.category === category) &&
       (family === "All families" || model.family === family) &&
-      `${model.title} ${model.family} ${model.tags.join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()),
+      runtimeMatches(model.platforms) &&
+      `${model.title} ${model.family} ${model.tags.join(" ")} ${model.description}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()),
   );
+  const hardwareParams = new URLSearchParams();
+  writeHardwareSelection(hardwareParams, hardware);
+  if (gpuCount > 1) hardwareParams.set("gpus", String(gpuCount));
+  const suffix = hardwareParams.size ? `?${hardwareParams.toString()}` : "";
+  function clear() {
+    setQuery("");
+    setCategory("All models");
+    setFamily("All families");
+    setRuntime("all");
+    setHardware({ id: "" });
+    setGpuCount(1);
+  }
   return (
     <div className="cookbook not-prose recipe-directory">
       <div className="recipe-directory-tools">
@@ -787,37 +825,91 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
         />
       </div>
       <div className="recipe-directory-subbar">
-        <p role="status">{visible.length} models</p>
-        <select aria-label="Model family" value={family} onChange={(event) => setFamily(event.target.value)}>
-          <option>All families</option>
-          {[
-            ...new Set(
-              modelDirectory
-                .filter((model) => category === "All models" || model.category === category)
-                .map((model) => model.family),
-            ),
-          ].map((family) => (
-            <option key={family}>{family}</option>
-          ))}
-        </select>
+        <p role="status">
+          {visible.length} {visible.length === 1 ? "model" : "models"}
+          {hardwareRecord ? ` · ${backendLabel(hardwareRecord.backend)} recipes` : ""}
+          {runtime !== "all" ? ` · ${runtime === "mlx" ? "MLX" : "CUDA"} only` : ""}
+        </p>
+        <div className="recipe-directory-selects">
+          <label>
+            <span>Family</span>
+            <select aria-label="Model family" value={family} onChange={(event) => setFamily(event.target.value)}>
+              <option>All families</option>
+              {[
+                ...new Set(
+                  modelDirectory
+                    .filter((model) => category === "All models" || model.category === category)
+                    .map((model) => model.family),
+                ),
+              ].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Runtime</span>
+            <select aria-label="Runtime" value={runtime} onChange={(event) => setRuntime(event.target.value)}>
+              <option value="all">All runtimes</option>
+              <option value="cuda">CUDA</option>
+              <option value="mlx">MLX</option>
+            </select>
+          </label>
+        </div>
       </div>
-      {error && (
+      <div className="recipe-directory-hardware">
+        <span className="recipe-filter-label">Hardware</span>
+        <HardwarePicker
+          backend="cuda"
+          catalog={hardwareCatalog.records}
+          status={hardwareCatalog.status}
+          error={hardwareCatalog.error}
+          reload={hardwareCatalog.reload}
+          value={hardware}
+          onChange={setHardware}
+          gpuCount={gpuCount}
+          purpose="filter"
+        />
+        {hardwareRecord ? (
+          <label className="recipe-gpu-count">
+            <span>GPU count</span>
+            <Input
+              type="number"
+              min="1"
+              max="64"
+              step="1"
+              value={gpuCount}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setGpuCount(Number.isInteger(value) && value > 0 && value <= 64 ? value : 1);
+              }}
+            />
+          </label>
+        ) : null}
+      </div>
+      {hardwareRecord ? (
+        <p className="recipe-directory-note">
+          Showing {backendLabel(hardwareRecord.backend)} recipes for {hardwareRecord.name} ({memoryText(hardwareRecord)}
+          ).
+        </p>
+      ) : null}
+      {error ? (
         <div role="alert" className="recipe-error">
           <p>{error}</p>
           <Button variant="outline" onClick={retry}>
             Retry loading recipes
           </Button>
         </div>
-      )}
+      ) : null}
       <div className="recipe-card-grid">
         {visible.map((model) => (
-          <a className="recipe-card" key={model.id} href={sitePath(model.path)}>
+          <a className="recipe-card" key={model.id} href={`${sitePath(model.path)}${suffix}`}>
             <div className="recipe-card-top">
               <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
               <span className="recipe-card-kicker">{model.provider}</span>
-              {model.featured && <span className="recipe-featured">Featured</span>}
+              {model.featured ? <span className="recipe-featured">Featured</span> : null}
             </div>
             <h2>{model.title}</h2>
+            <p className="recipe-card-description">{model.description}</p>
             <div className="recipe-tags">
               <span>{model.category}</span>
               {model.tags.slice(0, 2).map((tag) => (
@@ -833,21 +925,15 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
           </a>
         ))}
       </div>
-      {!visible.length && (
+      {!visible.length ? (
         <div className="recipe-empty">
           <h2>No matching recipes</h2>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setQuery("");
-              setCategory("All models");
-              setFamily("All families");
-            }}
-          >
+          <p>Clear a filter or choose a different backend. Memory fit is not checked.</p>
+          <Button variant="outline" onClick={clear}>
             Clear filters
           </Button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
