@@ -154,7 +154,7 @@ test("the welcome cards reflow on mobile without horizontal scrolling", async ({
 test("the model catalog filters by family and checkpoint name", async ({ page }) => {
   await page.goto("/FastVideo/fast-models");
   const catalog = page.locator(".model-catalog");
-  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+  await expect(catalog.getByRole("status")).toHaveText("21 checkpoints");
   await page.getByRole("button", { name: "FastMetal", exact: true }).click();
   await expect(catalog.getByRole("status")).toHaveText("3 checkpoints");
   await page.getByRole("searchbox", { name: "Search checkpoints", exact: true }).fill("14B");
@@ -162,7 +162,7 @@ test("the model catalog filters by family and checkpoint name", async ({ page })
   await page.getByRole("searchbox").fill("no-such-model");
   await expect(catalog.getByRole("status")).toHaveText("0 checkpoints");
   await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+  await expect(catalog.getByRole("status")).toHaveText("21 checkpoints");
 });
 
 test("hardware guides are grouped below general inference tasks", async ({ page }) => {
