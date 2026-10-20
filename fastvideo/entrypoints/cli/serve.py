@@ -16,6 +16,9 @@ _VALIDATED_SERVE_CONFIG_ATTR = "_fastvideo_validated_serve_config"
 
 
 def _validate_execution_backend(serve_config) -> None:
+    # MLX configs have no CUDA executor backend; their server validates its own runtime.
+    if getattr(serve_config, "runtime", None) == "mlx":
+        return
     from fastvideo.worker.executor import reject_external_launcher
 
     reject_external_launcher(
