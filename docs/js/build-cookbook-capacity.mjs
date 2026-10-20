@@ -179,6 +179,7 @@ export function buildCapacityCatalog({
       examples: examples.map((deployment) => ({
         id: deployment.deployment.id,
         deployment_id: deployment.id,
+        workload: deployment.workload,
         config: deployment.source_config,
         runtime: deployment.runtime.id,
         env: structuredClone(deployment.env),

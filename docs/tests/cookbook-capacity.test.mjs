@@ -202,6 +202,7 @@ test("capacity export resolves shared metadata and preserves native example conf
   assert.equal(model.name, f.manifest.title);
   assert.equal(model.model_id, f.config.generator.model_path);
   assert.equal(model.examples[0].deployment_id, "example-model/cuda-rest");
+  assert.equal(model.examples[0].workload, "t2v");
   assert.equal(model.examples[0].config, f.manifest.deployments["cuda-rest"].defaults);
   assert.deepEqual(model.examples[0].base_config, f.config);
   assert.deepEqual(model.examples[0].env, { TEST_BACKEND: "fixture" });
