@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+DEFAULT_MEDIA_REFERENCE_MAX_BYTES = 2 * 1024**3
+
 
 @dataclass
 class ServerConfig:
@@ -11,6 +13,11 @@ class ServerConfig:
     port: int = 8000
     output_dir: str = "outputs/"
     served_model_name: str | None = None
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+
+    def __post_init__(self) -> None:
+        if self.media_reference_max_bytes <= 0:
+            raise ValueError("server.media_reference_max_bytes must be positive")
 
 
 @dataclass

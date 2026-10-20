@@ -67,6 +67,7 @@ class ServeSubcommand(CLISubcommand):
             output_dir=serve_config.server.output_dir,
             default_request=serve_config.default_request,
             served_model_name=serve_config.server.served_model_name,
+            media_reference_max_bytes=serve_config.server.media_reference_max_bytes,
         )
 
     def validate(self, args: argparse.Namespace) -> None:

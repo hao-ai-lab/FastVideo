@@ -482,12 +482,6 @@ FASTVIDEO_NVENC_QP = EnvStr("28", category="output", doc="NVENC quantization par
 FASTVIDEO_NVENC_BF = EnvStr("0", category="output", doc="NVENC number of B-frames.")
 FASTVIDEO_X264_PRESET = EnvStr("ultrafast", category="output", doc="x264 preset for non-NVENC codecs.")
 FASTVIDEO_OUTPUT_PIX_FMT = EnvStr("yuv420p", category="output", doc="ffmpeg pixel format for saved videos.")
-FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES = EnvInt(
-    2 * 1024**3,
-    category="output",
-    doc="Largest media reference downloaded from a URL, in bytes. The default 2 GiB admits "
-    "normal video clips; raise it for longer inputs or use a local path.",
-)
 
 # ================== Profiling ==================
 

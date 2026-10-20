@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastvideo.api.schema import DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+
 if TYPE_CHECKING:
     from fastvideo.api.schema import GenerationRequest
     from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine, ServingGenerator
@@ -22,6 +24,7 @@ _fastvideo_args: FastVideoArgs | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
 _served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
+_media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
 
 
 def get_generator() -> ServingGenerator:
@@ -60,6 +63,11 @@ def get_default_request() -> GenerationRequest | None:
     return _default_request
 
 
+def get_media_reference_max_bytes() -> int:
+    """Return the server's URL media-reference byte cap."""
+    return _media_reference_max_bytes
+
+
 def set_state(
     generator: ServingGenerator,
     serving_engine: OpenAIServingEngine,
@@ -67,22 +75,27 @@ def set_state(
     output_dir: str,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
 ) -> None:
     """Set all server state at once (called from lifespan)."""
     global _generator, _serving_engine, _fastvideo_args, _output_dir, _served_model_name, _default_request
+    global _media_reference_max_bytes
     _generator = generator
     _serving_engine = serving_engine
     _fastvideo_args = fastvideo_args
     _output_dir = output_dir
     _served_model_name = served_model_name
     _default_request = default_request
+    _media_reference_max_bytes = media_reference_max_bytes
 
 
 def clear_state() -> None:
     """Clear server state on shutdown."""
     global _generator, _serving_engine, _fastvideo_args, _served_model_name, _default_request
+    global _media_reference_max_bytes
     _generator = None
     _serving_engine = None
     _fastvideo_args = None
     _served_model_name = None
     _default_request = None
+    _media_reference_max_bytes = DEFAULT_MEDIA_REFERENCE_MAX_BYTES

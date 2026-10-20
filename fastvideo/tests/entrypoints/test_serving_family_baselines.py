@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-import fastvideo.envs as envs
 from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.api.flux import FluxSamplingParam
 from fastvideo.api.parser import parse_config
@@ -157,13 +156,31 @@ def test_local_media_url_is_downloaded_and_tracked_for_cleanup(tmp_path: Path) -
         server.server_close()
 
 
-def test_media_url_limit_is_configurable_and_removes_partial_file(tmp_path: Path, env_overrides) -> None:
+def test_server_media_reference_limit_is_a_validated_serve_field() -> None:
+    config = parse_config(
+        ServeConfig,
+        {
+            "generator": {"model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"},
+            "server": {"media_reference_max_bytes": 4096},
+        },
+    )
+    assert config.server.media_reference_max_bytes == 4096
+    with pytest.raises(ValueError, match="must be positive"):
+        parse_config(
+            ServeConfig,
+            {
+                "generator": {"model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"},
+                "server": {"media_reference_max_bytes": 0},
+            },
+        )
+
+
+def test_media_url_limit_is_configurable_and_removes_partial_file(tmp_path: Path) -> None:
     server, url = _serve_clip(b"larger-than-four")
     try:
-        env_overrides.enter_context(envs.FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES.override(4))
         request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": url})
         with pytest.raises(RequestAdaptationError, match="4-byte limit"):
-            asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+            asyncio.run(prepare_reference_media("request", request, str(tmp_path), max_bytes=4))
         assert not list((tmp_path / "uploads").glob("*"))
     finally:
         server.shutdown()
