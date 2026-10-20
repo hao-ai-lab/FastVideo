@@ -161,7 +161,7 @@ function hardwareRecords(document, context) {
         ids.add(partition.id);
         requireValue(text(partition.label), `${at}.partitions.${partition.id}.label: expected text`);
         const partitionGb = memorySizeGb(partition.memory, `${at}.partitions.${partition.id}.memory`);
-        requireValue(partitionGb < nominalGb, `${at}.partitions.${partition.id}: must be smaller than the full device`);
+        requireValue(partitionGb <= nominalGb, `${at}.partitions.${partition.id}: must not exceed the full device`);
         partitions.push({ ...structuredClone(partition), memory_gb: partitionGb });
       }
     }
@@ -183,6 +183,7 @@ function hardwareRecords(document, context) {
       variants.add(foldedVariant);
       families.set(hardware.family, variants);
     } else requireValue(hardware.variant === undefined, `${at}.variant: needs a family`);
+    requireValue(hardware.aliases === undefined || Array.isArray(hardware.aliases), `${at}.aliases: expected a list`);
     const aliases = [...(hardware.aliases ?? [])];
     if (hardware.ui_id !== undefined) {
       identifier(hardware.ui_id, `${at}.ui_id`);
@@ -221,6 +222,7 @@ function hardwareRecords(document, context) {
         !(identity !== id && local.has(folded) && folded !== id),
         `${context}: hardware ${id} repeats its own identity ${identity}`,
       );
+      local.add(folded);
       identities.set(folded, id);
     }
   }

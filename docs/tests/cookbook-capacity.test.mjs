@@ -471,7 +471,7 @@ test("the authored hardware inventory is sourced, unique and keeps unified memor
       aliases.set(alias, device.id);
     }
     for (const partition of device.partitions ?? []) {
-      assert.ok(partition.memory_gb > 0 && partition.memory_gb < device.memory_gb);
+      assert.ok(partition.memory_gb > 0 && partition.memory_gb <= device.memory_gb);
       assert.match(partition.id, /^[a-z0-9][a-z0-9.-]*$/);
     }
   }
@@ -480,11 +480,22 @@ test("the authored hardware inventory is sourced, unique and keeps unified memor
   assert.equal(spark.memory_gb, 128);
   assert.equal(spark.memory_type, undefined);
   assert.equal(catalog["h100-sxm-80gb"].partitions.length, 3);
+  assert.deepEqual(
+    catalog["a100-sxm-80gb"].partitions.map((partition) => partition.id),
+    ["1g.10gb", "2g.20gb", "3g.40gb", "7g.80gb"],
+  );
   assert.equal(catalog["gb200-186gb"].gpu_count, 1);
 });
 
 test("hardware aliases, budgets and partitions cannot contradict the device", (t) => {
   const f = fixture(t);
+  f.hardware.hardware["example-gpu"].aliases = "fixture";
+  f.save();
+  assert.throws(() => buildCapacityCatalog({ root: f.root }), /aliases/i);
+  f.hardware.hardware["example-gpu"].aliases = ["fixture", "FIXTURE"];
+  f.save();
+  assert.throws(() => buildCapacityCatalog({ root: f.root }), /repeats its own identity/i);
+  f.hardware.hardware["example-gpu"].aliases = ["fixture"];
   f.hardware.hardware["other-gpu"] = {
     ...clone(f.hardware.hardware["example-gpu"]),
     name: "Other GPU",
@@ -499,7 +510,7 @@ test("hardware aliases, budgets and partitions cannot contradict the device", (t
   f.hardware.hardware["example-gpu"].memory.usable = { value: 20, unit: "GB" };
   f.hardware.hardware["example-gpu"].memory.policy = "Fixture application budget";
   f.hardware.hardware["example-gpu"].partitions = [
-    { id: "1g.24gb", label: "1g.24gb", memory: { value: 24, unit: "GB" } },
+    { id: "1g.25gb", label: "1g.25gb", memory: { value: 25, unit: "GB" } },
   ];
   f.save();
   assert.throws(() => buildCapacityCatalog({ root: f.root }), /partition/i);

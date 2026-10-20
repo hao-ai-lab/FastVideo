@@ -60,9 +60,9 @@ vendor source and checked date.
 
 The build fails on duplicate IDs, names, aliases, or family variants; duplicate
 or malformed sources; missing checked dates; unknown units, vendors, kinds,
-backends, or dtypes; usable budgets above nominal capacity; partitions at or
-above the full device; and unified entries that hide capacity in a generic
-`memory_gb` field.
+backends, or dtypes; usable budgets above nominal capacity; partitions above
+the full device; and unified entries that hide capacity in a generic `memory_gb`
+field.
 
 - `memory.nominal` and `memory.usable` keep the authored value/unit (`GB` or
   `GiB`); the build also exports normalized decimal `memory_gb` and
@@ -70,8 +70,9 @@ above the full device; and unified entries that hide capacity in a generic
 - Dedicated records expose VRAM. Unified records expose shared system memory and
   never expose it as VRAM; the estimator uses a labeled 75% application default
   and accepts an explicit `memoryBudgetGiB` override.
-- `partitions` are separate selectable allocations. Selecting one never inherits
-  the full-card capacity. If no partition is selected, the full device is used.
+- `partitions` are separate selectable allocations. Selecting one never silently
+  inherits the full-card capacity; a vendor-documented profile may explicitly
+  span the full memory. If no partition is selected, the full device is used.
 - `aliases` preserve old UI links and search names; canonical IDs remain stable.
 - `sources[].checked` records when the vendor page was verified, not when the
   device was released.
