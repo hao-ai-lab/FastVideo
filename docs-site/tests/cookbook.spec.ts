@@ -443,6 +443,9 @@ test("custom devices persist and no preview control can block generated YAML", a
   await page.getByLabel("Device name", { exact: true }).fill("RTX 4090");
   await page.getByRole("combobox", { name: "Memory type", exact: true }).selectOption("dedicated");
   await page.getByRole("spinbutton", { name: "Nominal memory", exact: true }).fill("24");
+  await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("32");
+  await expect(page.getByText("The usable budget cannot exceed the nominal memory.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use this device", exact: true })).toBeDisabled();
   await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("22");
   await page.getByRole("spinbutton", { name: "Host RAM (optional)", exact: true }).fill("64");
   await page.getByRole("button", { name: "Use this device", exact: true }).click();

@@ -75,7 +75,10 @@ export default function HardwarePicker({
   const candidates =
     purpose === "filter" ? catalog : catalog.filter((item) => item.backend === (backend === "mlx" ? "mlx" : "cuda"));
   const matches = searchHardware(candidates, query).slice(0, 20);
-  const validDraft = !!draft.name.trim() && !!amount(draft.memory);
+  const draftMemory = amount(draft.memory);
+  const draftBudget = amount(draft.budget);
+  const budgetTooLarge = draftMemory !== undefined && draftBudget !== undefined && draftBudget > draftMemory;
+  const validDraft = !!draft.name.trim() && !!draftMemory && !budgetTooLarge;
   const scope = gpuScopeNote(record, gpuCount);
 
   useEffect(() => {
@@ -337,6 +340,9 @@ export default function HardwarePicker({
                   </label>
                 ) : null}
               </div>
+              {budgetTooLarge ? (
+                <p className="hardware-form-error">The usable budget cannot exceed the nominal memory.</p>
+              ) : null}
               <p className="hardware-form-note">
                 Nominal memory is device capacity, not what FastVideo can use. A budget is your own limit and is not
                 verified. Unified memory is shared with the CPU; it is not dedicated VRAM.

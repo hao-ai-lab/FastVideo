@@ -255,7 +255,8 @@ export function resolveHardware(selection: HardwareSelection, records: HardwareR
       memory_gb: custom.memory_gb,
       memory_unit: custom.memory_unit,
       backend: custom.backend,
-      usable_budget_gb: custom.usable_budget_gb,
+      usable_budget_gb:
+        custom.usable_budget_gb && custom.usable_budget_gb <= custom.memory_gb ? custom.usable_budget_gb : undefined,
       host_ram_gb: custom.host_ram_gb,
     };
   }

@@ -1411,6 +1411,12 @@
   color: var(--blume-foreground);
   font-size: 0.75rem;
 }
+.hardware-form-error {
+  margin-block: 0.5rem 0;
+  color: var(--blume-destructive, #b42318);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
 .hardware-form-note {
   margin: 0;
   color: var(--blume-muted-foreground);
