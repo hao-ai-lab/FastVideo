@@ -110,8 +110,11 @@ polling and deletion contract. The job's `media_type` is `audio/wav`, and
 `video_params`.
 
 MMAudio is video-to-audio and requires `video_reference` (a local path or
-URL). Stable Audio is text-to-audio. Stable Audio needs the optional
-inference dependencies listed in `examples/inference/basic/basic_stable_audio.py`.
+URL). URLs may point at a local or cluster media service. The server downloads
+at most 2 GiB per reference by default and removes that copy when the job
+finishes; set `FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES` for longer clips. Stable
+Audio is text-to-audio. Stable Audio needs the optional inference dependencies
+listed in `examples/inference/basic/basic_stable_audio.py`.
 
 ```bash
 python -m pip install httpx

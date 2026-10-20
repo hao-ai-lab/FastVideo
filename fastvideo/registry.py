@@ -220,6 +220,7 @@ def _get_config_info(
     *,
     raise_on_missing: bool = True,
     revision: str | None = None,
+    allow_remote: bool = True,
 ) -> ConfigInfo | None:
     # 1. Exact match
     if model_path in _MODEL_HF_PATH_TO_NAME:
@@ -240,8 +241,10 @@ def _get_config_info(
     # 3. Use detectors (path or model_index pipeline name).
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
-    else:
+    elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
+    else:
+        return None
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")
@@ -1277,8 +1280,8 @@ def get_pipeline_config_cls_from_name(pipeline_name_or_path: str) -> type[Pipeli
     return config_info.pipeline_config_cls
 
 
-def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
-    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str, *, allow_remote: bool = True) -> Any | None:
+    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         logger.warning("No match found for pipeline %s, using default sampling param.", pipeline_name_or_path)
         return None
