@@ -495,7 +495,7 @@ function hostRequirement(components, bytes, execution) {
   for (const [index, component] of components.entries()) {
     const flag = offloadFlag(component.role);
     if (component.role === "transformer" || component.role === "transformer_2") {
-      if (execution.offload.dit || execution.offload.dit_layerwise) used += bytes[index].full;
+      if (execution.offload.dit_layerwise) used += bytes[index].full;
     } else if (execution.offload[flag]) used += bytes[index].full;
   }
   return used ? used / GIB + HOST_STAGING_GIB : 0;
