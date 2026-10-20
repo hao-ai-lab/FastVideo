@@ -1,16 +1,20 @@
 import { useEffect, useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 
+type Purpose = "target" | "filter";
+
 export default function HardwarePicker({
   backend,
   options,
   value,
   onChange,
+  purpose = "target",
 }: {
   backend: string;
   options: string[][];
   value: string;
   onChange: (value: string) => void;
+  purpose?: Purpose;
 }) {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
@@ -21,6 +25,7 @@ export default function HardwarePicker({
   }, []);
   const id = useId();
   const known = options.filter((option) => option.join(" ").toLowerCase().includes(search.toLowerCase()));
+  const selected = value.startsWith("custom:") ? value.slice(7) : options.find(([key]) => key === value)?.[1];
   function add() {
     const name = search.trim();
     if (!name) return;
@@ -29,10 +34,15 @@ export default function HardwarePicker({
     setSearch("");
     setAdding(false);
   }
+  function clear() {
+    setCustom("");
+    setSearch("");
+    onChange("");
+  }
   return (
     <div className="hardware-picker">
       <fieldset className="hardware-matrix">
-        <legend className="sr-only">Hardware target</legend>
+        <legend className="sr-only">Hardware {purpose}</legend>
         {known.map(([key, title, detail]) => (
           <label key={key} data-selected={value === key}>
             <input
@@ -63,9 +73,21 @@ export default function HardwarePicker({
           </label>
         )}
       </fieldset>
-      <button type="button" className="hardware-add" aria-expanded={adding} onClick={() => setAdding(!adding)}>
-        + Find or add {backend === "mlx" ? "a Mac" : "a GPU"}
-      </button>
+      <div className="hardware-picker-actions">
+        <button type="button" className="hardware-add" aria-expanded={adding} onClick={() => setAdding(!adding)}>
+          + Find or add {backend === "mlx" ? "a Mac" : "a GPU"}
+        </button>
+        {selected && (
+          <button type="button" className="hardware-clear" onClick={clear}>
+            Clear hardware {purpose}
+          </button>
+        )}
+      </div>
+      {!selected && (
+        <p className="hardware-current" role="status">
+          No hardware {purpose} selected.
+        </p>
+      )}
       {adding && (
         <form
           className="hardware-search"
@@ -83,7 +105,11 @@ export default function HardwarePicker({
             placeholder={backend === "mlx" ? "e.g. M4 Max" : "e.g. RTX 4090"}
             maxLength={80}
           />
-          <p>Search the list or add your device. Memory lookup and fit checks are not connected yet.</p>
+          <p>
+            {purpose === "filter"
+              ? "Saved in this URL and used to filter by runtime. Fit checks appear only when an estimate covers the device."
+              : "Saved in this URL as your setup target. Device choice does not change generated configuration."}
+          </p>
           <button type="submit" disabled={!search.trim()}>
             Add device
           </button>

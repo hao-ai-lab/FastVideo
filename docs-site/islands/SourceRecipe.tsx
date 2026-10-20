@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ModelHeader from "@/components/cookbook/ModelHeader";
 import HardwarePicker from "@/components/cookbook/HardwarePicker";
+import RecipeFacts from "@/components/cookbook/RecipeFacts";
 import { configAndLaunch, fileAndLaunch, sdkCommand, pythonSource } from "@/lib/cookbook-commands";
 import { sitePath, type DirectoryModel } from "@/lib/cookbook-pages";
 import { api } from "@/lib/cookbook";
@@ -50,9 +51,13 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
   const [outputTab, setOutputTab] = useState("commands");
   const [error, setError] = useState("");
   const [edits, setEdits] = useState<Record<number, string | number | boolean>>({});
-  const [hardware, setHardware] = useState("unspecified");
+  const [hardware, setHardware] = useState(() => {
+    const requested = new URL(window.location.href).searchParams.get("hardware");
+    return requested && requested !== "unspecified" ? requested : "";
+  });
   useEffect(() => {
-    setHardware(new URL(window.location.href).searchParams.get("hardware") ?? "unspecified");
+    const requested = new URL(window.location.href).searchParams.get("hardware");
+    setHardware(requested && requested !== "unspecified" ? requested : "");
   }, []);
   const recipe = model.recipes.find((recipe) => recipe.id === selected)!;
   const yamlSource =
@@ -115,14 +120,15 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
     return () => controller.abort();
   }, [sourceUrl, yamlSource, recipe]);
   function selectMode(next: string) {
+    const reset = (next === "serving") !== (mode === "serving");
     setMode(next);
-    if ((next === "serving") !== (mode === "serving")) setEdits({});
-    setNotice("");
+    if (reset) setEdits({});
+    setNotice(reset ? "Serving uses a different native example, so generation edits were reset." : "");
   }
-  async function copy(value: string) {
+  async function copy(value: string, message = "Copied to clipboard.") {
     try {
       await navigator.clipboard.writeText(value);
-      setNotice("Copied to clipboard.");
+      setNotice(message);
     } catch {
       setNotice("Copy failed. Select and copy the text below.");
     }
@@ -140,14 +146,22 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
     )
       failure = "Enter valid numeric settings before copying the example.";
   }
+  let config: Record<string, unknown> | undefined;
   if (example && yamlSource) {
-    const config = parse(source);
-    for (const [key, value] of Object.entries(edits)) {
-      const path = example.controls[Number(key)].path!;
-      const parent = path.slice(0, -1).reduce((item, name) => item[name], config);
-      parent[path.at(-1)!] = value;
+    try {
+      const root = parse(source) as Record<string, unknown>;
+      config = root;
+      for (const [key, value] of Object.entries(edits)) {
+        const path = example.controls[Number(key)].path!;
+        const parent = path
+          .slice(0, -1)
+          .reduce<Record<string, unknown>>((item, name) => item[name] as Record<string, unknown>, root);
+        parent[path.at(-1)!] = value;
+      }
+      source = stringify(root);
+    } catch {
+      failure = "The checked-in YAML could not be parsed, so runnable output is withheld.";
     }
-    source = stringify(config);
   } else if (example) {
     source = pythonSource(source, example.controls, edits);
   }
@@ -169,19 +183,24 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
         })
         .join("");
   const sdk = mode === "sdk" && !!yamlSource;
-  const config = sdk && source ? parse(source) : undefined;
-  const displayedSource = config
-    ? stringify({ generator: config.generator, request: config.request ?? config.default_request })
-    : source;
+  // The SDK consumes only generator + request; serving and CLI keep server and every native field.
+  const displayedSource =
+    config && sdk
+      ? stringify({
+          generator: config.generator as Record<string, unknown>,
+          request: config.request ?? config.default_request,
+        })
+      : source;
   const launch = sdk ? command.replace(/fastvideo generate --config config\.yaml$/, sdkCommand) : command;
   const ready = !!example && !failure;
+  const workload = recipe.task.toLowerCase().includes("image") ? "i2v" : "t2v";
   const clientCommand =
     mode === "serving" && ready
       ? api.sampleRequest(
           {
             runtime: { interface: "rest", server_defaults: { host: "127.0.0.1", port: 8000 } },
             model: { id: model.model },
-            workload: "t2v",
+            workload,
           },
           parse(source),
         ).command
@@ -202,10 +221,13 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
         ["rtx", "RTX PRO 6000", "Workstation"],
         ["spark", "DGX Spark", "GB10"],
       ];
-  const chooseHardware = (value: string) => {
-    setHardware(value);
+  const hardwareLabel = hardware.startsWith("custom:")
+    ? hardware.slice(7)
+    : devices.find(([id]) => id === hardware)?.[1];
+  const chooseHardware = (value: string) => {    setHardware(value);
     const url = new URL(window.location.href);
-    url.searchParams.set("hardware", value);
+    if (value) url.searchParams.set("hardware", value);
+    else url.searchParams.delete("hardware");
     window.history.replaceState(null, "", url);
   };
   const control = (field: Control, index: number) => {
@@ -276,7 +298,11 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
         model={model}
         actions={
           <>
-            <Button variant="outline" disabled={!ready} onClick={() => copy(displayedSource)}>
+            <Button
+              variant="outline"
+              disabled={!ready}
+              onClick={() => copy(displayedSource, yamlSource ? "Copied config.yaml." : "Copied Python example.")}
+            >
               Copy {yamlSource ? "YAML" : "Python"}
             </Button>
             <Button
@@ -305,10 +331,18 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
       <section className="recipe-command-box" aria-label="Source recipe">
         <Tabs.Root value={outputTab} onValueChange={setOutputTab}>
           <div className="recipe-command-toolbar">
-            <span className="recipe-unverified">Unverified recipe</span>
             <div className="recipe-command-tools">
-              <button type="button" disabled={!ready} onClick={() => copy(launchScript)}>
-                Copy
+              <button
+                type="button"
+                disabled={!ready}
+                onClick={() =>
+                  copy(
+                    launchScript,
+                    yamlSource ? "Copied config.yaml and launch command." : "Copied example and launch command.",
+                  )
+                }
+              >
+                {yamlSource ? "Copy config + command" : "Copy example + command"}
               </button>
               {mode === "serving" && (
                 <button
@@ -321,12 +355,12 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                     setShowClient(!showClient);
                   }}
                 >
-                  cURL
+                  Show request
                 </button>
               )}
               {environment && (
                 <button type="button" aria-pressed={showEnv} onClick={() => setShowEnv(!showEnv)}>
-                  Env
+                  Show environment
                 </button>
               )}
             </div>
@@ -352,7 +386,10 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
             <pre tabIndex={0} aria-label={mode === "serving" ? "Server command" : "Inference command"}>
               <code>{launch}</code>
             </pre>
-            <p className="matrix-note">Includes your settings. Run from an installed FastVideo checkout.</p>
+            <p className="matrix-note">
+              Uses your settings; the copy action includes the source file and launch command. Run from an installed
+              FastVideo checkout.
+            </p>
             {clientCommand && (
               <details
                 className="recipe-request-code"
@@ -361,8 +398,8 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                 onToggle={(event) => setShowClient(event.currentTarget.open)}
               >
                 <summary>Example request</summary>
-                <button type="button" onClick={() => copy(clientCommand)}>
-                  Copy client command
+                <button type="button" onClick={() => copy(clientCommand, "Copied example request.")}>
+                  Copy request command
                 </button>
                 <pre tabIndex={0} aria-label="Client command">
                   <code>{clientCommand}</code>
@@ -415,13 +452,13 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                   aria-pressed={platform === (mlx ? "MLX" : "CUDA")}
                   onClick={() => {
                     if (platform === (mlx ? "MLX" : "CUDA")) return;
-                    setNotice("");
                     const target = model.recipes.find((entry) =>
                       entry.gpu_types.includes(platform === "MLX" ? "Apple Silicon" : "NVIDIA"),
                     )!;
                     setSelected(target.id);
                     setMode("sdk");
                     setEdits({});
+                    setNotice(`Switched to the ${platform} recipe; generation edits were reset.`);
                   }}
                 >
                   {platform}
@@ -432,11 +469,7 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
               <HardwarePicker
                 backend={mlx ? "mlx" : "nvidia"}
                 options={devices}
-                value={
-                  hardware.startsWith("custom:")
-                    ? hardware
-                    : (devices.find(([id]) => id === hardware)?.[0] ?? devices[0][0])
-                }
+                value={hardware}
                 onChange={chooseHardware}
               />
               <div className="matrix-resources">
@@ -445,11 +478,26 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                 {!example?.controls.some((field) => field.name === "num_gpus") && (
                   <p>{mlx ? "1 Apple Silicon host" : `${recipe.hardware?.gpu_count ?? 1} GPU in the source example`}</p>
                 )}
+                <a href={sitePath(mlx ? "/getting_started/installation/mlx" : "/getting_started/installation/gpu")}>
+                  Setup guide ↗
+                </a>
               </div>
             </div>
             <p className="matrix-note">
-              Hardware fit has not been verified. Settings edit the source example; device choice is a preference.
+              {mlx
+                ? hardwareLabel
+                  ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
+                  : "No hardware target selected. Choosing a Mac records your target; it does not change the example."
+                : hardwareLabel
+                  ? `${hardwareLabel} is saved as your target. It does not change the example; use GPU count in the source settings.`
+                  : "No hardware target selected. Choosing a device records your setup path; it does not change the example."}
             </p>
+            <RecipeFacts
+              validity={failure ? "invalid" : example ? "valid" : "loading"}
+              fit="unknown"
+              evidence="none"
+              subject={yamlSource ? "configuration" : "example"}
+            />
           </div>
         </div>
         {model.recipes.filter((entry) => entry.gpu_types.includes(mlx ? "Apple Silicon" : "NVIDIA")).length > 1 && (

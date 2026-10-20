@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const route = "/FastVideo/cookbook/minimax-h3/fasth3-8step";
+
+// The cookbook has no behavioral dependency on third-party scripts. Keep load
+// deterministic when GitHub/Trendshift are slow or unreachable.
+test.beforeEach(async ({ page }) => {
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (request) => request.abort());
+});
 async function settings(page: Page, section: string) {
   await expect(page.locator(".recipe-matrix")).toBeVisible();
   if (section === "Serving" || section === "Hardware") {
@@ -75,12 +81,12 @@ test("copy buttons use their own generated output", async ({ page, context }) =>
     server,
     ")",
   ].join("\n");
-  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await page.getByRole("button", { name: "Copy config + command", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(launch);
   await page.locator(".recipe-request-code > summary").click();
   const client = await page.getByLabel("Client command", { exact: true }).innerText();
   expect(client).toContain(":9001/");
-  await page.getByRole("button", { name: "Copy client command", exact: true }).click();
+  await page.getByRole("button", { name: "Copy request command", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(client);
   expect(new Set([yaml, launch, client]).size).toBe(3);
 });
@@ -207,7 +213,9 @@ test("hardware preferences stay distinct from schema-backed GPU count and topolo
   const yaml = page.getByLabel("Generated YAML", { exact: true });
   await expect(yaml).toContainText('"num_gpus": 1');
   await expect(yaml).not.toContainText('"hardware"');
-  await expect(page.getByText("Unverified recipe", { exact: true })).toBeVisible();
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Fit unknown", { exact: true })).toBeVisible();
+  await expect(page.getByText("No recorded run", { exact: true })).toBeVisible();
   await page.getByLabel("GPU count", { exact: true }).fill("0");
   await expect(yaml).toHaveCount(0);
   await expect(page.getByLabel("GPU count", { exact: true })).toHaveAttribute("aria-invalid", "true");
@@ -261,13 +269,13 @@ test("image and audio models have logos and dedicated source recipe pages", asyn
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Serving", exact: true })).toHaveCount(0);
   await page.getByLabel("Seed", { exact: true }).fill("0");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
   await page.goto("/FastVideo/cookbook");
   await page.getByRole("button", { name: "Audio", exact: true }).click();
   await expect(page.locator(".recipe-card")).toHaveCount(3);
   await page.locator(".recipe-card").first().click();
   await page.getByLabel("Audio duration", { exact: true }).fill("1.5");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
 });
 
 test("provider labels match FastVideo logos and CompactH3 is replaced by FastH3 Trim", async ({ page }) => {
@@ -282,7 +290,6 @@ test("provider labels match FastVideo logos and CompactH3 is replaced by FastH3 
     "href",
     /FastVideo-FastH3-Trim-8-Step-NVFP4/,
   );
-  await expect(page.getByRole("button", { name: "Copy YAML", exact: true })).toBeEnabled();
 });
 
 test("FastH3 Trim edits drive inference, serving, and complete copyable launch scripts", async ({ page }) => {
@@ -296,11 +303,12 @@ test("FastH3 Trim edits drive inference, serving, and complete copyable launch s
     });
   });
   await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-trim");
+  await page.getByRole("radio", { name: "DGX Spark GB10", exact: true }).check();
   await expect(page.getByRole("radio", { name: "DGX Spark GB10", exact: true })).toBeChecked();
   await expect(page.getByRole("radio", { name: "H100 Data center", exact: true })).toHaveCount(0);
   await page.getByLabel("Prompt", { exact: true }).fill("A potter finishes a blue bowl.");
   await page.getByLabel("Seed", { exact: true }).fill("0");
-  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await page.getByRole("button", { name: "Copy config + command", exact: true }).click();
   const script = await page.evaluate(() => (window as Window & { copiedCommand?: string }).copiedCommand);
   expect(script).toContain("cat > config.yaml <<'FASTVIDEO_CONFIG'");
   expect(script).toContain("FastVideo-FastH3-Trim-8-Step-NVFP4");
@@ -332,19 +340,19 @@ test("Wan I2V requires an image for CLI and SDK examples without changing server
   await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
   await chip(page, "Run mode", "CLI");
   await expect(page.getByRole("alert")).toContainText("Enter a source image path");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeDisabled();
   await page.getByLabel("Source image path", { exact: true }).fill("/data/first-frame.png");
   await output(page, "config.yaml");
   await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("image_path: /data/first-frame.png");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
   await chip(page, "Run mode", "Python SDK");
   await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("image_path: /data/first-frame.png");
   await page.getByLabel("Source image path", { exact: true }).fill("");
   await expect(page.getByRole("button", { name: "Copy YAML", exact: true })).toBeDisabled();
   await expect(page.getByLabel("Generated YAML", { exact: true })).toHaveCount(0);
   await chip(page, "Run mode", "Serving");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
   await expect(page.getByLabel("Generated YAML", { exact: true })).not.toContainText("image_path");
 });
 
@@ -368,12 +376,12 @@ test("source-backed serving pages expose their actual server settings", async ({
   await chip(page, "Run mode", "Serving");
   await page.locator(".matrix-advanced > summary").click();
   await page.getByLabel("Port", { exact: true }).fill("9005");
-  await page.getByRole("button", { name: "cURL", exact: true }).click();
+  await page.getByRole("button", { name: "Show request", exact: true }).click();
   await expect(page.getByLabel("Client command", { exact: true })).toContainText(":9005/v1/videos/sync");
   await page.getByRole("tab", { name: "config.yaml", exact: true }).click();
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("port: 9005");
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("Wan2.2-T2V-A14B");
-  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
 });
 
 test("source model hardware preferences survive hydration and reload", async ({ page }) => {
@@ -386,7 +394,7 @@ test("source model hardware preferences survive hydration and reload", async ({ 
   expect(errors).toEqual([]);
 });
 
-test("custom devices persist and component previews cannot silently generate incompatible YAML", async ({ page }) => {
+test("custom devices persist and no preview control can block generated YAML", async ({ page }) => {
   await page.goto(route);
   await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
   await page.getByLabel("Device name", { exact: true }).fill("RTX 4090");
@@ -394,10 +402,46 @@ test("custom devices persist and component previews cannot silently generate inc
   await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
   await page.reload();
   await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
-  await page.locator(".component-plan > summary").click();
-  await chip(page, "Text encoder", "NVFP4 encoder");
-  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeDisabled();
-  await expect(page.getByRole("alert")).toContainText("compatible serving recipe");
-  await page.getByRole("button", { name: "Restore recipe components", exact: true }).click();
+  await expect(page.locator(".component-plan")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toHaveCount(0);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+});
+
+test("hardware is never preselected and a target does not change generated YAML", async ({ page }) => {
+  await page.goto(route);
+  await expect(page.locator('input[type="radio"]:checked')).toHaveCount(0);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await output(page, "config.yaml");
+  const yaml = page.getByLabel("Generated YAML", { exact: true });
+  const baseline = await yaml.innerText();
+  await page.getByRole("radio", { name: /RTX 5090/ }).check();
+  await expect(page.getByRole("radio", { name: /RTX 5090/ })).toBeChecked();
+  await expect(page.getByText(/RTX 5090 is saved as your target/)).toBeVisible();
+  await expect(yaml).toHaveText(baseline);
+  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await expect(page.locator('input[type="radio"]:checked')).toHaveCount(0);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+});
+
+test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
+  await page.goto(route);
+  const facts = page.getByLabel("Recipe facts");
+  await expect(facts.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Fit unknown", { exact: true })).toBeVisible();
+  await expect(facts.getByText("No recorded run", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByText(/This is not a fit claim/)).toBeVisible();
+  await expect(page.getByText(/do not establish this configuration/)).toBeVisible();
+});
+
+test("WebSocket deployments expose only the serving interface", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/ltx/ltx2-distilled");
+  const modes = page.getByRole("group", { name: "Run mode" });
+  await expect(modes.getByRole("button")).toHaveCount(1);
+  await expect(modes.getByRole("button", { name: "Serving", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(modes.getByRole("button", { name: "Python SDK", exact: true })).toHaveCount(0);
+  await expect(modes.getByRole("button", { name: "CLI", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Only serving is recorded for it/)).toBeVisible();
 });

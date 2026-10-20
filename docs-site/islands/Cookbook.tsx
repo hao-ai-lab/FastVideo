@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import SourceRecipe from "./SourceRecipe";
-import ComponentPlan from "@/components/cookbook/ComponentPlan";
 import HardwarePicker from "@/components/cookbook/HardwarePicker";
 import ModelHeader from "@/components/cookbook/ModelHeader";
+import RecipeFacts from "@/components/cookbook/RecipeFacts";
 import { configAndLaunch, inferenceOutput, sdkCommand } from "@/lib/cookbook-commands";
 import {
   api,
@@ -193,18 +193,16 @@ function Editor({
   selectRuntime: (id: string) => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
-  const [componentDraft, setComponentDraft] = useState(false);
   const [runMode, setRunMode] = useState("serving");
   const [sourceImage, setSourceImage] = useState("");
   const sourceImageId = useId();
   const [showEnv, setShowEnv] = useState(false);
   const [showClient, setShowClient] = useState(false);
   const [outputTab, setOutputTab] = useState("commands");
-  const [hardware, setHardware] = useState(
-    () =>
-      new URL(window.location.href).searchParams.get("hardware") ??
-      (catalog.id.startsWith("fasth3-trim/") ? "spark" : "unspecified"),
-  );
+  const [hardware, setHardware] = useState(() => {
+    const requested = new URL(window.location.href).searchParams.get("hardware");
+    return requested && requested !== "unspecified" ? requested : "";
+  });
   const [edits, setEdits] = useState<Record<string, Value>>({});
   const [parseErrors, setParseErrors] = useState<Record<string, string>>({});
   const [reset, setReset] = useState(0);
@@ -214,8 +212,6 @@ function Editor({
   let failure = "";
   let failedPath: string | undefined;
   try {
-    if (componentDraft)
-      throw new Error("Component preview selected. A compatible serving recipe is needed before generating YAML.");
     if (Object.keys(parseErrors).length) throw new Error("Correct the highlighted fields to generate a configuration.");
     result = api.resolveConfig(catalog, edits);
     output =
@@ -247,10 +243,10 @@ function Editor({
     setEdits(next);
     setParseErrors(errors);
   }
-  async function copy(text: string) {
+  async function copy(text: string, message = "Copied to clipboard.") {
     try {
       await navigator.clipboard.writeText(text);
-      setNotice("Copied to clipboard.");
+      setNotice(message);
     } catch {
       setNotice("Copy failed. Select and copy the text below.");
     }
@@ -280,7 +276,8 @@ function Editor({
           ["spark", "DGX Spark", "GB10"],
         ]
   ).filter(([id]) => !nvfp4 || id !== "h100");
-  const selectedHardware = hardwareOptions.find(([value]) => value === hardware) ?? hardwareOptions[0];
+  const selectedHardware = hardwareOptions.find(([value]) => value === hardware);
+  const hardwareLabel = hardware.startsWith("custom:") ? hardware.slice(7) : selectedHardware?.[1];
   const model = modelDirectory.find((model) => model.id === catalog.id.split("/")[0])!;
   const renderField = (field: Field) => (
     <FieldControl
@@ -294,9 +291,16 @@ function Editor({
   function chooseHardware(value: string) {
     setHardware(value);
     const url = new URL(window.location.href);
-    url.searchParams.set("hardware", value);
+    if (value) url.searchParams.set("hardware", value);
+    else url.searchParams.delete("hardware");
     window.history.replaceState(null, "", url);
   }
+  const modes = mlx || catalog.runtime.interface === "websocket" ? ["serving"] : ["sdk", "inference", "serving"];
+  const modeNote = mlx
+    ? "Apple Silicon runs through the native MLX server in this recipe. There is no CUDA CLI or Python SDK launch for this deployment."
+    : catalog.runtime.interface === "websocket"
+      ? "This deployment uses the native WebSocket server. Only serving is recorded for it."
+      : "";
   const advancedGroups = groups.filter(
     (group) => group === "server" || group.includes("parallelism") || group.startsWith("streaming"),
   );
@@ -309,7 +313,11 @@ function Editor({
         model={model}
         actions={
           <>
-            <Button variant="outline" disabled={!output} onClick={() => output && copy(output.yaml)}>
+            <Button
+              variant="outline"
+              disabled={!output}
+              onClick={() => output && copy(output.yaml, "Copied config.yaml.")}
+            >
               Copy YAML
             </Button>
             <Button disabled={!output} onClick={download}>
@@ -320,7 +328,7 @@ function Editor({
       />
       {
         <div className="recipe-run-modes option-chips" role="group" aria-label="Run mode">
-          {(mlx ? ["serving"] : ["sdk", "inference", "serving"]).map((mode) => (
+          {modes.map((mode) => (
             <button
               type="button"
               key={mode}
@@ -335,17 +343,17 @@ function Editor({
           ))}
         </div>
       }
+      {modeNote && <p className="recipe-mode-note">{modeNote}</p>}
       <section className="recipe-command-box" aria-label="Generated configuration">
         <Tabs.Root value={outputTab} onValueChange={setOutputTab}>
           <div className="recipe-command-toolbar">
-            <span className="recipe-unverified">Unverified recipe</span>
             <div className="recipe-command-tools">
               <button
                 type="button"
                 disabled={!output}
-                onClick={() => output && copy(configAndLaunch(output.yaml, launchCommand!))}
+                onClick={() => output && copy(configAndLaunch(output.yaml, launchCommand!), "Copied config.yaml and launch command.")}
               >
-                Copy
+                Copy config + command
               </button>
               {runMode === "serving" && (
                 <button
@@ -358,12 +366,12 @@ function Editor({
                     setShowClient(!showClient);
                   }}
                 >
-                  cURL
+                  Show request
                 </button>
               )}
               {Object.keys(catalog.env).length > 0 && (
                 <button type="button" aria-pressed={showEnv} onClick={() => setShowEnv(!showEnv)}>
-                  Env
+                  Show environment
                 </button>
               )}
             </div>
@@ -404,7 +412,8 @@ function Editor({
                   <code>{launchCommand}</code>
                 </pre>
                 <p className="matrix-note">
-                  Includes your settings and writes config.yaml. Run from an installed FastVideo checkout.
+                  Uses your settings; Copy config + command writes config.yaml first. Run from an installed FastVideo
+                  checkout.
                 </p>
                 {runMode === "serving" && (
                   <details
@@ -414,8 +423,11 @@ function Editor({
                     onToggle={(event) => setShowClient(event.currentTarget.open)}
                   >
                     <summary>{result.websocketUrl ? "Health check and WebSocket" : "Example request"}</summary>
-                    <button type="button" onClick={() => copy(result.clientCommand)}>
-                      Copy client command
+                    <button
+                      type="button"
+                      onClick={() => copy(result.clientCommand, "Copied example request.")}
+                    >
+                      Copy request command
                     </button>
                     <pre tabIndex={0} aria-label="Client command">
                       <code>{result.clientCommand}</code>
@@ -479,7 +491,7 @@ function Editor({
             <HardwarePicker
               backend={mlx ? "mlx" : "nvidia"}
               options={hardwareOptions}
-              value={hardware.startsWith("custom:") ? hardware : selectedHardware[0]}
+              value={hardware}
               onChange={chooseHardware}
             />
             <div className="matrix-resources">
@@ -490,7 +502,7 @@ function Editor({
                 href={sitePath(
                   mlx
                     ? "/getting_started/installation/mlx"
-                    : selectedHardware[0] === "spark"
+                    : hardware === "spark"
                       ? "/getting_started/installation/spark"
                       : "/getting_started/installation/gpu",
                 )}
@@ -499,7 +511,20 @@ function Editor({
               </a>
             </div>
           </div>
-          <p className="matrix-note">Hardware fit has not been verified. GPU count updates the YAML.</p>
+          <p className="matrix-note">
+            {mlx
+              ? hardwareLabel
+                ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
+                : "No hardware target selected. Choosing a Mac records your target; it does not change the generated YAML."
+              : hardwareLabel
+                ? `${hardwareLabel} is saved as your target. It does not change the generated YAML; use GPU count and parallelism for the run.`
+                : "No hardware target selected. Choosing a device records your setup path; it does not change the generated YAML."}
+          </p>
+          <RecipeFacts
+            validity={failure ? "invalid" : result ? "valid" : "loading"}
+            fit="unknown"
+            evidence="none"
+          />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (
           <MatrixRow title="Inputs">
@@ -538,7 +563,7 @@ function Editor({
                 )}
               </div>
             )}
-            <ComponentPlan key={reset} onDraftChange={setComponentDraft} />
+            <p className="matrix-note">Components come from the maintained recipe. They are not individually selectable in the cookbook yet.</p>
           </MatrixRow>
         )}
         {standardGroups.map((group) => (
@@ -570,7 +595,6 @@ function Editor({
                     setParseErrors(
                       Object.fromEntries(Object.entries(parseErrors).filter(([path]) => !path.includes("parallelism"))),
                     );
-                    setComponentDraft(false);
                     setNotice("Parallelism set to automatic.");
                   }}
                 >
@@ -588,7 +612,6 @@ function Editor({
           onClick={() => {
             setEdits({});
             setSourceImage("");
-            setComponentDraft(false);
             setParseErrors({});
             setReset(reset + 1);
             setNotice("Restored the baseline configuration.");
