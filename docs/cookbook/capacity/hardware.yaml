@@ -1,0 +1,62 @@
+# Initial variants corresponding to existing cookbook hardware choices.
+# memory_gb is nominal capacity per device in decimal GB (1 GB = 1e9 bytes),
+# not memory available to the application. Unified memory is shared with the CPU.
+# supported_dtypes, when listed, describes hardware format capability rather than
+# FastVideo kernel support. Omission means that formats have not been cataloged.
+# NVFP4 entries are backed by E2M1 matrix instructions with E4M3 block scales
+# for the device's documented compute capability.
+hardware:
+  h100-sxm-80gb:
+    name: NVIDIA H100 SXM 80 GB
+    ui_id: h100
+    memory_type: dedicated
+    memory_gb: 80
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    sources:
+      - https://www.nvidia.com/en-us/data-center/h100/
+    notes: H100 SXM variant; the separate H100 NVL variant has a different capacity.
+
+  geforce-rtx-5090-32gb:
+    name: NVIDIA GeForce RTX 5090 32 GB (desktop)
+    ui_id: rtx5090
+    memory_type: dedicated
+    memory_gb: 32
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    sources:
+      - https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/
+      - https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+      - https://developer.nvidia.com/cuda/gpus
+      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
+
+  rtx-pro-6000-blackwell-workstation-96gb:
+    name: NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB
+    ui_id: rtx
+    memory_type: dedicated
+    memory_gb: 96
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    sources:
+      - https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/
+      - https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/quadro-product-literature/NVIDIA-RTX-Blackwell-PRO-GPU-Architecture-v1.0.pdf
+      - https://developer.nvidia.com/cuda/gpus
+      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
+    notes: Workstation Edition variant with dedicated GDDR7 memory.
+
+  dgx-spark-gb10-128gb:
+    name: NVIDIA DGX Spark GB10 128 GB
+    ui_id: spark
+    memory_type: unified
+    memory_gb: 128
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    sources:
+      - https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+      - https://developer.nvidia.com/cuda/gpus
+      - https://docs.nvidia.com/cuda/archive/13.0.2/cuda-toolkit-release-notes/index.html#cublas-release-13-0-update-2
+      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
+    notes: >-
+      One 128 GB system with coherent memory shared by the CPU and GPU.
+      This entry does not describe the separate 64 GB OEM configuration or
+      the aggregate memory of a multi-system deployment.

@@ -212,10 +212,14 @@ recipe needs it. It is not implemented in this change:
   sibling fields. The current LTX2 baseline fixes refinement on and uses 64-pixel
   dimensions accordingly.
 
-Measured hardware support, format versioning and HTTP cache freshness remain
-separate follow-ups. `estimateMemory()` is analytical and never verifies a
-recipe. No general arithmetic validator or CLI override workflow is introduced
-here.
+The [capacity metadata catalog](../contributing/capacity_estimation.md) supplies
+shared hardware/component facts and optional recorded runs through separate
+static loaders. Optional `capacity` sections extend existing model manifests;
+model identity and example configurations are derived from their deployments
+and native baseline YAML. `estimateMemory()` is analytical and never verifies a
+recipe. Measured-hardware UI, format versioning and HTTP cache freshness remain
+separate follow-ups. No general arithmetic validator or CLI override workflow
+is introduced here.
 
 ## Cookbook interface
 

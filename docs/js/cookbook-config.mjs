@@ -3,6 +3,7 @@
  * Native baselines and manifest-selected JSON Schema controls come from the authored YAML catalog.
  */
 import { createValidator } from "./cookbook-validator.mjs";
+export { loadCapacityIndex, loadCapacityModel, loadCapacityHardware } from "./cookbook-capacity.mjs";
 
 const scope = globalThis;
 
