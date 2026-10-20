@@ -58,7 +58,7 @@ hardware:
     sources:
       - url: https://www.nvidia.com/en-us/data-center/h100/
         checked: 2026-10-19
-      - url: https://images.nvidia.com/aem-dam/Solutions/Data-Center/h100/nvidia-hopper-architecture-whitepaper.pdf
+      - url: https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/
         checked: 2026-10-19
 
   h200-sxm-141gb:
@@ -78,7 +78,7 @@ hardware:
     sources:
       - url: https://www.nvidia.com/en-us/data-center/h200/
         checked: 2026-10-19
-      - url: https://images.nvidia.com/aem-dam/Solutions/Data-Center/h100/nvidia-hopper-architecture-whitepaper.pdf
+      - url: https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/
         checked: 2026-10-19
 
   b200-180gb:
