@@ -20,6 +20,7 @@ deployments:
       - "!generator.engine.parallelism.hsdp_*"
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
+      - generator.pipeline.experimental.video_decode_backend
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width

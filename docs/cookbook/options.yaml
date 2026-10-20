@@ -97,6 +97,15 @@ runtimes:
         title: Compile transformer
         type: boolean
         default: false
+      # MiniMax-H3 only (fastvideo_args.video_decode_backend). TAEH3 fetches its own SHA-pinned weights.
+      generator.pipeline.experimental.video_decode_backend:
+        title: Video decoder
+        description: >-
+          h3-vae is the full decoder. taeh3 is the tiny preview decoder: faster and lighter, lower quality,
+          text-to-video only.
+        type: string
+        enum: [h3-vae, taeh3]
+        default: h3-vae
       default_request.sampling.num_frames:
         title: Frames
         type: integer

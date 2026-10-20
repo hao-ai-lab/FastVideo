@@ -27,6 +27,7 @@ deployments:
       - generator.engine.parallelism.sp_size
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
+      - generator.pipeline.experimental.video_decode_backend
       - default_request.prompt
       - default_request.sampling.num_frames
       - default_request.sampling.height

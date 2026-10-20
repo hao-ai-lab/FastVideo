@@ -17,6 +17,7 @@ import pytest
 from fastvideo.api.schema import GenerationRequest, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.entrypoints.openai.mlx_server import MLXServeConfig
+from fastvideo.fastvideo_args import FastVideoArgs
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CONFIGS = {
@@ -25,6 +26,11 @@ RUNTIME_CONFIGS = {
     "fastvideo-mlx-rest": MLXServeConfig,
 }
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean", type(None): "null"}
+# Individually verified experimental keys and the native field that receives each one.
+EXPERIMENTAL_DECLARATIONS = {
+    "generator.pipeline.experimental.flow_shift": (PipelineConfig, "flow_shift"),
+    "generator.pipeline.experimental.video_decode_backend": (FastVideoArgs, "video_decode_backend"),
+}
 
 
 def annotation_at_path(config_type: type, path: str) -> Any:
@@ -49,10 +55,11 @@ def native_annotation(runtime: str, path: str) -> Any:
         # create_mlx_app normalizes this opaque mapping as GenerationRequest.
         assert annotation_at_path(config_type, "default_request") == dict[str, Any]
         return annotation_at_path(GenerationRequest, path.removeprefix("default_request."))
-    if config_type is ServeConfig and path == "generator.pipeline.experimental.flow_shift":
+    if config_type is ServeConfig and path in EXPERIMENTAL_DECLARATIONS:
         # The compatibility adapter forwards experimental keys to pipeline args.
         assert annotation_at_path(config_type, "generator.pipeline.experimental") == dict[str, Any]
-        return annotation_at_path(PipelineConfig, "flow_shift")
+        native_type, field = EXPERIMENTAL_DECLARATIONS[path]
+        return annotation_at_path(native_type, field)
     return annotation_at_path(config_type, path)
 
 
