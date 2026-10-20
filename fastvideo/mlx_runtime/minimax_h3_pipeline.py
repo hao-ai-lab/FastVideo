@@ -26,7 +26,7 @@ import math
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -67,19 +67,9 @@ from fastvideo.mlx_runtime.minimax_h3 import (
 from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
 from fastvideo.mlx_runtime.prompt_cache import fingerprint_digest, text_encoder_fingerprint
 
+from fastvideo.mlx_runtime.generation_result import GenerationResult
+
 logger = init_logger(__name__)
-
-
-@dataclass
-class GenerationResult:
-    video_path: str | None
-    frames: np.ndarray | None
-    waveform: np.ndarray | None
-    sample_rate: int
-    timings: dict[str, float] = field(default_factory=dict)
-    peak_memory_gib: dict[str, float] = field(default_factory=dict)
-    vsa: dict[str, Any] = field(default_factory=dict)
-    video_decode_backend: str = "h3-vae"
 
 
 @dataclass(frozen=True)

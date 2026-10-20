@@ -42,8 +42,8 @@ and API clients share the same server; both can run locally.
 For native Apple Silicon MLX, use
 `python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml`
 (Preview) or `examples/serving/mlx_fasth3_8step.yaml` (8-Step V2) after preparing
-the weights and editing their paths in that configuration. The same playground
-and OpenAI Python client work with MLX. Its pipeline still loads and releases
+the weights and editing their paths in that configuration. The H3 playground
+and OpenAI Python client work with this MLX server. Its pipeline still loads and releases
 components between phases to limit unified-memory use. See the cookbook for
 setup and the supported text-to-video/audio request fields.
 
@@ -74,6 +74,32 @@ source image through the OpenAI-compatible reference fields, for example
 `{"image_reference": [{"image_url": "https://example.com/first-frame.png"}]}`.
 The I2V 14B server requires one on every request; the TI2V 5B server treats
 its absence as text-to-video.
+
+## FastMetal Wan on Apple Silicon
+
+The Wan MLX server supports text-to-video with FastMetal 1.3B, 14B, and 5B.
+Install FastVideo with its `mlx` and `serving` extras and install ffmpeg.
+Download the selected FastMetal checkpoint and set `generator.model_root` and
+`generator.mlx_checkpoint` to its local directory.
+
+| Model | Config | Served model name |
+| --- | --- | --- |
+| Wan2.1 1.3B | [mlx_wan21_1_3b.yaml](mlx_wan21_1_3b.yaml) | `fastwan21-1.3b-mlx` |
+| Wan2.1 14B | [mlx_wan21_14b.yaml](mlx_wan21_14b.yaml) | `fastwan21-14b-mlx` |
+| Wan2.2 5B | [mlx_wan22_5b.yaml](mlx_wan22_5b.yaml) | `fastwan22-5b-mlx` |
+
+For example, from the repository root:
+
+```bash
+hf download FastVideo/FastMetal-5B-QAD --local-dir ./FastMetal-5B-QAD
+fastvideo serve --config examples/serving/mlx_wan22_5b.yaml
+```
+
+Use `/v1/videos`, `/v1/videos/sync`, and the video clients. The browser
+playground currently supports H3 only. Set `FASTVIDEO_MODEL` to the Wan alias
+when using a client.
+
+## Video clients
 
 Or submit, poll, and download with the OpenAI Python client:
 

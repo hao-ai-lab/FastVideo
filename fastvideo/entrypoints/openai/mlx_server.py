@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import platform
 import shutil
@@ -13,13 +12,17 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-import uvicorn
 import yaml
 
 from fastvideo.api.compat import explicit_request_updates, normalize_generation_request
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
+from fastvideo.entrypoints.openai.mlx_common import (
+    MLXServerConfig as BaseMLXServerConfig,
+    MLXWorkerGenerator,
+    run_mlx_server,
+)
 
 PREVIEW_MODEL: Literal["FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"] = (
     "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2")
@@ -53,10 +56,7 @@ class MLXGeneratorConfig(BaseModel):
     vsa_tile_size: Literal[64, 256] = 64
 
 
-class MLXServerConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65535)
+class MLXServerConfig(BaseMLXServerConfig):
     output_dir: str = "outputs/mlx_fasth3"
     served_model_name: str = Field(default="fasth3", min_length=1)
 
@@ -104,20 +104,16 @@ def validate_mlx_video_request(request: VideoGenerationRequest, *, model_path: s
         raise ValueError("H3 MLX seed must be between 0 and 4294967295.")
 
 
-class MLXH3Generator:
+class MLXH3Generator(MLXWorkerGenerator):
     """Keep one pipeline on one MLX thread; preserve its phase-memory policy."""
+    thread_name = "h3-mlx"
 
     def __init__(self, config: MLXGeneratorConfig) -> None:
         self._model_path = config.model_path
         self._vsa = config.vsa
         self._vsa_sparsity = config.vsa_sparsity
         self._vsa_tile_size = config.vsa_tile_size
-        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="h3-mlx")
-        try:
-            self._pipeline = self._worker.submit(self._load, config).result()
-        except BaseException:
-            self._worker.shutdown(wait=True)
-            raise
+        super().__init__(config)
 
     @staticmethod
     def _load(config: MLXGeneratorConfig):
@@ -133,9 +129,6 @@ class MLXH3Generator:
             prompt_cache_dir=Path(config.prompt_cache_dir).expanduser(),
             vae_dtype=config.vae_dtype,
         )
-
-    def generate(self, request: GenerationRequest) -> dict[str, Any]:
-        return self._worker.submit(self._generate, request).result()
 
     def _generate(self, request: GenerationRequest) -> dict[str, Any]:
         started = time.perf_counter()
@@ -157,18 +150,11 @@ class MLXH3Generator:
         # Do not retain decoded frames/waveforms or label phase peaks as total RAM.
         return {"video_path": str(result.video_path), "generation_time": time.perf_counter() - started}
 
-    def shutdown(self) -> None:
+    @staticmethod
+    def _cleanup() -> None:
+        from fastvideo.mlx_runtime.minimax_h3_pipeline import _cleanup_mlx
 
-        def release():
-            self._pipeline = None
-            from fastvideo.mlx_runtime.minimax_h3_pipeline import _cleanup_mlx
-
-            _cleanup_mlx()
-
-        try:
-            self._worker.submit(release).result()
-        finally:
-            self._worker.shutdown(wait=True)
+        _cleanup_mlx()
 
 
 def load_config(path: str) -> MLXServeConfig:
@@ -226,7 +212,7 @@ def main() -> None:
                         help="H3 MLX serving YAML; paths are relative to the working directory")
     args = parser.parse_args()
     config = load_config(args.config)
-    uvicorn.run(create_mlx_app(config), host=config.server.host, port=config.server.port)
+    run_mlx_server(config)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,9 @@ _VALIDATED_SERVE_CONFIG_ATTR = "_fastvideo_validated_serve_config"
 
 
 def _validate_execution_backend(serve_config) -> None:
+    # MLX configs have no CUDA executor backend; their server validates its own runtime.
+    if getattr(serve_config, "runtime", None) == "mlx":
+        return
     from fastvideo.worker.executor import reject_external_launcher
 
     reject_external_launcher(
@@ -41,6 +44,12 @@ class ServeSubcommand(CLISubcommand):
         _validate_execution_backend(serve_config)
 
         logger.info("CLI serve config: %s", serve_config)
+
+        if getattr(serve_config, "runtime", None) == "mlx":
+            from fastvideo.entrypoints.openai.mlx_common import run_mlx_server
+
+            run_mlx_server(serve_config)
+            return
 
         # A `streaming:` block selects the WebSocket/Dynamo runtime;
         # its deps stay out of REST-only deployments via lazy import.

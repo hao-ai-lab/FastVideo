@@ -4,11 +4,15 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
 from fastvideo.api.parser import load_raw_config, parse_config
 from fastvideo.api.schema import RunConfig, ServeConfig
+
+if TYPE_CHECKING:
+    from fastvideo.entrypoints.openai.mlx_server import MLXServeConfig
+    from fastvideo.entrypoints.openai.mlx_wan_server import MLXWanServeConfig
 
 _GENERATE_OVERRIDE_PREFIXES = ("generator.", "request.")
 _SERVE_OVERRIDE_PREFIXES = (
@@ -39,7 +43,7 @@ def build_generate_run_config(
 def build_serve_config(
     args: argparse.Namespace,
     overrides: list[str] | None = None,
-) -> ServeConfig:
+) -> ServeConfig | MLXServeConfig | MLXWanServeConfig:
     raw = _load_nested_config(getattr(args, "config", None))
     raw.setdefault("server", {})
     raw.setdefault("default_request", {})
@@ -48,6 +52,14 @@ def build_serve_config(
         overrides,
         allowed_prefixes=_SERVE_OVERRIDE_PREFIXES,
     )
+    if raw.get("runtime") == "mlx":
+        from fastvideo.entrypoints.openai.mlx_wan_server import MLXWanServeConfig, _PIPELINE_CLASS_NAMES
+
+        if raw["generator"].get("model_path") in _PIPELINE_CLASS_NAMES:
+            return MLXWanServeConfig.model_validate(raw)
+        from fastvideo.entrypoints.openai.mlx_server import MLXServeConfig
+
+        return MLXServeConfig.model_validate(raw)
     config = parse_config(ServeConfig, raw)
     _validate_num_gpus(config.generator.engine.num_gpus)
     return config
