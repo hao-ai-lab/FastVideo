@@ -23,7 +23,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     unpatchify_video_tokens,
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import DECODE_ON_ALL_RANKS_KEY, ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -40,7 +40,11 @@ def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
     return layout
 
 
-def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) -> tuple[Any, bool, bool]:
+def _decode_participation(
+    fastvideo_args: FastVideoArgs,
+    want_parallel: bool,
+    decode_all_ranks: bool = False,
+) -> tuple[Any, bool, bool]:
     """Resolve (sp_group, is_output_rank, parallel) for the VAE decode stages.
 
     The output rank is ``h3_output_worker_rank``: global rank zero, or the
@@ -50,6 +54,8 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     rank. Every rank in any other SP group skips the decode uniformly.
     ``parallel`` is only true when every rank in the active group will run the
     decode body, because its collectives require group-uniform participation.
+    Training validation sets ``decode_all_ranks`` because every rank holds a
+    distinct sample that needs its own media.
     """
     if not model_parallel_is_initialized():
         return None, True, False
@@ -57,6 +63,8 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     is_output_rank = h3_is_output_worker(fastvideo_args)
     if bool(want_parallel) and sp_group.world_size > 1:
         return sp_group, is_output_rank, h3_output_worker_rank(fastvideo_args) in sp_group.ranks
+    if decode_all_ranks:
+        return sp_group, True, False
     return sp_group, is_output_rank, False
 
 
@@ -110,7 +118,11 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Decode H3 video latents into normalized CPU pixels."""
         placeholder = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
-        sp_group, is_output_rank, parallel = _decode_participation(fastvideo_args, fastvideo_args.vae_parallel_decode)
+        sp_group, is_output_rank, parallel = _decode_participation(
+            fastvideo_args,
+            fastvideo_args.vae_parallel_decode,
+            decode_all_ranks=bool(batch.extra.get(DECODE_ON_ALL_RANKS_KEY, False)),
+        )
         if not is_output_rank and not parallel:
             # Consumers read the output rank's ForwardBatch. Keep a
             # verifier-compatible placeholder on other ranks and avoid
@@ -227,8 +239,10 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         """Decode H3 audio latents into a stereo CPU waveform."""
         # Audio decode is sub-second, so preserve the serial path's output
         # ownership (global rank zero, or the first denoise rank under the
-        # MiniMax-H3 encoder split).
-        if model_parallel_is_initialized() and not h3_is_output_worker(fastvideo_args):
+        # MiniMax-H3 encoder split) unless training validation asked every
+        # rank to decode its own sample.
+        if (model_parallel_is_initialized() and not h3_is_output_worker(fastvideo_args)
+                and not bool(batch.extra.get(DECODE_ON_ALL_RANKS_KEY, False))):
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
             self._clear_runtime(batch)
