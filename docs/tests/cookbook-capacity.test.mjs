@@ -458,7 +458,7 @@ test("hardware and components require source URLs and do not fix a runtime dtype
 test("the authored hardware inventory is sourced, unique and keeps unified memory explicit", () => {
   const catalog = buildCapacityCatalog({ root: ROOT }).hardware;
   const devices = Object.values(catalog);
-  assert.equal(devices.length, 50);
+  assert.equal(devices.length, 52);
   assert.equal(new Set(devices.map((device) => device.id)).size, devices.length);
   const aliases = new Map();
   for (const device of devices) {
