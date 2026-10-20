@@ -38,8 +38,11 @@ FastAPI's default 422 schema when the mounted application does not return it.
 ## Workload IDs
 
 Use these shared IDs in runtime `workloads`, recipe/deployment `workload`, and
-capability rows. The server owner implements endpoints and the docs-site owner
-renders from the declared input/output media rather than assuming video.
+capability rows. The shared media map lives in
+`docs/js/cookbook-workloads.mjs`; the catalog builder and sample client use it as
+the single workload allow-list. The server owner implements endpoints and the
+docs-site owner renders from the declared input/output media rather than
+assuming video.
 
 | ID | Input | Output | Minimal semantics |
 | --- | --- | --- | --- |
@@ -49,8 +52,10 @@ renders from the declared input/output media rather than assuming video.
 | `t2a` | text | audio | Text prompt to an audio clip |
 | `v2a` | video + text | audio | Video soundtrack, speech, or audio response |
 
-Do not infer an endpoint or response body from a workload ID. The capability row
-must name the actual operation and media type, and unsupported combinations stay
+The map records the canonical sample endpoint, extension, and media type used
+by cookbook examples; it does not prove that a model or deployment supports the
+workload. Do not infer support from an ID. The capability row must name the
+actual operation and media type, and unsupported combinations stay
 `unsupported` or `unknown` rather than falling back to a video route.
 
 ## Capability matrix
