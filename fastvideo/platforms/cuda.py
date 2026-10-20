@@ -176,12 +176,16 @@ class CudaPlatformBase(Platform):
         if selected_backend == AttentionBackendEnum.FLASHINFER:
             if not cls.has_device_capability(80, device_id=torch.cuda.current_device()):
                 raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
+            prefill_backend = envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get()
+            if prefill_backend == "cudnn" and not cls.has_device_capability(90):
+                raise RuntimeError("FLASHINFER cuDNN THD prefill requires Hopper (sm90) or newer. "
+                                   "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
             if dtype not in (torch.float16, torch.bfloat16):
                 logger.warning("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
             try:
                 from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
 
-                if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get() == "cudnn":
+                if prefill_backend == "cudnn":
                     from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache  # noqa: F401
 
                 from fastvideo.attention.backends.flashinfer import (  # noqa: F401
@@ -197,7 +201,7 @@ class CudaPlatformBase(Platform):
             # 128 only (see FlashInferImpl.__init__). Check it here too so a bad
             # combination fails at backend selection instead of per-layer, deep into
             # model construction.
-            if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get() == "cudnn" and head_size != 128:
+            if prefill_backend == "cudnn" and head_size != 128:
                 raise ValueError(f"FLASHINFER cuDNN prefill requires head size 128; got {head_size}. "
                                  "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
             logger.info("Using FlashInfer attention backend.")
