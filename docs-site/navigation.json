@@ -124,6 +124,10 @@
         "display": "group"
       },
       {
+        "label": "PAN 2 text/image to video",
+        "href": "/inference/pan2"
+      },
+      {
         "label": "Examples",
         "href": "/inference/examples/examples_inference_index"
       }

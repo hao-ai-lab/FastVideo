@@ -17,6 +17,7 @@ import os
 import socket
 import subprocess
 import sys
+from contextlib import ExitStack
 from dataclasses import fields
 from pathlib import Path
 
@@ -25,16 +26,14 @@ import torch
 import torch.nn as nn
 from torch.testing import assert_close
 
-os.environ.setdefault("DISABLE_SP", "1")
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-
-from fastvideo.forward_context import set_forward_context  # noqa: E402
-from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict  # noqa: E402
-from fastvideo.models.loader.utils import get_param_names_mapping  # noqa: E402
-from tests.local_tests.pan2.reference import TINY_REPO_ID, ReferencePAN2Transformer, tiny_model_dir  # noqa: E402
+from fastvideo import envs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict
+from fastvideo.models.loader.utils import get_param_names_mapping
+from tests.local_tests.pan2.reference import TINY_REPO_ID, ReferencePAN2Transformer, tiny_model_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SP_WORLD_SIZE = 2
+SP_WORLD_SIZES = (2, 4)
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -69,17 +68,25 @@ def _small_kwargs() -> dict:
 
 
 @pytest.fixture
-def single_rank_dist():
+def single_rank_dist(monkeypatch):
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
+    import fastvideo.distributed.parallel_state as parallel_state
 
-    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-    os.environ.setdefault("MASTER_PORT", str(_free_port()))
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
-    os.environ.setdefault("LOCAL_RANK", "0")
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    yield
-    cleanup_dist_env_and_memory()
+    if not torch.cuda.is_available():
+        def _cpu_device() -> torch.device:
+            return torch.device("cpu")
+
+        monkeypatch.setattr(parallel_state.get_local_torch_device, "__code__", _cpu_device.__code__)
+    with ExitStack() as stack:
+        stack.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+        for name, value in (("MASTER_ADDR", "127.0.0.1"), ("MASTER_PORT", str(_free_port())), ("RANK", "0"),
+                            ("WORLD_SIZE", "1"), ("LOCAL_RANK", "0")):
+            stack.enter_context(envs.override_external(name, value))
+        try:
+            maybe_init_distributed_environment_and_model_parallel(1, 1)
+            yield
+        finally:
+            cleanup_dist_env_and_memory()
 
 
 def _build_native(arch_kwargs: dict):
@@ -218,17 +225,16 @@ def test_pan2_random_weights_forward_parity(single_rank_dist, batch_size: int):
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# Sequence parallel: SP=2 must match one rank (video tokens are padded to a multiple of the SP size)
+# Sequence parallel: padded video tokens must never enter joint video/text attention.
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def _run_sp_worker(mode: str, output_path: Path) -> None:
+def _run_sp_worker(sp_size: int, output_path: Path) -> None:
     from fastvideo.configs.models.dits.pan2 import PAN2VideoConfig
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
     from fastvideo.models.dits.pan2 import PAN2Transformer3DModel
     import torch.distributed as dist
 
-    sp_size = 1 if mode == "single" else SP_WORLD_SIZE
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{int(os.environ.get('LOCAL_RANK', '0'))}")
         torch.cuda.set_device(device)
@@ -254,58 +260,76 @@ def _run_sp_worker(mode: str, output_path: Path) -> None:
         native = PAN2Transformer3DModel(config=config, hf_config=kwargs).float().eval()
         _load_into_native(native, reference.state_dict().items())
         native = native.to(device)
-        # 5x2x6 latents patchify to 15 video tokens, which SP=2 pads to 16.
-        inputs = _make_inputs(kwargs["in_channels"], kwargs["text_embed_dim"])
-        inputs["hidden_states"] = torch.randn(2, kwargs["in_channels"], 5, 2, 6, generator=torch.Generator().manual_seed(5))
-        inputs = {name: value.to(device) for name, value in inputs.items()}
-        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
-            output = native(**inputs)
+        outputs = {}
+        # 15 tokens need one pad at SP=2/4; 18 need two at SP=4, as at 704x1248x313.
+        for latent_frames in (5, 6):
+            for image_conditioned in (False, True):
+                inputs = _make_inputs(kwargs["in_channels"], kwargs["text_embed_dim"])
+                video = torch.randn(2, kwargs["in_channels"], latent_frames, 2, 6,
+                                    generator=torch.Generator().manual_seed(5))
+                video[:, kwargs["out_channels"]:] = 0
+                if image_conditioned:
+                    video[:, kwargs["out_channels"]:-1, :1] = torch.randn(
+                        2, kwargs["out_channels"], 1, 2, 6, generator=torch.Generator().manual_seed(6))
+                    video[:, -1:, :1] = 1
+                inputs["hidden_states"] = video
+                inputs = {name: value.to(device) for name, value in inputs.items()}
+                with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
+                    output = native(**inputs)
+                outputs[f"{latent_frames}_{image_conditioned}"] = output.detach().cpu()
         if int(os.environ.get("RANK", "0")) == 0:
-            torch.save({"output": output.detach().cpu()}, output_path)
+            torch.save(outputs, output_path)
         dist.barrier()
     finally:
         cleanup_dist_env_and_memory()
 
 
-def _run_torchrun(mode: str, nproc_per_node: int, output_path: Path) -> None:
+def _run_torchrun(nproc_per_node: int, output_path: Path) -> None:
     command = [
         sys.executable, "-m", "torch.distributed.run", "--nnodes", "1", "--nproc_per_node",
         str(nproc_per_node), "--master_port",
         str(_free_port()),
-        str(Path(__file__).resolve()), "--pan2-sp-worker", "--mode", mode, "--output",
+        str(Path(__file__).resolve()), "--pan2-sp-worker", "--sp-size", str(nproc_per_node), "--output",
         str(output_path)
     ]
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT), environment.get("PYTHONPATH")]))
-    environment["DISABLE_SP"] = "0"
     environment["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
-    process = subprocess.run(command, capture_output=True, text=True, env=environment)
+    process = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=180)
     if process.returncode != 0:
-        raise RuntimeError(f"{mode} worker failed with code {process.returncode}\n"
+        raise RuntimeError(f"SP={nproc_per_node} worker failed with code {process.returncode}\n"
                            f"STDOUT:\n{process.stdout}\nSTDERR:\n{process.stderr}")
 
 
-def test_pan2_sp2_matches_single_rank(tmp_path: Path):
-    """Ulysses SP=2 on an odd video token count (padded to the SP size) must match one rank. Runs on CPU with gloo
-    when no GPU is present."""
-    if torch.cuda.is_available() and torch.cuda.device_count() < SP_WORLD_SIZE:
-        pytest.skip(f"PAN2 SP parity requires {SP_WORLD_SIZE} CUDA devices.")
-    single_path, sp_path = tmp_path / "single.pt", tmp_path / "sp2.pt"
-    _run_torchrun("single", 1, single_path)
-    _run_torchrun("sp", SP_WORLD_SIZE, sp_path)
-    single = torch.load(single_path, map_location="cpu", weights_only=True)["output"]
-    sp = torch.load(sp_path, map_location="cpu", weights_only=True)["output"]
-    diff = (sp - single).abs()
-    print(f"sp2-vs-single diff_max={diff.max().item():.3e}")
-    assert_close(sp, single, atol=1e-5, rtol=1e-5)
+@pytest.fixture(scope="module")
+def single_rank_sp_outputs(tmp_path_factory):
+    path = tmp_path_factory.mktemp("pan2-single") / "single.pt"
+    _run_torchrun(1, path)
+    return torch.load(path, map_location="cpu", weights_only=True)
+
+
+@pytest.mark.parametrize("sp_size", SP_WORLD_SIZES)
+def test_pan2_sequence_parallel_matches_single_rank(tmp_path: Path, single_rank_sp_outputs, sp_size: int):
+    """T2V and I2V joint attention excludes padding at Ulysses SP=2/4. Uses gloo on CPU or NCCL on 2/4 GPUs."""
+    if torch.cuda.is_available() and torch.cuda.device_count() < sp_size:
+        pytest.skip(f"PAN2 SP parity requires {sp_size} CUDA devices.")
+    sp_path = tmp_path / f"sp{sp_size}.pt"
+    _run_torchrun(sp_size, sp_path)
+    sp_outputs = torch.load(sp_path, map_location="cpu", weights_only=True)
+    assert sp_outputs.keys() == single_rank_sp_outputs.keys()
+    for case, single in single_rank_sp_outputs.items():
+        sp = sp_outputs[case]
+        diff = (sp - single).abs()
+        print(f"sp{sp_size}-vs-single {case} diff_max={diff.max().item():.3e}")
+        assert_close(sp, single, atol=1e-5, rtol=1e-5)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pan2-sp-worker", action="store_true")
-    parser.add_argument("--mode", choices=["single", "sp"], required=True)
+    parser.add_argument("--sp-size", type=int, choices=[1, *SP_WORLD_SIZES], required=True)
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
     if not args.pan2_sp_worker:
         raise SystemExit("This module is intended to be run by pytest.")
-    _run_sp_worker(args.mode, Path(args.output))
+    _run_sp_worker(args.sp_size, Path(args.output))

@@ -6,7 +6,8 @@ assembled from diffusers' and transformers' own building blocks (``AdaLayerNormZ
 ``FeedForward`` with ``gelu-approximate``/``swiglu``, ``Timesteps``/``TimestepEmbedding``,
 ``get_1d_rotary_pos_embed``/``apply_rotary_emb``, ``Qwen3_5TextModel``, ``AutoencoderKLWan``,
 ``FlowMatchEulerDiscreteScheduler``) and follows the vLLM-Omni PAN2 port (vllm-project/vllm-omni#8602), which was
-validated against the diffusers implementation. Module names are the checkpoint's, so checkpoints load strictly.
+validated against the diffusers implementation (upstream revision ``e0c4c731``). Module names are the checkpoint's,
+so checkpoints load strictly. Its unconditional SP padding mask is equivalent to unpadded reference attention.
 """
 
 from __future__ import annotations
