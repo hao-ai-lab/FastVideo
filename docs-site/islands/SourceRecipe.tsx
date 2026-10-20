@@ -224,7 +224,8 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
   const hardwareLabel = hardware.startsWith("custom:")
     ? hardware.slice(7)
     : devices.find(([id]) => id === hardware)?.[1];
-  const chooseHardware = (value: string) => {    setHardware(value);
+  const chooseHardware = (value: string) => {
+    setHardware(value);
     const url = new URL(window.location.href);
     if (value) url.searchParams.set("hardware", value);
     else url.searchParams.delete("hardware");

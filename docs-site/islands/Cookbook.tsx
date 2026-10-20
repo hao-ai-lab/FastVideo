@@ -351,7 +351,9 @@ function Editor({
               <button
                 type="button"
                 disabled={!output}
-                onClick={() => output && copy(configAndLaunch(output.yaml, launchCommand!), "Copied config.yaml and launch command.")}
+                onClick={() =>
+                  output && copy(configAndLaunch(output.yaml, launchCommand!), "Copied config.yaml and launch command.")
+                }
               >
                 Copy config + command
               </button>
@@ -423,10 +425,7 @@ function Editor({
                     onToggle={(event) => setShowClient(event.currentTarget.open)}
                   >
                     <summary>{result.websocketUrl ? "Health check and WebSocket" : "Example request"}</summary>
-                    <button
-                      type="button"
-                      onClick={() => copy(result.clientCommand, "Copied example request.")}
-                    >
+                    <button type="button" onClick={() => copy(result.clientCommand, "Copied example request.")}>
                       Copy request command
                     </button>
                     <pre tabIndex={0} aria-label="Client command">
@@ -520,11 +519,7 @@ function Editor({
                 ? `${hardwareLabel} is saved as your target. It does not change the generated YAML; use GPU count and parallelism for the run.`
                 : "No hardware target selected. Choosing a device records your setup path; it does not change the generated YAML."}
           </p>
-          <RecipeFacts
-            validity={failure ? "invalid" : result ? "valid" : "loading"}
-            fit="unknown"
-            evidence="none"
-          />
+          <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} fit="unknown" evidence="none" />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (
           <MatrixRow title="Inputs">
@@ -563,7 +558,9 @@ function Editor({
                 )}
               </div>
             )}
-            <p className="matrix-note">Components come from the maintained recipe. They are not individually selectable in the cookbook yet.</p>
+            <p className="matrix-note">
+              Components come from the maintained recipe. They are not individually selectable in the cookbook yet.
+            </p>
           </MatrixRow>
         )}
         {standardGroups.map((group) => (
