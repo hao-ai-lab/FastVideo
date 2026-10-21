@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native MLX NVFP4 encoder storage and residency regression checks."""
 import json
+import shutil
 from types import SimpleNamespace
 
 import numpy as np
@@ -176,3 +177,76 @@ def test_single_shard_omits_unused_language_layers_but_keeps_vision(tmp_path):
     # a Ref2VA request encodes its references through it.
     assert set(index.weights) == {kept, "model.visual.weight"}
     index.close()
+
+
+def _tiny_vision_tensors(torch, config):
+    """Every ``model.visual.*`` tensor the tower loader reads, BF16 like the release."""
+    hidden, patch, temporal = config["hidden_size"], config["patch_size"], config["temporal_patch_size"]
+    shapes = {
+        "patch_embed.proj.weight": (hidden, 3, temporal, patch, patch),
+        "patch_embed.proj.bias": (hidden, ),
+        "pos_embed.weight": (config["num_position_embeddings"], hidden),
+    }
+    for layer in range(config["depth"]):
+        for name in ("norm1", "norm2", "attn.qkv", "attn.proj", "mlp.linear_fc1", "mlp.linear_fc2"):
+            shapes[f"blocks.{layer}.{name}.weight"] = (4, 4)
+            shapes[f"blocks.{layer}.{name}.bias"] = (4, )
+    for name in ["merger"] + [f"deepstack_merger_list.{i}" for i in range(len(config["deepstack_visual_indexes"]))]:
+        for part in ("norm", "linear_fc1", "linear_fc2"):
+            shapes[f"{name}.{part}.weight"] = (4, 4)
+            shapes[f"{name}.{part}.bias"] = (4, )
+    generator = torch.Generator().manual_seed(5)
+    return {
+        "model.visual." + key: torch.randn(shape, generator=generator).to(torch.bfloat16)
+        for key, shape in shapes.items()
+    }
+
+
+def test_encoder_cache_carries_the_vision_tower_and_outlives_its_source(tmp_path):
+    torch = pytest.importorskip("torch")
+    from safetensors.torch import save_file
+
+    from fastvideo.mlx_runtime.minimax_h3_vision import MLXQwen3VLVisionModel
+
+    vision = {"hidden_size": 8, "depth": 1, "num_heads": 2, "intermediate_size": 12, "patch_size": 2,
+              "temporal_patch_size": 2, "spatial_merge_size": 2, "out_hidden_size": 8,
+              "num_position_embeddings": 16, "deepstack_visual_indexes": [0]}
+    source = tmp_path / "source"
+    source.mkdir()
+    tensors = _tiny_vision_tensors(torch, vision)
+    save_file(tensors, source / "model.safetensors")
+    _write_encoder_config(source)
+    raw = json.loads((source / "config.json").read_text())
+    (source / "config.json").write_text(json.dumps({**raw, "vision_config": vision}))
+
+    cache_dir = export_mlx_h3_nvfp4_encoder(source, tmp_path / "cache")
+    manifest = json.loads((cache_dir / "mlx_h3_nvfp4_encoder.json").read_text())
+    assert manifest["format_version"] == 2
+    cached = _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir)
+    bias = cached.get_mlx("model.visual.patch_embed.proj.bias")
+    assert bias.dtype == mx.bfloat16
+    for key, value in tensors.items():
+        np.testing.assert_array_equal(np.array(cached.get_mlx(key).astype(mx.float32)), value.float().numpy())
+
+    shutil.rmtree(source)  # the cache must not depend on the checkpoint it was built from
+    conditioner = ResidentNVFP4MiniMaxH3TextConditioner.__new__(ResidentNVFP4MiniMaxH3TextConditioner)
+    conditioner.component_dir, conditioner.index, conditioner._vision = cache_dir, cached, None
+    model = conditioner._vision_model()
+    assert isinstance(model, MLXQwen3VLVisionModel)
+    np.testing.assert_array_equal(np.array(model.patch_bias), tensors["model.visual.patch_embed.proj.bias"].float().numpy())
+
+
+def test_format_one_encoder_cache_is_still_readable(tmp_path):
+    from safetensors.numpy import save_file
+
+    key = "model.language_model.layers.0.input_layernorm.weight"
+    save_file({key: np.ones(8, np.float32)}, tmp_path / "model.safetensors")
+    _write_encoder_config(tmp_path)
+    cache_dir = export_mlx_h3_nvfp4_encoder(tmp_path, tmp_path / "cache")
+    manifest_path = cache_dir / "mlx_h3_nvfp4_encoder.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest_path.write_text(json.dumps({**manifest, "format_version": 1}))
+    assert key in _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir).weights
+    manifest_path.write_text(json.dumps({**manifest, "format_version": 3}))
+    with pytest.raises(ValueError, match="Unsupported"):
+        _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir)

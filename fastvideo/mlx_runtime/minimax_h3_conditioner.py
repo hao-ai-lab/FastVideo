@@ -410,18 +410,21 @@ class StreamedMiniMaxH3TextConditioner:
         if self._vision is None:
             from fastvideo.mlx_runtime.minimax_h3_vision import MLXQwen3VLVisionModel
 
-            self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self._vision_source_dir())
+            weights = getattr(self.index, "weights", None)
+            if weights is not None and _VISUAL_PROBE_KEY in weights:
+                # A resident index (and a format-2 cache) carries the whole tower.
+                self._vision = MLXQwen3VLVisionModel.from_arrays(self.component_dir / "config.json", weights)
+            else:
+                self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self._vision_source_dir())
         return self._vision
 
     def _vision_source_dir(self) -> Path:
-        """Where the vision tower's weights are read from.
+        """Where the vision tower's weights are read from when the encoder index lacks its biases.
 
-        A native MLX NVFP4 encoder cache stores what the resident loader keeps -
-        the packed matrices and their dense companions - which is every
-        ``.weight`` but no ``.bias``. The tower needs its LayerNorm,
-        patch-embed and projection biases, so it is read from the checkpoint the
-        cache records rather than from the cache, instead of forcing a re-export
-        of every existing cache.
+        Caches written before format 2 stored only the ``.weight`` tensors the
+        resident loader kept, so the tower's LayerNorm, patch-embed and
+        projection biases are read from the checkpoint the cache records. Newer
+        caches carry the whole tower and never reach this.
         """
         manifest_path = self.component_dir / MLX_NVFP4_ENCODER_MANIFEST
         if not manifest_path.is_file():
@@ -431,9 +434,9 @@ class StreamedMiniMaxH3TextConditioner:
             raise ValueError(f"{manifest_path} records no source_dir, so the vision tower cannot be read "
                              "from the encoder cache.")
         if not Path(source).is_dir():
-            raise FileNotFoundError(f"The checkpoint this encoder cache was built from, {source}, is gone; "
-                                    "the vision tower's biases live there. Re-export the cache from a "
-                                    "present checkpoint, or point --conditioner-dir at it.")
+            raise FileNotFoundError(f"The checkpoint this older encoder cache was built from, {source}, is gone; "
+                                    "the vision tower's biases live there. Re-export the cache to include the "
+                                    "vision tower, or point --conditioner-dir at the checkpoint.")
         return Path(source)
 
     def _splice_visual_tokens(self, hidden, ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw):
@@ -613,7 +616,7 @@ def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Pat
         mx.save_safetensors(str(output_dir / "model.safetensors"), arrays)
         (output_dir / "config.json").write_text(json.dumps(raw, indent=2) + "\n")
         manifest = {
-            "format_version": 1,
+            "format_version": _NVFP4_CACHE_FORMAT_VERSION,
             "language_layers": TEXT_ENCODER_LAYER,
             "matrices": matrices,
             "dense_keys": dense_keys,
@@ -632,6 +635,22 @@ def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Pat
         if not published:
             shutil.rmtree(output_dir, ignore_errors=True)
     return final_dir
+
+
+_VISUAL_PREFIX = "model.visual."
+# Present in a cache that carries the vision tower's biases (and so the whole tower).
+_VISUAL_PROBE_KEY = "model.visual.patch_embed.proj.bias"
+_NVFP4_CACHE_FORMAT_VERSION = 2
+_NVFP4_CACHE_READABLE_VERSIONS = (1, 2)
+
+
+def _read_native(source: _ShardIndex, key: str):
+    """One tensor in its stored dtype; BF16 stays BF16 instead of widening to FP32."""
+    shard = source.key_to_shard[key]
+    header, data_start = source._cache_header(shard)
+    if header[key]["dtype"] == "BF16":
+        return mx.array(_read_bf16_words(shard, key, header, data_start)).view(mx.bfloat16)
+    return mx.array(source.get(key))
 
 
 class _ResidentNVFP4Index:
@@ -658,14 +677,12 @@ class _ResidentNVFP4Index:
                     raise ValueError(f"Non-finite NVFP4 block scales for {prefix}")
                 mx.eval(weight, scale_bytes)
                 self.weights[prefix + ".weight"] = NVFP4Matrix(weight, scale_bytes, global_scale)
-            elif key.endswith(".weight"):
-                if key == "model.language_model.embed_tokens.weight":
-                    shard = source.key_to_shard[key]
-                    header, data_start = source._cache_header(shard)
-                    if header[key]["dtype"] == "BF16":
-                        value = mx.array(_read_bf16_words(shard, key, header, data_start)).view(mx.bfloat16)
-                    else:
-                        value = mx.array(source.get(key))
+            elif key.endswith(".weight") or key.startswith(_VISUAL_PREFIX):
+                # The embedding table and the whole vision tower (weights and
+                # biases) keep their source dtype; the tower is BF16 in the
+                # release and its loader casts as needed.
+                if key == "model.language_model.embed_tokens.weight" or key.startswith(_VISUAL_PREFIX):
+                    value = _read_native(source, key)
                 else:
                     value = source.get_mlx(key)
                 mx.eval(value)
@@ -676,7 +693,8 @@ class _ResidentNVFP4Index:
     def from_mlx_checkpoint(cls, component_dir: str | Path):
         component_dir = Path(component_dir)
         manifest = json.loads((component_dir / MLX_NVFP4_ENCODER_MANIFEST).read_text())
-        if manifest.get("format_version") != 1 or manifest.get("language_layers") != TEXT_ENCODER_LAYER:
+        if manifest.get("format_version") not in _NVFP4_CACHE_READABLE_VERSIONS or manifest.get(
+                "language_layers") != TEXT_ENCODER_LAYER:
             raise ValueError("Unsupported native MLX NVFP4 encoder cache")
         arrays = mx.load(str(component_dir / "model.safetensors"))
         matrices = manifest["matrices"]

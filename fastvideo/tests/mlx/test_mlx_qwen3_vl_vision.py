@@ -337,7 +337,7 @@ def test_prepare_vision_inputs_counts_padded_video_frames() -> None:
 
 
 def test_vision_source_dir_prefers_the_checkpoint_over_an_encoder_cache(tmp_path) -> None:
-    """A native MLX encoder cache keeps no biases, so the tower reads the source."""
+    """A pre-format-2 encoder cache keeps no biases, so the tower reads the source."""
     source = tmp_path / "checkpoint"
     source.mkdir()
     conditioner = StreamedMiniMaxH3TextConditioner.__new__(StreamedMiniMaxH3TextConditioner)

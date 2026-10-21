@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import math
 import struct
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -393,6 +394,17 @@ def _interpolate_vision_position_embeddings(
     return (gathered * weights[:, :, None]).sum(axis=1).astype(np.float32)
 
 
+class _ArrayIndex:
+    """The slice of ``_ShardIndex`` the tower loader uses, over loaded arrays."""
+
+    def __init__(self, arrays: Mapping[str, mx.array]) -> None:
+        self.key_to_shard = arrays
+        self._arrays = arrays
+
+    def get_mlx(self, key: str) -> mx.array:
+        return self._arrays[key]
+
+
 class MLXQwen3VLVisionModel:
     """MLX Qwen3-VL vision tower producing merged tokens and deepstack blocks."""
 
@@ -422,45 +434,54 @@ class MLXQwen3VLVisionModel:
         """Stream ``model.visual.*`` weights from the checkpoint shards."""
         from fastvideo.mlx_runtime.minimax_h3_conditioner import _ShardIndex
 
-        config = Qwen3VLVisionConfig.from_config_json(Path(component_dir) / "config.json")
-        model = cls(config)
-        model.dtype = {"fp32": mx.float32, "bf16": mx.bfloat16, "fp16": mx.float16}.get(dtype, mx.float32)
         index = _ShardIndex(Path(component_dir))
         try:
-            prefix = "model.visual."
-            keys = {key[len(prefix):] for key in index.key_to_shard if key.startswith(prefix)}
-            missing = model._expected_weight_keys() - keys
-            if missing:
-                raise ValueError(f"Checkpoint is missing Qwen3-VL vision weights: {sorted(missing)}")
-            cast = lambda key: index.get_mlx(prefix + key).astype(model.dtype)  # noqa: E731
-            model.patch_weight = cast("patch_embed.proj.weight").reshape(config.hidden_size, config.in_channels,
-                                                                         config.temporal_patch_size, config.patch_size,
-                                                                         config.patch_size)
-            model.patch_weight = model.patch_weight.reshape(config.hidden_size, -1)
-            model.patch_bias = cast("patch_embed.proj.bias")
-            model.pos_embed = cast("pos_embed.weight")
-            model.blocks = [{
-                "norm1.weight": cast(f"blocks.{layer}.norm1.weight"),
-                "norm1.bias": cast(f"blocks.{layer}.norm1.bias"),
-                "norm2.weight": cast(f"blocks.{layer}.norm2.weight"),
-                "norm2.bias": cast(f"blocks.{layer}.norm2.bias"),
-                "attn.qkv.weight": cast(f"blocks.{layer}.attn.qkv.weight"),
-                "attn.qkv.bias": cast(f"blocks.{layer}.attn.qkv.bias"),
-                "attn.proj.weight": cast(f"blocks.{layer}.attn.proj.weight"),
-                "attn.proj.bias": cast(f"blocks.{layer}.attn.proj.bias"),
-                "mlp.linear_fc1.weight": cast(f"blocks.{layer}.mlp.linear_fc1.weight"),
-                "mlp.linear_fc1.bias": cast(f"blocks.{layer}.mlp.linear_fc1.bias"),
-                "mlp.linear_fc2.weight": cast(f"blocks.{layer}.mlp.linear_fc2.weight"),
-                "mlp.linear_fc2.bias": cast(f"blocks.{layer}.mlp.linear_fc2.bias"),
-            } for layer in range(config.depth)]
-            model.merger = model._merger_weights(cast, "merger", config.hidden_size)
-            model.deepstack_mergers = [
-                model._merger_weights(cast, f"deepstack_merger_list.{position}", config.hidden_size)
-                for position in range(len(config.deepstack_visual_indexes))
-            ]
-            mx.eval(*model._arrays())
+            return cls._from_index(Path(component_dir) / "config.json", index, dtype)
         finally:
             index.close()
+
+    @classmethod
+    def from_arrays(cls, config_path: str | Path, arrays: Mapping[str, mx.array], *, dtype: str = "fp32"):
+        """Build the tower from already-loaded ``model.visual.*`` arrays (e.g. an encoder cache)."""
+        return cls._from_index(config_path, _ArrayIndex(arrays), dtype)
+
+    @classmethod
+    def _from_index(cls, config_path: str | Path, index: Any, dtype: str) -> MLXQwen3VLVisionModel:
+        config = Qwen3VLVisionConfig.from_config_json(Path(config_path))
+        model = cls(config)
+        model.dtype = {"fp32": mx.float32, "bf16": mx.bfloat16, "fp16": mx.float16}.get(dtype, mx.float32)
+        prefix = "model.visual."
+        keys = {key[len(prefix):] for key in index.key_to_shard if key.startswith(prefix)}
+        missing = model._expected_weight_keys() - keys
+        if missing:
+            raise ValueError(f"Checkpoint is missing Qwen3-VL vision weights: {sorted(missing)}")
+        cast = lambda key: index.get_mlx(prefix + key).astype(model.dtype)  # noqa: E731
+        model.patch_weight = cast("patch_embed.proj.weight").reshape(config.hidden_size, config.in_channels,
+                                                                     config.temporal_patch_size, config.patch_size,
+                                                                     config.patch_size)
+        model.patch_weight = model.patch_weight.reshape(config.hidden_size, -1)
+        model.patch_bias = cast("patch_embed.proj.bias")
+        model.pos_embed = cast("pos_embed.weight")
+        model.blocks = [{
+            "norm1.weight": cast(f"blocks.{layer}.norm1.weight"),
+            "norm1.bias": cast(f"blocks.{layer}.norm1.bias"),
+            "norm2.weight": cast(f"blocks.{layer}.norm2.weight"),
+            "norm2.bias": cast(f"blocks.{layer}.norm2.bias"),
+            "attn.qkv.weight": cast(f"blocks.{layer}.attn.qkv.weight"),
+            "attn.qkv.bias": cast(f"blocks.{layer}.attn.qkv.bias"),
+            "attn.proj.weight": cast(f"blocks.{layer}.attn.proj.weight"),
+            "attn.proj.bias": cast(f"blocks.{layer}.attn.proj.bias"),
+            "mlp.linear_fc1.weight": cast(f"blocks.{layer}.mlp.linear_fc1.weight"),
+            "mlp.linear_fc1.bias": cast(f"blocks.{layer}.mlp.linear_fc1.bias"),
+            "mlp.linear_fc2.weight": cast(f"blocks.{layer}.mlp.linear_fc2.weight"),
+            "mlp.linear_fc2.bias": cast(f"blocks.{layer}.mlp.linear_fc2.bias"),
+        } for layer in range(config.depth)]
+        model.merger = model._merger_weights(cast, "merger", config.hidden_size)
+        model.deepstack_mergers = [
+            model._merger_weights(cast, f"deepstack_merger_list.{position}", config.hidden_size)
+            for position in range(len(config.deepstack_visual_indexes))
+        ]
+        mx.eval(*model._arrays())
         logger.info("Loaded Qwen3-VL vision tower (depth=%d, dtype=%s)", config.depth, dtype)
         return model
 
