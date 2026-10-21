@@ -17,6 +17,7 @@ pytest.importorskip("mlx.core", reason="MLX is required for Ref2VA conditioning 
 from PIL import Image  # noqa: E402
 
 from fastvideo.mlx_runtime.minimax_h3_ref_conditioning import (  # noqa: E402
+    encode_reference_conditions,
     encode_reference_prompt,
     load_vision_limits,
 )
@@ -229,3 +230,47 @@ def test_encode_reference_prompt_handles_odd_sample_count() -> None:
     assert sum(1 for token in call["token_ids"] if token == 1002) == (
         int(np.prod(call["video_grid_thw"][:, 1:])) // VISION_CONFIG.spatial_merge_size**2 *
         int(call["video_grid_thw"][0][0]))
+
+
+class _FakeVideoVAE:
+    latent_channels = 4
+
+    def normalize_pixels(self, pixels):
+        return pixels
+
+    def encode_keyframe(self, pixels):
+        import mlx.core as mx
+
+        shape = (1, self.latent_channels, 1, 2, 2)
+        return mx.zeros(shape), mx.zeros(shape)
+
+    @staticmethod
+    def sample_posterior(mean, logvar, noise):
+        return mean + noise
+
+    def normalize_latents(self, latents):
+        return latents
+
+
+class _FakeScheduler:
+    def scale_noise(self, clean, timestep, noise):
+        return (1 - timestep) * clean + timestep * noise
+
+
+def _encode_with_seed(seed: int) -> np.ndarray:
+    video, _ = encode_reference_conditions(
+        video_vae=_FakeVideoVAE(),
+        audio_vae=None,
+        references=[_image()],
+        patch_size=(1, 1, 1),
+        scheduler=_FakeScheduler(),
+        seed=seed,
+    )
+    return video
+
+
+def test_reference_noise_follows_the_request_seed() -> None:
+    """Same seed reproduces the reference draws; a different seed changes them."""
+    first = _encode_with_seed(3)
+    np.testing.assert_array_equal(first, _encode_with_seed(3))
+    assert not np.allclose(first, _encode_with_seed(4))

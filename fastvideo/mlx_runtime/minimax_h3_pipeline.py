@@ -798,7 +798,7 @@ class MiniMaxH3MLXPipeline:
                                                               dtype=np.float32)])).astype(np.float32)
             if condition_video_rows is None or condition_audio_rows is None:
                 condition_video_rows, condition_audio_rows = self._encode_reference_conditions(
-                    references, dit.patch_size, video_scheduler)
+                    references, dit.patch_size, video_scheduler, seed)
 
         cache = getattr(dit, "_adaln_cache", None)
         if cache is None or not np.array_equal(cache.timesteps.astype(np.float32), union):
@@ -1140,6 +1140,7 @@ class MiniMaxH3MLXPipeline:
         references: list[MiniMaxH3PreparedReference],
         patch_size: tuple[int, int, int],
         scheduler: MiniMaxH3SchedulerState,
+        seed: int,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         """VAE-encode the prepared references into their condition rows.
 
@@ -1165,6 +1166,7 @@ class MiniMaxH3MLXPipeline:
                 references=references,
                 patch_size=patch_size,
                 scheduler=scheduler,
+                seed=seed,
             )
         finally:
             del video_vae, audio_vae

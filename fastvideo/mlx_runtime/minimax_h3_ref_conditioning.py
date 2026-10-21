@@ -40,9 +40,14 @@ from fastvideo.mlx_runtime.minimax_h3_reference import (
 
 logger = init_logger(__name__)
 
-# The seeded reference-posterior draw the CUDA path makes with a torch
-# generator; matching the seed keeps the draw reproducible, not identical.
+# Salt mixed into the request seed for the reference draws, so they never share
+# a stream with the target latents (which key off the bare request seed). The
+# CUDA path makes the same draws with a torch generator; deriving them from the
+# request seed keeps them reproducible per seed, not bit-identical to torch.
 MINIMAX_H3_REFERENCE_ENCODE_SEED = 42
+_POSTERIOR_STREAM = 0
+_CONDITION_NOISE_STREAM = 1
+_SEED_MODULUS = 2**32
 
 # Qwen3-VL processor defaults, used when the checkpoint ships no
 # preprocessor_config.json. The released H3 snapshot does ship one, so these
@@ -52,6 +57,15 @@ DEFAULT_VISION_MAX_PIXELS = 16777216
 # The released H3 video processor config, used when only the image config ships.
 DEFAULT_VIDEO_MIN_PIXELS = 4096
 DEFAULT_VIDEO_MAX_PIXELS = 25165824
+
+
+def reference_draw_key(seed: int, stream: int, index: int):
+    """MLX key for one reference draw: a function of request seed, stream and reference index."""
+    import mlx.core as mx
+
+    mixed = (int(seed) * 1_000_003 + MINIMAX_H3_REFERENCE_ENCODE_SEED + stream * 1_009 + index) % _SEED_MODULUS
+    return mx.random.key(mixed)
+
 
 # ---------------------------------------------------------------------------
 # Vision preprocessing limits
@@ -173,7 +187,7 @@ def reference_condition_noise(
     patch_size: tuple[int, int, int],
     latent_channels: int,
     *,
-    seed: int = MINIMAX_H3_REFERENCE_ENCODE_SEED,
+    seed: int,
 ) -> np.ndarray:
     """Packed noise for the noised video condition rows (one draw per reference)."""
     import mlx.core as mx
@@ -182,7 +196,7 @@ def reference_condition_noise(
     for index, (num_latent_frames, latent_height, latent_width) in enumerate(shapes):
         noise = mx.random.normal(
             (1, latent_channels, num_latent_frames, latent_height, latent_width),
-            key=mx.random.key(seed + index),
+            key=reference_draw_key(seed, _CONDITION_NOISE_STREAM, index),
         )
         rows.append(patchify_video_latents(np.asarray(noise, dtype=np.float32), patch_size))
     return np.concatenate(rows)
@@ -205,7 +219,7 @@ def _sample_latents(vae: Any, mean: Any, logvar: Any, *, seed: int, index: int) 
     """One seeded posterior draw with the reference fp16 round-trip."""
     import mlx.core as mx
 
-    noise = mx.random.normal(mean.shape, key=mx.random.key(seed + index))
+    noise = mx.random.normal(mean.shape, key=reference_draw_key(seed, _POSTERIOR_STREAM, index))
     sampled = vae.sample_posterior(mean, logvar, noise)
     return np.asarray(vae.normalize_latents(sampled.astype(mx.float16).astype(mx.float32)), dtype=np.float32)
 
@@ -217,14 +231,15 @@ def encode_reference_conditions(
     references: list[MiniMaxH3PreparedReference],
     patch_size: tuple[int, int, int],
     scheduler: MiniMaxH3SchedulerState,
-    seed: int = MINIMAX_H3_REFERENCE_ENCODE_SEED,
+    seed: int,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Encode every reference into packed condition rows.
 
     Video condition rows are augmented to ``MINIMAX_H3_KEYFRAME_NOISE_AUG`` so
     the student sees the reference the way it was trained; audio condition rows
     are handed over clean. Each reference's latent geometry is written back onto
-    it, because the packed layout is built from it afterwards.
+    it, because the packed layout is built from it afterwards. ``seed`` is the
+    request seed: the posterior draws and the condition noise derive from it.
     """
     import mlx.core as mx
 
@@ -292,4 +307,5 @@ __all__ = [
     "encode_reference_prompt",
     "load_vision_limits",
     "reference_condition_noise",
+    "reference_draw_key",
 ]
