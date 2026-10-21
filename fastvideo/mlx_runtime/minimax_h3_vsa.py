@@ -18,10 +18,10 @@ Ports the packed-sequence VSA-H3 contract from
 
 Execution backends:
 
-- **reference** (``auto`` default) — grouped gather plus batched
-  ``mx.fast.scaled_dot_product_attention``. Correctness baseline.
-- **simd** — opt-in SIMD-group 8x8 matrix operations over the reference tile
-  map for tile size 64 and head dimension 128. Unsupported shapes and kernel
+- **reference** — grouped gather plus batched ``mx.fast.scaled_dot_product_attention``.
+  Correctness baseline; ``auto`` for tiles other than 128 and ``impl="reference"``.
+- **simd** — flash-style SIMD-group 8x8 matrix operations over the reference tile
+  map for tile sizes 64 and 128 and head dimension 128. Unsupported shapes and kernel
   failures fall back to the reference backend.
 
 Dense fused SDPA remains the default when VSA is disabled, the geometry is
@@ -52,8 +52,8 @@ VSA_GATE_KEY_SUFFIX = "attn.to_gate_compress.weight"
 VSA_PREFIX_MODES = ("exempt", "compete")
 PUBLIC_VSA_IMPLS = ("auto", "reference", "simd")
 VSA_IMPLS = PUBLIC_VSA_IMPLS
-# SIMD is opt-in until its dynamically routed output is accepted as the default.
-_AUTO_PREFERS_SIMD = False
+# Tile sizes where ``auto`` picks the SIMD kernel (trained Omni tiles); other tiles stay opt-in.
+_AUTO_SIMD_TILES: tuple[int, ...] = (128, )
 _REFERENCE_FULL_MASK_TILE_LIMIT = 24
 _REFERENCE_FULL_MASK_MAX_ELEMENTS = 256 * 1024**2
 
@@ -862,16 +862,17 @@ def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeo
 
 
 def resolve_impl(requested: VSAImpl, head_dim: int, tile_elems: int) -> str:
-    if requested == "reference" or (requested == "auto" and not _AUTO_PREFERS_SIMD):
+    if requested == "reference" or (requested == "auto" and tile_elems not in _AUTO_SIMD_TILES):
         return "reference"
 
-    from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_available, simd_kernel_error
+    from fastvideo.mlx_runtime.minimax_h3_vsa_simd import (SIMD_HEAD_DIM, SIMD_TILE_SIZES, simd_kernel_available,
+                                                           simd_kernel_error)
 
-    if tile_elems != 64 or head_dim != 128:
+    if tile_elems not in SIMD_TILE_SIZES or head_dim != SIMD_HEAD_DIM:
         if requested == "simd":
             logger.warning_once(
-                f"SIMD VSA requires tile 64 and head dim 128 (got tile={tile_elems} head_dim={head_dim}); "
-                "using reference VSA")
+                f"SIMD VSA requires tile {' or '.join(map(str, SIMD_TILE_SIZES))} and head dim {SIMD_HEAD_DIM} "
+                f"(got tile={tile_elems} head_dim={head_dim}); using reference VSA")
         return "reference"
     if not simd_kernel_available():
         reason = simd_kernel_error() or "SIMD-group VSA kernel is unavailable"
@@ -951,8 +952,8 @@ def h3_vsa_attention(
         if stats is not None and impl == "simd" and chosen != "simd":
             from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_error
 
-            stats.dense_fallback_reason = ("SIMD requires tile 64 and head dim 128"
-                                           if geometry.tile_elems != 64 or dim != 128 else simd_kernel_error())
+            stats.dense_fallback_reason = ("SIMD requires tile 64 or 128 and head dim 128" if
+                                           geometry.tile_elems not in (64, 128) or dim != 128 else simd_kernel_error())
         if not geometry.prefix_length:
             prefix_out = query[:0]
         else:
