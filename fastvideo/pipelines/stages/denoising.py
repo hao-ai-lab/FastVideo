@@ -464,6 +464,8 @@ class DenoisingStage(PipelineStage):
                                 noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
                                                                                            noise_pred_uncond)
 
+                        noise_pred = self.finish_guidance(noise_pred, noise_pred_text, batch, fastvideo_args)
+
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
                             # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
@@ -605,6 +607,10 @@ class DenoisingStage(PipelineStage):
 
     def prepare_timestep(self, timestep, latent_model_input, batch, state) -> torch.Tensor:
         return timestep.repeat(latent_model_input.shape[0])
+
+    def finish_guidance(self, noise_pred, noise_pred_text, batch, fastvideo_args) -> torch.Tensor:
+        """The guided prediction handed on to the scheduler; a model overrides it to keep part of the output out of CFG."""
+        return noise_pred
 
     def prepare_scheduler_model_output(self, noise_pred, state) -> torch.Tensor:
         """The model output handed to the scheduler step, which returns the next latents in its dtype."""

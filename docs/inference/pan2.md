@@ -18,8 +18,9 @@ from the `pan2_t2v` and `pan2_i2v` presets:
 |---|---|
 | Resolution | 704x1248 (height and width must be multiples of 32) |
 | Frames | 313, 13 s at 24 fps (`num_frames - 1` must be a multiple of 4) |
-| Steps | 50, uniform sigmas from 1 to 0 with flow shift 7 |
-| Guidance | 3.0, classifier-free guidance with an empty negative prompt |
+| Steps | 50, uniform sigmas from 1 to 0 with the checkpoint's flow shift (9 for `IFM/PAN2-TEST`, the reference sampler's value) |
+| Guidance | 3.0, classifier-free guidance. Image-to-video keeps the first latent frame out of guidance (`i2v_skip_first_latent_cfg`, on by default, as in the reference sampler) |
+| Negative prompt | None unless the request carries one. The reference sampler always sends the release's structured negative caption (`negative_prompt.json` of the PAN2 repository) with its three `time_range_sec` values set to the clip length, `0 to 20` for 481 frames at 24 fps |
 
 PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
 prompts work, with weaker results.

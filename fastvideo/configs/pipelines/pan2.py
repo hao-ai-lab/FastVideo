@@ -24,7 +24,12 @@ class PAN2PipelineConfig(PipelineConfig):
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
-    flow_shift: float | None = 7.0
+    # Unset: the checkpoint's scheduler config decides, which is shift 9 for IFM/PAN2-TEST, the reference sampler's
+    # fixed value. A fixed default here would override the released shift with whatever a test checkpoint declares.
+    flow_shift: float | None = None
+    # Image-to-video: the first latent frame (the conditioning image) takes the positive prediction instead of the
+    # guided one, as the reference sampler does by default (``--i2v_skip_first_latent_cfg``).
+    i2v_skip_first_latent_cfg: bool = True
     # PAN2 samples on fp32 latents; keep the Euler update out of autocast.
     scheduler_step_in_fp32: bool = True
 
