@@ -149,7 +149,12 @@ def test_plan_validators() -> None:
 def _pdd_contract(**overrides) -> dict:
     payload = {
         "schema_version": "fasth3-inference-contract-v1",
+        "schema": "fasth3-inference-contract-v1",
         "model_type": "ref2va",
+        "base_model_revision": "hf://MiniMaxAI/MiniMax-H3@abc123",
+        "vsa_sparsity": 0.9,
+        "vsa_tile_size": 128,
+        "vsa_ref_keep_rate": 0.1,
         "transformer_component": "transformer_ref",
         "conditioning": "fixed_ordered_references_target_only_flow",
         "guidance_scale": 1.0,
@@ -212,10 +217,59 @@ def test_dmd_contract_stays_dmd(tmp_path) -> None:
         ({"guidance_scale": 2.0}, "guidance_scale"),
         ({"attention_backend": "TORCH_SDPA"}, "attention_backend"),
         ({"conditioning": "other"}, "conditioning"),
+        ({"schema": "other"}, "schema"),
+        ({"model_type": "t2va"}, "model_type"),
+        ({"surprise": 1}, "unknown"),
+        ({"base_model_revision": "MiniMaxAI/MiniMax-H3"}, "base_model_revision"),
+        ({"base_model_revision": "hf://MiniMaxAI/MiniMax-H3@"}, "base_model_revision"),
+        ({"vsa_tile_size": 96}, "vsa_tile_size"),
+        ({"vsa_sparsity": 1.0}, "vsa_sparsity"),
+        ({"vsa_sparsity": -0.1}, "vsa_sparsity"),
+        ({"vsa_ref_keep_rate": 0.0}, "vsa_ref_keep_rate"),
+        ({"vsa_ref_keep_rate": 1.0}, "vsa_ref_keep_rate"),
     ],
 )
 def test_malformed_pdd_contract_fails_closed(tmp_path, overrides, match) -> None:
     _write(tmp_path, _pdd_contract(**overrides))
+    with pytest.raises(ValueError, match=match):
+        load_fasth3_inference_contract(tmp_path)
+
+
+def test_pdd_contract_missing_a_field_fails_closed(tmp_path) -> None:
+    payload = _pdd_contract()
+    del payload["vsa_tile_size"]
+    _write(tmp_path, payload)
+    with pytest.raises(ValueError, match="missing .*vsa_tile_size"):
+        load_fasth3_inference_contract(tmp_path)
+
+
+def _write_siblings(tmp_path, *, pdd_steps=4, video_shift=VIDEO_SHIFT, audio_shift=AUDIO_SHIFT) -> None:
+    for relative, payload in (
+        ("transformer_ref/config.json", {"pdd_steps": pdd_steps}),
+        ("scheduler/scheduler_config.json", {"shift": video_shift}),
+        ("audio_scheduler/scheduler_config.json", {"shift": audio_shift}),
+    ):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text(json.dumps(payload))
+
+
+def test_pdd_contract_matching_sibling_files_is_accepted(tmp_path) -> None:
+    _write(tmp_path, _pdd_contract())
+    _write_siblings(tmp_path)
+    assert load_fasth3_inference_contract(tmp_path)["kind"] == "pdd"
+
+
+@pytest.mark.parametrize(
+    "siblings, match",
+    [
+        ({"pdd_steps": 8}, "transformer_ref/config.json"),
+        ({"video_shift": VIDEO_SHIFT + 1}, "scheduler/scheduler_config.json"),
+        ({"audio_shift": AUDIO_SHIFT + 1}, "audio_scheduler/scheduler_config.json"),
+    ],
+)
+def test_pdd_contract_disagreeing_with_sibling_files_fails(tmp_path, siblings, match) -> None:
+    _write(tmp_path, _pdd_contract())
+    _write_siblings(tmp_path, **siblings)
     with pytest.raises(ValueError, match=match):
         load_fasth3_inference_contract(tmp_path)
 

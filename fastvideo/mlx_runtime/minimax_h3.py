@@ -117,19 +117,10 @@ MINIMAX_H3_AUDIO_SHIFT = 3.0
 FASTH3_INFERENCE_CONTRACT = "fastvideo_inference.json"
 FASTH3_INFERENCE_CONTRACT_SCHEMA = "fasth3-inference-contract-v1"
 
-# A FastH3 Ref2VA PDD export writes a *different* contract than a DMD export:
-# ``pdd_steps`` / ``pdd_step_indices`` / ``grid_max_t`` instead of
-# ``dmd_denoising_steps``. The fields it pins to a value FastVideo fixes in
-# code (the Ref2VA pipeline, its conditioning, no CFG, and the per-reference
-# sparse regions) must hold that value here too, so a mismatched export fails
-# loudly (``fastvideo/configs/pipelines/minimax_h3.py::_PDD_FIXED_FIELDS``).
-FASTH3_PDD_FIXED_FIELDS: dict[str, Any] = {
-    "transformer_component": "transformer_ref",
-    "conditioning": "fixed_ordered_references_target_only_flow",
-    "guidance_scale": 1.0,
-    "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-    "vsa_ref_policy": "p2_multi_region",
-}
+# A FastH3 Ref2VA PDD export writes a *different* contract than a DMD export
+# (``pdd_steps`` / ``pdd_step_indices`` / ``grid_max_t`` instead of
+# ``dmd_denoising_steps``); its fields are validated in
+# ``minimax_h3_contract_validation`` against the CUDA reader's rules.
 
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)
@@ -690,14 +681,15 @@ def _load_pdd_contract(contract: dict[str, Any], path: Path) -> dict[str, Any]:
     """Validate a FastH3 Ref2VA PDD contract and normalize its partition and shifts."""
     from fastvideo.mlx_runtime.minimax_h3_pdd import PDD_GRID_MAX_T
 
+    from fastvideo.mlx_runtime.minimax_h3_contract_validation import (
+        validate_pdd_contract_fields,
+        validate_pdd_contract_siblings,
+    )
+
     contract = dict(contract)
     if contract.get("schema_version") != FASTH3_INFERENCE_CONTRACT_SCHEMA:
         raise ValueError(f"Unsupported FastH3 inference contract schema in {path}.")
-    for key, expected in FASTH3_PDD_FIXED_FIELDS.items():
-        if key not in contract:
-            raise ValueError(f"{path} is a FastH3 PDD contract but declares no {key}.")
-        if contract[key] != expected:
-            raise ValueError(f"{path} {key}={contract[key]!r} is unsupported; expected {expected!r}.")
+    validate_pdd_contract_fields(contract, path)
     pdd_steps = contract.get("pdd_steps")
     if isinstance(pdd_steps, bool) or not isinstance(pdd_steps, int) or pdd_steps < 2:
         raise ValueError(f"{path} pdd_steps must be an int >= 2, got {pdd_steps!r}.")
@@ -719,6 +711,7 @@ def _load_pdd_contract(contract: dict[str, Any], path: Path) -> dict[str, Any]:
         if key not in contract:
             raise ValueError(f"{path} is a FastH3 PDD contract but declares no {key}.")
         contract[key] = _positive_shift(contract[key], name=key)
+    validate_pdd_contract_siblings(contract, path)
     contract["pdd_step_indices"] = indices
     contract["kind"] = "pdd"
     return contract
