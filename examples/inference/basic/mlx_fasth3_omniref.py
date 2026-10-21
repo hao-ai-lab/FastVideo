@@ -83,6 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps", type=int, default=0,
                         help="transformer forwards; 0 uses the export contract's trained count")
     parser.add_argument("--prompt-cache-dir", type=Path)
+    parser.add_argument("--metal-wired-limit-gib", type=float,
+                        help="keep this much unified memory wired so macOS does not page the DiT out mid-denoise")
     parser.add_argument("--vae-dtype", default="fp32")
     parser.add_argument("--vae-decoder", type=Path,
                         help="standalone video decoder (FastH3 decoder[-nvfp4].safetensors or a LightVAE decoder) "
@@ -199,6 +201,7 @@ def run(args: argparse.Namespace) -> None:
         vae_encoder_path=args.vae_encoder,
         vae_decoder_quantization=args.vae_decoder_quantization,
         prompt_cache_dir=args.prompt_cache_dir,
+        metal_wired_limit_gib=args.metal_wired_limit_gib,
     )
     try:
         kwargs: dict[str, Any] = {}
