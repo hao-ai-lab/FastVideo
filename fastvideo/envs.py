@@ -448,6 +448,11 @@ FASTVIDEO_MLX_DQ_GEMM = EnvStr(
     category="performance",
     doc="MLX dequantized GEMM for affine-quantized weights: 0 turns it off, 1 uses the measured minimum row count, "
     "and an integer sets the minimum row count.")
+FASTVIDEO_MLX_QUANT_GEMM = EnvStr(
+    "auto",
+    category="performance",
+    doc="MLX H3 affine-quantized GEMM path: auto keeps FASTVIDEO_MLX_DQ_GEMM behaviour, dequant always uses "
+    "dequantize + dense GEMM for wide inputs, qmm always uses mx.quantized_matmul.")
 FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D = EnvBool(True,
                                               category="performance",
                                               doc="LTX-2 VAE uses the channels_last_3d memory format.")

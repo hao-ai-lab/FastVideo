@@ -39,6 +39,7 @@ from fastvideo.mlx_runtime.frame_upsample import (
     PIXEL_UPSAMPLE_MODES,
     upsample_frames,
 )
+from fastvideo.mlx_runtime.fastwan import set_quant_gemm_mode
 from fastvideo.mlx_runtime.minimax_h3 import (
     H3_MANIFEST_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
@@ -446,6 +447,7 @@ class MiniMaxH3MLXPipeline:
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
         mlx_cache_limit_gib: float | None = None,
+        quant_gemm: str = "auto",
         video_decode_backend: str = "h3-vae",
         taeh3_checkpoint: str | Path | None = None,
         taeh3_chunk_size: int = 5,
@@ -489,6 +491,8 @@ class MiniMaxH3MLXPipeline:
         self._dit_in_channels = int(dit_config["in_channels"])
         self.last_dit_forward_s = 0.0
         self.last_vsa_stats: dict[str, Any] | None = None
+        self._previous_quant_gemm = set_quant_gemm_mode(quant_gemm)
+        self._quant_gemm_set = True
         self._previous_memory_limit, self._previous_wired_limit = _configure_metal_memory_limits(mx,
                                                                                                  metal_wired_limit_gib,
                                                                                                  resident=resident)
@@ -591,6 +595,9 @@ class MiniMaxH3MLXPipeline:
             raise
 
     def close(self) -> None:
+        if getattr(self, "_quant_gemm_set", False):
+            set_quant_gemm_mode(self._previous_quant_gemm)
+            self._quant_gemm_set = False
         conditioner = self._resident_components.get("conditioner")
         if conditioner is not None:
             conditioner.close()

@@ -87,6 +87,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="keep this much unified memory wired so macOS does not page the DiT out mid-denoise")
     parser.add_argument("--mlx-cache-limit-gib", type=float,
                         help="bound MLX's freed-buffer cache; unbounded by default")
+    parser.add_argument("--quant-gemm", choices=("auto", "dequant", "qmm"), default="auto",
+                        help="INT8/INT6/INT4 linear path: auto (measured default), dequant (dequantize + dense "
+                        "GEMM for wide inputs), qmm (mx.quantized_matmul). Ignored by a bf16 checkpoint.")
     parser.add_argument("--reference-max-pixels", default=None,
                         help="opt-in cap on each image/video reference canvas (down only): a pixel count, or "
                         "'match' for the clip's own area. Faster, but references lose detail versus the trained "
@@ -221,6 +224,7 @@ def run(args: argparse.Namespace) -> None:
         prompt_cache_dir=args.prompt_cache_dir,
         metal_wired_limit_gib=args.metal_wired_limit_gib,
         mlx_cache_limit_gib=args.mlx_cache_limit_gib,
+        quant_gemm=args.quant_gemm,
     )
     try:
         kwargs: dict[str, Any] = {}
