@@ -687,7 +687,6 @@ class MiniMaxH3MLXPipeline:
         data = np.load(path)
         return data["hidden_states"], data["token_tags"]
 
-
     def prepare_references(
         self,
         references: Sequence[MiniMaxH3Reference],

@@ -67,7 +67,6 @@ def reference_draw_key(seed: int, stream: int, index: int):
     return mx.random.key(mixed)
 
 
-
 def load_vision_limits(processor_dir: str | Path, *, video: bool = False) -> tuple[int, int]:
     """``(min_pixels, max_pixels)`` the Qwen3-VL image or video processor would use.
 
@@ -89,7 +88,6 @@ def load_vision_limits(processor_dir: str | Path, *, video: bool = False) -> tup
         int(raw.get("min_pixels", size.get("shortest_edge", default_min))),
         int(raw.get("max_pixels", size.get("longest_edge", default_max))),
     )
-
 
 
 def encode_reference_prompt(
@@ -167,7 +165,6 @@ def encode_reference_prompt(
     if hidden.shape[0] != len(token_ids):
         raise ValueError(f"The H3 conditioner returned {hidden.shape[0]} rows for {len(token_ids)} tokens.")
     return hidden, tags
-
 
 
 def reference_condition_noise(

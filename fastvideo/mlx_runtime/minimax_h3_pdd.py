@@ -47,7 +47,6 @@ def validate_pdd_steps(value: Any, name: str = "pdd_steps") -> int:
     return value
 
 
-
 def shifted_noise_amount(base: np.ndarray, shift: float, *, max_t: float = PDD_GRID_MAX_T) -> np.ndarray:
     """Rational time shift ``f_s(u) = s * u * M / (u * (s - 1) + M)`` on ``[0, M]``.
 
@@ -96,7 +95,6 @@ class PDDModalitySchedule:
         coefficient. Negative for a descending grid.
         """
         return shifted_noise_delta(fine_grid[:-1], fine_grid[1:], self.shift, max_t=self.max_t)
-
 
 
 def pdd_fine_grid(pdd_steps: int, *, max_t: float = PDD_GRID_MAX_T) -> np.ndarray:
@@ -160,7 +158,6 @@ def build_pdd_sampling_plan(
         },
         integration_weights=weights,
     )
-
 
 
 def resolved_grid_size(weight: np.ndarray, bias: np.ndarray | None, output_size: int) -> int | None:
