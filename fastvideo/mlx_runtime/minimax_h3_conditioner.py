@@ -529,15 +529,14 @@ class StreamedMiniMaxH3TextConditioner:
         query = _apply_mrope(query, cos, sin)
         key = _apply_mrope(key, cos, sin)
 
-        # GQA: repeat KV heads.
-        repeats = heads // kv_heads
-        key = mx.repeat(key, repeats, axis=1)
-        value = mx.repeat(value, repeats, axis=1)
-
-        scores = (query.transpose(1, 0, 2) @ key.transpose(1, 2, 0)) * head_dim**-0.5
-        mask = mx.triu(mx.ones((seq_len, seq_len), dtype=mx.bool_), k=1)
-        scores = mx.where(mask[None], mx.array(-np.inf, dtype=scores.dtype), scores)
-        attended = mx.softmax(scores, axis=-1) @ value.transpose(1, 0, 2)
+        # Fused causal attention with native GQA. A reference request carries
+        # thousands of vision tokens; explicit fp32 scores would need
+        # heads * seq^2 * 4 bytes (~14 GB at 7.5k tokens) per layer.
+        attended = mx.fast.scaled_dot_product_attention(query.transpose(1, 0, 2)[None],
+                                                        key.transpose(1, 0, 2)[None],
+                                                        value.transpose(1, 0, 2)[None],
+                                                        scale=head_dim**-0.5,
+                                                        mask="causal")[0]
         # Attention is head-major here: (heads, sequence, head_dim).  Restore
         # sequence-major ordering before concatenating heads for o_proj.
         attended = attended.transpose(1, 0, 2)
@@ -553,6 +552,7 @@ class StreamedMiniMaxH3TextConditioner:
         return residual + down
 
     def close(self) -> None:
+        self._vision = None
         self.index.close()
 
 
