@@ -810,6 +810,15 @@ def pdd_plan_from_contract(contract: dict[str, Any]) -> Any:
     return build_pdd_sampling_plan(contract["pdd_step_indices"], schedules)
 
 
+def pdd_adaln_timesteps(contract: dict[str, Any], video: MiniMaxH3SchedulerState,
+                        audio: MiniMaxH3SchedulerState) -> np.ndarray:
+    """A PDD contract's AdaLN ladder; Ref2VA adds the 0.999 its reference rows always run at."""
+    union = adaln_timestep_union(video, audio)
+    if contract.get("model_type") != "ref2va":
+        return union
+    return np.unique(np.append(union, np.float32(MINIMAX_H3_KEYFRAME_NOISE_AUG))).astype(np.float32)
+
+
 def _resolve_pdd_schedule(
     contract: dict[str, Any],
     num_steps: int,
@@ -823,7 +832,7 @@ def _resolve_pdd_schedule(
                          "transformer forwards (one per trained fused block).")
     video = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["video_scheduler_shift"], plan.node_sigmas["video"])
     audio = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["audio_scheduler_shift"], plan.node_sigmas["audio"])
-    union = adaln_timestep_union(video, audio)
+    union = pdd_adaln_timesteps(contract, video, audio)
     if cached_timesteps is not None:
         _require_cached_schedule(cached_timesteps, union, num_steps)
     return ResolvedH3Schedule(video, audio, union, blocks, "contract-pdd", plan)

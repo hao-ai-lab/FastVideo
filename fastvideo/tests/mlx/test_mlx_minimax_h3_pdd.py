@@ -267,6 +267,17 @@ def test_converter_cache_follows_a_pdd_contract(tmp_path) -> None:
         _validate_checkpoint_step_ladder(tmp_path, 4, model_root=tmp_path)
 
 
+def test_ref2va_ladder_carries_the_reference_condition_timestep(tmp_path) -> None:
+    """Reference rows run at 0.999; a converted DiT has dropped AdaLN, so the baked cache must hold it."""
+    from scripts.checkpoint_conversion.convert_minimax_h3_mlx import _adaln_cache_timesteps
+    from fastvideo.mlx_runtime.minimax_h3 import MINIMAX_H3_KEYFRAME_NOISE_AUG
+
+    _write(tmp_path, _pdd_contract())
+    condition = np.float32(MINIMAX_H3_KEYFRAME_NOISE_AUG)
+    assert condition in resolve_h3_denoise_schedule(tmp_path, 2).adaln_timesteps
+    assert condition in _adaln_cache_timesteps(tmp_path)
+
+
 def test_from_pdd_node_sigmas_validates(tmp_path) -> None:
     node = np.array([0.9, 0.4, 0.0], dtype=np.float64)
     state = MiniMaxH3SchedulerState.from_pdd_node_sigmas(VIDEO_SHIFT, node)

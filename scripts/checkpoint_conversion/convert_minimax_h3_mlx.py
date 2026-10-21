@@ -48,6 +48,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
+    pdd_adaln_timesteps,
     pdd_plan_from_contract,
     save_mlx_h3_checkpoint,
 )
@@ -79,7 +80,7 @@ def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
         logger.info("FastH3 PDD schedule contract: %d fused blocks of a %d-interval grid, video/audio shift=%g/%g",
                     plan.num_steps, plan.pdd_steps, contract["video_scheduler_shift"],
                     contract["audio_scheduler_shift"])
-        return adaln_timestep_union(video_state, audio_state)
+        return pdd_adaln_timesteps(contract, video_state, audio_state)
     video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
                                                          contract["dmd_denoising_steps"])
     audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],
