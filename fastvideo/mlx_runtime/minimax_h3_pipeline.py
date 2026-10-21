@@ -99,7 +99,6 @@ class GenerationResult:
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
     vsa: dict[str, Any] = field(default_factory=dict)
     video_decode_backend: str = "h3-vae"
-    # Prefix K/V reuse report: whether it ran, cache size and per-step times.
     prefix_kv: dict[str, Any] = field(default_factory=dict)
 
 
@@ -688,7 +687,6 @@ class MiniMaxH3MLXPipeline:
         data = np.load(path)
         return data["hidden_states"], data["token_tags"]
 
-    # -- Ref2VA conditioning ---------------------------------------------
 
     def prepare_references(
         self,
@@ -823,7 +821,7 @@ class MiniMaxH3MLXPipeline:
         """
         import mlx.core as mx
 
-        self.last_prefix_kv_stats = {"enabled": False}
+        self.last_prefix_kv_stats: dict[str, object] = {"enabled": False}
         self.last_denoise_step_times = []
         if prefix_kv_refresh_every < 0:
             raise ValueError(f"prefix_kv_refresh_every must be >= 0, got {prefix_kv_refresh_every}.")
@@ -1439,12 +1437,10 @@ class MiniMaxH3MLXPipeline:
             vsa_config=vsa_config,
             inter_step_cooldown_s=inter_step_cooldown_s,
             references=prepared_references,
-            **({} if not reuse_prefix_kv else {
-                "reuse_prefix_kv": True,
-                "prefix_kv_refresh_every": prefix_kv_refresh_every,
-                "prefix_kv_cache_max_gib": prefix_kv_cache_max_gib,
-                "prefix_kv_storage": prefix_kv_storage,
-            }),
+            reuse_prefix_kv=reuse_prefix_kv,
+            prefix_kv_refresh_every=prefix_kv_refresh_every,
+            prefix_kv_cache_max_gib=prefix_kv_cache_max_gib,
+            prefix_kv_storage=prefix_kv_storage,
         )
         timings["denoise_s"] = time.perf_counter() - started
         timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
