@@ -274,3 +274,50 @@ def load_released_weights_into_torch(model: AutoencoderKLMiniMaxH3, vae_dir: Pat
     missing, unexpected = model.load_state_dict(state, strict=False)
     unexpected = [k for k in unexpected]
     assert not unexpected, f"unexpected released keys: {unexpected[:5]}"
+
+
+# ---------------------------------------------------------------------------
+# Memory-bounded slabs, pruned (LightVAE) encoders, quantized decoder linears
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("slab_elements", [1, 256])
+def test_slabbed_encoder_matches_torch(monkeypatch, slab_elements: int) -> None:
+    import fastvideo.mlx_runtime.minimax_h3_video_vae as vae_module
+
+    monkeypatch.setattr(vae_module, "CONV_SLAB_ELEMENTS", slab_elements)
+    model = build_torch_model()
+    vae = build_mlx_model(model)
+    frames = np.random.default_rng(SEED + 5).standard_normal((1, 3, 5, 16, 16)).astype(np.float32)
+    mean_m, _ = vae.encode(mx.array(frames))
+    with torch.no_grad():
+        moments = model._encode(torch.from_numpy(frames))
+    mean_t, _ = torch.chunk(moments, 2, dim=1)
+    _stats("slabbed.encoder.mean", _to_np(mean_m), mean_t.numpy(), atol=2e-4, rtol=2e-4)
+
+
+def test_pruned_resnet_keeps_only_the_shortcut() -> None:
+    from fastvideo.mlx_runtime.minimax_h3_video_vae import _resnet_block
+
+    x = mx.array(np.random.default_rng(1).standard_normal((1, 4, 2, 4, 4)).astype(np.float32))
+    assert _resnet_block({}, "encoder.down_blocks.0.resnets.0", x, num_groups=2, eps=1e-6) is x
+    shortcut = {
+        "p.conv_shortcut.weight": mx.ones((8, 1, 1, 1, 4)),
+        "p.conv_shortcut.bias": mx.zeros((8, )),
+    }
+    out = _resnet_block(shortcut, "p", x, num_groups=2, eps=1e-6)
+    assert out.shape == (1, 8, 2, 4, 4)
+
+
+@pytest.mark.parametrize("mode,min_snr_db", [("nvfp4", 17.0), ("mxfp8", 30.0), ("int8", 35.0), ("int4", 15.0)])
+def test_quantized_linear_tracks_dense(mode: str, min_snr_db: float) -> None:
+    from fastvideo.mlx_runtime.minimax_h3_video_vae import _linear
+    from fastvideo.mlx_runtime.minimax_h3_video_vae_quant import quantize_weight
+
+    rng = np.random.default_rng(3)
+    weight = mx.array((rng.standard_normal((64, 128)) * 0.02).astype(np.float32)).astype(mx.bfloat16)
+    x = mx.array(rng.standard_normal((5, 128)).astype(np.float32)).astype(mx.bfloat16)
+    dense = np.asarray(_linear(x, weight).astype(mx.float32))
+    quant = np.asarray(_linear(x, quantize_weight(weight, mode)).astype(mx.float32))
+    snr = 10 * np.log10(np.sum(dense**2) / np.sum((dense - quant)**2))
+    assert snr >= min_snr_db, f"{mode}: {snr:.1f} dB"

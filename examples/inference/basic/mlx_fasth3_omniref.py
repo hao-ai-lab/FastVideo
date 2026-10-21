@@ -79,6 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="transformer forwards; 0 uses the export contract's trained count")
     parser.add_argument("--prompt-cache-dir", type=Path)
     parser.add_argument("--vae-dtype", default="fp32")
+    parser.add_argument("--vae-decoder", type=Path,
+                        help="standalone video decoder (FastH3 decoder[-nvfp4].safetensors or a LightVAE decoder) "
+                        "replacing the base vae/ decoder")
+    parser.add_argument("--vae-encoder", type=Path,
+                        help="standalone video encoder (LightVAE) replacing the base vae/ encoder; with both flags "
+                        "vae/ only needs config.json")
+    parser.add_argument("--vae-decoder-quantization", choices=("nvfp4", "mxfp8", "int8", "int4"),
+                        help="quantize the decoder block linears of a dense decoder file as it loads")
     parser.add_argument("--vsa", action="store_true",
                         help="VSA sparse attention; needs a checkpoint converted with --include-vsa")
     parser.add_argument("--vsa-sparsity", type=float, default=0.9)
@@ -167,6 +175,9 @@ def run(args: argparse.Namespace) -> None:
         model_root=model_root,
         mlx_dit_checkpoint=args.mlx_checkpoint,
         vae_dtype=args.vae_dtype,
+        vae_decoder_path=args.vae_decoder,
+        vae_encoder_path=args.vae_encoder,
+        vae_decoder_quantization=args.vae_decoder_quantization,
         prompt_cache_dir=args.prompt_cache_dir,
     )
     try:

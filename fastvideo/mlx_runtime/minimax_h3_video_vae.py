@@ -30,7 +30,7 @@ from __future__ import annotations
 import gc
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,12 @@ import numpy as np
 import mlx.core as mx
 
 from fastvideo.logger import init_logger
+from fastvideo.mlx_runtime.minimax_h3_video_vae_quant import (
+    QuantizedWeight,
+    is_block_linear_weight,
+    packed_nvfp4_weight,
+    quantize_weight,
+)
 
 logger = init_logger(__name__)
 
@@ -80,7 +86,11 @@ class MiniMaxH3VideoVAEConfigView:
 
     @classmethod
     def from_vae_dir(cls, vae_dir: str | Path) -> MiniMaxH3VideoVAEConfigView:
-        config = json.loads((Path(vae_dir) / "config.json").read_text())
+        return cls.from_dict(json.loads((Path(vae_dir) / "config.json").read_text()))
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> MiniMaxH3VideoVAEConfigView:
+        """Build from a ``vae/config.json`` dict (also LightVAE's embedded ``teacher_config``)."""
         latents_mean = tuple(float(v) for v in config.get("latents_mean", ()))
         latents_std = tuple(float(v) for v in config.get("latents_std", ()))
         return cls(
@@ -153,6 +163,17 @@ def _reflect_pad_axis(x, axis: int, left: int, right: int):
     return mx.contiguous(mx.concatenate(pieces, axis=axis))
 
 
+# mx.conv3d materializes an im2col-style workspace ~16x its input, so one conv over a
+# full-resolution clip can need tens of GiB. Convolutions larger than this many input
+# elements run in output-frame / output-row slabs (exact: slabs carry their halo, and
+# only the slab is padded, so the padded full-resolution tensor never exists).
+CONV_SLAB_ELEMENTS = 1 << 24
+
+
+def _reflect_indices(size: int, pad: int) -> list[int]:
+    return [-i if i < 0 else (2 * (size - 1) - i if i >= size else i) for i in range(-pad, size + pad)]
+
+
 def _causal_conv3d(x, weight, bias=None, *, stride=(1, 1, 1), spatial_padding: int = 0, temporal_padding: int = 0):
     """Reflect spatial padding + zero causal temporal padding, then conv3d.
 
@@ -160,31 +181,77 @@ def _causal_conv3d(x, weight, bias=None, *, stride=(1, 1, 1), spatial_padding: i
     channels-last internally.
     """
     x = _ct(x, 0, 2, 3, 4, 1)
-    if spatial_padding > 0:
-        x = _reflect_pad_axis(x, 2, spatial_padding, spatial_padding)
-        x = _reflect_pad_axis(x, 3, spatial_padding, spatial_padding)
-    if temporal_padding > 0:
-        x = mx.pad(x, ((0, 0), (temporal_padding, 0), (0, 0), (0, 0), (0, 0)))
-    y = mx.conv3d(mx.contiguous(x), weight, stride=stride)
+    batch, depth, height, width, channels = x.shape
+    _, k_t, k_h, k_w, _ = weight.shape
+    st, sh, _ = stride
+    pad = spatial_padding
+    out_d = (depth + temporal_padding - k_t) // st + 1
+    padded_h, padded_w = height + 2 * pad, width + 2 * pad
+    out_h = (padded_h - k_h) // sh + 1
+    row_index = _reflect_indices(height, pad) if pad else list(range(height))
+    frame_elements = max(batch * padded_h * padded_w * channels, 1)
+    frames_per_slab = max(1, min(out_d, CONV_SLAB_ELEMENTS // (frame_elements * k_t)))
+    rows_per_slab = out_h
+    if frames_per_slab == 1 and frame_elements * k_t > CONV_SLAB_ELEMENTS:
+        rows_per_slab = max(1, min(out_h, CONV_SLAB_ELEMENTS // (batch * padded_w * channels * k_t * sh) - k_h))
+    single = frames_per_slab >= out_d and rows_per_slab >= out_h
+    depth_slabs = []
+    for d0 in range(0, out_d, frames_per_slab):
+        d1 = min(d0 + frames_per_slab, out_d)
+        low, high = d0 * st - temporal_padding, (d1 - 1) * st + k_t - temporal_padding  # unpadded frame range
+        frames = x[:, max(low, 0):high]
+        if low < 0:
+            frames = mx.concatenate([mx.zeros((batch, -low, height, width, channels), dtype=x.dtype), frames], axis=1)
+        row_slabs = []
+        for h0 in range(0, out_h, rows_per_slab):
+            h1 = min(h0 + rows_per_slab, out_h)
+            rows = row_index[h0 * sh:(h1 - 1) * sh + k_h]
+            slab = frames if rows == list(range(height)) else mx.take(frames, mx.array(rows), axis=2)
+            slab = _reflect_pad_axis(slab, 3, pad, pad)
+            y = mx.conv3d(mx.contiguous(slab), weight, stride=stride)
+            if not single:
+                mx.eval(y)  # frees the slab's workspace before the next one starts
+            row_slabs.append(y)
+        depth_slabs.append(row_slabs[0] if len(row_slabs) == 1 else mx.concatenate(row_slabs, axis=2))
+    y = depth_slabs[0] if len(depth_slabs) == 1 else mx.concatenate(depth_slabs, axis=1)
     if bias is not None:
         y = y + bias[None, None, None, None, :]
     return _ct(y, 0, 4, 1, 2, 3)
 
 
-def _group_norm_per_frame(x, weight, bias, *, num_groups: int, eps: float):
-    """GroupNorm over channels for every (batch, frame) independently.
+def _group_norm_frames(x, weight, bias, *, num_groups: int, eps: float, silu: bool):
+    n, c, t, h, w = x.shape
+    grouped = _ct(x, 0, 2, 1, 3, 4).reshape(n * t, num_groups, (c // num_groups) * h * w)
+    grouped = mx.fast.layer_norm(grouped.astype(mx.float32), None, None, eps).astype(x.dtype)
+    grouped = _ct(grouped.reshape(n, t, c, h, w), 0, 2, 1, 3, 4)
+    y = grouped * weight[None, :, None, None, None] + bias[None, :, None, None, None]
+    return _silu(y) if silu else y
 
-    x: (N, C, T, H, W) -> same layout. Mirrors MiniMaxH3VideoGroupNorm.
+
+def _group_norm_per_frame(x, weight, bias, *, num_groups: int, eps: float, silu: bool = False):
+    """GroupNorm (optionally fused with SiLU) over channels for every (batch, frame) independently.
+
+    x: (N, C, T, H, W) -> same layout. Mirrors MiniMaxH3VideoGroupNorm. Each
+    (frame, group) is one normalization row, so the fused layer norm computes it
+    without materializing the centered and squared full-resolution temporaries;
+    large clips run in frame slabs so the fp32 working copy stays one slab wide.
     """
     n, c, t, h, w = x.shape
     assert c % num_groups == 0
-    grouped = _ct(x, 0, 2, 1, 3, 4).reshape(n * t, num_groups, c // num_groups, h, w)
-    mean = grouped.mean(axis=(2, 3, 4), keepdims=True)
-    var = ((grouped - mean)**2).mean(axis=(2, 3, 4), keepdims=True)
-    grouped = (grouped - mean) / mx.sqrt(var + eps)
-    grouped = grouped.reshape(n, t, c, h, w)
-    grouped = _ct(grouped, 0, 2, 1, 3, 4)
-    return grouped * weight[None, :, None, None, None] + bias[None, :, None, None, None]
+    frames_per_slab = max(1, CONV_SLAB_ELEMENTS // max(n * c * h * w, 1))
+    if frames_per_slab >= t:
+        return _group_norm_frames(x, weight, bias, num_groups=num_groups, eps=eps, silu=silu)
+    slabs = []
+    for t0 in range(0, t, frames_per_slab):
+        slab = _group_norm_frames(x[:, :, t0:t0 + frames_per_slab],
+                                  weight,
+                                  bias,
+                                  num_groups=num_groups,
+                                  eps=eps,
+                                  silu=silu)
+        mx.eval(slab)
+        slabs.append(slab)
+    return mx.concatenate(slabs, axis=2)
 
 
 def _rms_norm_no_affine(x, eps: float):
@@ -196,7 +263,7 @@ def _silu(x):
 
 
 def _linear(x, weight, bias=None):
-    y = x @ weight.T
+    y = weight.matmul(x) if isinstance(weight, QuantizedWeight) else x @ weight.T
     if bias is not None:
         y = y + bias
     return y
@@ -279,23 +346,29 @@ def _rms_norm_affine(x_fp32, weight, eps: float):
 
 def _resnet_block(weights: dict[str, Any], prefix: str, x, *, num_groups: int, eps: float):
     residual = x
-    h = _silu(
-        _group_norm_per_frame(x,
+    if f"{prefix}.conv1.weight" not in weights:
+        # Block-pruned (LightVAE) residual: only the channel-changing shortcut, if any, survives.
+        shortcut_key = f"{prefix}.conv_shortcut.weight"
+        if shortcut_key in weights:
+            return _causal_conv3d(x, weights[shortcut_key], weights[f"{prefix}.conv_shortcut.bias"])
+        return x
+    h = _group_norm_per_frame(x,
                               weights[f"{prefix}.norm1.weight"],
                               weights[f"{prefix}.norm1.bias"],
                               num_groups=num_groups,
-                              eps=eps))
+                              eps=eps,
+                              silu=True)
     h = _causal_conv3d(h,
                        weights[f"{prefix}.conv1.weight"],
                        weights[f"{prefix}.conv1.bias"],
                        spatial_padding=1,
                        temporal_padding=2)
-    h = _silu(
-        _group_norm_per_frame(h,
+    h = _group_norm_per_frame(h,
                               weights[f"{prefix}.norm2.weight"],
                               weights[f"{prefix}.norm2.bias"],
                               num_groups=num_groups,
-                              eps=eps))
+                              eps=eps,
+                              silu=True)
     h = _causal_conv3d(h,
                        weights[f"{prefix}.conv2.weight"],
                        weights[f"{prefix}.conv2.bias"],
@@ -315,10 +388,16 @@ def _resnet_block(weights: dict[str, Any], prefix: str, x, *, num_groups: int, e
 class MLXMiniMaxH3VideoVAE:
     """Encoder + decoder for the released MiniMax-H3 video VAE."""
 
-    def __init__(self, weights: dict[str, Any], config: MiniMaxH3VideoVAEConfigView, *, has_encoder: bool = True):
+    def __init__(self,
+                 weights: dict[str, Any],
+                 config: MiniMaxH3VideoVAEConfigView,
+                 *,
+                 has_encoder: bool = True,
+                 has_decoder: bool = True):
         self.weights = weights
         self.config = config
         self.has_encoder = has_encoder
+        self.has_decoder = has_decoder
         self.latent_channels = config.latent_channels
         self.spatial_compression_ratio = config.spatial_compression_ratio
         self.temporal_compression_ratio = config.temporal_compression_ratio
@@ -355,6 +434,7 @@ class MLXMiniMaxH3VideoVAE:
         """(N, 3, T, H, W) pixels -> (N, 2C, T', H', W') moments."""
         w = self.weights
         cfg = self.config
+        x = x.astype(w["encoder.conv_in.weight"].dtype)  # compute in the storage dtype
         x = _causal_conv3d(x,
                            w["encoder.conv_in.weight"],
                            w["encoder.conv_in.bias"],
@@ -369,6 +449,7 @@ class MLXMiniMaxH3VideoVAE:
                                   x,
                                   num_groups=cfg.norm_num_groups,
                                   eps=cfg.norm_eps)
+                mx.eval(x)  # bound the lazy graph: full-resolution activations are the encoder's peak
             if td * sd > 1:
                 if sd == 2:
                     x = _reflect_pad_axis(x, 3, 0, 1)
@@ -380,19 +461,20 @@ class MLXMiniMaxH3VideoVAE:
                     stride=(td, sd, sd),
                     temporal_padding=2,
                 )
-        x = _silu(
-            _group_norm_per_frame(x,
+                mx.eval(x)
+        x = _group_norm_per_frame(x,
                                   w["encoder.norm_out.weight"],
                                   w["encoder.norm_out.bias"],
                                   num_groups=cfg.norm_num_groups,
-                                  eps=cfg.norm_eps))
+                                  eps=cfg.norm_eps,
+                                  silu=True)
         x = _causal_conv3d(x,
                            w["encoder.conv_out.weight"],
                            w["encoder.conv_out.bias"],
                            spatial_padding=1,
                            temporal_padding=2)
         x = _causal_conv3d(x, w["quant_conv.weight"], w["quant_conv.bias"])
-        return x
+        return x.astype(mx.float32)
 
     def encode(self, pixels):
         """Normalized pixels (1, 3, T, H, W) -> (mean, logvar) each (1, C, T', H', W').
@@ -451,6 +533,7 @@ class MLXMiniMaxH3VideoVAE:
         """(1, C, T_tokens, H', W') latents -> (1, 3, T_tokens*4, H, W) pixels."""
         w = self.weights
         cfg = self.config
+        z = z.astype(w["post_quant_conv.weight"].dtype)  # compute in the storage dtype
         z = _causal_conv3d(z, w["post_quant_conv.weight"], w["post_quant_conv.bias"])
         batch, channels, num_frames, height, width = z.shape
         # (B, C, T, H, W) -> (B*T*H*W, C): sequence-major tokens.
@@ -577,6 +660,8 @@ class MLXMiniMaxH3VideoVAE:
                tile_sample_min_overlap_height: int = 64,
                tile_sample_min_overlap_width: int = 64):
         """Chunked decode of normalized latents (1, C, T_lat, H', W') -> (1, 3, T, H, W)."""
+        if not self.has_decoder:
+            raise RuntimeError("This MLX H3 video VAE was loaded without decoder weights.")
         cfg = self.config
         tokens_chunk_size = cfg.tokens_chunk_size
         token_drop = cfg.token_drop
@@ -652,6 +737,130 @@ def _shards(component_dir: Path) -> list[Path]:
 
 
 _DTYPE_MAP = {"fp32": mx.float32, "bf16": mx.bfloat16, "fp16": mx.float16}
+_ENCODER_PREFIXES = ("quant_conv.", "encoder.")
+_DECODER_PREFIXES = ("post_quant_conv.", "decoder.")
+_PACKED_NVFP4_FORMAT = "fastvideo_h3_decoder_nvfp4_packed_v1"
+_PACKED_SUFFIXES = (".packed_weight", ".weight_inv_scale", ".weight_global_sf", ".input_amax")
+
+
+def _read_weights(paths: list[Path], prefixes: tuple[str, ...], cast_dtype, decoder_quantization: str | None):
+    """Stream the tensors under ``prefixes`` from safetensors files, one file at a time.
+
+    Handles the three decoder layouts: dense diffusers keys (released VAE, LightVAE), the FastH3
+    ``deploy_v1`` bf16 masters (``input_amax`` calibration tensors are dropped), and the pre-packed
+    ``packed_v1`` NVFP4 file (loaded as MLX NVFP4 weights without requantizing).
+    """
+    weights: dict[str, Any] = {}
+    for path in paths:
+        arrays, metadata = mx.load(str(path), return_metadata=True)
+        packed = metadata.get("format") == _PACKED_NVFP4_FORMAT
+        for key, source in arrays.items():
+            if not key.startswith(prefixes):
+                continue
+            if packed and key.endswith(_PACKED_SUFFIXES):
+                if key.endswith(".packed_weight"):
+                    base = key.removesuffix(".packed_weight")
+                    weights[base + ".weight"] = packed_nvfp4_weight(source, arrays[base + ".weight_inv_scale"],
+                                                                    arrays[base + ".weight_global_sf"])
+                continue
+            if key.endswith(".input_amax"):
+                continue
+            array = source.astype(cast_dtype)
+            if array.ndim == 5:  # conv3d (O, I, kT, kH, kW) -> (O, kT, kH, kW, I)
+                array = _ct(array, 0, 2, 3, 4, 1)
+            if decoder_quantization is not None and is_block_linear_weight(key):
+                quantized = quantize_weight(array, decoder_quantization)
+                mx.eval(quantized.weight, quantized.scales)
+                weights[key] = quantized
+            else:
+                mx.eval(array)
+                weights[key] = array
+            del source
+        del arrays
+        gc.collect()
+        mx.clear_cache()
+    return weights
+
+
+def _embedded_config(paths: list[Path]) -> MiniMaxH3VideoVAEConfigView | None:
+    """LightVAE files embed the teacher VAE config (latent statistics included) as safetensors metadata."""
+    for path in paths:
+        _, metadata = mx.load(str(path), return_metadata=True)
+        if "architecture" in metadata:
+            architecture = json.loads(metadata["architecture"])
+            return MiniMaxH3VideoVAEConfigView.from_dict(architecture.get("teacher_config", architecture))
+    return None
+
+
+def _check_required(weights: dict[str, Any], required: list[str], what: str) -> None:
+    missing = [key for key in required if key not in weights]
+    if missing:
+        raise KeyError(f"{what} is missing required tensors: {missing}")
+
+
+def mlx_h3_video_vae_from_files(*,
+                                vae_dir: str | Path | None = None,
+                                decoder_path: str | Path | None = None,
+                                encoder_path: str | Path | None = None,
+                                include_encoder: bool = True,
+                                include_decoder: bool = True,
+                                storage_dtype: str = "fp32",
+                                config: MiniMaxH3VideoVAEConfigView | None = None,
+                                decoder_quantization: str | None = None) -> MLXMiniMaxH3VideoVAE:
+    """Load an H3 video VAE from any mix of the released VAE directory and standalone component files.
+
+    ``decoder_path`` / ``encoder_path`` override the matching half of ``vae_dir`` (or stand alone when no
+    ``vae_dir`` is given, so the base VAE weights are never read). Standalone files may be a LightVAE
+    block-pruned component (config embedded in its metadata; ``decoder_num_layers`` follows the kept
+    blocks) or a FastH3 NVFP4 decoder (``decoder.safetensors`` bf16 masters, or ``decoder-nvfp4.safetensors``
+    pre-packed). A FastH3 decoder carries no latent statistics: pass a LightVAE encoder, a ``vae_dir``
+    holding ``config.json``, or ``config``.
+
+    ``decoder_quantization`` ("nvfp4", "mxfp8", "int8", "int4") stores the 216 decoder block linears
+    quantized as they are read, so the dense decoder never needs to be resident.
+    """
+    cast_dtype = _DTYPE_MAP[storage_dtype]
+
+    def component_paths(explicit: str | Path | None, wanted: bool, what: str) -> list[Path]:
+        if not wanted:
+            return []
+        if explicit:
+            return [Path(explicit)]
+        if vae_dir is None:
+            raise ValueError(f"A {what} needs vae_dir or an explicit {what}_path.")
+        return _shards(Path(vae_dir))
+
+    decoder_paths = component_paths(decoder_path, include_decoder, "decoder")
+    encoder_paths = component_paths(encoder_path, include_encoder, "encoder")
+    if config is None and vae_dir is not None and (Path(vae_dir) / "config.json").exists():
+        config = MiniMaxH3VideoVAEConfigView.from_vae_dir(vae_dir)
+    if config is None:
+        config = _embedded_config([Path(p) for p in (encoder_path, decoder_path) if p] + encoder_paths + decoder_paths)
+    if config is None:
+        raise ValueError("No VAE config: pass vae_dir with config.json, a LightVAE component file, or config=.")
+
+    weights: dict[str, Any] = {}
+    if include_encoder:
+        weights.update(_read_weights(encoder_paths, _ENCODER_PREFIXES, cast_dtype, None))
+        _check_required(
+            weights,
+            ["quant_conv.weight", "encoder.conv_in.weight", "encoder.conv_out.weight", "encoder.norm_out.weight"],
+            "H3 video VAE encoder")
+    if include_decoder:
+        weights.update(_read_weights(decoder_paths, _DECODER_PREFIXES, cast_dtype, decoder_quantization))
+        _check_required(weights, [
+            "post_quant_conv.weight", "post_quant_conv.bias", "decoder.proj_in.weight", "decoder.norm_out.weight",
+            "decoder.proj_out.weight", "decoder.register_tokens"
+        ], "H3 video VAE decoder")
+        found = {int(key.split(".")[2]) for key in weights if key.startswith("decoder.transformer_blocks.")}
+        if found != set(range(len(found))) or not found:
+            raise KeyError(f"H3 video VAE decoder blocks are not contiguous from 0: {sorted(found)}.")
+        if vae_dir is not None and decoder_path is None and len(found) != config.decoder_num_layers:
+            raise KeyError(f"H3 video VAE decoder blocks incomplete: found {sorted(found)} "
+                           f"of {config.decoder_num_layers}.")
+        if len(found) != config.decoder_num_layers:  # pruned / depth-cut decoder
+            config = replace(config, decoder_num_layers=len(found))
+    return MLXMiniMaxH3VideoVAE(weights, config, has_encoder=include_encoder, has_decoder=include_decoder)
 
 
 def mlx_h3_video_vae_from_dir(vae_dir: str | Path,
@@ -665,50 +874,7 @@ def mlx_h3_video_vae_from_dir(vae_dir: str | Path,
     residency; measure drift against the FP32 acceptance gate before shipping
     a reduced-dtype configuration.
     """
-    import mlx.core as mx
-
-    vae_dir = Path(vae_dir)
-    config = config or MiniMaxH3VideoVAEConfigView.from_vae_dir(vae_dir)
-    cast_dtype = _DTYPE_MAP[storage_dtype]
-
-    wanted_prefixes: tuple[str, ...] = ("post_quant_conv.", "decoder.")
-    if include_encoder:
-        wanted_prefixes = ("quant_conv.", "encoder.", "post_quant_conv.", "decoder.")
-
-    weights: dict[str, Any] = {}
-    for shard in _shards(vae_dir):
-        arrays = mx.load(str(shard))
-        for key, source in arrays.items():
-            if not key.startswith(wanted_prefixes):
-                continue
-            array = source.astype(cast_dtype)
-            if array.ndim == 5:  # conv3d (O, I, kT, kH, kW) -> (O, kT, kH, kW, I)
-                array = _ct(array, 0, 2, 3, 4, 1)
-            mx.eval(array)
-            del source
-            weights[key] = array
-        del arrays
-        gc.collect()
-        mx.clear_cache()
-
-    required = [
-        "post_quant_conv.weight", "post_quant_conv.bias", "decoder.proj_in.weight", "decoder.norm_out.weight",
-        "decoder.proj_out.weight", "decoder.register_tokens"
-    ]
-    missing = [key for key in required if key not in weights]
-    if missing:
-        raise KeyError(f"H3 video VAE at {vae_dir} is missing required tensors: {missing}")
-    if include_encoder:
-        encoder_required = [
-            "quant_conv.weight", "encoder.conv_in.weight", "encoder.conv_out.weight", "encoder.norm_out.weight"
-        ]
-        missing = [key for key in encoder_required if key not in weights]
-        if missing:
-            raise KeyError(f"H3 video VAE encoder at {vae_dir} is missing required tensors: {missing}")
-    vae = MLXMiniMaxH3VideoVAE(weights, config, has_encoder=include_encoder)
-    expected_blocks = config.decoder_num_layers
-    found_blocks = {int(key.split(".")[2]) for key in weights if key.startswith("decoder.transformer_blocks.")}
-    if found_blocks != set(range(expected_blocks)):
-        raise KeyError(f"H3 video VAE decoder blocks incomplete: found {sorted(found_blocks)} "
-                       f"of {expected_blocks}.")
-    return vae
+    return mlx_h3_video_vae_from_files(vae_dir=vae_dir,
+                                       include_encoder=include_encoder,
+                                       storage_dtype=storage_dtype,
+                                       config=config)

@@ -412,6 +412,9 @@ class MiniMaxH3MLXPipeline:
     # Defaults for pipelines built without __init__ (unit tests use __new__).
     resident = False
     conditioner_mode = "auto"
+    vae_decoder_path: Path | None = None
+    vae_encoder_path: Path | None = None
+    vae_decoder_quantization: str | None = None
 
     def __init__(
         self,
@@ -419,6 +422,9 @@ class MiniMaxH3MLXPipeline:
         model_root: str | Path,
         mlx_dit_checkpoint: str | Path,
         vae_dtype: str = "fp32",
+        vae_decoder_path: str | Path | None = None,
+        vae_encoder_path: str | Path | None = None,
+        vae_decoder_quantization: str | None = None,
         prompt_cache_dir: str | Path | None = None,
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
@@ -441,6 +447,9 @@ class MiniMaxH3MLXPipeline:
         self._resident_components: dict[str, Any] = {}
         self.dit_checkpoint = Path(mlx_dit_checkpoint)
         self.vae_dtype = vae_dtype
+        self.vae_decoder_path = Path(vae_decoder_path) if vae_decoder_path else None
+        self.vae_encoder_path = Path(vae_encoder_path) if vae_encoder_path else None
+        self.vae_decoder_quantization = vae_decoder_quantization
         if video_decode_backend not in ("h3-vae", "taeh3"):
             raise ValueError(f"Unknown H3 video decoder: {video_decode_backend}")
         if taeh3_chunk_size < 1:
@@ -467,6 +476,26 @@ class MiniMaxH3MLXPipeline:
                                                                                                  metal_wired_limit_gib,
                                                                                                  resident=resident)
 
+    def _load_video_vae(self, *, include_encoder: bool, include_decoder: bool = True):
+        """Load the H3 video VAE, swapping in standalone decoder / encoder files when configured."""
+        from fastvideo.mlx_runtime import minimax_h3_video_vae as video_vae
+
+        vae_dir = self.model_root / "vae"
+        if self.vae_decoder_path is None and self.vae_encoder_path is None and self.vae_decoder_quantization is None:
+            return video_vae.mlx_h3_video_vae_from_dir(vae_dir,
+                                                       include_encoder=include_encoder,
+                                                       storage_dtype=self.vae_dtype)
+        has_base = vae_dir.is_dir() and (any(vae_dir.glob("*.safetensors")) or (vae_dir / "config.json").exists())
+        return video_vae.mlx_h3_video_vae_from_files(
+            vae_dir=vae_dir if has_base else None,
+            decoder_path=self.vae_decoder_path,
+            encoder_path=self.vae_encoder_path,
+            include_encoder=include_encoder,
+            include_decoder=include_decoder,
+            storage_dtype=self.vae_dtype,
+            decoder_quantization=self.vae_decoder_quantization,
+        )
+
     # -- input validation (before anything heavy loads) -------------------
 
     def _validate_inputs_before_loading(self) -> bool:
@@ -475,8 +504,14 @@ class MiniMaxH3MLXPipeline:
             missing.append(str(self.dit_checkpoint))
         vae_dir = self.model_root / "vae"
         audio_dir = self.model_root / "audio_vae"
-        if self.video_decode_backend == "h3-vae" and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
+        # Standalone decoder + encoder files (LightVAE, FastH3 decoder) replace the base VAE shards entirely.
+        standalone = self.vae_decoder_path is not None and self.vae_encoder_path is not None
+        if (self.video_decode_backend == "h3-vae" and not standalone
+                and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors")))):
             missing.append(str(vae_dir))
+        for path in (self.vae_decoder_path, self.vae_encoder_path):
+            if path is not None and not path.is_file():
+                missing.append(str(path))
         if not (audio_dir.exists() and any(audio_dir.glob("*.safetensors"))):
             missing.append(str(audio_dir))
         if missing:
@@ -519,8 +554,6 @@ class MiniMaxH3MLXPipeline:
             return
         from fastvideo.mlx_runtime.minimax_h3_conditioner import ResidentNVFP4MiniMaxH3TextConditioner
         from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
-        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
-
         import mlx.core as mx
 
         try:
@@ -530,9 +563,7 @@ class MiniMaxH3MLXPipeline:
                 raise ValueError("All-resident generation requires the packed NVFP4 text encoder.")
             self._resident_components["conditioner"] = conditioner
             self._resident_components["dit"] = _load_resident_dit(self.dit_checkpoint)
-            self._resident_components["video_vae"] = mlx_h3_video_vae_from_dir(self.model_root / "vae",
-                                                                               include_encoder=False,
-                                                                               storage_dtype=self.vae_dtype)
+            self._resident_components["video_vae"] = self._load_video_vae(include_encoder=False)
             self._resident_components["audio_vae"] = mlx_h3_audio_vae_from_dir(self.model_root / "audio_vae",
                                                                                include_encoder=False)
             mx.eval(list(self._resident_components["audio_vae"].weights.values()))
@@ -749,7 +780,8 @@ class MiniMaxH3MLXPipeline:
         # (already on the schedulers) and the integration weights.
         pdd_plan = schedule.pdd_plan
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
-        # conditioning rows; those modes recompute the ladder before denoise.
+        # conditioning rows. A Ref2VA PDD ladder already carries it, so a
+        # converted DiT's baked cache matches; this append is then a no-op.
         if references is not None:
             if video_temporal_scale != 1.0:
                 # The reference-prefixed builder stretches only the target video
@@ -947,8 +979,6 @@ class MiniMaxH3MLXPipeline:
         _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
         import mlx.core as mx
 
-        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
-
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=False)
         if self.video_decode_backend == "taeh3":
             from fastvideo.mlx_runtime.minimax_h3_taeh3 import decode_latents_taeh3_mlx
@@ -970,9 +1000,7 @@ class MiniMaxH3MLXPipeline:
             self.prepare_resident()
             vae = self._resident_components["video_vae"]
         else:
-            vae = mlx_h3_video_vae_from_dir(self.model_root / "vae",
-                                            include_encoder=False,
-                                            storage_dtype=self.vae_dtype)
+            vae = self._load_video_vae(include_encoder=False)
         expected_height = height // vae.spatial_compression_ratio
         expected_width = width // vae.spatial_compression_ratio
         if (geometry["latent_height"], geometry["latent_width"]) != (expected_height, expected_width):
@@ -1116,16 +1144,13 @@ class MiniMaxH3MLXPipeline:
         """
         from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
         from fastvideo.mlx_runtime.minimax_h3_ref_conditioning import encode_reference_conditions
-        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
 
         if self.video_decode_backend == "taeh3":
             raise ValueError("A reference-conditioned request needs the video VAE encoder; "
                              "use --video-decode-backend h3-vae.")
 
         needs_audio = any(reference.has_audio for reference in references)
-        video_vae = mlx_h3_video_vae_from_dir(self.model_root / "vae",
-                                              include_encoder=True,
-                                              storage_dtype=self.vae_dtype)
+        video_vae = self._load_video_vae(include_encoder=True, include_decoder=False)
         audio_vae = (mlx_h3_audio_vae_from_dir(self.model_root /
                                                "audio_vae", include_encoder=True) if needs_audio else None)
         try:

@@ -101,6 +101,20 @@ the MLX pipeline (`--image` on `mlx_fasth3.py`), two-pass refinement, and
 `--video-decode-backend taeh3` for reference requests (the reference encode
 needs the real video VAE).
 
+## Video VAE without the base weights
+
+`--vae-decoder` and `--vae-encoder` swap in standalone video VAE files, so the
+base `vae/` shards are never read (its `config.json` is still read, unless the
+encoder is a LightVAE file, which embeds the config and latent statistics).
+
+- Decoder: FastH3 `quality-36L/decoder-nvfp4.safetensors` (1.4 GB, loads as MLX
+  NVFP4 without requantizing), `decoder.safetensors` (bf16 masters; add
+  `--vae-decoder-quantization nvfp4|mxfp8|int8|int4`), or a LightVAE decoder.
+- Encoder: LightVAE `lightvae-lite-h3-encoder.safetensors` (block-pruned).
+- Use `--vae-dtype bf16` for the decoder and `fp16` for the encoder; fp32 is
+  several times slower and larger. Decode needs the tiled path (the default):
+  the decoder was trained on 256-pixel tiles.
+
 ## When something goes wrong
 
 - **`A reference-conditioned request needs the video VAE encoder`** — you passed
