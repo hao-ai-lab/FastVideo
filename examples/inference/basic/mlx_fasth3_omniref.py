@@ -117,6 +117,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vsa-impl", choices=("auto", "reference", "simd"), default="auto",
                         help="sparse attention backend; auto uses the SIMD Metal kernel for 128-token tiles and "
                         "gather+SDPA otherwise, reference forces gather+SDPA")
+    parser.add_argument("--reuse-prefix-kv", action="store_true",
+                        help="opt-in, lossy: record the text/reference rows' per-block K/V on step 1 and run later "
+                        "steps on the target audio/video rows only (faster, slightly different output)")
+    parser.add_argument("--prefix-kv-refresh-every", type=int, default=0,
+                        help="re-record the prefix K/V with a full forward every N steps (0 never)")
+    parser.add_argument("--prefix-kv-cache-max-gib", type=float, default=4.0,
+                        help="refuse prefix K/V reuse when the estimated cache exceeds this many GiB")
+    parser.add_argument("--prefix-kv-storage", choices=("bf16", "fp16", "int8"), default="bf16",
+                        help="prefix K/V cache storage dtype (int8 halves the cache)")
     parser.add_argument("--inter-step-cooldown-s", type=float, default=0.0)
     return parser
 
@@ -250,6 +259,10 @@ def run(args: argparse.Namespace) -> None:
             vsa_ref_keep_rate=args.vsa_ref_keep_rate,
             vsa_impl=args.vsa_impl,
             inter_step_cooldown_s=args.inter_step_cooldown_s,
+            reuse_prefix_kv=args.reuse_prefix_kv,
+            prefix_kv_refresh_every=args.prefix_kv_refresh_every,
+            prefix_kv_cache_max_gib=args.prefix_kv_cache_max_gib,
+            prefix_kv_storage=args.prefix_kv_storage,
             reference_max_pixels=resolve_reference_max_pixels(args.reference_max_pixels, args.width, args.height),
             **kwargs,
         )
@@ -261,6 +274,7 @@ def run(args: argparse.Namespace) -> None:
         "timings_s": {key: round(value, 2) for key, value in result.timings.items()},
         "peak_memory_gib": {key: round(value, 2) for key, value in result.peak_memory_gib.items()},
         "vsa": result.vsa,
+        "prefix_kv": result.prefix_kv,
         "audio_samples": int(result.waveform.shape[-1]),
     }, indent=2))
 

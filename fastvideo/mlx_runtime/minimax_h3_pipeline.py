@@ -74,6 +74,14 @@ from fastvideo.mlx_runtime.minimax_h3_reference import (
     prepare_reference,
     validate_references,
 )
+from fastvideo.mlx_runtime.minimax_h3_prefix_kv import (
+    DEFAULT_PREFIX_KV_MAX_GIB,
+    MiniMaxH3PrefixKVCache,
+    check_prefix_kv_budget,
+    estimate_prefix_kv_bytes,
+    frozen_prefix_rows,
+    validate_prefix_kv_storage,
+)
 from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
 from fastvideo.mlx_runtime.minimax_h3_vsa_contract import resolve_vsa_settings
 from fastvideo.mlx_runtime.prompt_cache import fingerprint_digest, text_encoder_fingerprint
@@ -91,6 +99,8 @@ class GenerationResult:
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
     vsa: dict[str, Any] = field(default_factory=dict)
     video_decode_backend: str = "h3-vae"
+    # Prefix K/V reuse report: whether it ran, cache size and per-step times.
+    prefix_kv: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -785,14 +795,31 @@ class MiniMaxH3MLXPipeline:
         references: list[MiniMaxH3PreparedReference] | None = None,
         condition_video_rows: np.ndarray | None = None,
         condition_audio_rows: np.ndarray | None = None,
+        reuse_prefix_kv: bool = False,
+        prefix_kv_refresh_every: int = 0,
+        prefix_kv_cache_max_gib: float = DEFAULT_PREFIX_KV_MAX_GIB,
+        prefix_kv_storage: str = "bf16",
     ) -> tuple[np.ndarray, np.ndarray]:
         """Denoise joint latents; returns (normalized target video rows, target audio rows).
 
         With ``references`` the packed sequence is reference-prefixed and the
         encoder rows ride along in every forward, but only the target rows are
         stepped and returned: the references are conditioning, not output.
+
+        ``reuse_prefix_kv`` (Ref2VA only, lossy) records the text/reference
+        rows' per-block K/V on the first step and runs later steps on the
+        target rows alone; ``prefix_kv_refresh_every=R`` re-records every R
+        steps (0 never). The cache is refused above ``prefix_kv_cache_max_gib``.
         """
         import mlx.core as mx
+
+        self.last_prefix_kv_stats = {"enabled": False}
+        self.last_denoise_step_times = []
+        if prefix_kv_refresh_every < 0:
+            raise ValueError(f"prefix_kv_refresh_every must be >= 0, got {prefix_kv_refresh_every}.")
+        if reuse_prefix_kv and references is None:
+            raise ValueError("Prefix K/V reuse needs Ref2VA references (a reference-prefixed packed layout).")
+        validate_prefix_kv_storage(prefix_kv_storage)
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=audio_num_frames is None)
         audio_frames = geometry["num_frames"] if audio_num_frames is None else align_num_frames(audio_num_frames)
@@ -904,6 +931,18 @@ class MiniMaxH3MLXPipeline:
             raise ValueError("A reference-prefixed layout needs its encoded audio condition rows.")
         text = mx.array(text_rows.astype(np.float32))
         dit_forward_s = 0.0
+        prefix_kv = None
+        if reuse_prefix_kv:
+            frozen_rows = frozen_prefix_rows(layout)
+            estimated = estimate_prefix_kv_bytes(len(dit.blocks), frozen_rows, dit.num_heads, dit.head_dim,
+                                                 prefix_kv_storage)
+            check_prefix_kv_budget(estimated, prefix_kv_cache_max_gib, rows=frozen_rows)
+            prefix_kv = MiniMaxH3PrefixKVCache(len(dit.blocks), frozen_rows, dit.num_heads, dit.head_dim,
+                                               prefix_kv_storage)
+            logger.info("Prefix K/V reuse: %d frozen rows, ~%.2f GiB cache (%s), refresh_every=%d", frozen_rows,
+                        estimated / 2**30, prefix_kv_storage, prefix_kv_refresh_every)
+        recorded_steps: list[int] = []
+        reused_steps: list[int] = []
 
         if pdd_plan is not None:
             # PDD targets start at the first node's noise level (0.999 * eps),
@@ -934,20 +973,38 @@ class MiniMaxH3MLXPipeline:
                 "pdd_block": pdd_plan.block(step_index),
                 "pdd_integration_weights": pdd_plan.integration_weights,
             })
-            video_velocity, audio_velocity = dit.forward_with_cache(
-                x_v,
-                x_a,
-                text,
-                layout=layout,
-                step_timesteps=unique,
-                row_timestep_inverse=inverse,
-                step_index=step_index,
-                **pdd_forward_kwargs,
-            )
+            record_step = prefix_kv is not None and (step_index == 0 or (prefix_kv_refresh_every > 0
+                                                                         and step_index % prefix_kv_refresh_every == 0))
+            if prefix_kv is not None and not record_step:
+                video_velocity, audio_velocity = dit.forward_target_rows(
+                    x_v[layout.num_condition_video_rows:],
+                    x_a[layout.num_condition_audio_rows:],
+                    layout=layout,
+                    step_timesteps=unique,
+                    row_timestep_inverse=inverse,
+                    prefix_kv=prefix_kv,
+                    step_index=step_index,
+                    **pdd_forward_kwargs,
+                )
+                reused_steps.append(step_index)
+            else:
+                if record_step:
+                    pdd_forward_kwargs["record_prefix_kv"] = prefix_kv
+                    recorded_steps.append(step_index)
+                video_velocity, audio_velocity = dit.forward_with_cache(
+                    x_v,
+                    x_a,
+                    text,
+                    layout=layout,
+                    step_timesteps=unique,
+                    row_timestep_inverse=inverse,
+                    step_index=step_index,
+                    **pdd_forward_kwargs,
+                )
+                video_velocity = video_velocity[layout.num_condition_video_rows:]
+                audio_velocity = audio_velocity[layout.num_condition_audio_rows:]
             # Only the target rows are denoised: condition rows stay pinned at
             # the timestep the contract trained them at.
-            video_velocity = video_velocity[layout.num_condition_video_rows:]
-            audio_velocity = audio_velocity[layout.num_condition_audio_rows:]
             if layout.num_condition_video_rows:
                 x_v = mx.concatenate([
                     x_v[:layout.num_condition_video_rows],
@@ -967,6 +1024,7 @@ class MiniMaxH3MLXPipeline:
             mx.eval(x_v, x_a)
             step_s = time.perf_counter() - step_started
             dit_forward_s += step_s
+            self.last_denoise_step_times.append(step_s)
             logger.info("H3 denoise step %d/%d (sigma_video=%.4f, sigma_audio=%.4f) in %.2fs", step_index + 1,
                         num_steps, 1.0 - video_t, 1.0 - audio_t, step_s)
             del video_velocity, audio_velocity
@@ -976,6 +1034,17 @@ class MiniMaxH3MLXPipeline:
                 time.sleep(inter_step_cooldown_s)
 
         self.last_dit_forward_s = dit_forward_s
+        self.last_prefix_kv_stats = {
+            "enabled": prefix_kv is not None,
+            "refresh_every": prefix_kv_refresh_every,
+            "storage": prefix_kv_storage,
+            "frozen_rows": 0 if prefix_kv is None else prefix_kv.rows,
+            "cache_gib": 0.0 if prefix_kv is None else prefix_kv.nbytes / 2**30,
+            "max_gib": prefix_kv_cache_max_gib,
+            "recorded_steps": recorded_steps,
+            "reused_steps": reused_steps,
+        }
+        prefix_kv = None
         stats = getattr(dit, "last_vsa_stats", None)
         self.last_vsa_stats = None if stats is None else {
             "enabled": bool(getattr(dit.vsa_config, "enabled", False)),
@@ -1242,6 +1311,10 @@ class MiniMaxH3MLXPipeline:
         vsa_impl: str = "auto",
         inter_step_cooldown_s: float = 0.0,
         reference_max_pixels: int | None = None,
+        reuse_prefix_kv: bool = False,
+        prefix_kv_refresh_every: int = 0,
+        prefix_kv_cache_max_gib: float = DEFAULT_PREFIX_KV_MAX_GIB,
+        prefix_kv_storage: str = "bf16",
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
@@ -1356,6 +1429,12 @@ class MiniMaxH3MLXPipeline:
             vsa_config=vsa_config,
             inter_step_cooldown_s=inter_step_cooldown_s,
             references=prepared_references,
+            **({} if not reuse_prefix_kv else {
+                "reuse_prefix_kv": True,
+                "prefix_kv_refresh_every": prefix_kv_refresh_every,
+                "prefix_kv_cache_max_gib": prefix_kv_cache_max_gib,
+                "prefix_kv_storage": prefix_kv_storage,
+            }),
         )
         timings["denoise_s"] = time.perf_counter() - started
         timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
@@ -1446,6 +1525,11 @@ class MiniMaxH3MLXPipeline:
             timings=timings,
             peak_memory_gib=peaks,
             video_decode_backend=self.video_decode_backend,
+            prefix_kv={
+                **getattr(self, "last_prefix_kv_stats", {"enabled": False}),
+                "step_times_s":
+                list(getattr(self, "last_denoise_step_times", [])),
+            },
             vsa=getattr(self, "last_vsa_stats", None) or {
                 "enabled": vsa_config.enabled,
                 "checkpoint_vsa_capable": mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
