@@ -568,8 +568,9 @@ class MLXQwen3VLVisionModel:
             query_chunk = query[start:start + length].transpose(1, 0, 2)[None]
             key_chunk = key[start:start + length].transpose(1, 0, 2)[None]
             value_chunk = value[start:start + length].transpose(1, 0, 2)[None]
-            scores = (query_chunk @ key_chunk.transpose(0, 1, 3, 2)) * scaling
-            attended = mx.softmax(scores, axis=-1) @ value_chunk
+            # Fused attention never materializes the (heads, n, n) scores: a
+            # 2048-short-edge reference is ~28k patches, ~50 GB of fp32 scores.
+            attended = mx.fast.scaled_dot_product_attention(query_chunk, key_chunk, value_chunk, scale=scaling)
             outputs.append(attended.transpose(0, 2, 1, 3))
             start += length
         merged = mx.concatenate(outputs, axis=1).reshape(sequence_length, -1)
@@ -621,6 +622,8 @@ class MLXQwen3VLVisionModel:
             if layer_index in indexes:
                 merger = self.deepstack_mergers[indexes.index(layer_index)]
                 deepstack_features.append(self._merger_forward(hidden, merger, postshuffle=True))
+            # Bound the lazy graph to one block so its intermediates free as it goes.
+            mx.eval(hidden, *deepstack_features)
         merged = self._merger_forward(hidden, self.merger, postshuffle=False)
         mx.eval(merged, *deepstack_features)
         return (np.asarray(merged,
