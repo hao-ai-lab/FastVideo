@@ -209,3 +209,16 @@ def test_quant_gemm_env_selector_and_validation(env_overrides, quant_gemm_mode_r
     assert affine_dq_gemm_min_m() is not None
     with pytest.raises(ValueError, match="Unknown quantized GEMM mode"):
         set_quant_gemm_mode("bogus")
+
+
+def test_unset_pipeline_quant_gemm_keeps_the_environment(monkeypatch) -> None:
+    from fastvideo.mlx_runtime import fastwan
+    from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
+
+    monkeypatch.setenv("FASTVIDEO_MLX_QUANT_GEMM", "qmm")
+    pipeline = object.__new__(MiniMaxH3MLXPipeline)
+    pipeline._apply_quant_gemm(None)
+    try:
+        assert fastwan.quant_gemm_mode() == "qmm"
+    finally:
+        pipeline._restore_quant_gemm()

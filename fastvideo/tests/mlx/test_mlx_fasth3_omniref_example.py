@@ -164,9 +164,9 @@ def test_reference_max_pixels_flag_resolves() -> None:
         resolve_reference_max_pixels("0", 832, 480)
 
 
-def test_quant_gemm_flag_defaults_to_auto_and_rejects_unknown(capsys: pytest.CaptureFixture[str]) -> None:
+def test_quant_gemm_flag_defaults_to_unset_and_rejects_unknown(capsys: pytest.CaptureFixture[str]) -> None:
     base = ["--model-root", "/m", "--mlx-checkpoint", "/c", "--prompt", "p", "--image", "a.png"]
-    assert example.parse_args(base).quant_gemm == "auto"
+    assert example.parse_args(base).quant_gemm is None
     for mode in ("auto", "dequant", "qmm"):
         assert example.parse_args([*base, "--quant-gemm", mode]).quant_gemm == mode
     with pytest.raises(SystemExit):

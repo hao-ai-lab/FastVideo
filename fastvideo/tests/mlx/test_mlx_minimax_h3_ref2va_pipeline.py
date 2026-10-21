@@ -375,3 +375,16 @@ def test_target_rows_step_alongside_pinned_encoder_rows(tmp_path: Path) -> None:
 
 def _condition_rows() -> int:
     return _expected_layout().num_condition_video_rows
+
+
+def test_reference_encode_skips_the_base_decoder(tmp_path, monkeypatch) -> None:
+    from fastvideo.mlx_runtime import minimax_h3_video_vae as video_vae
+    from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
+
+    seen = {}
+    monkeypatch.setattr(video_vae, "mlx_h3_video_vae_from_dir", lambda _dir, **kwargs: seen.update(kwargs) or "vae")
+    pipeline = object.__new__(MiniMaxH3MLXPipeline)
+    pipeline.model_root = tmp_path
+    pipeline.vae_dtype = "bf16"
+    assert pipeline._load_video_vae(include_encoder=True, include_decoder=False) == "vae"
+    assert seen["include_decoder"] is False and seen["include_encoder"] is True

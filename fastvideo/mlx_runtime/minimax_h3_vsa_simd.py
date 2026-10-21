@@ -229,16 +229,11 @@ def _simd_kernel() -> Any | None:
             kernel = mx.fast.metal_kernel(**kwargs, compile_options={"math_mode": "safe"})
         except TypeError:
             kernel = mx.fast.metal_kernel(**kwargs)
-        from fastvideo.mlx_runtime.minimax_h3_vsa import build_h3_tile_geometry
-
         # Constructing a CustomKernel does not compile it. Execute every
         # supported tile and dtype once before advertising this backend.
         for tile in SIMD_TILE_SIZES:
-            geometry = build_h3_tile_geometry((1, ), (4, 4, 8), tile)
-            indices = mx.array([[[0, 1]]], dtype=mx.int32)
-            counts = mx.array([[2]], dtype=mx.int32)
             for dtype in (mx.float32, mx.float16, mx.bfloat16):
-                q = mx.zeros((geometry.total_seq_length, 1, SIMD_HEAD_DIM), dtype=dtype)
+                q, indices, counts, geometry = _probe_inputs(tile, dtype)
                 probe = _launch_simd_block_sparse(kernel, q, q, q, indices, counts, geometry, SIMD_HEAD_DIM**-0.5)
                 mx.eval(probe)
         _SIMD_KERNEL = kernel
@@ -246,6 +241,20 @@ def _simd_kernel() -> Any | None:
         _SIMD_KERNEL_ERROR = str(error)
         _SIMD_KERNEL = None
     return _SIMD_KERNEL
+
+
+def _probe_inputs(tile: int, dtype):
+    """Tiled Q and routing for the capability probe, sized exactly like a real launch."""
+    import mlx.core as mx
+
+    from fastvideo.mlx_runtime.minimax_h3_vsa import build_h3_tile_geometry
+
+    geometry = build_h3_tile_geometry((1, ), (4, 4, 8), tile)
+    selected = [0, geometry.num_tiles - 1]
+    indices = mx.array([[selected] * geometry.num_video_tiles], dtype=mx.int32)
+    counts = mx.full((1, geometry.num_video_tiles), len(selected), dtype=mx.int32)
+    q = mx.zeros((geometry.padded_length, 1, SIMD_HEAD_DIM), dtype=dtype)
+    return q, indices, counts, geometry
 
 
 def simd_block_sparse(

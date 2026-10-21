@@ -1284,8 +1284,6 @@ class MLXMiniMaxH3DiT:
         self.last_vsa_stats: MiniMaxH3VSAStats | None = None
         self.pdd_grid_size = self._resolve_pdd_grid_size()
 
-    # -- PDD widened heads --------------------------------------------------
-
     def _resolve_pdd_grid_size(self) -> int | None:
         """The PDD head count of this checkpoint, or None for a single-headed DiT.
 
@@ -1302,7 +1300,6 @@ class MLXMiniMaxH3DiT:
             raise ValueError(f"MiniMax H3 pdd_steps must be an int >= 2, got {declared!r}.")
         video_weight = self.weights.get("proj_out.weight")
         audio_weight = self.weights.get("audio_proj_out.weight")
-        # Partial models (unit tests) may carry neither projection.
         video_grid = None if video_weight is None else resolved_grid_size(
             video_weight, self.weights.get("proj_out.bias"), self.patch_dim)
         audio_grid = None if audio_weight is None else resolved_grid_size(

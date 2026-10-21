@@ -457,7 +457,7 @@ class MiniMaxH3MLXPipeline:
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
         mlx_cache_limit_gib: float | None = None,
-        quant_gemm: str = "auto",
+        quant_gemm: str | None = None,
         video_decode_backend: str = "h3-vae",
         taeh3_checkpoint: str | Path | None = None,
         taeh3_chunk_size: int = 5,
@@ -501,21 +501,33 @@ class MiniMaxH3MLXPipeline:
         self._dit_in_channels = int(dit_config["in_channels"])
         self.last_dit_forward_s = 0.0
         self.last_vsa_stats: dict[str, Any] | None = None
-        self._previous_quant_gemm = set_quant_gemm_mode(quant_gemm)
-        self._quant_gemm_set = True
+        self._apply_quant_gemm(quant_gemm)
         self._previous_memory_limit, self._previous_wired_limit = _configure_metal_memory_limits(mx,
                                                                                                  metal_wired_limit_gib,
                                                                                                  resident=resident)
         self._previous_cache_limit = _configure_mlx_cache_limit(mx, mlx_cache_limit_gib)
+
+    def _apply_quant_gemm(self, quant_gemm: str | None) -> None:
+        """An explicit mode overrides FASTVIDEO_MLX_QUANT_GEMM for this pipeline; None leaves it in charge."""
+        self._quant_gemm_set = quant_gemm is not None
+        self._previous_quant_gemm = set_quant_gemm_mode(quant_gemm) if self._quant_gemm_set else None
+
+    def _restore_quant_gemm(self) -> None:
+        if getattr(self, "_quant_gemm_set", False):
+            set_quant_gemm_mode(self._previous_quant_gemm)
+            self._quant_gemm_set = False
 
     def _load_video_vae(self, *, include_encoder: bool, include_decoder: bool = True):
         """Load the H3 video VAE, swapping in standalone decoder / encoder files when configured."""
         from fastvideo.mlx_runtime import minimax_h3_video_vae as video_vae
 
         vae_dir = self.model_root / "vae"
-        if self.vae_decoder_path is None and self.vae_encoder_path is None and self.vae_decoder_quantization is None:
+        standalone = (self.vae_decoder_path is not None or self.vae_encoder_path is not None
+                      or self.vae_decoder_quantization is not None)
+        if not standalone:
             return video_vae.mlx_h3_video_vae_from_dir(vae_dir,
                                                        include_encoder=include_encoder,
+                                                       include_decoder=include_decoder,
                                                        storage_dtype=self.vae_dtype)
         has_base = vae_dir.is_dir() and (any(vae_dir.glob("*.safetensors")) or (vae_dir / "config.json").exists())
         return video_vae.mlx_h3_video_vae_from_files(
@@ -605,9 +617,7 @@ class MiniMaxH3MLXPipeline:
             raise
 
     def close(self) -> None:
-        if getattr(self, "_quant_gemm_set", False):
-            set_quant_gemm_mode(self._previous_quant_gemm)
-            self._quant_gemm_set = False
+        self._restore_quant_gemm()
         conditioner = self._resident_components.get("conditioner")
         if conditioner is not None:
             conditioner.close()

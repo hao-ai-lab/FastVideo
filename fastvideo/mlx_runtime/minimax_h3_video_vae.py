@@ -866,6 +866,7 @@ def mlx_h3_video_vae_from_files(*,
 def mlx_h3_video_vae_from_dir(vae_dir: str | Path,
                               *,
                               include_encoder: bool = True,
+                              include_decoder: bool = True,
                               storage_dtype: str = "fp32",
                               config: MiniMaxH3VideoVAEConfigView | None = None) -> MLXMiniMaxH3VideoVAE:
     """Load the released H3 video VAE, streaming one shard at a time.
@@ -876,5 +877,6 @@ def mlx_h3_video_vae_from_dir(vae_dir: str | Path,
     """
     return mlx_h3_video_vae_from_files(vae_dir=vae_dir,
                                        include_encoder=include_encoder,
+                                       include_decoder=include_decoder,
                                        storage_dtype=storage_dtype,
                                        config=config)

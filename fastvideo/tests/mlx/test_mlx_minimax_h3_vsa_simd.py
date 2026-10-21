@@ -155,3 +155,12 @@ def test_auto_resolves_tile_128_to_simd_and_reference_overrides() -> None:
     assert vsa.resolve_impl("auto", _DIM, 256) == "reference"
     assert vsa.resolve_impl("simd", _DIM, 64) == "simd"
     assert vsa.resolve_impl("simd", 64, 128) == "reference"
+
+
+@pytest.mark.parametrize("tile", simd.SIMD_TILE_SIZES)
+def test_startup_probe_inputs_cover_the_padded_geometry(tile) -> None:
+    """The capability probe must size Q/K/V and routing like a real launch, or it reads/writes out of bounds."""
+    q, indices, counts, geometry = simd._probe_inputs(tile, mx.float32)
+    assert q.shape[0] == geometry.padded_length
+    assert indices.shape[1] == counts.shape[1] == geometry.num_video_tiles
+    assert int(mx.max(indices).item()) < geometry.num_tiles

@@ -43,7 +43,6 @@ from typing import Any
 
 CONTRACT = "fastvideo_inference.json"
 MANIFESTS = ("modular_model_index.json", "model_index.json")
-# Components the distilled export replaces, and the ones it shares with base MiniMax-H3.
 EXPORT_COMPONENTS = ("transformer_ref", "scheduler", "audio_scheduler")
 BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 
@@ -87,9 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="keep this much unified memory wired so macOS does not page the DiT out mid-denoise")
     parser.add_argument("--mlx-cache-limit-gib", type=float,
                         help="bound MLX's freed-buffer cache; unbounded by default")
-    parser.add_argument("--quant-gemm", choices=("auto", "dequant", "qmm"), default="auto",
+    parser.add_argument("--quant-gemm", choices=("auto", "dequant", "qmm"), default=None,
                         help="INT8/INT6/INT4 linear path: auto (measured default), dequant (dequantize + dense "
-                        "GEMM for wide inputs), qmm (mx.quantized_matmul). Ignored by a bf16 checkpoint.")
+                        "GEMM for wide inputs), qmm (mx.quantized_matmul). Unset defers to "
+                        "FASTVIDEO_MLX_QUANT_GEMM. Ignored by a bf16 checkpoint.")
     parser.add_argument("--reference-max-pixels", default=None,
                         help="opt-in cap on each image/video reference canvas (down only): a pixel count, or "
                         "'match' for the clip's own area. Faster, but references lose detail versus the trained "
