@@ -30,11 +30,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import signal
 import socket
 import subprocess
+import sys
+import time
 from pathlib import Path
 
+import psutil
 import pytest
 import torch
 
@@ -394,6 +396,35 @@ def _run_production_worker(output_path: Path, *, hybrid: bool) -> None:
         cleanup_dist_env_and_memory()
 
 
+def _stop_worker_tree(proc: subprocess.Popen, grace_seconds: float = 10) -> None:
+    """Let torchrun reap its workers, then kill survivors in separate sessions."""
+    # Snapshot before terminating the launcher: otherwise workers can become
+    # reparented and disappear from its descendants list.
+    try:
+        workers = psutil.Process(proc.pid).children(recursive=True)
+    except psutil.NoSuchProcess:
+        workers = []
+    proc.terminate()
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        pass
+
+    for worker in workers:
+        try:
+            worker.kill()
+        except psutil.NoSuchProcess:
+            pass
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait(timeout=grace_seconds)
+    _, alive = psutil.wait_procs(workers, timeout=grace_seconds)
+    # Reparented zombies hold no GPU resources and must be reaped by their
+    # new parent; they cannot be killed again.
+    if any(p.is_running() and p.status() != psutil.STATUS_ZOMBIE for p in alive):
+        raise RuntimeError("Ring Attention workers survived forced cleanup")
+
+
 def _run_torchrun(
     script_path: Path,
     nproc_per_node: int,
@@ -430,11 +461,8 @@ def _run_torchrun(
             launcher.append("TORCH_DISTRIBUTED_DEBUG=DETAIL")
     cmd = launcher + cmd
 
-    # torchrun spawns the per-rank worker processes as children that stay in
-    # this process's group. Launch it as its own session leader so a timeout
-    # can kill the whole tree via killpg -- subprocess.run(timeout=...) only
-    # terminates the torchrun launcher itself, leaving orphaned rank workers
-    # that keep the GPUs pegged at 100% util for every subsequent test run.
+    # torchrun workers may have their own sessions; a launcher-only killpg
+    # cannot clean up the complete process tree.
     proc = subprocess.Popen(
         cmd,
         start_new_session=True,
@@ -445,11 +473,10 @@ def _run_torchrun(
         # visible so a communication hang can be located immediately.
         returncode = proc.wait(timeout=120)
     except subprocess.TimeoutExpired as exc:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        proc.wait()
+        _stop_worker_tree(proc)
         raise RuntimeError(
             "The multi-GPU Ring Attention worker timed out after 120 seconds "
-            "and its process group was killed. Use the last printed per-rank "
+            "and its worker tree was cleaned up. Use the last printed per-rank "
             "stage to determine whether the hang occurred during "
             "initialization, Ring P2P communication, all_gather, or the "
             "final barrier."
@@ -459,6 +486,47 @@ def _run_torchrun(
         raise RuntimeError(
             f"Ring Attention worker exited with code {returncode}."
         )
+
+
+@pytest.mark.parametrize("ignore_termination", [False, True])
+def test_stop_worker_tree_cleans_separate_sessions(tmp_path, ignore_termination):
+    """Exercise graceful torchrun-style cleanup and forced orphan cleanup."""
+    pid_file = tmp_path / "worker.pid"
+    worker_code = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+    launcher_code = f"""
+import signal, subprocess, sys, time
+from pathlib import Path
+worker = subprocess.Popen([sys.executable, "-c", {worker_code!r}], start_new_session=True)
+def stop(signum, frame):
+    worker.kill()
+    worker.wait()
+    sys.exit(0)
+signal.signal(signal.SIGTERM, signal.SIG_IGN if {ignore_termination!r} else stop)
+Path(sys.argv[1]).write_text(str(worker.pid))
+time.sleep(60)
+"""
+    proc = subprocess.Popen([sys.executable, "-c", launcher_code, str(pid_file)], start_new_session=True)
+    worker = None
+    try:
+        deadline = time.monotonic() + 10
+        while not pid_file.exists():
+            assert proc.poll() is None, "launcher exited before creating worker"
+            assert time.monotonic() < deadline, "worker startup timed out"
+            time.sleep(0.01)
+        worker = psutil.Process(int(pid_file.read_text()))
+        assert os.getsid(worker.pid) != os.getsid(proc.pid)
+        _stop_worker_tree(proc, grace_seconds=1)
+        assert proc.poll() is not None
+        assert not worker.is_running() or worker.status() == psutil.STATUS_ZOMBIE
+    finally:
+        if worker is not None:
+            try:
+                worker.kill()
+            except psutil.NoSuchProcess:
+                pass
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)
 
 
 @pytest.mark.parametrize(
