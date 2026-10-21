@@ -85,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-cache-dir", type=Path)
     parser.add_argument("--metal-wired-limit-gib", type=float,
                         help="keep this much unified memory wired so macOS does not page the DiT out mid-denoise")
+    parser.add_argument("--mlx-cache-limit-gib", type=float,
+                        help="bound MLX's freed-buffer cache; unbounded by default")
+    parser.add_argument("--reference-max-pixels", default=None,
+                        help="opt-in cap on each image/video reference canvas (down only): a pixel count, or "
+                        "'match' for the clip's own area. Faster, but references lose detail versus the trained "
+                        "canvas.")
     parser.add_argument("--vae-dtype", default="fp32")
     parser.add_argument("--vae-decoder", type=Path,
                         help="standalone video decoder (FastH3 decoder[-nvfp4].safetensors or a LightVAE decoder) "
@@ -169,6 +175,18 @@ def load_contract(export_dir: Path) -> dict[str, Any]:
     return contract
 
 
+def resolve_reference_max_pixels(value: str | None, width: int, height: int) -> int | None:
+    """``--reference-max-pixels``: unset keeps the trained canvas; 'match' uses the clip's area."""
+    if value is None:
+        return None
+    if value == "match":
+        return width * height
+    pixels = int(value)
+    if pixels <= 0:
+        raise ValueError(f"--reference-max-pixels must be positive or 'match', got {value!r}.")
+    return pixels
+
+
 def resolve_model_root(args: argparse.Namespace) -> Path:
     if args.model_root is not None:
         return args.model_root
@@ -202,6 +220,7 @@ def run(args: argparse.Namespace) -> None:
         vae_decoder_quantization=args.vae_decoder_quantization,
         prompt_cache_dir=args.prompt_cache_dir,
         metal_wired_limit_gib=args.metal_wired_limit_gib,
+        mlx_cache_limit_gib=args.mlx_cache_limit_gib,
     )
     try:
         kwargs: dict[str, Any] = {}
@@ -223,6 +242,7 @@ def run(args: argparse.Namespace) -> None:
             vsa_tile_size=args.vsa_tile_size,
             vsa_ref_keep_rate=args.vsa_ref_keep_rate,
             inter_step_cooldown_s=args.inter_step_cooldown_s,
+            reference_max_pixels=resolve_reference_max_pixels(args.reference_max_pixels, args.width, args.height),
             **kwargs,
         )
     finally:

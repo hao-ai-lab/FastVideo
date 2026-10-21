@@ -228,13 +228,28 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
 # ---------------------------------------------------------------------------
 
 
-def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
-    """Resolve the released 2048-short-edge reference-image canvas."""
+def _cap_canvas_scale(area: float, max_pixels: int | None) -> float:
+    """Down-only scale that fits ``area`` under an opt-in pixel cap."""
+    if max_pixels is None:
+        return 1.0
+    if max_pixels <= 0:
+        raise ValueError(f"max_pixels must be positive, got {max_pixels}.")
+    return min(1.0, (max_pixels / area)**0.5)
+
+
+def resolve_reference_image_size(width: int, height: int, *, max_pixels: int | None = None) -> tuple[int, int]:
+    """Resolve the released 2048-short-edge reference-image canvas.
+
+    ``max_pixels`` optionally shrinks that canvas (never enlarges it). Every
+    reference row rides through every transformer forward, so a capped canvas
+    trades reference detail for speed; the default is the trained canvas.
+    """
     if width <= 0 or height <= 0:
         raise ValueError(f"A reference image must have a positive size, got {width}x{height}.")
     if width > 4 * height or height > 4 * width:
         raise ValueError(f"A reference image must be within 1:4 and 4:1, got {width}x{height}.")
     scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+    scale *= _cap_canvas_scale(width * scale * height * scale, max_pixels)
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return (
         max(multiple,
@@ -244,8 +259,8 @@ def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
     )
 
 
-def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int, int]:
-    """The shared 768-short-edge canvas a reference video is resized onto."""
+def resolve_canvas_size(aspect_width: float, aspect_height: float, *, max_pixels: int | None = None) -> tuple[int, int]:
+    """The shared 768-short-edge canvas a reference video is resized onto, optionally capped (down only)."""
     if aspect_width <= 0 or aspect_height <= 0:
         raise ValueError(f"The aspect ratio must be positive, got {aspect_width}:{aspect_height}.")
     ratio = aspect_width / aspect_height
@@ -260,6 +275,8 @@ def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int,
     if area > MINIMAX_H3_MAX_PIXELS:
         scale = (MINIMAX_H3_MAX_PIXELS / area)**0.5
         width, height = width * scale, height * scale
+    cap = _cap_canvas_scale(width * height, max_pixels)
+    width, height = width * cap, height * cap
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return max(multiple, round(height / multiple) * multiple), max(multiple, round(width / multiple) * multiple)
 
@@ -297,12 +314,12 @@ def resample_reference_frames(frames: np.ndarray, fps: float) -> np.ndarray:
     return np.repeat(frames, repeats, axis=0)
 
 
-def prepare_reference_frames(frames: np.ndarray, num_frames: int) -> np.ndarray:
+def prepare_reference_frames(frames: np.ndarray, num_frames: int, *, max_pixels: int | None = None) -> np.ndarray:
     """Trim a reference video to the request and resize every RGB frame."""
     if frames.ndim != 4 or frames.shape[-1] != 3 or frames.shape[0] == 0:
         raise ValueError(f"A reference video must be non-empty RGB frames, got {tuple(frames.shape)}.")
     frames = frames[:num_frames]
-    height, width = resolve_canvas_size(frames.shape[2], frames.shape[1])
+    height, width = resolve_canvas_size(frames.shape[2], frames.shape[1], max_pixels=max_pixels)
     if frames.shape[1:3] == (height, width):
         return frames
     return np.stack(
@@ -381,8 +398,10 @@ def prepare_reference(
     reference: MiniMaxH3Reference,
     num_frames: int,
     target_sample_rate: int,
+    *,
+    max_pixels: int | None = None,
 ) -> MiniMaxH3PreparedReference:
-    """Decode and normalize one deferred Ref2VA medium."""
+    """Decode and normalize one deferred Ref2VA medium; ``max_pixels`` caps image/video canvases (down only)."""
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
         source = reference.source
@@ -393,7 +412,7 @@ def prepare_reference(
                 raise ValueError(f"An image reference must be RGB, got {tuple(pixels.shape)}.")
             image = Image.fromarray(pixels)
         image = ImageOps.exif_transpose(image).convert("RGB")
-        height, width = resolve_reference_image_size(*image.size)
+        height, width = resolve_reference_image_size(*image.size, max_pixels=max_pixels)
         prepared.image = prepare_reference_image(image, height, width)
         return prepared
 
@@ -408,7 +427,9 @@ def prepare_reference(
             frames = reference_media_to_uint8(reference.source)
             decoded_fps = float(MINIMAX_H3_FPS)
         fps = float(reference.fps if reference.fps is not None else decoded_fps)
-        prepared.frames = prepare_reference_frames(resample_reference_frames(frames, fps), num_frames)
+        prepared.frames = prepare_reference_frames(resample_reference_frames(frames, fps),
+                                                   num_frames,
+                                                   max_pixels=max_pixels)
 
         if reference.soundtrack is not None:
             waveform, source_rate = _resolve_audio_source(reference.soundtrack)

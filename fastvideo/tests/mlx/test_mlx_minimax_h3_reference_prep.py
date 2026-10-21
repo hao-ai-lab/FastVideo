@@ -212,3 +212,33 @@ def test_presentation_uses_upstream_vision_tokens() -> None:
     prompt = [ord(character) for character in "hi"]
     assert token_ids == [ord(character) for character in label] + vision + prompt
     assert token_tags == [1] * len(label) + [0] * len(vision) + [1] * len(prompt)
+
+
+@pytest.mark.parametrize("size", [(3000, 2000), (1080, 1920), (832, 480), (400, 300)])
+@pytest.mark.parametrize("max_pixels", [832 * 480, 4 * 832 * 480])
+def test_reference_image_cap_scales_down_only(size: tuple[int, int], max_pixels: int) -> None:
+    """An opt-in pixel cap shrinks the trained canvas, keeps its aspect, and never upscales."""
+    trained = mlx_reference.resolve_reference_image_size(*size)
+    capped = mlx_reference.resolve_reference_image_size(*size, max_pixels=max_pixels)
+    multiple = mlx_reference.MINIMAX_H3_CANVAS_MULTIPLE
+    assert capped[0] % multiple == 0 and capped[1] % multiple == 0
+    assert capped[0] <= trained[0] and capped[1] <= trained[1]
+    if trained[0] * trained[1] <= max_pixels:
+        assert capped == trained
+    else:
+        # Within one snapping step of the cap, aspect within one multiple.
+        assert capped[0] * capped[1] <= max_pixels * 1.15
+        assert abs(capped[1] / capped[0] - trained[1] / trained[0]) < multiple / min(capped)
+
+
+def test_reference_video_canvas_cap_scales_down_only() -> None:
+    trained = mlx_reference.resolve_canvas_size(1920, 1080)
+    assert mlx_reference.resolve_canvas_size(1920, 1080, max_pixels=None) == trained
+    capped = mlx_reference.resolve_canvas_size(1920, 1080, max_pixels=416 * 736)
+    assert capped[0] * capped[1] < trained[0] * trained[1]
+    assert mlx_reference.resolve_canvas_size(1920, 1080, max_pixels=10**9) == trained
+
+
+def test_reference_cap_rejects_nonpositive() -> None:
+    with pytest.raises(ValueError, match="max_pixels"):
+        mlx_reference.resolve_reference_image_size(800, 600, max_pixels=0)

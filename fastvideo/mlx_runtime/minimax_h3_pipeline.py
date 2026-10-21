@@ -314,6 +314,20 @@ def _restore_metal_memory_limit(mx, previous_bytes: int | None) -> None:
         set_memory(previous_bytes)
 
 
+def _configure_mlx_cache_limit(mx, cache_limit_gib: float | None) -> int | None:
+    """Bound MLX's freed-buffer cache; returns the previous limit to restore.
+
+    MLX keeps freed buffers up to its memory limit by default. With a ~17 GB
+    DiT on a 36 GB Mac that cache competes with the weights and macOS pages
+    them out; too small a cache instead re-allocates every activation.
+    """
+    if cache_limit_gib is None:
+        return None
+    if not math.isfinite(cache_limit_gib) or cache_limit_gib < 0:
+        raise ValueError("mlx_cache_limit_gib must be finite and non-negative")
+    return int(mx.set_cache_limit(int(cache_limit_gib * 2**30)))
+
+
 MINIMAX_H3_PROMPT_CACHE_VERSION = "v2-attention-layout"
 
 
@@ -431,6 +445,7 @@ class MiniMaxH3MLXPipeline:
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
+        mlx_cache_limit_gib: float | None = None,
         video_decode_backend: str = "h3-vae",
         taeh3_checkpoint: str | Path | None = None,
         taeh3_chunk_size: int = 5,
@@ -477,6 +492,7 @@ class MiniMaxH3MLXPipeline:
         self._previous_memory_limit, self._previous_wired_limit = _configure_metal_memory_limits(mx,
                                                                                                  metal_wired_limit_gib,
                                                                                                  resident=resident)
+        self._previous_cache_limit = _configure_mlx_cache_limit(mx, mlx_cache_limit_gib)
 
     def _load_video_vae(self, *, include_encoder: bool, include_decoder: bool = True):
         """Load the H3 video VAE, swapping in standalone decoder / encoder files when configured."""
@@ -592,6 +608,12 @@ class MiniMaxH3MLXPipeline:
 
             _restore_metal_memory_limit(mx, previous_memory)
             self._previous_memory_limit = None
+        previous_cache = getattr(self, "_previous_cache_limit", None)
+        if previous_cache is not None:
+            import mlx.core as mx
+
+            mx.set_cache_limit(previous_cache)
+            self._previous_cache_limit = None
 
     def encode_prompt(self, prompt: str) -> tuple[np.ndarray, np.ndarray]:
         """Returns (hidden states (S, hidden), token tags). Uses the cache or
@@ -645,6 +667,8 @@ class MiniMaxH3MLXPipeline:
         self,
         references: Sequence[MiniMaxH3Reference],
         num_frames: int,
+        *,
+        max_pixels: int | None = None,
     ) -> list[MiniMaxH3PreparedReference]:
         """Validate and decode the ordered reference list.
 
@@ -653,7 +677,10 @@ class MiniMaxH3MLXPipeline:
         """
         validated = validate_references(list(references))
         target_sample_rate = self.audio_sample_rate()
-        prepared = [prepare_reference(reference, num_frames, target_sample_rate) for reference in validated]
+        prepared = [
+            prepare_reference(reference, num_frames, target_sample_rate, max_pixels=max_pixels)
+            for reference in validated
+        ]
         logger.info("Prepared %d reference(s): %s", len(prepared),
                     ", ".join(reference.media_type for reference in prepared))
         return prepared
@@ -1207,6 +1234,7 @@ class MiniMaxH3MLXPipeline:
         vsa_dense_layers: tuple[int, ...] = (),
         vsa_impl: str = "auto",
         inter_step_cooldown_s: float = 0.0,
+        reference_max_pixels: int | None = None,
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
@@ -1292,7 +1320,9 @@ class MiniMaxH3MLXPipeline:
 
         prepared_references: list[MiniMaxH3PreparedReference] | None = None
         if references is not None:
-            prepared_references = self.prepare_references(references, video_geometry["num_frames"])
+            prepared_references = self.prepare_references(references,
+                                                          video_geometry["num_frames"],
+                                                          max_pixels=reference_max_pixels)
 
         _reset_peak_memory()
         started = time.perf_counter()

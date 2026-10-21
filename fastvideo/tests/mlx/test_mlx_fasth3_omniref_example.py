@@ -153,3 +153,12 @@ def test_generation_still_requires_a_checkpoint_and_prompt(capsys: pytest.Captur
     with pytest.raises(SystemExit):
         example.parse_args(["--model-root", "/m", "--image", "a.png"])
     assert "--mlx-checkpoint and --prompt are required" in capsys.readouterr().err
+
+
+def test_reference_max_pixels_flag_resolves() -> None:
+    resolve_reference_max_pixels = example.resolve_reference_max_pixels
+    assert resolve_reference_max_pixels(None, 832, 480) is None
+    assert resolve_reference_max_pixels("match", 832, 480) == 832 * 480
+    assert resolve_reference_max_pixels("1000000", 832, 480) == 1_000_000
+    with pytest.raises(ValueError, match="positive"):
+        resolve_reference_max_pixels("0", 832, 480)

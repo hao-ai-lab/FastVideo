@@ -250,3 +250,20 @@ def test_format_one_encoder_cache_is_still_readable(tmp_path):
     manifest_path.write_text(json.dumps({**manifest, "format_version": 3}))
     with pytest.raises(ValueError, match="Unsupported"):
         _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir)
+
+
+def test_mlx_cache_limit_is_set_and_restored() -> None:
+    import mlx.core as mx
+
+    from fastvideo.mlx_runtime.minimax_h3_pipeline import _configure_mlx_cache_limit
+
+    original = mx.set_cache_limit(3 * 2**30)
+    try:
+        previous = _configure_mlx_cache_limit(mx, 1.5)
+        assert previous == 3 * 2**30
+        assert mx.set_cache_limit(previous) == int(1.5 * 2**30)
+        assert _configure_mlx_cache_limit(mx, None) is None
+        with pytest.raises(ValueError, match="mlx_cache_limit_gib"):
+            _configure_mlx_cache_limit(mx, -1.0)
+    finally:
+        mx.set_cache_limit(original)
