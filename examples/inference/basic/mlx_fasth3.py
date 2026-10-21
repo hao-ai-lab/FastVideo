@@ -162,8 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "reference", "simd"),
         default="auto",
         help=(
-            "sparse attention implementation; auto uses chunked gather+SDPA "
-            "(simd is opt-in)"
+            "sparse attention implementation; auto uses the SIMD Metal kernel for "
+            "128-token tiles and chunked gather+SDPA otherwise (simd is opt-in for tile 64)"
         ),
     )
     parser.add_argument("--vae-tile-height", type=int, default=256,

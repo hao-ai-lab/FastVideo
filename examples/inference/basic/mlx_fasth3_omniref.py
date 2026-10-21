@@ -114,6 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vsa-ref-keep-rate", type=float, default=None,
                         help="fraction of each reference video's tiles a query keeps (p2_multi_region); "
                         "default is the contract's trained value")
+    parser.add_argument("--vsa-impl", choices=("auto", "reference", "simd"), default="auto",
+                        help="sparse attention backend; auto uses the SIMD Metal kernel for 128-token tiles and "
+                        "gather+SDPA otherwise, reference forces gather+SDPA")
     parser.add_argument("--inter-step-cooldown-s", type=float, default=0.0)
     return parser
 
@@ -245,6 +248,7 @@ def run(args: argparse.Namespace) -> None:
             vsa_sparsity=args.vsa_sparsity,
             vsa_tile_size=args.vsa_tile_size,
             vsa_ref_keep_rate=args.vsa_ref_keep_rate,
+            vsa_impl=args.vsa_impl,
             inter_step_cooldown_s=args.inter_step_cooldown_s,
             reference_max_pixels=resolve_reference_max_pixels(args.reference_max_pixels, args.width, args.height),
             **kwargs,
