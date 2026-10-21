@@ -49,25 +49,35 @@ MINIMAX_H3_REFERENCE_ENCODE_SEED = 42
 # only apply to a stripped-down model directory.
 DEFAULT_VISION_MIN_PIXELS = 65536
 DEFAULT_VISION_MAX_PIXELS = 16777216
+# The released H3 video processor config, used when only the image config ships.
+DEFAULT_VIDEO_MIN_PIXELS = 4096
+DEFAULT_VIDEO_MAX_PIXELS = 25165824
 
 # ---------------------------------------------------------------------------
 # Vision preprocessing limits
 # ---------------------------------------------------------------------------
 
 
-def load_vision_limits(processor_dir: str | Path) -> tuple[int, int]:
-    """``(min_pixels, max_pixels)`` the Qwen3-VL image processor would use.
+def load_vision_limits(processor_dir: str | Path, *, video: bool = False) -> tuple[int, int]:
+    """``(min_pixels, max_pixels)`` the Qwen3-VL image or video processor would use.
 
-    Read from the checkpoint's ``preprocessor_config.json`` so a reference is
-    resized onto the same grid the CUDA path's HF processor produces.
+    Images read ``preprocessor_config.json``; videos read the separate
+    ``video_preprocessor_config.json`` the HF video processor is built from, so a
+    reference is resized onto the same grid the CUDA path produces. Both accept
+    the HF ``size`` block (``shortest_edge``/``longest_edge``) or explicit
+    ``min_pixels``/``max_pixels`` keys.
     """
-    config_path = Path(processor_dir) / "preprocessor_config.json"
+    name = "video_preprocessor_config.json" if video else "preprocessor_config.json"
+    default_min, default_max = ((DEFAULT_VIDEO_MIN_PIXELS, DEFAULT_VIDEO_MAX_PIXELS) if video else
+                                (DEFAULT_VISION_MIN_PIXELS, DEFAULT_VISION_MAX_PIXELS))
+    config_path = Path(processor_dir) / name
     if not config_path.is_file():
-        return DEFAULT_VISION_MIN_PIXELS, DEFAULT_VISION_MAX_PIXELS
+        return default_min, default_max
     raw = json.loads(config_path.read_text(encoding="utf-8"))
+    size = raw.get("size") or {}
     return (
-        int(raw.get("min_pixels", DEFAULT_VISION_MIN_PIXELS)),
-        int(raw.get("max_pixels", DEFAULT_VISION_MAX_PIXELS)),
+        int(raw.get("min_pixels", size.get("shortest_edge", default_min))),
+        int(raw.get("max_pixels", size.get("longest_edge", default_max))),
     )
 
 
@@ -84,6 +94,8 @@ def encode_reference_prompt(
     vision_config: Any,
     min_pixels: int,
     max_pixels: int,
+    video_min_pixels: int | None = None,
+    video_max_pixels: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Present and encode the ordered references plus the prompt.
 
@@ -112,6 +124,8 @@ def encode_reference_prompt(
         config=vision_config,
         min_pixels=min_pixels,
         max_pixels=max_pixels,
+        video_min_pixels=video_min_pixels,
+        video_max_pixels=video_max_pixels,
     )
 
     merge_area = vision_config.spatial_merge_size**2

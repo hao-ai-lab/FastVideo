@@ -167,6 +167,38 @@ def test_load_vision_limits_reads_the_processor_config(tmp_path) -> None:
     assert load_vision_limits(tmp_path) == (1024, 4096)
 
 
+def test_load_vision_limits_reads_hf_size_block_and_separate_video_config(tmp_path) -> None:
+    (tmp_path / "preprocessor_config.json").write_text('{"size": {"shortest_edge": 65536, "longest_edge": 16777216}}')
+    (tmp_path / "video_preprocessor_config.json").write_text('{"size": {"shortest_edge": 4096, "longest_edge": 8192}}')
+    assert load_vision_limits(tmp_path) == (65536, 16777216)
+    assert load_vision_limits(tmp_path, video=True) == (4096, 8192)
+
+
+def test_load_vision_limits_video_defaults_without_a_video_config(tmp_path) -> None:
+    (tmp_path / "preprocessor_config.json").write_text('{"size": {"shortest_edge": 1024, "longest_edge": 4096}}')
+    assert load_vision_limits(tmp_path, video=True) == (4096, 25165824)
+
+
+def test_video_references_use_the_video_pixel_limits() -> None:
+    """Image and video limits that differ must give different grids for the same pixels."""
+    shared = {"vision_config": VISION_CONFIG, "min_pixels": 1024, "max_pixels": 65536}
+
+    def video_grid(**extra) -> np.ndarray:
+        conditioner = _RecordingConditioner()
+        encode_reference_prompt(conditioner, "p", [_video()], **shared, **extra)
+        return conditioner.calls[0]["video_grid_thw"][0]
+
+    default = video_grid()
+    capped = video_grid(video_min_pixels=256, video_max_pixels=32 * 32)
+    assert tuple(default[1:]) == (4, 4)
+    assert tuple(capped[1:]) == (2, 2)
+
+    conditioner = _RecordingConditioner()
+    encode_reference_prompt(conditioner, "p", [_image(), _video()], **shared, video_min_pixels=256,
+                            video_max_pixels=32 * 32)
+    assert tuple(conditioner.calls[0]["image_grid_thw"][0][1:]) == (4, 4)
+
+
 def test_encode_reference_prompt_handles_odd_sample_count() -> None:
     """A 124-frame reference samples to 11 frames, which the encoder must accept.
 

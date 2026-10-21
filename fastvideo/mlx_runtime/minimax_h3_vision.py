@@ -257,6 +257,8 @@ def prepare_vision_inputs(
     config: Qwen3VLVisionConfig,
     min_pixels: int,
     max_pixels: int,
+    video_min_pixels: int | None = None,
+    video_max_pixels: int | None = None,
 ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     """HF image/video-processor equivalent for Ref2VA references.
 
@@ -264,8 +266,12 @@ def prepare_vision_inputs(
     ``(frames, H, W, 3)`` uint8 frame blocks already sampled at the presentation
     fps. Returns ``(pixel_values, image_grid_thw, pixel_values_videos,
     video_grid_thw)`` with the missing modality's pair set to ``None`` — slots a
-    absent modality's pair stays ``None``.
+    absent modality's pair stays ``None``. Videos resize against their own pixel
+    limits (``video_*_pixels``, from the HF video processor config), defaulting to
+    the image limits.
     """
+    video_min_pixels = min_pixels if video_min_pixels is None else video_min_pixels
+    video_max_pixels = max_pixels if video_max_pixels is None else video_max_pixels
     factor = config.patch_size * config.spatial_merge_size
     if factor <= 0:
         raise ValueError(f"Invalid patch/merge factor {factor}")
@@ -299,7 +305,7 @@ def prepare_vision_inputs(
                 raise ValueError("A reference video block must contain frames")
             num_frames = frames.shape[0]
             height, width = _smart_resize_video(num_frames, frames.shape[1], frames.shape[2],
-                                                config.temporal_patch_size, factor, min_pixels, max_pixels)
+                                                config.temporal_patch_size, factor, video_min_pixels, video_max_pixels)
             video_patches.append(
                 _prepare_block(frames,
                                num_frames=num_frames,
@@ -307,9 +313,6 @@ def prepare_vision_inputs(
                                source_width=frames.shape[2],
                                grid=(height, width),
                                config=config))
-            # ``_prepare_block`` pads a block up to a whole temporal patch, so
-            # the grid must count the padded frames: an 11-frame block is 6
-            # patches, not 5, and the placeholder count is derived from this.
             # ``_prepare_block`` pads a block up to a whole temporal patch, so
             # the grid must count the padded frames: an 11-frame block is 6
             # patches, not 5, and the placeholder count is derived from this.

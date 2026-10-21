@@ -682,6 +682,7 @@ class MiniMaxH3MLXPipeline:
         try:
             config = Qwen3VLVisionConfig.from_config_json(self.conditioner_dir / "config.json")
             min_pixels, max_pixels = load_vision_limits(self.processor_dir())
+            video_min_pixels, video_max_pixels = load_vision_limits(self.processor_dir(), video=True)
             hidden, tags = encode_reference_prompt(
                 conditioner,
                 prompt,
@@ -689,6 +690,8 @@ class MiniMaxH3MLXPipeline:
                 vision_config=config,
                 min_pixels=min_pixels,
                 max_pixels=max_pixels,
+                video_min_pixels=video_min_pixels,
+                video_max_pixels=video_max_pixels,
             )
         finally:
             if not self.resident:
