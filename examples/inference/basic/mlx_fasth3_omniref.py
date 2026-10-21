@@ -87,11 +87,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "vae/ only needs config.json")
     parser.add_argument("--vae-decoder-quantization", choices=("nvfp4", "mxfp8", "int8", "int4"),
                         help="quantize the decoder block linears of a dense decoder file as it loads")
-    parser.add_argument("--vsa", action="store_true",
-                        help="VSA sparse attention; needs a checkpoint converted with --include-vsa")
-    parser.add_argument("--vsa-sparsity", type=float, default=0.9)
-    parser.add_argument("--vsa-tile-size", type=int, default=64,
-                        help="VSA tile: 64 or 256. The contract's trained 128 has no MLX tile shape.")
+    parser.add_argument("--vsa", action=argparse.BooleanOptionalAction, default=None,
+                        help="VSA sparse attention (needs a checkpoint converted with --include-vsa). "
+                        "On by default when the contract is a VSA contract; --no-vsa runs dense.")
+    parser.add_argument("--vsa-sparsity", type=float, default=None,
+                        help="generated-video sparsity; default is the contract's trained value")
+    parser.add_argument("--vsa-tile-size", type=int, default=None,
+                        help="VSA tile: 64, 128 or 256. Must equal the contract's trained tile; "
+                        "default is the contract's.")
+    parser.add_argument("--vsa-ref-keep-rate", type=float, default=None,
+                        help="fraction of each reference video's tiles a query keeps (p2_multi_region); "
+                        "default is the contract's trained value")
     parser.add_argument("--inter-step-cooldown-s", type=float, default=0.0)
     return parser
 
@@ -198,6 +204,7 @@ def run(args: argparse.Namespace) -> None:
             vsa=args.vsa,
             vsa_sparsity=args.vsa_sparsity,
             vsa_tile_size=args.vsa_tile_size,
+            vsa_ref_keep_rate=args.vsa_ref_keep_rate,
             inter_step_cooldown_s=args.inter_step_cooldown_s,
             **kwargs,
         )

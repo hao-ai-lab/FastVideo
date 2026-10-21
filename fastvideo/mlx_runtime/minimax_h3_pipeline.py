@@ -58,6 +58,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     build_ref2va_packed_layout,
     build_row_timesteps,
     dense_only_vsa_error,
+    load_fasth3_inference_contract,
     load_mlx_h3_checkpoint,
     mlx_h3_checkpoint_vsa_capable,
     resolve_h3_denoise_schedule,
@@ -73,6 +74,7 @@ from fastvideo.mlx_runtime.minimax_h3_reference import (
     validate_references,
 )
 from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
+from fastvideo.mlx_runtime.minimax_h3_vsa_contract import resolve_vsa_settings
 from fastvideo.mlx_runtime.prompt_cache import fingerprint_digest, text_encoder_fingerprint
 
 logger = init_logger(__name__)
@@ -1190,9 +1192,11 @@ class MiniMaxH3MLXPipeline:
         fast_spatial_scale: int = 2,
         fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
         fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
-        vsa: bool = False,
-        vsa_sparsity: float = 0.9,
-        vsa_tile_size: int = 64,
+        vsa: bool | None = None,
+        vsa_sparsity: float | None = None,
+        vsa_tile_size: int | None = None,
+        vsa_ref_policy: str | None = None,
+        vsa_ref_keep_rate: float | None = None,
         vsa_prefix_mode: str = "exempt",
         vsa_dense_first_n_steps: int = 0,
         vsa_dense_layers: tuple[int, ...] = (),
@@ -1208,10 +1212,24 @@ class MiniMaxH3MLXPipeline:
             raise ValueError(f"inter_step_cooldown_s must be non-negative, got {inter_step_cooldown_s}.")
         _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
         _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
-        vsa_config = MiniMaxH3VSAConfig(
-            enabled=vsa,
+        # Unset VSA knobs come from the snapshot's FastH3 contract; ``vsa=None``
+        # turns VSA on for a VSA contract and ``vsa=False`` opts out.
+        vsa_settings = resolve_vsa_settings(
+            load_fasth3_inference_contract(self.model_root),
+            vsa=vsa,
             sparsity=vsa_sparsity,
             tile_size=vsa_tile_size,
+            ref_policy=vsa_ref_policy,
+            ref_keep_rate=vsa_ref_keep_rate,
+            checkpoint_capable=mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
+        )
+        vsa = vsa_settings.enabled
+        vsa_config = MiniMaxH3VSAConfig(
+            enabled=vsa,
+            sparsity=vsa_settings.sparsity,
+            tile_size=vsa_settings.tile_size,
+            ref_policy=vsa_settings.ref_policy,
+            ref_keep_rate=vsa_settings.ref_keep_rate,
             prefix_mode=vsa_prefix_mode,  # type: ignore[arg-type]
             dense_first_n_steps=vsa_dense_first_n_steps,
             dense_layers=vsa_dense_layers,
