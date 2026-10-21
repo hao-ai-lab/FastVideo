@@ -169,7 +169,8 @@ def test_prepare_vision_inputs_matches_hf_video_processor() -> None:
     pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw = prepare_vision_inputs(
         [image], [video], config=_mlx_config(), min_pixels=min_pixels, max_pixels=max_pixels)
 
-    reference_image = processor(videos=[image[None]], do_sample_frames=False, return_tensors="np", size={
+    # Newer transformers reject single-frame videos; a duplicated frame yields the same t=1 temporal patch.
+    reference_image = processor(videos=[np.repeat(image[None], 2, axis=0)], do_sample_frames=False, return_tensors="np", size={
         "shortest_edge": min_pixels,
         "longest_edge": max_pixels
     })
