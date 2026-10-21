@@ -78,11 +78,12 @@ from fastvideo.mlx_runtime.minimax_h3_vsa import (
     MiniMaxH3VSAGeometry,
     MiniMaxH3VSAStats,
     VSA_GATE_KEY_SUFFIX,
-    build_h3_tile_geometry,
+    build_h3_segment_geometry,
     dense_only_vsa_error,
     dit_seq_shape_from_layout,
     h3_vsa_attention,
     prefix_segments_from_layout,
+    ref2va_vsa_segments_from_layout,
 )
 
 logger = init_logger(__name__)
@@ -1046,6 +1047,7 @@ def _attention(
     vsa_geometry: MiniMaxH3VSAGeometry | None = None,
     vsa_sparsity: float = 0.0,
     vsa_exempt: bool = True,
+    vsa_ref_keep_rate: float | None = None,
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
@@ -1076,6 +1078,7 @@ def _attention(
             vsa_geometry,
             sparsity=vsa_sparsity,
             exempt=vsa_exempt,
+            ref_keep_rate=vsa_ref_keep_rate,
             gate_compress=gate,
             impl=vsa_impl,  # type: ignore[arg-type]
             stats=vsa_stats,
@@ -1135,6 +1138,7 @@ def _transformer_block(
     vsa_geometry: MiniMaxH3VSAGeometry | None = None,
     vsa_sparsity: float = 0.0,
     vsa_exempt: bool = True,
+    vsa_ref_keep_rate: float | None = None,
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
@@ -1156,6 +1160,7 @@ def _transformer_block(
         vsa_geometry=vsa_geometry,
         vsa_sparsity=vsa_sparsity,
         vsa_exempt=vsa_exempt,
+        vsa_ref_keep_rate=vsa_ref_keep_rate,
         vsa_impl=vsa_impl,
         vsa_stats=vsa_stats,
         use_gate_compress=use_gate_compress,
@@ -1428,18 +1433,23 @@ class MLXMiniMaxH3DiT:
         if not self.vsa_config.enabled:
             self._vsa_geometry = None
             return None
-        prefix = tuple(segment for segment in prefix_segments_from_layout(layout, self.patch_size) if segment > 0)
-        video_shape = dit_seq_shape_from_layout(layout, self.patch_size)
+        config = self.vsa_config
+        ref_keep_rate = config.effective_ref_keep_rate
+        if ref_keep_rate is not None and layout.reference_segments:
+            segments = ref2va_vsa_segments_from_layout(layout, self.patch_size)
+        else:
+            segments = (*prefix_segments_from_layout(layout, self.patch_size),
+                        dit_seq_shape_from_layout(layout, self.patch_size))
+        segments = tuple(segment for segment in segments if isinstance(segment, tuple) or segment > 0)
         geometry = self._vsa_geometry
-        if geometry is not None and (geometry.prefix_segments, geometry.dit_seq_shape,
-                                     geometry.tile_elems) == (prefix, video_shape, self.vsa_config.tile_size):
+        if geometry is not None and (geometry.segments, geometry.tile_elems) == (segments, config.tile_size):
             return geometry
         try:
-            geometry = build_h3_tile_geometry(prefix, video_shape, self.vsa_config.tile_size)
+            geometry = build_h3_segment_geometry(segments, config.tile_size)
         except ValueError as error:
-            raise ValueError(f"H3 VSA cannot run with this packed layout (prefix={prefix}, "
-                             f"video={video_shape}, tile_size={self.vsa_config.tile_size}): {error}. "
-                             "Disable VSA or pick a supported tile size (64 or 256).") from error
+            raise ValueError(f"H3 VSA cannot run with this packed layout (segments={segments}, "
+                             f"tile_size={config.tile_size}): {error}. "
+                             "Disable VSA or pick a supported tile size (64, 128 or 256).") from error
         self._vsa_geometry = geometry
         return self._vsa_geometry
 
@@ -1462,6 +1472,7 @@ class MLXMiniMaxH3DiT:
             "vsa_geometry": geometry,
             "vsa_sparsity": sparsity,
             "vsa_exempt": self.vsa_config.exempt,
+            "vsa_ref_keep_rate": self.vsa_config.effective_ref_keep_rate,
             "vsa_impl": self.vsa_config.impl,
             "vsa_stats": stats,
             "use_gate_compress": geometry is not None and self._block_gate_active(block_index),

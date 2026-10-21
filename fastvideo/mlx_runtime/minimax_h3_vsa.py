@@ -6,7 +6,10 @@ Ports the packed-sequence VSA-H3 contract from
 ``fastvideo/attention/backends/video_sparse_attn_h3.py``:
 
 - Tiles are ``[segment-pure prefix chunks] + [3D video tiles]``.
-- Tile sizes 64 ``(4, 4, 4)`` and 256 ``(4, 8, 8)``.
+- Tile sizes 64 ``(4, 4, 4)``, 128 ``(4, 4, 8)`` and 256 ``(4, 8, 8)``.
+- ``p2_multi_region`` Ref2VA policy: every reference VIDEO is its own sparse
+  region with its own top-k at ``ref_keep_rate`` (image/audio/text rows stay
+  dense prefix), as in the CUDA backend's ``_build_block_mask``.
 - Per-head pooled Q/K scoring and top-k routing.
 - Prefix queries are always dense; prefix keys are ``exempt`` (always kept)
   or ``compete`` (FLOP-matched top-k).
@@ -41,8 +44,10 @@ logger = init_logger(__name__)
 
 VSA_H3_TILE_SHAPES: dict[int, tuple[int, int, int]] = {
     256: (4, 8, 8),
+    128: (4, 4, 8),
     64: (4, 4, 4),
 }
+VSA_REF_POLICIES = ("p2_multi_region", )
 VSA_GATE_KEY_SUFFIX = "attn.to_gate_compress.weight"
 VSA_PREFIX_MODES = ("exempt", "compete")
 PUBLIC_VSA_IMPLS = ("auto", "reference", "simd")
@@ -54,6 +59,19 @@ _REFERENCE_FULL_MASK_MAX_ELEMENTS = 256 * 1024**2
 
 PrefixMode = Literal["exempt", "compete"]
 VSAImpl = Literal["auto", "reference", "simd"]
+
+
+def validate_ref_policy(ref_policy: str | None, ref_keep_rate: float | None) -> None:
+    """``p2_multi_region`` needs a keep rate in (0, 1]; no policy takes no keep rate."""
+    if ref_policy is None:
+        if ref_keep_rate is not None:
+            raise ValueError("VSA ref_keep_rate needs ref_policy='p2_multi_region'.")
+        return
+    if ref_policy not in VSA_REF_POLICIES:
+        raise ValueError(f"VSA ref_policy must be one of {VSA_REF_POLICIES} or None, got {ref_policy!r}.")
+    if (isinstance(ref_keep_rate, bool) or not isinstance(ref_keep_rate, int | float)
+            or not math.isfinite(ref_keep_rate) or not 0.0 < float(ref_keep_rate) <= 1.0):
+        raise ValueError(f"VSA ref_keep_rate must be in (0, 1] for {ref_policy}, got {ref_keep_rate!r}.")
 
 
 class DenseOnlyVSACheckpointError(ValueError):
@@ -71,8 +89,13 @@ class MiniMaxH3VSAConfig:
     dense_first_n_steps: int = 0
     dense_layers: tuple[int, ...] = ()
     impl: VSAImpl = "auto"
+    # ``p2_multi_region`` makes each reference video its own sparse region that
+    # keeps ``ref_keep_rate`` of its tiles; None keeps references dense prefix.
+    ref_policy: str | None = None
+    ref_keep_rate: float | None = None
 
     def __post_init__(self) -> None:
+        validate_ref_policy(self.ref_policy, self.ref_keep_rate)
         if not 0.0 <= self.sparsity < 1.0:
             raise ValueError(f"VSA sparsity must be in [0, 1), got {self.sparsity}.")
         if self.tile_size not in VSA_H3_TILE_SHAPES:
@@ -91,6 +114,11 @@ class MiniMaxH3VSAConfig:
     @property
     def exempt(self) -> bool:
         return self.prefix_mode == "exempt"
+
+    @property
+    def effective_ref_keep_rate(self) -> float | None:
+        """The per-reference-video keep rate, or None when references stay dense."""
+        return self.ref_keep_rate if self.ref_policy == "p2_multi_region" else None
 
     def layer_sparsity(self, layer_idx: int, step_index: int) -> float:
         if not self.enabled:
@@ -116,6 +144,26 @@ class MiniMaxH3VSAGeometry:
     variable_block_sizes: np.ndarray
     untile_combined_index: np.ndarray
     tile_partition_indices: np.ndarray
+    # One [start, end) tile range per sparse video region in packed order, the
+    # generated video last. Tile numbering includes the dense prefix tiles.
+    video_tile_spans: tuple[tuple[int, int], ...] = ()
+    segments: tuple[int | tuple[int, int, int], ...] = ()
+    reference_regions: tuple[tuple[int, int, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.video_tile_spans:
+            object.__setattr__(self, "video_tile_spans",
+                               ((self.num_prefix_tiles, self.num_prefix_tiles + self.num_video_tiles), ))
+
+    @property
+    def dense_rows(self) -> np.ndarray:
+        """Packed positions of the dense rows, in prefix-tile order."""
+        return self.tile_partition_indices[:self.prefix_length]
+
+    @cached_property
+    def dense_rows_lead(self) -> bool:
+        """True when the dense rows are the first packed rows (no interleaved region)."""
+        return bool(np.array_equal(self.dense_rows, np.arange(self.prefix_length)))
 
     @property
     def num_tiles(self) -> int:
@@ -142,8 +190,14 @@ class MiniMaxH3VSAGeometry:
         import mlx.core as mx
 
         index = np.full(self.num_prefix_tiles * self.tile_elems, self.prefix_length, dtype=np.int32)
-        index[self.untile_combined_index[:self.prefix_length]] = np.arange(self.prefix_length, dtype=np.int32)
+        index[self.untile_combined_index[self.dense_rows]] = np.arange(self.prefix_length, dtype=np.int32)
         return mx.array(index)
+
+    @cached_property
+    def dense_row_index(self):
+        import mlx.core as mx
+
+        return mx.array(self.dense_rows.astype(np.int32))
 
     @cached_property
     def untile_index(self):
@@ -255,6 +309,47 @@ def prefix_segments_from_layout(layout: Any, patch_size: tuple[int, int, int]) -
     return tuple(segments)
 
 
+def ref2va_vsa_segments_from_layout(
+    layout: Any,
+    patch_size: tuple[int, int, int],
+) -> tuple[int | tuple[int, int, int], ...]:
+    """Packed segments with every reference VIDEO as a sparse region (``p2_multi_region``).
+
+    Mirrors ``_h3_vsa_ref2va_segments`` in the CUDA denoising stage:
+    ``[text | reference spans... | target audio | target video]`` where each
+    reference video is a token grid and text, reference audio, image
+    references and the target audio are dense row counts.
+    """
+    reference_segments = getattr(layout, "reference_segments", ())
+    if not reference_segments:
+        raise ValueError("Ref2VA VSA sparsification needs per-reference spans on the layout; "
+                         "this layout carries none (T2VA/FL2VA packing).")
+    cursor = int(layout.text_indices.shape[0])
+    segments: list[int | tuple[int, int, int]] = [cursor]
+    for kind, rows, latent_shape in reference_segments:
+        rows = int(rows)
+        if kind == "video":
+            if any(int(axis) <= 0 or int(axis) % patch for axis, patch in zip(latent_shape, patch_size, strict=True)):
+                raise ValueError(f"Reference video latent shape {tuple(latent_shape)} is not a positive multiple of "
+                                 f"patch {tuple(patch_size)}.")
+            grid = tuple(int(axis) // patch for axis, patch in zip(latent_shape, patch_size, strict=True))
+            if math.prod(grid) != rows:
+                raise ValueError(f"Reference video span of {rows} rows does not match its grid {grid}.")
+            segments.append(grid)  # type: ignore[arg-type]
+        else:
+            segments.append(rows)
+        cursor += rows
+    n_target_audio = int(layout.audio_indices.shape[0]) - int(layout.num_condition_audio_rows)
+    segments.append(n_target_audio)
+    cursor += n_target_audio
+    target = dit_seq_shape_from_layout(layout, patch_size)
+    segments.append(target)
+    if cursor + math.prod(target) != int(layout.sequence_length):
+        raise ValueError(f"Ref2VA reference spans {reference_segments} + target segments do not tile the packed "
+                         f"sequence: reached row {cursor} + video {math.prod(target)} != {layout.sequence_length}.")
+    return tuple(segments)
+
+
 def dit_seq_shape_from_layout(layout: Any, patch_size: tuple[int, int, int]) -> tuple[int, int, int]:
     return (
         int(layout.num_video_latent_frames // patch_size[0]),
@@ -301,14 +396,23 @@ def _non_pad_index(variable_block_sizes: np.ndarray, tile_elems: int) -> np.ndar
     return index_pad[index_mask]
 
 
+def _grid(shape: tuple[int, ...]) -> tuple[int, int, int]:
+    t, h, w = (int(axis) for axis in shape)
+    return (t, h, w)
+
+
+def _segments_total(segments: tuple[int | tuple[int, int, int], ...]) -> int:
+    return sum(math.prod(segment) if isinstance(segment, tuple) else segment for segment in segments)
+
+
 def validate_h3_tile_geometry(
-    prefix_segments: tuple[int, ...],
-    dit_seq_shape: tuple[int, int, int],
+    prefix_segments: tuple[int | tuple[int, int, int], ...],
+    dit_seq_shape: tuple[int, int, int] | None,
     variable_block_sizes: np.ndarray,
     untile_combined_index: np.ndarray,
     tile_elems: int,
 ) -> None:
-    total = sum(prefix_segments) + math.prod(dit_seq_shape)
+    total = _segments_total(prefix_segments) + (math.prod(dit_seq_shape) if dit_seq_shape is not None else 0)
     n_pad = int(variable_block_sizes.size) * tile_elems
     sizes_min = int(variable_block_sizes.min()) if variable_block_sizes.size else 0
     sizes_max = int(variable_block_sizes.max()) if variable_block_sizes.size else 0
@@ -340,49 +444,83 @@ def build_h3_tile_geometry(
     tile_size: int = 64,
 ) -> MiniMaxH3VSAGeometry:
     """Tile the packed sequence: segment-pure prefix chunks, then video tiles."""
+    return build_h3_segment_geometry((*prefix_segments, _grid(dit_seq_shape)), tile_size)
+
+
+def build_h3_segment_geometry(
+    segments: tuple[int | tuple[int, int, int], ...],
+    tile_size: int = 64,
+) -> MiniMaxH3VSAGeometry:
+    """Tile a packed sequence of interleaved dense segments and video regions.
+
+    ``segments`` lists, in packed order, dense row counts (``int``) and video
+    token grids (``(t, h, w)``). Rows are permuted to ``[dense chunks][region 0
+    tiles][region 1 tiles]...`` exactly as the CUDA ``_h3_segment_tile_geometry``
+    does; the last region is the generated video.
+    """
     tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
     if tile_shape is None:
         raise ValueError(f"VSA-H3 tile_size must be one of {sorted(VSA_H3_TILE_SHAPES)}, got {tile_size!r}")
-    if len(dit_seq_shape) != 3 or any(axis <= 0 for axis in dit_seq_shape):
-        raise ValueError(f"VSA-H3 video axes must be positive, got {dit_seq_shape}.")
     tile_elems = math.prod(tile_shape)
-    prefix_segments = tuple(int(segment) for segment in prefix_segments if int(segment) > 0)
-    prefix_len = sum(prefix_segments)
-
-    prefix_sizes: list[int] = []
-    for segment in prefix_segments:
-        full, rem = divmod(segment, tile_elems)
-        prefix_sizes.extend([tile_elems] * full)
+    dense_sizes: list[int] = []
+    dense_rows: list[np.ndarray] = []
+    regions: list[tuple[int, tuple[int, int, int]]] = []
+    kept: list[int | tuple[int, int, int]] = []
+    cursor = 0
+    for segment in segments:
+        if isinstance(segment, tuple):
+            grid = tuple(int(axis) for axis in segment)
+            if len(grid) != 3 or any(axis <= 0 for axis in grid):
+                raise ValueError(f"VSA-H3 video axes must be positive, got {segment}.")
+            regions.append((cursor, grid))  # type: ignore[arg-type]
+            kept.append(grid)  # type: ignore[arg-type]
+            cursor += math.prod(grid)
+            continue
+        rows = int(segment)
+        if rows <= 0:
+            continue
+        full, rem = divmod(rows, tile_elems)
+        dense_sizes.extend([tile_elems] * full)
         if rem:
-            prefix_sizes.append(rem)
-    num_prefix_tiles = len(prefix_sizes)
+            dense_sizes.append(rem)
+        dense_rows.append(np.arange(cursor, cursor + rows, dtype=np.int64))
+        kept.append(rows)
+        cursor += rows
+    if not regions:
+        raise ValueError("VSA-H3 needs at least one video region.")
+    num_prefix_tiles = len(dense_sizes)
 
-    video_sizes = _video_tile_sizes(dit_seq_shape, tile_shape)
-    num_video_tiles = int(video_sizes.size)
-    video_indices = _video_tile_partition_indices(dit_seq_shape, tile_shape) + prefix_len
-    tile_partition_indices = np.concatenate(
-        [np.arange(prefix_len, dtype=np.int64), video_indices],
-        axis=0,
-    )
-    variable_block_sizes = np.concatenate(
-        [np.asarray(prefix_sizes, dtype=np.int64),
-         video_sizes.astype(np.int64)],
-        axis=0,
-    )
+    index_parts: list[np.ndarray] = []
+    size_parts: list[np.ndarray] = []
+    spans: list[tuple[int, int]] = []
+    tile_cursor = num_prefix_tiles
+    for start, grid in regions:
+        sizes = _video_tile_sizes(grid, tile_shape)
+        index_parts.append(_video_tile_partition_indices(grid, tile_shape) + start)
+        size_parts.append(sizes.astype(np.int64))
+        spans.append((tile_cursor, tile_cursor + int(sizes.size)))
+        tile_cursor += int(sizes.size)
+    num_video_tiles = tile_cursor - num_prefix_tiles
+    tile_partition_indices = np.concatenate([*dense_rows, *index_parts], axis=0)
+    variable_block_sizes = np.concatenate([np.asarray(dense_sizes, dtype=np.int64), *size_parts], axis=0)
     non_pad_index = _non_pad_index(variable_block_sizes, tile_elems)
     untile_combined_index = non_pad_index[np.argsort(tile_partition_indices, kind="stable")]
-    validate_h3_tile_geometry(prefix_segments, dit_seq_shape, variable_block_sizes, untile_combined_index, tile_elems)
+    validate_h3_tile_geometry(tuple(kept), None, variable_block_sizes, untile_combined_index, tile_elems)
+    prefix_segments = tuple(segment for segment in kept if not isinstance(segment, tuple))
     return MiniMaxH3VSAGeometry(
-        prefix_segments=prefix_segments,
-        dit_seq_shape=dit_seq_shape,
+        prefix_segments=prefix_segments,  # type: ignore[arg-type]
+        dit_seq_shape=regions[-1][1],
         tile_shape=tile_shape,
         tile_elems=tile_elems,
-        total_seq_length=prefix_len + math.prod(dit_seq_shape),
+        total_seq_length=cursor,
         num_prefix_tiles=num_prefix_tiles,
         num_video_tiles=num_video_tiles,
         variable_block_sizes=variable_block_sizes,
         untile_combined_index=untile_combined_index,
         tile_partition_indices=tile_partition_indices,
+        video_tile_spans=tuple(spans),
+        segments=tuple(kept),
+        reference_regions=tuple(grid for _, grid in regions[:-1]),
     )
 
 
@@ -392,30 +530,75 @@ def token_tile_and_valid(variable_block_sizes: np.ndarray, tile_elems: int) -> t
     return token_tile, token_valid
 
 
+def region_sparsities(num_regions: int, sparsity: float, ref_keep_rate: float | None) -> tuple[float, ...]:
+    """Per-region sparsity: reference videos keep ``ref_keep_rate``, the target follows ``sparsity``.
+
+    Mirrors ``MiniMaxH3VSAMetadataBuilder.build``: a dense step (sparsity <= 0)
+    keeps every region dense, whatever the reference keep rate.
+    """
+    if num_regions < 1:
+        raise ValueError("VSA-H3 needs at least one video region.")
+    if sparsity <= 0.0:
+        return (0.0, ) * num_regions
+    if num_regions == 1:
+        return (float(sparsity), )
+    if ref_keep_rate is None:
+        raise ValueError(f"A VSA-H3 build with {num_regions - 1} reference-video region(s) needs ref_keep_rate.")
+    return (1.0 - float(ref_keep_rate), ) * (num_regions - 1) + (float(sparsity), )
+
+
+def _region_plan(
+    num_prefix_tiles: int,
+    num_video_tiles: int,
+    sparsity: float,
+    exempt: bool,
+    spans: tuple[tuple[int, int], ...] | None,
+    span_sparsities: tuple[float, ...] | None,
+) -> tuple[tuple[tuple[int, int], ...], tuple[int, ...]]:
+    """(spans, per-span top-k); a missing plan is one region over every video tile."""
+    if spans is None:
+        spans = ((num_prefix_tiles, num_prefix_tiles + num_video_tiles), )
+    if span_sparsities is None:
+        span_sparsities = region_sparsities(len(spans), sparsity, None)
+    if len(span_sparsities) != len(spans):
+        raise ValueError(f"{len(span_sparsities)} span sparsities for {len(spans)} video spans.")
+    if len(spans) > 1 and not exempt and num_prefix_tiles:
+        raise ValueError("vsa prefix_mode='compete' supports only the generated-video region; "
+                         "use prefix_mode='exempt' with reference-video regions.")
+    topks = tuple(compute_topk(sp, end - start) for (start, end), sp in zip(spans, span_sparsities, strict=True))
+    return spans, topks
+
+
 def build_block_mask(
     scores: np.ndarray,
     num_prefix_tiles: int,
     num_video_tiles: int,
     sparsity: float,
     exempt: bool,
+    spans: tuple[tuple[int, int], ...] | None = None,
+    span_sparsities: tuple[float, ...] | None = None,
 ) -> np.ndarray:
     """scores: [..., n_tiles, n_tiles] -> bool mask, same shape.
 
-    Mirrors ``_build_block_mask`` in the PyTorch H3 backend.
+    Mirrors ``_build_block_mask`` in the PyTorch H3 backend: every video query
+    keeps its own top-k of EACH video region (``spans`` / ``span_sparsities``).
     """
     n_tiles = scores.shape[-1]
-    k_vid = compute_topk(sparsity, num_video_tiles)
-    if k_vid == num_video_tiles:
+    spans, topks = _region_plan(num_prefix_tiles, num_video_tiles, sparsity, exempt, spans, span_sparsities)
+    if all(k == end - start for k, (start, end) in zip(topks, spans, strict=True)):
         return np.ones_like(scores, dtype=bool)
     mask = np.zeros_like(scores, dtype=bool)
     if exempt or num_prefix_tiles == 0:
-        video_cols = scores[..., num_prefix_tiles:]
-        idx = np.argsort(-video_cols, axis=-1)[..., :k_vid] + num_prefix_tiles
-        np.put_along_axis(mask, idx, True, axis=-1)
+        for (start, end), k_span in zip(spans, topks, strict=True):
+            if k_span == end - start:
+                mask[..., start:end] = True
+                continue
+            idx = np.argsort(-scores[..., start:end], axis=-1, kind="stable")[..., :k_span] + start
+            np.put_along_axis(mask, idx, True, axis=-1)
         mask[..., :num_prefix_tiles] = True
     else:
-        k_total = min(k_vid + num_prefix_tiles, n_tiles)
-        idx = np.argsort(-scores, axis=-1)[..., :k_total]
+        k_total = min(topks[0] + num_prefix_tiles, n_tiles)
+        idx = np.argsort(-scores, axis=-1, kind="stable")[..., :k_total]
         np.put_along_axis(mask, idx, True, axis=-1)
     mask[..., :num_prefix_tiles, :] = True
     return mask
@@ -457,13 +640,21 @@ def _dense_sdpa(q, k, v, scale: float):
     )[0].transpose(1, 0, 2)
 
 
-def _selected_keep(sparsity: float, num_prefix_tiles: int, num_video_tiles: int, exempt: bool) -> int:
-    k_vid = compute_topk(sparsity, num_video_tiles)
-    if k_vid == num_video_tiles:
+def _selected_keep(
+    sparsity: float,
+    num_prefix_tiles: int,
+    num_video_tiles: int,
+    exempt: bool,
+    spans: tuple[tuple[int, int], ...] | None = None,
+    span_sparsities: tuple[float, ...] | None = None,
+) -> int:
+    """Key tiles each video query attends to (constant across queries and heads)."""
+    spans, topks = _region_plan(num_prefix_tiles, num_video_tiles, sparsity, exempt, spans, span_sparsities)
+    if all(k == end - start for k, (start, end) in zip(topks, spans, strict=True)):
         return num_prefix_tiles + num_video_tiles
     if exempt or num_prefix_tiles == 0:
-        return num_prefix_tiles + k_vid
-    return min(k_vid + num_prefix_tiles, num_prefix_tiles + num_video_tiles)
+        return num_prefix_tiles + sum(topks)
+    return min(topks[0] + num_prefix_tiles, num_prefix_tiles + num_video_tiles)
 
 
 def _block_indices_from_scores(
@@ -472,35 +663,45 @@ def _block_indices_from_scores(
     num_video_tiles: int,
     sparsity: float,
     exempt: bool,
+    spans: tuple[tuple[int, int], ...] | None = None,
+    span_sparsities: tuple[float, ...] | None = None,
 ):
-    """Return (block_idx [H, n_video_tiles, k_sel], block_num [H, n_video_tiles])."""
+    """Return (block_idx [H, n_video_tiles, k_sel], block_num [H, n_video_tiles]).
+
+    ``k_sel`` is the same for every query: all prefix tiles plus each video
+    region's own top-k, so the gather path keeps one shape.
+    """
     import mlx.core as mx
 
     n_tiles = scores.shape[-1]
     heads = scores.shape[0]
-    k_vid = compute_topk(sparsity, num_video_tiles)
+    spans, topks = _region_plan(num_prefix_tiles, num_video_tiles, sparsity, exempt, spans, span_sparsities)
     video_scores = scores[:, num_prefix_tiles:, :]
-    if k_vid == num_video_tiles:
+    if all(k == end - start for k, (start, end) in zip(topks, spans, strict=True)):
         idx = mx.broadcast_to(mx.arange(n_tiles, dtype=mx.int32)[None, None, :], (heads, num_video_tiles, n_tiles))
         counts = mx.full((heads, num_video_tiles), n_tiles, dtype=mx.int32)
         return idx, counts
 
     if exempt or num_prefix_tiles == 0:
-        k_sel = num_prefix_tiles + k_vid
-        video_cols = video_scores[:, :, num_prefix_tiles:]
-        top = mx.argpartition(-video_cols, kth=k_vid - 1, axis=-1)[:, :, :k_vid].astype(mx.int32) + num_prefix_tiles
+        parts = []
         if num_prefix_tiles:
-            prefix = mx.broadcast_to(
-                mx.arange(num_prefix_tiles, dtype=mx.int32)[None, None, :],
-                (heads, num_video_tiles, num_prefix_tiles),
-            )
-            idx = mx.concatenate([prefix, top], axis=-1)
-        else:
-            idx = top
+            parts.append(
+                mx.broadcast_to(
+                    mx.arange(num_prefix_tiles, dtype=mx.int32)[None, None, :],
+                    (heads, num_video_tiles, num_prefix_tiles),
+                ))
+        for (start, end), k_span in zip(spans, topks, strict=True):
+            if k_span == end - start:
+                parts.append(
+                    mx.broadcast_to(
+                        mx.arange(start, end, dtype=mx.int32)[None, None, :], (heads, num_video_tiles, end - start)))
+                continue
+            cols = video_scores[:, :, start:end]
+            parts.append(mx.argpartition(-cols, kth=k_span - 1, axis=-1)[:, :, :k_span].astype(mx.int32) + start)
+        idx = parts[0] if len(parts) == 1 else mx.concatenate(parts, axis=-1)
     else:
-        k_sel = min(k_vid + num_prefix_tiles, n_tiles)
-        top = mx.argpartition(-video_scores, kth=k_sel - 1, axis=-1)[:, :, :k_sel].astype(mx.int32)
-        idx = top
+        k_sel = min(topks[0] + num_prefix_tiles, n_tiles)
+        idx = mx.argpartition(-video_scores, kth=k_sel - 1, axis=-1)[:, :, :k_sel].astype(mx.int32)
     counts = mx.full((heads, num_video_tiles), idx.shape[-1], dtype=mx.int32)
     return idx, counts
 
@@ -674,8 +875,13 @@ def h3_vsa_attention(
     gate_compress=None,
     impl: VSAImpl = "auto",
     stats: MiniMaxH3VSAStats | None = None,
+    ref_keep_rate: float | None = None,
 ):
-    """Packed ``[S, H, D]`` VSA attention. Falls back to dense SDPA when sparsity is 0."""
+    """Packed ``[S, H, D]`` VSA attention. Falls back to dense SDPA when sparsity is 0.
+
+    ``ref_keep_rate`` is the ``p2_multi_region`` keep rate of each reference-video
+    region of ``geometry``; geometries with reference regions require it.
+    """
     import mlx.core as mx
 
     _, heads, dim = query.shape
@@ -702,7 +908,9 @@ def h3_vsa_attention(
     k_pooled = _pool_tiles(k_tiled, geometry.variable_block_sizes, geometry.tile_elems)
     scores = (q_pooled @ k_pooled.transpose(0, 2, 1)) / (dim**0.5)
 
-    k_vid = compute_topk(sparsity, geometry.num_video_tiles)
+    span_sparsities = region_sparsities(len(geometry.video_tile_spans), sparsity, ref_keep_rate)
+    spans = geometry.video_tile_spans
+    k_vid = sum(compute_topk(sp, end - start) for (start, end), sp in zip(spans, span_sparsities, strict=True))
     if stats is not None:
         stats.video_keep = k_vid if sparsity > 0.0 else geometry.num_video_tiles
         stats.achieved_sparsity = (1.0 - (k_vid / geometry.num_video_tiles) if geometry.num_video_tiles else 0.0)
@@ -717,6 +925,8 @@ def h3_vsa_attention(
             geometry.num_video_tiles,
             sparsity,
             exempt,
+            spans,
+            span_sparsities,
         )
         if stats is not None and not exempt:
             stats.video_keep = float(mx.mean(mx.sum(block_idx >= geometry.num_prefix_tiles, axis=-1)).item())
@@ -727,8 +937,12 @@ def h3_vsa_attention(
 
             stats.dense_fallback_reason = ("SIMD requires tile 64 and head dim 128"
                                            if geometry.tile_elems != 64 or dim != 128 else simd_kernel_error())
-        prefix_out = (_dense_sdpa(query[:geometry.prefix_length], key, value, scale)
-                      if geometry.prefix_length else query[:0])
+        if not geometry.prefix_length:
+            prefix_out = query[:0]
+        else:
+            dense_query = (query[:geometry.prefix_length]
+                           if geometry.dense_rows_lead else query[geometry.dense_row_index])
+            prefix_out = _dense_sdpa(dense_query, key, value, scale)
         n_prefix_pad = geometry.num_prefix_tiles * geometry.tile_elems
         if chosen == "simd":
             from fastvideo.mlx_runtime.minimax_h3_vsa_simd import disable_simd_kernel, simd_block_sparse
@@ -753,6 +967,8 @@ def h3_vsa_attention(
                 geometry.num_video_tiles,
                 sparsity,
                 exempt,
+                spans,
+                span_sparsities,
             )
             video_tiled = _reference_token_sdpa(q_tiled, k_tiled, v_tiled, mask, geometry, scale)[n_prefix_pad:]
         else:
@@ -774,11 +990,11 @@ def h3_vsa_attention(
     return _untile_hidden(out_tiled, geometry)
 
 
-def geometry_is_supported(prefix_segments: tuple[int, ...], dit_seq_shape: tuple[int, int, int],
+def geometry_is_supported(prefix_segments: tuple[int | tuple[int, int, int], ...], dit_seq_shape: tuple[int, int, int],
                           tile_size: int) -> str | None:
     """Return a fallback reason, or None when VSA can run."""
     try:
-        build_h3_tile_geometry(prefix_segments, dit_seq_shape, tile_size)
+        build_h3_segment_geometry((*prefix_segments, _grid(dit_seq_shape)), tile_size)
     except ValueError as error:
         return str(error)
     return None
