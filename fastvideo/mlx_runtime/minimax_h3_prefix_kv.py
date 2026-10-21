@@ -125,9 +125,11 @@ class MiniMaxH3PrefixKVCache:
             quantized = mx.clip(mx.round(x.astype(mx.float32) / scale.astype(mx.float32)), -_INT8_MAX,
                                 _INT8_MAX).astype(mx.int8)
             return quantized, scale
+        # ``x * 1`` forces a fresh buffer: a bare row slice (or a same-dtype astype) would be a view that keeps
+        # the whole [S, H, D] K/V of the block alive for the entire denoise.
         if self.storage == "native":
-            return x, None
-        return x.astype(mx.bfloat16 if self.storage == "bf16" else mx.float16), None
+            return x * 1, None
+        return (x * 1).astype(mx.bfloat16 if self.storage == "bf16" else mx.float16), None
 
     def _decode(self, entry: tuple[Any, Any]):
         data, scale = entry
