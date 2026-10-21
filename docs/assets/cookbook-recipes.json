@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -875,6 +875,7 @@
       "hardware": {
         "platform": "cuda",
         "gpu_count": 1,
+        "minimum_memory": "32 GB VRAM",
         "evidence": "source-configured"
       },
       "evidence": "Source-backed"
@@ -919,6 +920,41 @@
         "evidence": "source-configured"
       },
       "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-mlx",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 Omni V1 on MLX",
+      "summary": "Run the FastH3 Omni BF16 release on Apple Silicon: compose it with the NVFP4 text-encoder stack, convert the DiT to INT6 with VSA, and decode with the LightVAE encoder and the FastH3 NVFP4 decoder.",
+      "model": "FastVideo/FastVideo-FastH3-Omni-8-Step-V1",
+      "source": "examples/inference/basic/mlx_fasth3_omniref.py",
+      "command": "hf download FastVideo/FastVideo-FastH3-Omni-8-Step-V1 --local-dir ./FastVideo-FastH3-Omni-8-Step-V1\nhf download FastVideo/FastH3-OmniRef-NVFP4-QAD --include 'text_encoder/*' 'tokenizer/*' 'processor/*' 'vae/config.json' 'audio_vae/*' --local-dir ./FastH3-OmniRef-NVFP4-QAD\nhf download lightx2v/LightVAE lightvae-lite-h3-encoder.safetensors --local-dir ./LightVAE\nhf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./FastH3-NVFP4-VAE-Decoder\npython examples/inference/basic/mlx_fasth3_omniref.py --compose-only --export ./FastVideo-FastH3-Omni-8-Step-V1 --base-model-path ./FastH3-OmniRef-NVFP4-QAD --composed-dir ./FastH3-OmniRef-composed\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-OmniRef-composed/transformer_ref --out ./FastH3-OmniRef-MLX --formats int6 --include-vsa --nvfp4-conditioner-root ./FastH3-OmniRef-NVFP4-QAD/text_encoder\nln -sfn \"$PWD/FastH3-OmniRef-MLX/nvfp4-encoder\" ./FastH3-OmniRef-composed/text_encoder\npython examples/inference/basic/mlx_fasth3_omniref.py --model-root ./FastH3-OmniRef-composed --mlx-checkpoint ./FastH3-OmniRef-MLX/int6 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.' --vae-encoder ./LightVAE/lightvae-lite-h3-encoder.safetensors --vae-decoder ./FastH3-NVFP4-VAE-Decoder/quality-36L/decoder-nvfp4.safetensors --vae-dtype bf16 --mlx-cache-limit-gib 8 --metal-wired-limit-gib 42 --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_omniref_mlx.mp4",
+      "gpu_types": [
+        "Apple Silicon"
+      ],
+      "hardware": {
+        "platform": "mlx",
+        "accelerator": "Apple M5 Max",
+        "system_memory": "64 GB unified memory",
+        "minimum_memory": "36 GB unified memory",
+        "peak_memory": "27-31 GB peak memory, INT6 DiT of about 17 GB",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2000"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_omniref_mlx.mp4",
+      "modes": [
+        "Ref2VA",
+        "8-step FastH3 Omni",
+        "trained VSA"
+      ],
+      "limitations": [
+        "Convert with --include-vsa. At least one image or video reference is required; pass references in the order the model should read them.",
+        "Validated on an M4 Max with 36 GB and an M5 Max with 64 GB. Set --metal-wired-limit-gib to about two thirds of the Mac's memory.",
+        "Use fast-8L/decoder-nvfp4.safetensors for the smaller, faster decoder tier. FL2VA keyframes, two-pass refinement and TAEH3 decoding are not wired for references."
+      ]
     }
   ]
 }

@@ -99,6 +99,56 @@ The prompt is cached under `--prompt-cache-dir` **for text-only requests**; a
 reference-conditioned request re-encodes, because the vision tokens are part of
 the conditioning.
 
+## Recommended recipe: INT6, 480p, 5 s
+
+This is the end-to-end flow the cookbook entry uses. It reads no base video VAE
+weights: the LightVAE encoder handles references and the FastH3 NVFP4 decoder
+renders the clip.
+
+```bash
+# BF16 release, the NVFP4 text-encoder stack, and the standalone VAE files.
+hf download FastVideo/FastVideo-FastH3-Omni-8-Step-V1 \
+  --local-dir ./FastVideo-FastH3-Omni-8-Step-V1
+hf download FastVideo/FastH3-OmniRef-NVFP4-QAD \
+  --include 'text_encoder/*' 'tokenizer/*' 'processor/*' 'vae/config.json' 'audio_vae/*' \
+  --local-dir ./FastH3-OmniRef-NVFP4-QAD
+hf download lightx2v/LightVAE lightvae-lite-h3-encoder.safetensors --local-dir ./LightVAE
+hf download FastVideo/FastH3-NVFP4-VAE-Decoder \
+  --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' \
+  --local-dir ./FastH3-NVFP4-VAE-Decoder
+
+# Compose, convert the DiT to INT6 with VSA gates, and cache the NVFP4 text encoder.
+python examples/inference/basic/mlx_fasth3_omniref.py --compose-only \
+  --export ./FastVideo-FastH3-Omni-8-Step-V1 \
+  --base-model-path ./FastH3-OmniRef-NVFP4-QAD \
+  --composed-dir ./FastH3-OmniRef-composed
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
+  --model-root ./FastH3-OmniRef-composed/transformer_ref \
+  --out ./FastH3-OmniRef-MLX --formats int6 --include-vsa \
+  --nvfp4-conditioner-root ./FastH3-OmniRef-NVFP4-QAD/text_encoder
+ln -sfn "$PWD/FastH3-OmniRef-MLX/nvfp4-encoder" ./FastH3-OmniRef-composed/text_encoder
+
+python examples/inference/basic/mlx_fasth3_omniref.py \
+  --model-root ./FastH3-OmniRef-composed \
+  --mlx-checkpoint ./FastH3-OmniRef-MLX/int6 \
+  --image assets/images/couple.jpg \
+  --prompt "A person on a sofa, lit by a warm lamp, speaking to camera." \
+  --vae-encoder ./LightVAE/lightvae-lite-h3-encoder.safetensors \
+  --vae-decoder ./FastH3-NVFP4-VAE-Decoder/quality-36L/decoder-nvfp4.safetensors \
+  --vae-dtype bf16 --mlx-cache-limit-gib 8 --metal-wired-limit-gib 42 \
+  --height 480 --width 832 --num-frames 124 --seed 2026 \
+  --output-path ./outputs/fasth3_omniref_mlx.mp4
+```
+
+- `fast-8L/decoder-nvfp4.safetensors` is the smaller, faster decoder tier;
+  `quality-36L` is the higher-quality one.
+- Set `--metal-wired-limit-gib` to about two thirds of the Mac's memory
+  (42 for 64 GB, 24 for 36 GB). It does not add memory.
+- 480p at 124 frames is roughly five seconds at 24 fps.
+- Memory: the INT6 DiT takes about 17 GB. Peak memory measured on an M5 Max
+  64 GB was about 27-31 GB. The recipe is validated on an M4 Max 36 GB and an
+  M5 Max 64 GB.
+
 ## What this path does and does not do
 
 The MLX runtime runs the same packed layout, the same reference conditioning

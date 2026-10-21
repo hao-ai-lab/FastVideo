@@ -176,7 +176,7 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
   const localFile = recipe.source.replace(/[^/]+$/, `cookbook_${recipe.id.replaceAll("-", "_")}.py`);
   const command = yamlSource
     ? baselineCommand.replace(/--config\s+\S+/, "--config config.yaml")
-    : baselineCommand.replace(recipe.source, localFile) +
+    : baselineCommand.replaceAll(recipe.source, localFile) +
       Object.entries(edits)
         .filter(([key]) => example?.controls[Number(key)].flag)
         .map(([key, value]) => {

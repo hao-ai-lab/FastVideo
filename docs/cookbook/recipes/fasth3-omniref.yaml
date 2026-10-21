@@ -34,6 +34,7 @@ deployments:
       - >-
         The 32 GB card needs ./adaln_table.pt. Write it once with FASTVIDEO_H3_ADALN_DUMP=./adaln_table.pt
         on a run that loads the AdaLN projections, such as the RTX PRO 6000 or DGX Spark profile.
+      - The 32 GB RTX 5090 keeps the text encoder off the GPU and loads denoise modules on demand; the DiT stays whole at 480p.
       - Requests carry ordered image_reference, video_reference, and audio references; list local media
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
@@ -47,6 +48,10 @@ deployments:
       - default_request.sampling.width
       - default_request.sampling.seed
     overrides: &omniref_overrides
+      generator.pipeline.experimental.h3_vae_nvfp4_decoder:
+        description: >-
+          Replaces the video decoder with an NVFP4 decoder on Blackwell GPUs. quality-36L (about 1.4 GiB) gives the
+          best-quality clip; fast-8L (0.31 GiB) suits memory-bound devices.
       default_request.sampling.num_frames:
         enum: [124, 243, 362]
         default: 124
