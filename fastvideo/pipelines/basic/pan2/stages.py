@@ -196,7 +196,16 @@ class PAN2ConditioningStage(PipelineStage):
 
 
 class PAN2DenoisingStage(DenoisingStage):
-    """Keeps the latents in fp32 across the loop; they are cast to the DiT dtype for each forward."""
+    """Keeps the latents in fp32 across the loop; they are cast to the DiT dtype for each forward.
+
+    Image-to-video leaves the conditioning image's latent frame out of classifier-free guidance: that frame takes the
+    positive prediction, as in the reference sampler.
+    """
+
+    def finish_guidance(self, noise_pred, noise_pred_text, batch, fastvideo_args) -> torch.Tensor:
+        if batch.pil_image is not None and fastvideo_args.pipeline_config.i2v_skip_first_latent_cfg:
+            noise_pred[:, :, :1] = noise_pred_text[:, :, :1]
+        return noise_pred
 
     def prepare_scheduler_model_output(self, noise_pred, state) -> torch.Tensor:
         return noise_pred.float()

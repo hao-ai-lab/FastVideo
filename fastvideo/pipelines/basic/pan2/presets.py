@@ -10,8 +10,9 @@ _DENOISE_STAGE = PresetStageSpec(
     allowed_overrides=frozenset({"num_inference_steps", "guidance_scale"}),
 )
 
-# 704x1248, 313 frames (13 s at 24 fps), 50 steps, CFG 3. PAN2 has no default negative prompt; an empty one is
-# encoded as a single space.
+# 704x1248, 313 frames (13 s at 24 fps), 50 steps, CFG 3. The preset sends no negative prompt (an empty one is encoded
+# as a single space); the reference sampler sends the release's structured negative caption, so pass it as the
+# request's ``negative_prompt`` to follow that recipe.
 _SHARED_DEFAULTS = {
     "height": 704,
     "width": 1248,
