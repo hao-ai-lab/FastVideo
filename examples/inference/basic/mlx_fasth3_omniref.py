@@ -16,7 +16,7 @@ the packed MLX layout first:
       --formats int8 --include-vsa
 
     python examples/inference/basic/mlx_fasth3_omniref.py \\
-      --export ./FastH3-OmniRef-QAD120-NVFP4 --composed-dir ./FastH3-OmniRef-composed \\
+      --export ./FastVideo-FastH3-Omni-8-Step-V1 --composed-dir ./FastH3-OmniRef-composed \\
       --base-model-path ./MiniMax-H3 --mlx-checkpoint ~/models/FastH3-OmniRef-MLX/int8 \\
       --image reference.png --audio voice.wav \\
       --prompt "a person on a sofa, lit by a warm lamp, speaking to camera" \\
@@ -26,6 +26,9 @@ References are ordered: pass them in the order the model should read them, with
 ``--image`` / ``--video`` / ``--audio`` (for example ``--video dance.mp4
 --image outfit.png --audio voice.wav``). At least one image or video reference
 is required; audio references only accompany them.
+
+Add ``--compose-only`` to build the composed directory (the conversion above
+needs it) and stop, with no checkpoint, prompt or reference.
 
 The PDD ladder comes from the export's contract, so ``--steps`` is optional:
 without it the trained fused-block count runs.
@@ -64,12 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="where the composed directory of symlinks is written")
     parser.add_argument("--model-root", type=Path,
                         help="an already-composed directory; skips composing")
-    parser.add_argument("--mlx-checkpoint", type=Path, required=True,
+    parser.add_argument("--compose-only", action="store_true",
+                        help="compose --export with --base-model-path into --composed-dir and exit")
+    parser.add_argument("--mlx-checkpoint", type=Path,
                         help="packed MLX checkpoint converted from the composed transformer_ref/")
     for flag in ("image", "video", "audio"):
         parser.add_argument(f"--{flag}", dest="references", action=_AppendReference, const=flag, metavar="PATH",
                             help=f"an ordered {flag} reference (repeatable)")
-    parser.add_argument("--prompt", required=True)
+    parser.add_argument("--prompt")
     parser.add_argument("--output-path", type=Path, default=Path("outputs/mlx_fasth3_omniref.mp4"))
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=832)
@@ -105,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.compose_only:
+        if args.export is None or args.base_model_path is None:
+            parser.error("--compose-only needs --export and --base-model-path")
+        return args
+    if args.mlx_checkpoint is None or args.prompt is None:
+        parser.error("--mlx-checkpoint and --prompt are required unless --compose-only is set")
     if not args.references:
         parser.error("pass at least one ordered reference with --image, --video, or --audio")
     if not any(kind != "audio" for kind, _ in args.references):
@@ -163,6 +174,9 @@ def resolve_model_root(args: argparse.Namespace) -> Path:
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.compose_only:
+        print(f"Composed model directory: {resolve_model_root(args)}")
+        return
     from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
     from fastvideo.mlx_runtime.minimax_h3_reference import MiniMaxH3Reference
 

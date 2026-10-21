@@ -131,3 +131,25 @@ def test_parser_needs_a_model_root_or_the_pieces_to_build_one(capsys: pytest.Cap
         "--image", "a.png",
     ])
     assert args.composed_dir == Path("outputs/fasth3_omniref_mlx_model")
+
+
+def test_compose_only_needs_no_checkpoint_prompt_or_reference(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    export, base = _export(tmp_path), _base(tmp_path)
+    composed = tmp_path / "composed"
+    args = example.parse_args(["--compose-only", "--export", str(export), "--base-model-path", str(base),
+                               "--composed-dir", str(composed)])
+    example.run(args)
+    assert (composed / "transformer_ref").is_symlink()
+    assert str(composed) in capsys.readouterr().out
+
+
+def test_compose_only_still_needs_the_export_and_base(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        example.parse_args(["--compose-only", "--export", "/e"])
+    assert "--compose-only needs" in capsys.readouterr().err
+
+
+def test_generation_still_requires_a_checkpoint_and_prompt(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        example.parse_args(["--model-root", "/m", "--image", "a.png"])
+    assert "--mlx-checkpoint and --prompt are required" in capsys.readouterr().err
