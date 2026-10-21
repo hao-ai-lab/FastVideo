@@ -331,6 +331,7 @@ def _run_production_worker(output_path: Path, *, hybrid: bool) -> None:
     from fastvideo.distributed.parallel_state import maybe_init_distributed_environment_and_model_parallel
     from fastvideo.layers.rotary_embedding import _apply_rotary_emb
     from fastvideo.platforms import AttentionBackendEnum
+    from fastvideo.utils import set_mixed_precision_policy
 
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
@@ -343,6 +344,8 @@ def _run_production_worker(output_path: Path, *, hybrid: bool) -> None:
             tp_size=1, sp_size=world_size,
             ring_size=HYBRID_RING_SIZE if hybrid else world_size,
         )
+        # Match the BF16 inputs when selecting the backend at construction time.
+        set_mixed_precision_policy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
         with _component_attention_backend_scope(AttentionBackendEnum.FLASH_ATTN):
             attention = DistributedAttention(
                 num_heads=NUM_HEADS, head_size=HEAD_SIZE,
