@@ -238,6 +238,6 @@ separate point-to-point subnets without routes between them.
 
 ## Apple Silicon
 
-`fastvideo/mlx_runtime` has an MLX MiniMax-H3 runtime, but its pipeline is
-T2V/FL2VA-class. Running OmniRef on a Mac needs an MLX Ref2VA path and an MLX
-build of the NVFP4 decoder; it is not implemented.
+Apple Silicon runs OmniRef natively through MLX, with a locally converted
+INT8/INT6/INT4 DiT instead of NVFP4. See
+[FastH3 OmniRef on Apple Silicon (MLX)](fasth3_omniref_mlx.md).

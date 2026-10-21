@@ -5,29 +5,31 @@ image/video/audio references become one video+audio clip in the export's fused
 transformer forwards. The Apple Silicon runtime runs it natively through MLX,
 the same way it runs the text-to-video-audio FastH3 checkpoints.
 
-The CUDA counterpart is the FastH3 OmniRef consumer-devices page; it shares this
-one's packed layout and export contract, so a clip is built from the same
-request on either runtime. (Its page lands with the CUDA consumer stack, so the
-link resolves once that is in.)
+The CUDA counterpart is [FastH3 OmniRef inference](fasth3_omniref.md); it shares
+this page's packed layout and export contract, so a clip is built from the same
+request on either runtime.
 
 ## What you need
 
-1. A **FastH3 OmniRef PDD export** — `transformer_ref/`, the two scheduler
-   configs and `fastvideo_inference.json`.
+1. The **FastH3 OmniRef PDD export**
+   [`FastVideo/FastVideo-FastH3-Omni-8-Step-V1`](https://huggingface.co/FastVideo/FastVideo-FastH3-Omni-8-Step-V1)
+   — `transformer_ref/`, the two scheduler configs and
+   `fastvideo_inference.json`. Use this BF16 release: the MLX converter needs
+   BF16 weights, so the packed NVFP4 CUDA export cannot be converted.
 2. A **base MiniMax-H3 snapshot** — `text_encoder/`, `tokenizer/`,
    `processor/`, `vae/`, `audio_vae/`. The export does not carry these.
 3. An **MLX conversion of `transformer_ref`**. The runtime reads a packed MLX
    checkpoint, not the diffusers shards. There is no FP4 on Apple Silicon, so
-   convert to INT8 (or INT6/INT4) - the same formats the T2VA MLX path uses.
+   convert to INT8, INT6 or INT4 - the same weight-only formats the T2VA MLX path
+   uses.
 
 Compose the first two into one directory of symlinks and convert the DiT:
 
 ```bash
-python examples/inference/basic/mlx_fasth3_omniref.py \
-  --export ./FastH3-OmniRef-QAD120 \
+python examples/inference/basic/mlx_fasth3_omniref.py --compose-only \
+  --export ./FastVideo-FastH3-Omni-8-Step-V1 \
   --base-model-path ./MiniMax-H3 \
-  --composed-dir ./FastH3-OmniRef-composed \
-  --mlx-checkpoint ./placeholder --prompt x --image reference.png   # composes, then fails on the DiT
+  --composed-dir ./FastH3-OmniRef-composed
 
 python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
   --model-root ./FastH3-OmniRef-composed/transformer_ref \
@@ -71,18 +73,13 @@ and the same contract ladder as the CUDA path. Where it differs:
 
 - **No NVFP4.** The MLX DiT is an INT8/INT6/INT4 weight-only conversion, and
   the text encoder and VAEs are the base snapshot's rather than the NVFP4
-  ones the CUDA consumer stack prefers. The export's bf16-kept blocks land
-  where the calibration put them; nothing is FP4. An NVFP4 text encoder
-  still works through the resident MLX encoder path if you have one.
-- **VSA reference regions are dense prefix.** With `--vsa`, the reference rows
-  ride as dense prefix tiles split per reference. The CUDA path's
-  `p2_multi_region` policy sparsifies each reference video region at
-  `vsa_ref_keep_rate` instead, so reference rows are treated more conservatively
-  here. Reference-conditioned VSA also needs the checkpoint converted with
-  `--include-vsa`, like the T2VA path.
-- **No 128-token VSA tile.** The contract's `vsa_tile_size` is the trained 128,
-  but MLX only shapes tiles of 64 and 256, so `--vsa-tile-size` has to be set
-  rather than taken from the contract.
+  ones the CUDA consumer stack prefers. An NVFP4 text encoder still works
+  through the resident MLX encoder path if you have one.
+- **VSA follows the contract.** With VSA on (the default for a VSA contract),
+  the trained tile size, sparsity and `p2_multi_region` reference policy with
+  its `vsa_ref_keep_rate` are read from `fastvideo_inference.json`. VSA needs the
+  checkpoint converted with `--include-vsa`, like the T2VA path; without it the
+  run falls back to dense attention with a warning.
 - **The prefix split has no MLX equivalent.** The CUDA consumer route runs dense
   prefix query tiles at 8-bit Q/K to keep conditioning out of FP4 rounding;
   there is no FP4 kernel to split away from on Apple Silicon.
@@ -121,7 +118,7 @@ encoder is a LightVAE file, which embeds the config and latent statistics).
   `--video-decode-backend taeh3`. Use `h3-vae`.
 - **`not a Ref2VA contract`** — the export is a T2VA one; the PDD ladder and the
   reference layout come from a `model_type: ref2va` contract.
-- **`VSA tile_size must be one of [64, 256]`** — you passed the contract's 128.
-  Pass `--vsa-tile-size 64`.
+- **`vsa_tile_size ... trained with`** — `--vsa-tile-size` differs from the
+  contract's trained tile. Leave it unset.
 - **`VSA-H3 cannot run with this packed layout`** — the tile size does not fit
-  the reference prefix. Try `--vsa-tile-size 64`, or drop `--vsa`.
+  the reference prefix. Drop `--vsa` to run dense.

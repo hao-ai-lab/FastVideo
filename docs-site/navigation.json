@@ -98,6 +98,10 @@
             "href": "/inference/fasth3_omniref"
           },
           {
+            "label": "FastH3 OmniRef on Apple Silicon",
+            "href": "/inference/fasth3_omniref_mlx"
+          },
+          {
             "label": "DGX Spark tuning",
             "href": "/getting_started/installation/spark_performance"
           },
