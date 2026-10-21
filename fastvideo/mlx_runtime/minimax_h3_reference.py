@@ -127,10 +127,6 @@ def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
     return typed
 
 
-# ---------------------------------------------------------------------------
-# Decoding
-# ---------------------------------------------------------------------------
-
 
 def _import_av() -> Any:
     try:
@@ -222,10 +218,6 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
         result = np.ascontiguousarray(np.rot90(result, k=-turns, axes=(1, 2)))
     return result, float(rate), soundtrack
 
-
-# ---------------------------------------------------------------------------
-# Normalization
-# ---------------------------------------------------------------------------
 
 
 def _cap_canvas_scale(area: float, max_pixels: int | None) -> float:
@@ -459,10 +451,6 @@ def prepare_reference(
     prepared.has_audio = True
     return prepared
 
-
-# ---------------------------------------------------------------------------
-# Presentation
-# ---------------------------------------------------------------------------
 
 
 def build_ref2va_presentation(

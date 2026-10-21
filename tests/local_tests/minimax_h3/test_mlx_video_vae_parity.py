@@ -224,10 +224,6 @@ def test_tiled_decode_matches_untiled() -> None:
     _stats("tiled-vs-untiled", _to_np(tiled), _to_np(untiled), atol=2e-3, rtol=2e-3)
 
 
-# ---------------------------------------------------------------------------
-# Real released weights (bounded tile)
-# ---------------------------------------------------------------------------
-
 DEFAULT_MODEL_ROOT = Path(envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get() or Path.home() / "models/FastH3-Preview-v0.2")
 REAL_WEIGHTS_PRESENT = (DEFAULT_MODEL_ROOT / "vae").is_dir() and any(
     (DEFAULT_MODEL_ROOT / "vae").glob("*.safetensors"))
@@ -275,10 +271,6 @@ def load_released_weights_into_torch(model: AutoencoderKLMiniMaxH3, vae_dir: Pat
     unexpected = [k for k in unexpected]
     assert not unexpected, f"unexpected released keys: {unexpected[:5]}"
 
-
-# ---------------------------------------------------------------------------
-# Memory-bounded slabs, pruned (LightVAE) encoders, quantized decoder linears
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("slab_elements", [1, 256])

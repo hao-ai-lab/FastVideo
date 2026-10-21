@@ -93,10 +93,6 @@ class Qwen3VLVisionConfig:
         )
 
 
-# ---------------------------------------------------------------------------
-# geometry: HF smart-resize + bicubic resize + patchify
-# ---------------------------------------------------------------------------
-
 
 def _smart_resize_image(height: int, width: int, factor: int, min_pixels: int, max_pixels: int) -> tuple[int, int]:
     """HF image-processor smart resize: round to ``factor`` then clamp the area."""
@@ -325,10 +321,6 @@ def prepare_vision_inputs(
     return pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw
 
 
-# ---------------------------------------------------------------------------
-# vision transformer
-# ---------------------------------------------------------------------------
-
 
 def _rotate_half(x):
     first, second = mx.split(x, 2, axis=-1)
@@ -533,7 +525,6 @@ class MLXQwen3VLVisionModel:
             arrays.extend(merger.values())
         return arrays
 
-    # -- forward helpers --------------------------------------------------
 
     def _rotary_frequency_table(self, count: int) -> mx.array:
         positions = np.arange(count, dtype=np.float32)
@@ -670,10 +661,6 @@ def _mlp(hidden, weights: dict[str, mx.array], hidden_act: str):
     activated = _gelu_tanh(activated) if "tanh" in hidden_act else _gelu_exact(activated)
     return _linear(activated, weights["mlp.linear_fc2.weight"], weights["mlp.linear_fc2.bias"])
 
-
-# ---------------------------------------------------------------------------
-# mixed text/image/video MRoPE position ids
-# ---------------------------------------------------------------------------
 
 
 def qwen3_vl_rope_index(

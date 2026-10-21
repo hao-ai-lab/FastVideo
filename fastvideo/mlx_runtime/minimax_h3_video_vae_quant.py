@@ -24,7 +24,6 @@ from typing import Any
 import numpy as np
 import mlx.core as mx
 
-# mode name -> (mx.quantize mode, group_size, bits)
 QUANT_MODES: dict[str, tuple[str, int, int]] = {
     "nvfp4": ("nvfp4", 16, 4),
     "mxfp8": ("mxfp8", 32, 8),

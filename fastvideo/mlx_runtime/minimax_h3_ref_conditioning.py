@@ -67,10 +67,6 @@ def reference_draw_key(seed: int, stream: int, index: int):
     return mx.random.key(mixed)
 
 
-# ---------------------------------------------------------------------------
-# Vision preprocessing limits
-# ---------------------------------------------------------------------------
-
 
 def load_vision_limits(processor_dir: str | Path, *, video: bool = False) -> tuple[int, int]:
     """``(min_pixels, max_pixels)`` the Qwen3-VL image or video processor would use.
@@ -94,10 +90,6 @@ def load_vision_limits(processor_dir: str | Path, *, video: bool = False) -> tup
         int(raw.get("max_pixels", size.get("longest_edge", default_max))),
     )
 
-
-# ---------------------------------------------------------------------------
-# Text conditioning
-# ---------------------------------------------------------------------------
 
 
 def encode_reference_prompt(
@@ -177,10 +169,6 @@ def encode_reference_prompt(
     return hidden, tags
 
 
-# ---------------------------------------------------------------------------
-# Reference latents
-# ---------------------------------------------------------------------------
-
 
 def reference_condition_noise(
     shapes: tuple[tuple[int, int, int], ...],
@@ -211,7 +199,6 @@ def _visual_pixels(pixels: np.ndarray, pixels_are_uint8: bool) -> Any:
         array = array / 255.0
     if array.ndim == 3:
         array = array[None]
-    # (T, H, W, C) -> (1, C, T, H, W)
     return mx.array(np.ascontiguousarray(array.transpose(3, 0, 1, 2))[None])
 
 
