@@ -974,23 +974,36 @@ def rope_cos_sin(position_ids, rope_freq_dim: int, rope_theta: float):
     return mx.cos(freqs), mx.sin(freqs)
 
 
-def apply_h3_rotary(x, cos, sin):
-    """Rotate the RoPE prefix of each head, preserving the rest.
-
-    x: (S, H, D); cos/sin: (S, R) with R <= D. Half-split (GPT-NeoX style)
-    rotation inside the rotary prefix, computed in fp32.
-    """
+def _rotate_half_fp32(x, cos, sin):
+    """fp32 half-split rotation of a rotary prefix; cast back to the input dtype."""
     import mlx.core as mx
 
-    rotary_dim = cos.shape[-1]
-    x_rotary = x[..., :rotary_dim].astype(mx.float32)
-    x_pass = x[..., rotary_dim:]
+    x_rotary = x.astype(mx.float32)
     cos_b = cos[:, None, :].astype(mx.float32)
     sin_b = sin[:, None, :].astype(mx.float32)
     first_half, second_half = mx.split(x_rotary, 2, axis=-1)
     rotated = mx.concatenate([-second_half, first_half], axis=-1)
-    out = x_rotary * cos_b + rotated * sin_b
-    return mx.concatenate([out.astype(x.dtype), x_pass], axis=-1)
+    return (x_rotary * cos_b + rotated * sin_b).astype(x.dtype)
+
+
+_compiled_rotate_half = None
+
+
+def apply_h3_rotary(x, cos, sin):
+    """Rotate the RoPE prefix of each head, preserving the rest.
+
+    x: (S, H, D); cos/sin: (S, R) with R <= D. Half-split (GPT-NeoX style)
+    rotation inside the rotary prefix, computed in fp32. The fp32 math runs in
+    one compiled kernel so the (S, H, R) fp32 intermediates never hit memory.
+    """
+    import mlx.core as mx
+
+    global _compiled_rotate_half
+    if _compiled_rotate_half is None:
+        _compiled_rotate_half = mx.compile(_rotate_half_fp32)
+    rotary_dim = cos.shape[-1]
+    out = _compiled_rotate_half(x[..., :rotary_dim], cos, sin)
+    return mx.concatenate([out, x[..., rotary_dim:]], axis=-1)
 
 
 def _gate_weight_is_active(weight: Any) -> bool:

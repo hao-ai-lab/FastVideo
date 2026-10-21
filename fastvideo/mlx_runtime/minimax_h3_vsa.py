@@ -734,23 +734,31 @@ def _reference_full_mask_fits(geometry: MiniMaxH3VSAGeometry, heads: int) -> boo
             and mask_elements <= _REFERENCE_FULL_MASK_MAX_ELEMENTS)
 
 
-def _gather_selected_kv(k_tiles, v_tiles, block_idx, tile_elems: int):
+def _tile_rows(tiles):
+    """[H, n_tiles, tile_elems, D] -> contiguous [H * n_tiles, tile_elems * D], one row per (head, tile)."""
+    import mlx.core as mx
+
+    heads, n_tiles, tile_elems, dim = tiles.shape
+    return mx.contiguous(tiles).reshape(heads * n_tiles, tile_elems * dim)
+
+
+def _gather_selected_kv(k_rows, v_rows, block_idx, n_tiles: int, tile_elems: int):
     """Gather K/V tiles for one query-tile batch.
 
-    k_tiles/v_tiles: [H, n_tiles, tile_elems, D]
+    k_rows/v_rows: ``_tile_rows`` of [H, n_tiles, tile_elems, D]
     block_idx: [H, n_q, k_sel]
     returns K/V: [H, n_q, k_sel * tile_elems, D]
+
+    A row ``take`` moves whole tiles with contiguous copies; the equivalent
+    advanced-indexing gather over [H, n_tiles] runs ~3x slower on M4 Max.
     """
     import mlx.core as mx
 
     heads, n_q, k_sel = block_idx.shape
-    dim = k_tiles.shape[-1]
-    gathered_k = k_tiles[mx.arange(heads)[:, None, None], block_idx]
-    gathered_v = v_tiles[mx.arange(heads)[:, None, None], block_idx]
-    return (
-        gathered_k.reshape(heads, n_q, k_sel * tile_elems, dim),
-        gathered_v.reshape(heads, n_q, k_sel * tile_elems, dim),
-    )
+    dim = k_rows.shape[-1] // tile_elems
+    flat = (block_idx + (mx.arange(heads, dtype=block_idx.dtype) * n_tiles)[:, None, None]).reshape(-1)
+    shape = (heads, n_q, k_sel * tile_elems, dim)
+    return mx.take(k_rows, flat, axis=0).reshape(shape), mx.take(v_rows, flat, axis=0).reshape(shape)
 
 
 def _key_valid_mask(block_idx, variable_block_sizes, tile_elems: int):
@@ -780,7 +788,7 @@ def _reference_gather_target_bytes() -> int:
 
 
 def _reference_gather_query_chunk(heads: int, dim: int, k_sel: int, tile_elems: int, n_q: int) -> int:
-    """Bound gathered BF16 K/V by the device's gather budget."""
+    """Bound gathered BF16 K/V per chunk by the device's gather budget (two chunks are in flight)."""
     bytes_per_query = 4 * heads * max(k_sel, 1) * tile_elems * dim
     chunk = min(n_q, max(1, _reference_gather_target_bytes() // max(bytes_per_query, 1)))
     return int(chunk)
@@ -808,6 +816,8 @@ def _reference_gather_sdpa(
     q_tiles = q_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
     k_tiles = k_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
     v_tiles = v_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
+    k_rows = _tile_rows(k_tiles)
+    v_rows = _tile_rows(v_tiles)
     q_video = q_tiles[:, geometry.num_prefix_tiles:]  # [H, V, tile_elems, D]
     n_q = int(q_video.shape[1])
     k_sel = int(block_idx.shape[-1])
@@ -818,7 +828,7 @@ def _reference_gather_sdpa(
         idx = block_idx[:, start:end, :]
         n_chunk = end - start
         k_sel = int(idx.shape[-1])
-        gathered_k, gathered_v = _gather_selected_kv(k_tiles, v_tiles, idx, tile_elems)
+        gathered_k, gathered_v = _gather_selected_kv(k_rows, v_rows, idx, n_tiles, tile_elems)
         valid = _key_valid_mask(idx, geometry.variable_block_sizes, tile_elems)
         valid = valid.reshape(heads, n_chunk, k_sel * tile_elems)
         q_bh = mx.contiguous(q_video[:, start:end].reshape(heads * n_chunk, tile_elems, dim)[None])
@@ -827,8 +837,14 @@ def _reference_gather_sdpa(
         mask = valid.reshape(1, heads * n_chunk, 1, k_sel * tile_elems)
         out = mx.fast.scaled_dot_product_attention(q_bh, k_bh, v_bh, scale=scale, mask=mask)[0]
         out = out.reshape(heads, n_chunk, tile_elems, dim)
-        mx.eval(out)
+        # Queue this chunk, then wait for the previous one: the GPU always has the next chunk's
+        # gather+SDPA ready (no idle gap while Python builds the graph) and at most two chunks'
+        # gathered K/V are alive.
+        mx.async_eval(out)
         chunks.append(out)
+        if len(chunks) > 1:
+            mx.eval(chunks[-2])
+    mx.eval(chunks[-1])
     out = mx.concatenate(chunks, axis=1) if len(chunks) > 1 else chunks[0]
     return out.transpose(1, 2, 0, 3).reshape(n_q * tile_elems, heads, dim)
 
