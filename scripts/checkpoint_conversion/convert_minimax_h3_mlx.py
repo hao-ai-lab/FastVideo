@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Convert the FastH3 Preview DiT into pre-quantized MLX checkpoints.
+"""Convert the FastH3 DiT into pre-quantized (or dense BF16) MLX checkpoints.
 
 Each output dir is a self-contained, shippable artifact in the
 `mlx_h3_dit.safetensors` format: weights already cast/quantized, optional
@@ -22,6 +22,17 @@ checkpoints to a new directory — do not overwrite an existing dense export.
         --model-root ~/models/FastH3-Preview-v0.2/transformer \\
         --out ~/models/FastH3-MLX-vsa \\
         --formats int6 --include-vsa
+
+``bf16`` writes a dense, unquantized checkpoint (~38 GiB for the 33B body; AdaLN
+table baked and its projection weights dropped, exactly like the quantized
+formats). It targets large-memory Macs (96 GB+) where MLX runs dense BF16
+matmul fastest. Conversion holds the dense body resident while saving, so it
+needs roughly the output size in free memory.
+
+    python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
+        --model-root ~/models/FastH3/transformer_ref \\
+        --out ~/models/FastH3-MLX-vsa \\
+        --formats bf16 --include-vsa
 
 Output layout: `~/models/FastH3-MLX/<format>/mlx_h3_dit.safetensors` + manifest.
 """
@@ -55,8 +66,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (
 
 logger = init_logger(__name__)
 
-SUPPORTED_FORMATS = ("int8", "int6", "int4")
-DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
+DENSE_FORMAT = "bf16"
+QUANTIZED_FORMATS = ("int8", "int6", "int4")
+SUPPORTED_FORMATS = (*QUANTIZED_FORMATS, DENSE_FORMAT)
+DEFAULT_FORMATS = " ".join(QUANTIZED_FORMATS)
 
 
 def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
@@ -122,8 +135,8 @@ def main() -> None:
     cache_timesteps = _adaln_cache_timesteps(args.model_root)
 
     for fmt in formats:
-        spec = MLXQuantizationSpec.from_name(fmt)
-        if spec is None:
+        spec = None if fmt == DENSE_FORMAT else MLXQuantizationSpec.from_name(fmt)
+        if spec is None and fmt != DENSE_FORMAT:
             raise ValueError(f"Expected a quantized H3 format, got {fmt}.")
         ensure_quantization_supported(spec)
         dtype = "bf16"
