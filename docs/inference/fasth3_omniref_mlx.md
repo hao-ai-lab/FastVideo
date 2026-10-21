@@ -20,8 +20,8 @@ request on either runtime.
    `processor/`, `vae/`, `audio_vae/`. The export does not carry these.
 3. An **MLX conversion of `transformer_ref`**. The runtime reads a packed MLX
    checkpoint, not the diffusers shards. There is no FP4 on Apple Silicon, so
-   convert to INT8, INT6 or INT4 - the same weight-only formats the T2VA MLX path
-   uses.
+   convert to INT8, INT6 or INT4 (the same weight-only formats the T2VA MLX path
+   uses), or to dense BF16 on a large-memory Mac (see below).
 
 Compose the first two into one directory of symlinks and convert the DiT:
 
@@ -39,6 +39,39 @@ python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
 The composed directory is not throwaway: the runtime reads the contract
 (`fastvideo_inference.json`) from it to resolve the trained step ladder, and the
 VAEs and text encoder from it for every request.
+
+## DiT formats, memory and GEMM path
+
+`convert_minimax_h3_mlx.py --formats` takes `int8`, `int6`, `int4` and `bf16`.
+`bf16` is a dense, unquantized checkpoint: the same layout as the quantized
+formats (AdaLN table baked, its projection weights dropped, VSA gates kept with
+`--include-vsa`), with every matrix stored as BF16. Conversion needs roughly
+the output size in free memory while it saves.
+
+| Format | DiT body in memory (approx.) | Use it on |
+|--------|------------------------------|-----------|
+| `int6` | ~17 GB | 36 GB and up |
+| `int8` | ~20 GB | 48 GB and up |
+| `bf16` | ~38 GB, plus activations | 96 GB and up |
+
+Add the text encoder, VAEs and activations on top of the DiT figure. On a
+96 GB-or-larger Mac, prefer `bf16`: dequantizing INT weights once at load and
+keeping them resident is the same footprint, so the BF16 checkpoint is the way
+to hold dense weights. Apple M5 accelerates dense BF16 and FP16 matmul on the
+GPU neural accelerators, which can make the dense path faster than any
+quantized one; whether it does on your machine is a measurement, not a given.
+Do not load a BF16 DiT on a Mac that cannot hold it.
+
+Quantized checkpoints pick a linear path per layer. `--quant-gemm` (or
+`FASTVIDEO_MLX_QUANT_GEMM`) selects it; a `bf16` checkpoint ignores it:
+
+- `auto` (default): dequantize + dense GEMM for wide inputs, subject to
+  `FASTVIDEO_MLX_DQ_GEMM`, and `mx.quantized_matmul` otherwise.
+- `dequant`: dequantize + dense GEMM for every wide input, even if
+  `FASTVIDEO_MLX_DQ_GEMM=0`.
+- `qmm`: always `mx.quantized_matmul`.
+
+The same flag is on the example: `--quant-gemm {auto,dequant,qmm}`.
 
 ## Generate
 
