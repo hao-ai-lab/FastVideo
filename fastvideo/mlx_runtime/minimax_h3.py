@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1057,8 +1058,13 @@ def _attention(
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
+    kv_sink: Callable[[Any, Any], None] | None = None,
 ):
-    """H3 attention: bias-free qkv, per-head qk RMSNorm, partial RoPE."""
+    """H3 attention: bias-free qkv, per-head qk RMSNorm, partial RoPE.
+
+    ``kv_sink`` receives the post-norm, post-rotary K and V ([S, H, D]); the
+    prefix K/V cache uses it to record the frozen rows.
+    """
     import mlx.core as mx
 
     seq_len = x.shape[0]
@@ -1070,6 +1076,8 @@ def _attention(
     if use_rope:
         q = apply_h3_rotary(q, cos, sin)
         k = apply_h3_rotary(k, cos, sin)
+    if kv_sink is not None:
+        kv_sink(k, v)
     gate = None
     if use_gate_compress and "attn.to_gate_compress.weight" in weights:
         gate = linear(x, weights["attn.to_gate_compress.weight"]).reshape(seq_len, num_heads, head_dim)
@@ -1148,6 +1156,7 @@ def _transformer_block(
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
+    kv_sink: Callable[[Any, Any], None] | None = None,
 ):
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = tables
 
@@ -1170,6 +1179,7 @@ def _transformer_block(
         vsa_impl=vsa_impl,
         vsa_stats=vsa_stats,
         use_gate_compress=use_gate_compress,
+        kv_sink=kv_sink,
     )
     hidden_states = residual + gate_msa[adaln_indices] * attn_output
 
@@ -1595,8 +1605,13 @@ class MLXMiniMaxH3DiT:
         step_index: int = 0,
         pdd_block: tuple[int, int] | None = None,
         pdd_integration_weights: dict[str, np.ndarray] | None = None,
+        record_prefix_kv: Any | None = None,
     ):
         """Denoise-step forward served entirely from the AdaLN cache.
+
+        ``record_prefix_kv`` (a ``MiniMaxH3PrefixKVCache``) additionally keeps
+        every block's K/V of the frozen text/reference rows for later
+        ``forward_target_rows`` steps; the outputs are unchanged.
 
         ``step_timesteps`` are this step's unique timesteps (sorted);
         ``row_timestep_inverse`` maps each packed row to one of them (the
@@ -1642,8 +1657,24 @@ class MLXMiniMaxH3DiT:
         # Sync per block: without this, MLX enqueues the entire 50-block graph
         # while the GPU lags behind, allocating every intermediate at once
         # (observed as an OOM kill on 36 GiB Macs at 480x832).
+        recorded: list[Any] = []
+        if record_prefix_kv is not None:
+            from fastvideo.mlx_runtime.minimax_h3_prefix_kv import frozen_prefix_rows
+
+            frozen_rows = frozen_prefix_rows(layout)
+            if record_prefix_kv.rows != frozen_rows or record_prefix_kv.num_layers != len(self.blocks):
+                raise ValueError(f"Prefix K/V cache is sized for {record_prefix_kv.num_layers} layers x "
+                                 f"{record_prefix_kv.rows} rows, the step has {len(self.blocks)} x {frozen_rows}.")
+            record_prefix_kv.hidden_dtype = packed.dtype
+            record_prefix_kv.recorded_step = step_index
         for block_index, (block, tables) in enumerate(zip(self.blocks, cache.block_tables, strict=True)):
             vsa_kwargs = self._vsa_block_kwargs(block_index, step_index)
+            if record_prefix_kv is not None:
+
+                def kv_sink(k, v, _layer=block_index):
+                    recorded.extend(record_prefix_kv.store(_layer, k[:frozen_rows], v[:frozen_rows]))
+
+                vsa_kwargs["kv_sink"] = kv_sink
             packed = _transformer_block(
                 block,
                 packed,
@@ -1657,7 +1688,8 @@ class MLXMiniMaxH3DiT:
                 qk_norm_eps=self.qk_norm_eps,
                 **vsa_kwargs,
             )
-            mx.eval(packed)
+            mx.eval(packed, *recorded)
+            recorded.clear()
             if self.last_vsa_stats is not None:
                 self.last_vsa_stats.record(vsa_kwargs["vsa_stats"])
 
@@ -1679,6 +1711,16 @@ class MLXMiniMaxH3DiT:
             audio_bias,
         )
         return video_output, audio_output
+
+    def forward_target_rows(self, video_target_rows, audio_target_rows, **kwargs):
+        """Denoise-step forward over the target rows only, reusing recorded prefix K/V.
+
+        See ``minimax_h3_prefix_kv_forward.forward_target_rows``; returns the
+        (video, audio) outputs of the target rows alone.
+        """
+        from fastvideo.mlx_runtime.minimax_h3_prefix_kv_forward import forward_target_rows
+
+        return forward_target_rows(self, video_target_rows, audio_target_rows, **kwargs)
 
     __call__ = forward
 

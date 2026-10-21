@@ -665,18 +665,22 @@ def _block_indices_from_scores(
     exempt: bool,
     spans: tuple[tuple[int, int], ...] | None = None,
     span_sparsities: tuple[float, ...] | None = None,
+    query_scores_only: bool = False,
 ):
     """Return (block_idx [H, n_video_tiles, k_sel], block_num [H, n_video_tiles]).
 
     ``k_sel`` is the same for every query: all prefix tiles plus each video
-    region's own top-k, so the gather path keeps one shape.
+    region's own top-k, so the gather path keeps one shape. With
+    ``query_scores_only`` the rows of ``scores`` are already the video query
+    tiles to route (a subset of the video tiles), not the full tile grid.
     """
     import mlx.core as mx
 
     n_tiles = scores.shape[-1]
     heads = scores.shape[0]
     spans, topks = _region_plan(num_prefix_tiles, num_video_tiles, sparsity, exempt, spans, span_sparsities)
-    video_scores = scores[:, num_prefix_tiles:, :]
+    video_scores = scores if query_scores_only else scores[:, num_prefix_tiles:, :]
+    num_video_tiles = int(video_scores.shape[1])
     if all(k == end - start for k, (start, end) in zip(topks, spans, strict=True)):
         idx = mx.broadcast_to(mx.arange(n_tiles, dtype=mx.int32)[None, None, :], (heads, num_video_tiles, n_tiles))
         counts = mx.full((heads, num_video_tiles), n_tiles, dtype=mx.int32)
@@ -801,8 +805,12 @@ def _reference_gather_sdpa(
     block_idx,
     geometry: MiniMaxH3VSAGeometry,
     scale: float,
+    q_video_tiles=None,
 ):
     """Grouped gather + batched SDPA over video query tiles.
+
+    ``q_video_tiles`` ([H, V, tile_elems, D]) replaces the default of every
+    video query tile of ``q_tiled`` for callers that route only some queries.
 
     Full-sequence gather at 720p materializes tens of GiB of selected K/V, so
     query tiles are processed in memory-bounded chunks. This is the correctness
@@ -813,12 +821,15 @@ def _reference_gather_sdpa(
     tile_elems = geometry.tile_elems
     heads, dim = q_tiled.shape[1], q_tiled.shape[2]
     n_tiles = geometry.num_tiles
-    q_tiles = q_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
     k_tiles = k_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
     v_tiles = v_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
     k_rows = _tile_rows(k_tiles)
     v_rows = _tile_rows(v_tiles)
-    q_video = q_tiles[:, geometry.num_prefix_tiles:]  # [H, V, tile_elems, D]
+    if q_video_tiles is None:
+        q_tiles = q_tiled.reshape(n_tiles, tile_elems, heads, dim).transpose(2, 0, 1, 3)
+        q_video = q_tiles[:, geometry.num_prefix_tiles:]  # [H, V, tile_elems, D]
+    else:
+        q_video = q_video_tiles
     n_q = int(q_video.shape[1])
     k_sel = int(block_idx.shape[-1])
     query_chunk = _reference_gather_query_chunk(heads, dim, k_sel, tile_elems, n_q)
