@@ -32,14 +32,24 @@ MINIMAX_H3_MAX_REFERENCE_IMAGES = 9
 MINIMAX_H3_MAX_REFERENCE_VIDEOS = 3
 MINIMAX_H3_MAX_REFERENCE_AUDIOS = 3
 MINIMAX_H3_MAX_REFERENCES = 12
+# A continuation clip ends on a causal-VAE chunk boundary: 2, 7 or 12 latent frames.
+MINIMAX_H3_CONTINUATION_FRAMES = (5, 22, 39)
+# ForwardBatch.extra key for the decoded continuation clip, set by input preparation.
+MINIMAX_H3_PREPARED_CONTINUATION_KEY = "minimax_h3_prepared_continuation"
 
 
 @dataclass(frozen=True)
 class MiniMaxH3Reference:
-    """One ordered Ref2VA input; decoding is deferred until request preparation."""
+    """One ordered Ref2VA input; decoding is deferred until request preparation.
+
+    ``media_type="continuation"`` is not a reference: it is the end of an earlier video (5, 22 or 39 frames, on the
+    target canvas) that the request continues. The generated video starts by regenerating those frames, at the same
+    positions, so a caller joins the two by dropping them. At most one per request; it is not presented to the text
+    encoder and does not count toward the reference limits.
+    """
 
     source: Any
-    media_type: Literal["image", "video", "audio"] = "image"
+    media_type: Literal["image", "video", "audio", "continuation"] = "image"
     soundtrack: Any | None = None
     fps: float | None = None
     sample_rate: int | None = None
@@ -47,7 +57,7 @@ class MiniMaxH3Reference:
     def __post_init__(self) -> None:
         if self.source is None:
             raise ValueError("A MiniMax-H3 reference requires a media source.")
-        if self.media_type not in ("image", "video", "audio"):
+        if self.media_type not in ("image", "video", "audio", "continuation"):
             raise ValueError(f"Unsupported MiniMax-H3 reference type: {self.media_type!r}.")
         if self.soundtrack is not None and self.media_type != "video":
             raise ValueError("Only a video reference may carry a separate soundtrack.")
@@ -97,8 +107,13 @@ def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
         raise ValueError("MiniMax-H3 Ref2VA requires at least one reference.")
 
     typed = [coerce_reference(reference) for reference in references]
+    if sum(reference.media_type == "continuation" for reference in typed) > 1:
+        raise ValueError("MiniMax-H3 accepts at most one continuation clip.")
+    typed_references = [reference for reference in typed if reference.media_type != "continuation"]
+    if not typed_references:
+        raise ValueError("A MiniMax-H3 continuation needs at least one reference besides its clip.")
     counts = {
-        media_type: sum(reference.media_type == media_type for reference in typed)
+        media_type: sum(reference.media_type == media_type for reference in typed_references)
         for media_type in ("image", "video", "audio")
     }
     limits = {
@@ -109,9 +124,9 @@ def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
     for media_type, limit in limits.items():
         if counts[media_type] > limit:
             raise ValueError(f"MiniMax-H3 accepts at most {limit} {media_type} references.")
-    if len(typed) > MINIMAX_H3_MAX_REFERENCES:
+    if len(typed_references) > MINIMAX_H3_MAX_REFERENCES:
         raise ValueError(f"MiniMax-H3 accepts at most {MINIMAX_H3_MAX_REFERENCES} references.")
-    if counts["audio"] == len(typed):
+    if counts["audio"] == len(typed_references):
         raise ValueError("Audio references must be paired with at least one image or video reference.")
     return typed
 
@@ -321,6 +336,8 @@ def prepare_reference(
     target_sample_rate: int,
 ) -> MiniMaxH3PreparedReference:
     """Decode and normalize one deferred Ref2VA medium."""
+    if reference.media_type == "continuation":
+        raise ValueError("A continuation clip is decoded by prepare_continuation, not as a reference.")
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
         source = reference.source
@@ -377,19 +394,58 @@ def prepare_reference(
     return prepared
 
 
+@dataclass
+class MiniMaxH3PreparedContinuation:
+    """A decoded continuation clip: 24-fps RGB frames on the target canvas, and its soundtrack if it has one."""
+
+    frames: np.ndarray
+    waveform: torch.Tensor | None = None
+
+
+def prepare_continuation(
+    reference: MiniMaxH3Reference,
+    height: int,
+    width: int,
+    target_sample_rate: int,
+) -> MiniMaxH3PreparedContinuation:
+    """Decode a continuation clip, resampled to 24 fps; its frames and canvas must match the contract."""
+    if isinstance(reference.source, str | os.PathLike):
+        frames, fps, soundtrack = decode_reference_video(reference.source)
+    else:
+        frames, fps, soundtrack = reference_media_to_uint8(reference.source), float(MINIMAX_H3_FPS), None
+    frames = resample_reference_frames(frames, fps)
+    if frames.shape[0] not in MINIMAX_H3_CONTINUATION_FRAMES:
+        raise ValueError(f"A continuation clip must have {', '.join(map(str, MINIMAX_H3_CONTINUATION_FRAMES))} frames "
+                         f"at {MINIMAX_H3_FPS} fps, got {frames.shape[0]}.")
+    if frames.shape[1:3] != (height, width):
+        raise ValueError(f"A continuation clip must be on the target canvas {width}x{height}, "
+                         f"got {frames.shape[2]}x{frames.shape[1]}.")
+    waveform = None
+    if soundtrack is not None:
+        waveform = prepare_reference_waveform(soundtrack[0],
+                                              soundtrack[1],
+                                              target_sample_rate,
+                                              max_duration=frames.shape[0] / MINIMAX_H3_FPS)
+    return MiniMaxH3PreparedContinuation(frames=frames, waveform=waveform)
+
+
 __all__ = [
     "MINIMAX_H3_MAX_REFERENCES",
     "MINIMAX_H3_MAX_REFERENCE_AUDIOS",
     "MINIMAX_H3_MAX_REFERENCE_IMAGES",
     "MINIMAX_H3_MAX_REFERENCE_VIDEOS",
+    "MINIMAX_H3_CONTINUATION_FRAMES",
+    "MINIMAX_H3_PREPARED_CONTINUATION_KEY",
     "MINIMAX_H3_QWEN_TEMPORAL_PATCH",
     "MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS",
     "MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE",
     "coerce_reference",
+    "MiniMaxH3PreparedContinuation",
     "MiniMaxH3PreparedReference",
     "MiniMaxH3Reference",
     "decode_reference_audio",
     "decode_reference_video",
+    "prepare_continuation",
     "prepare_reference",
     "prepare_reference_frames",
     "prepare_reference_image",

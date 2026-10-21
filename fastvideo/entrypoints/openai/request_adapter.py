@@ -214,6 +214,15 @@ async def prepare_reference_media(
                                                          policy=policy)
             if remote:
                 track(request.video_url)
+        if request.continuation_video:
+            remote = is_remote(request.continuation_video)
+            request.continuation_video = await _materialize_video(request.continuation_video,
+                                                                  os.path.join(uploads_dir,
+                                                                               f"{request_id}_continuation"),
+                                                                  max_bytes=max_bytes,
+                                                                  policy=policy)
+            if remote:
+                track(request.continuation_video)
     except BaseException:
         # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
         discard_materialized_media(created)
@@ -371,6 +380,8 @@ def _apply_reference_inputs(
         references = [MiniMaxH3Reference(source=source, media_type="image") for source in images]
         references.extend(MiniMaxH3Reference(source=source, media_type="video") for source in videos)
         references.extend(MiniMaxH3Reference(source=source, media_type="audio") for source in audios)
+        if request.continuation_video:
+            references.append(MiniMaxH3Reference(source=request.continuation_video, media_type="continuation"))
         if references:
             try:
                 kwargs["references"] = validate_references(references)
@@ -380,6 +391,9 @@ def _apply_reference_inputs(
 
     if request.task is not None and model_family != "minimax_h3":
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
+    if request.continuation_video:
+        raise RequestAdaptationError("continuation_video requires a MiniMax-H3 server configured with "
+                                     "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
 
     if model_family == "minimax_h3" and (videos or audios):
         raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "

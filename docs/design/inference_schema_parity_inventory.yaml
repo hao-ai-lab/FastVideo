@@ -600,6 +600,7 @@ surfaces:
       audio_reference: request.inputs.references
       video_path: request.inputs.video_path
       video_url: request.inputs.video_path
+      continuation_video: request.inputs.references
       video_params: request.sampling.width,height,num_frames,fps
       size:
         target: request.sampling.width,height

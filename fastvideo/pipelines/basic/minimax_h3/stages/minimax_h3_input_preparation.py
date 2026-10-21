@@ -25,6 +25,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.reference import (
     MiniMaxH3PreparedReference,
     prepare_reference,
+    MINIMAX_H3_PREPARED_CONTINUATION_KEY,
+    prepare_continuation,
     validate_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -202,8 +204,19 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
         target_sample_rate = int(self.audio_vae.sampling_rate)
-        batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
+        clips = [reference for reference in references if reference.media_type == "continuation"]
+        batch.references = [
+            prepare_reference(reference, num_frames, target_sample_rate) for reference in references
+            if reference.media_type != "continuation"
+        ]
         self._write_target_geometry(batch, height, width, ratio, num_frames)
+        batch.extra.pop(MINIMAX_H3_PREPARED_CONTINUATION_KEY, None)
+        if clips:
+            continuation = prepare_continuation(clips[0], height, width, target_sample_rate)
+            if continuation.frames.shape[0] >= num_frames:
+                raise ValueError(f"A {continuation.frames.shape[0]}-frame continuation clip leaves no new frames in "
+                                 f"{num_frames}.")
+            batch.extra[MINIMAX_H3_PREPARED_CONTINUATION_KEY] = continuation
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
 
