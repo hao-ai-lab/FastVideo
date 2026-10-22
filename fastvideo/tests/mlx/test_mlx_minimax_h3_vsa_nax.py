@@ -345,7 +345,7 @@ def synthetic_nax_headers(monkeypatch, tmp_path):
 def test_nax_rejects_modified_validated_header(synthetic_nax_headers):
     include_root, dependency, hashes = synthetic_nax_headers
     _, actual_hashes = nax._header()
-    assert actual_hashes == hashes  # The original synthetic include tree is valid.
+    assert actual_hashes == hashes
     (include_root / dependency).write_text("// changed dependency with unchanged API\n")
     nax._header.cache_clear()
     with pytest.raises(RuntimeError, match="Unvalidated MLX private header") as captured:
@@ -359,7 +359,6 @@ def test_nax_rejects_unregistered_header_dependency(synthetic_nax_headers):
     (include_root / unknown).write_text("// This dependency is outside the validated set.\n")
     header_path = include_root / nax._NAX_HEADER
     header_path.write_text(header_path.read_text() + f'#include "{unknown}"\n')
-    # Accept the updated parent to isolate validation of its new dependency.
     hashes[nax._NAX_HEADER] = hashlib.sha256(header_path.read_bytes()).hexdigest()
     with pytest.raises(RuntimeError, match="Unvalidated MLX private header") as captured:
         nax._header()
