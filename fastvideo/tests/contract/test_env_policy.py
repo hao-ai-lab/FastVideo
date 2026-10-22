@@ -111,6 +111,7 @@ CI_ONLY_VARIABLES = {
     "GPU_BACKEND": "fastvideo-kernel/CMakeLists.txt (kernel build).",
     "FASTVIDEO_PERFORMANCE_PROFILE_VERSION": "fastvideo/tests/modal/launch_l40s_job.py; recorded in performance identity.",
     "FASTVIDEO_CONTAINER_IMAGE_REF": "Modal CI launchers; recorded in performance identity.",
+    "FASTVIDEO_CI_BACKEND": "DGX Spark CI runner sets spark4; see docs/contributing/ci_architecture.md.",
     "FASTVIDEO_SSIM_MODEL_ID": "fastvideo/tests/ssim/ci_runner.py (SSIM CI scheduler).",
     "FASTVIDEO_MODAL_IMAGE": "Modal launch tooling in fastvideo/tests/modal/.",
     "FASTVIDEO_MODAL_VOLUME": "Modal launch tooling in fastvideo/tests/modal/.",
