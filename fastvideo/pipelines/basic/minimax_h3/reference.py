@@ -59,11 +59,11 @@ class MiniMaxH3Reference:
             raise ValueError("A MiniMax-H3 reference requires a media source.")
         if self.media_type not in ("image", "video", "audio", "continuation"):
             raise ValueError(f"Unsupported MiniMax-H3 reference type: {self.media_type!r}.")
-        if self.soundtrack is not None and self.media_type != "video":
-            raise ValueError("Only a video reference may carry a separate soundtrack.")
-        if self.fps is not None and (self.media_type != "video" or isinstance(self.fps, bool)
+        if self.soundtrack is not None and self.media_type not in ("video", "continuation"):
+            raise ValueError("Only a video reference or a continuation clip may carry a separate soundtrack.")
+        if self.fps is not None and (self.media_type not in ("video", "continuation") or isinstance(self.fps, bool)
                                      or not isinstance(self.fps, Real) or self.fps <= 0):
-            raise ValueError("Reference `fps` must be positive and is only valid for video.")
+            raise ValueError("Reference `fps` must be positive and is only valid for video and continuation clips.")
         if self.sample_rate is not None and (self.media_type == "image" or isinstance(self.sample_rate, bool)
                                              or not isinstance(self.sample_rate, Integral) or self.sample_rate <= 0):
             raise ValueError("Reference `sample_rate` must be positive and is only valid for audio-bearing media.")
@@ -408,12 +408,22 @@ def prepare_continuation(
     width: int,
     target_sample_rate: int,
 ) -> MiniMaxH3PreparedContinuation:
-    """Decode a continuation clip, resampled to 24 fps; its frames and canvas must match the contract."""
+    """Decode a continuation clip, resampled to 24 fps; its frames and canvas must match the contract.
+
+    Like a video reference, the clip is a path (its own soundtrack, if any, is used) or in-memory frames, and
+    ``soundtrack``/``fps``/``sample_rate`` on the reference override what the file carries.
+    """
+    sound: torch.Tensor | None = None
+    sound_rate: int | None = None
     if isinstance(reference.source, str | os.PathLike):
-        frames, fps, soundtrack = decode_reference_video(reference.source)
+        frames, fps, decoded = decode_reference_video(reference.source)
+        if decoded is not None:
+            sound, sound_rate = decoded
     else:
-        frames, fps, soundtrack = reference_media_to_uint8(reference.source), float(MINIMAX_H3_FPS), None
-    frames = resample_reference_frames(frames, fps)
+        frames, fps = reference_media_to_uint8(reference.source), float(MINIMAX_H3_FPS)
+    if reference.soundtrack is not None:
+        sound, sound_rate = _resolve_audio_source(reference.soundtrack)
+    frames = resample_reference_frames(frames, float(reference.fps if reference.fps is not None else fps))
     if frames.shape[0] not in MINIMAX_H3_CONTINUATION_FRAMES:
         raise ValueError(f"A continuation clip must have {', '.join(map(str, MINIMAX_H3_CONTINUATION_FRAMES))} frames "
                          f"at {MINIMAX_H3_FPS} fps, got {frames.shape[0]}.")
@@ -421,9 +431,9 @@ def prepare_continuation(
         raise ValueError(f"A continuation clip must be on the target canvas {width}x{height}, "
                          f"got {frames.shape[2]}x{frames.shape[1]}.")
     waveform = None
-    if soundtrack is not None:
-        waveform = prepare_reference_waveform(soundtrack[0],
-                                              soundtrack[1],
+    if sound is not None:
+        waveform = prepare_reference_waveform(sound,
+                                              int(reference.sample_rate or sound_rate or target_sample_rate),
                                               target_sample_rate,
                                               max_duration=frames.shape[0] / MINIMAX_H3_FPS)
     return MiniMaxH3PreparedContinuation(frames=frames, waveform=waveform)
