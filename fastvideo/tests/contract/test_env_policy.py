@@ -98,7 +98,7 @@ EXTERNAL_ALLOWLIST = {
 # Variables that FastVideo's own CI and CI tooling define. They keep their names
 # and test code under fastvideo/tests/ reads them directly; the value names what sets them.
 CI_ONLY_VARIABLES = {
-    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-ssim.yml",
+    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-full-suite.yml",
     "PERF_RUN_SOURCE": ".buildkite/scripts/lanes/performance.sh",
     "PERF_UPLOAD_POLICY": ".buildkite/scripts/lanes/performance.sh",
     "PERF_REPORTS_DIR": ".buildkite/scripts/lanes/performance.sh",

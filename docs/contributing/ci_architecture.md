@@ -34,7 +34,7 @@ PR opened or updated
         `-- Explicit all-20-lane diagnostic run
 
   `-- weekly schedule on main
-        `-- Complete four-GPU SSIM matrix
+        `-- Complete Full Suite, including the four-GPU SSIM matrix
 ```
 
 CI is not one monolithic job:
@@ -59,7 +59,7 @@ Three Buildkite entry pipelines share the validated graph:
 | Pipeline | Trigger | Scope |
 |---|---|---|
 | `pr-fastcheck` | Automatic pull-request webhook | Six Fastcheck lanes |
-| `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, scheduled SSIM, explicit Full Suite, Fastcheck reruns, or one direct lane |
+| `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, the weekly Full Suite, explicit Full Suite, Fastcheck reruns, or one direct lane |
 | `fastvideo-performance-lane` | GitHub weekly scheduler | Direct performance lane |
 
 Each entry pipeline starts with the same trusted `pipeline-upload` job on the
@@ -161,7 +161,7 @@ selection never deletes or dynamically invents a Buildkite step.
 Integration steps depend on `golden-gate`. A failed selected golden prevents
 the expensive downstream jobs from starting; `/test full` still selects all
 twenty lanes. A condition-skipped golden satisfies the dependency, so direct
-lane reruns, scheduled SSIM, and training-only merge plans keep their existing
+lane reruns, the scheduled Full Suite, and training-only merge plans keep their existing
 meaning. This follows Buildkite's
 [conditional dependency rules](https://buildkite.com/docs/pipelines/configure/depends-on).
 No dependency allows failures. The trusted uploader accepts either the old
@@ -202,8 +202,8 @@ switch and VAE gates do not depend on an unused attention backend.
 Golden-gate and SSIM selections are basenames, not arbitrary pytest arguments.
 The private host checks the comma-separated allowlist before staging, and the
 container checks it again before invoking pytest. Shared quality-harness
-changes still run the complete owning lane. The full SSIM matrix also runs on
-`main` every Sunday at 05:00 UTC through `ci-scheduled-ssim.yml`; `/test ssim`
+changes still run the complete owning lane. The full suite, including the complete SSIM matrix, also runs on
+`main` every Sunday at 05:00 UTC through `ci-scheduled-full-suite.yml`; `/test ssim`
 and `/test full` remain available for deliberate complete runs.
 
 The four Buildkite workers may accept multiple jobs concurrently. The
@@ -581,7 +581,7 @@ through checks, commit statuses, or labels instead of PR/issue comments.
 | `.github/workflows/ci-precommit.yml` | Tier 1 pre-commit |
 | `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
 | `.github/workflows/ci-trigger-full-suite.yml` | Change-aware merge-gate trigger for `ready` PRs and new pushes |
-| `.github/workflows/ci-scheduled-ssim.yml` | Weekly complete SSIM trigger on `main` |
+| `.github/workflows/ci-scheduled-full-suite.yml` | Weekly Full Suite trigger on `main` |
 | `.github/workflows/ci-scheduled-performance.yml` | Weekly performance trigger with an immutable source SHA |
 | `.github/scripts/plan_merge_ci.py` | Trusted changed-path to integration-lane planner |
 | `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |

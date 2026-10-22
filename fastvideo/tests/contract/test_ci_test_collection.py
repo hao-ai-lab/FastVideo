@@ -250,15 +250,21 @@ def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
     assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
 
 
-def test_full_ssim_has_a_weekly_slurm_schedule():
-    workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").read_text()
+def test_full_suite_has_a_weekly_slurm_schedule():
+    workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-full-suite.yml").read_text()
     ssim_step = next(step for step in _pipeline_steps() if step["key"] == "ssim")
 
+    assert not (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").exists()
     assert 'cron: "0 5 * * 0"' in workflow
-    assert 'TEST_SCOPE: "scheduled"' in workflow
-    assert 'TEST_TYPE: "ssim"' in workflow
+    assert "workflow_dispatch:" in workflow
+    assert 'TEST_SCOPE: "full"' in workflow
+    assert 'FULL_SUITE: "true"' in workflow
+    assert 'TEST_TYPE: "all"' in workflow
+    assert 'PR_TITLE: "Scheduled full suite"' in workflow
+    assert "Weekly full suite on main" in workflow
     assert "modal" not in workflow.lower()
-    assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
+    # The full suite includes the complete SSIM matrix.
+    assert 'build.env("TEST_SCOPE") == "full"' in str(ssim_step["if"])
 
 
 def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
