@@ -387,7 +387,7 @@ def test_untile_hidden_never_consumes_padded_query_rows() -> None:
 
 
 def test_simd_unsupported_tile_falls_back_to_reference() -> None:
-    assert PUBLIC_VSA_IMPLS == ("auto", "reference", "simd")
+    assert PUBLIC_VSA_IMPLS == ("auto", "reference", "simd", "sdpa")
     assert "metal" not in PUBLIC_VSA_IMPLS
     assert resolve_impl("simd", head_dim=128, tile_elems=256) == "reference"
     assert resolve_impl("simd", head_dim=64, tile_elems=64) == "reference"

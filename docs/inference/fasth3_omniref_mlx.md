@@ -73,6 +73,20 @@ Quantized checkpoints pick a linear path per layer. `--quant-gemm` (or
 
 The same flag is on the example: `--quant-gemm {auto,dequant,qmm}`.
 
+### Opt-in M5 attention backend
+
+`--vsa-impl sdpa` evaluates the trained VSA tile mask through fused MLX SDPA,
+sharing each attention head's K/V across its query tiles. On M5, the built-in
+matrix operations can be faster than the custom SIMD kernel even though they
+visit masked keys. The default `auto` selection is unchanged.
+
+This backend keeps the reference resolution, selected tiles, ragged-row masks,
+and compression gate. Accumulation differs from the SIMD backend, so outputs
+are not bit-identical. It supports tiles 64/128 with head dimension 128 and
+raises if fused SDPA is unavailable. Prefix K/V reuse is not supported; do not
+combine it with `--reuse-prefix-kv`. Query tiles are processed in chunks of at
+most 128, capped at 256 MiB per boolean-mask chunk with two chunks in flight.
+
 ## Generate
 
 ```bash

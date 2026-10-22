@@ -85,6 +85,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_sdpa.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_prefix_kv.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
@@ -158,6 +159,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_sdpa.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_prefix_kv.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
