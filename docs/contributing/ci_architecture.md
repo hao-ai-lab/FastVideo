@@ -108,6 +108,23 @@ kernels, unit tests, and DreamVerse. Static steps replace the former
 host-side path-filter plugin: the login plane never checks out or executes PR
 code.
 
+#### Backend routing (Slurm or DGX Spark)
+
+Every step keeps `queue: "ci-runner"` and adds a `backend` agent tag.
+
+| Lanes | `backend` tag |
+|---|---|
+| unit, dreamverse, encoder, vae, transformer, kernel-tests, lora-inference, lora-extraction, inference-vmoba, api-server, eval, train-framework, golden-gate | `"${FV_SPARK_BACKEND:-slurm}"` (Spark-capable) |
+| ssim, training, distillation, self-forcing, lora-training, training-vsa, performance | `"slurm"` (multi-GPU or GB200 baselines) |
+
+With `FV_SPARK_BACKEND` unset every lane routes to Slurm exactly as before.
+Setting it to `spark4` moves only the Spark-capable lanes to a GB10 runner.
+That runner exports `FASTVIDEO_CI_BACKEND=spark4`, which the lane scripts and
+a few tests honor to skip GB200-only coverage (for example the LTX-2 finetune
+test, which needs more than 128 GB). GB10 golden references are keyed by
+`NVIDIA_GB10`; see `fastvideo/tests/golden_gate`. The private uploader policy
+must allow the `backend` agent key before this routing is active.
+
 ### Tier 3: Change-Aware Merge Gate
 
 | Attribute | Value |
