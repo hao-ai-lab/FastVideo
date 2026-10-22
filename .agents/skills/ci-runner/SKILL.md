@@ -51,8 +51,8 @@ and the coordination contract with that bundle.
 - Focused merge builds may pass allowlisted golden-gate and SSIM test basenames.
   The private host validates the lane plan and basenames before staging them,
   and the in-container scripts validate them again. Direct `/test ssim`,
-  explicit `/test full`, and the weekly main-branch schedule run the complete
-  SSIM matrix.
+  explicit `/test full`, and the weekly main-branch Full Suite
+  (`ci-scheduled-full-suite.yml`) run the complete SSIM matrix.
 - The trusted uploader serves exactly three entry pipelines:
   `pr-fastcheck` for automatic PR builds, `ci` for slash-command/ready-label
   API builds, and `fastvideo-performance-lane` for the weekly schedule. Keep
