@@ -17,7 +17,11 @@ the clip's aspect ratio at the inference short edge (`resolve_canvas_size`), and
 the frame count is the longest `17 * n + 5` that fits the clip, capped at 362
 (about 15 seconds; a longer clip trains on its start). Clips under 124 frames at
 24 fps fail. Target audio is cut to the samples covered by that frame count's
-whole audio latents, so the record matches what inference generates.
+whole audio latents, so the record matches what inference generates. To train
+on those lengths, leave `training.data.num_latent_t` and `num_frames` unset in
+the training config. When they are set, every row is cropped to that length;
+for example, the 124-frame overfit values crop a 10-second clip to its first
+5.17 seconds while its caption still describes all 10.
 
 ## Input
 

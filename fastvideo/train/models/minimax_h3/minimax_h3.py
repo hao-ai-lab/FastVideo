@@ -19,6 +19,7 @@ from fastvideo.dataset.sequence_capacity import select_sequence_capacity, valida
 from fastvideo.distributed import get_sp_group
 from fastvideo.forward_context import set_forward_context
 from fastvideo.layers.pdd import shifted_noise_amount
+from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -48,6 +49,8 @@ from fastvideo.train.utils.activation_checkpoint import (activation_offload_cont
 from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
 from fastvideo.train.utils.lora import finalize_lora_training, LoraConfig
+
+logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import TrainingConfig
@@ -370,10 +373,26 @@ class MiniMaxH3Model(ModelBase):
 
         if latents_source == "data" and native_shapes:
             self._validate_native_latents(raw_batch, video_latents, audio_latents)
+        elif latents_source == "data" and data_config.num_latent_t <= 0 and data_config.num_frames <= 0:
+            # With no fixed shape configured, each row trains at its own
+            # length, as the Ref2VA SFT preprocessor records it. Its video and
+            # audio latents must still describe the same frame count.
+            num_video_latents = int(video_latents.shape[2])
+            if (num_video_latents - 2) % 5:
+                raise ValueError(f"vae_latent has {num_video_latents} frames; MiniMax H3 encodes 5 * n + 2")
+            num_frames = (num_video_latents - 2) // 5 * 17 + 5
+            if audio_latents.shape[-1] != audio_latent_num_frames(num_frames):
+                raise ValueError(f"audio_latent has {audio_latents.shape[-1]} frames; {num_frames} video frames "
+                                 f"need {audio_latent_num_frames(num_frames)}")
         elif not native_shapes:
             # Preserve the legacy fixed-shape contract for configs that have
             # not opted into exact-shape bucketing.
             if data_config.num_latent_t > 0:
+                if video_latents.shape[2] > data_config.num_latent_t:
+                    logger.warning_once(
+                        f"Cropping vae_latent from {video_latents.shape[2]} to training.data.num_latent_t="
+                        f"{data_config.num_latent_t} frames, and audio to match. Leave num_latent_t and "
+                        "num_frames unset to train each row at its own length.")
                 video_latents = video_latents[:, :, :data_config.num_latent_t]
             expected_audio_frames = audio_latent_num_frames(data_config.num_frames)
             audio_latents = audio_latents[:, :, :, :expected_audio_frames]
