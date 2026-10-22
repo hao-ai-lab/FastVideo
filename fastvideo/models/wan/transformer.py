@@ -295,6 +295,7 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False,
                                    supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                                                 AttentionBackendEnum.FLASHINFER,
                                                                  AttentionBackendEnum.TORCH_SDPA,
                                                                  AttentionBackendEnum.ATTN_QAT_INFER))
 
