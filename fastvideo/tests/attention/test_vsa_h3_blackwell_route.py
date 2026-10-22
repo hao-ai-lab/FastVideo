@@ -16,6 +16,7 @@ import torch
 import fastvideo.attention.backends.video_sparse_attn_h3 as vsa_h3
 import fastvideo.envs as envs
 import fastvideo.logger as fastvideo_logger
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.attention.backends.video_sparse_attn_h3 import (VSA_PTX_BLACKWELL_ENV, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder,
                                                                _ptx_blackwell_unavailable_reason)
@@ -767,6 +768,7 @@ def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, e
     layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
     torch.nn.Module.__init__(layer)
     layer.attn_impl = impl
+    layer.backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3  # set by __init__; read by forward
     layer._compile_forward_enabled = True
     builder = MiniMaxH3VSAMetadataBuilder()
     counter = CompileCounter()
