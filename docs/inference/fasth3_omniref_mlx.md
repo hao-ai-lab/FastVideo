@@ -87,6 +87,20 @@ raises if fused SDPA is unavailable. Prefix K/V reuse is not supported; do not
 combine it with `--reuse-prefix-kv`. Query tiles are processed in chunks of at
 most 128, capped at 256 MiB per boolean-mask chunk with two chunks in flight.
 
+`--vsa-impl nax` is a separate opt-in backend for Apple M5 GPUs. It uses Metal
+TensorOps to visit only the selected key blocks and their valid rows, avoiding
+the dense mask and masked-key traversal of the SDPA backend. Dense prefix
+queries and the trained compression branch keep their existing implementations.
+The selected reference tokens, output resolution and denoising steps are unchanged.
+
+The NAX backend uses private helper headers from the installed MLX package;
+it accepts only the header hashes validated with MLX 0.32.4. Changed headers need
+numerical and generation validation before their hashes are accepted. Missing headers, unsupported GPUs
+and compilation failures raise errors rather than silently selecting another
+backend. Tiles 64/128 and head dimension 128 are supported. Prefix K/V reuse is
+not supported. Floating-point accumulation differs from both SIMD and SDPA,
+so the generated clip can differ even with the same seed. `auto` remains unchanged.
+
 ## Generate
 
 ```bash

@@ -1334,8 +1334,9 @@ class MiniMaxH3MLXPipeline:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
 
-        if vsa_impl == "sdpa" and reuse_prefix_kv:
-            raise ValueError("SDPA VSA does not support prefix K/V reuse; disable reuse or select another backend")
+        if vsa_impl in ("sdpa", "nax") and reuse_prefix_kv:
+            raise ValueError(
+                f"{vsa_impl.upper()} VSA does not support prefix K/V reuse; disable reuse or select another backend")
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         if inter_step_cooldown_s < 0:
