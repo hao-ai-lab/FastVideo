@@ -12,6 +12,13 @@ format, which stores already augmented `ref_visual_anchor` tensors. Keep using
 `preprocess_minimax_h3_ref2va` for that format. Do not rename or directly combine
 shards from these two schemas.
 
+The SFT preprocessor keeps each target clip's own geometry: the canvas follows
+the clip's aspect ratio at the inference short edge (`resolve_canvas_size`), and
+the frame count is the longest `17 * n + 5` that fits the clip, capped at 362
+(about 15 seconds; a longer clip trains on its start). Clips under 124 frames at
+24 fps fail. Target audio is cut to the samples covered by that frame count's
+whole audio latents, so the record matches what inference generates.
+
 ## Input
 
 Provide your own local MiniMax-H3 checkpoint with `vae`, `audio_vae`, `tokenizer`,
