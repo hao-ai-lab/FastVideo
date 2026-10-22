@@ -460,6 +460,8 @@ surfaces:
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
       vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
+      video_scheduler_shift: "MiniMax-H3 training-time video noise clock; inference samples with the checkpoint's scheduler config."
+      audio_scheduler_shift: "MiniMax-H3 training-time audio noise clock; inference samples with the checkpoint's scheduler config."
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
