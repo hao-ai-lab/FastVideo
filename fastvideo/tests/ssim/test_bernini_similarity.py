@@ -64,7 +64,6 @@ BERNINI_PARAMS = {
 BERNINI_MODEL_TO_PARAMS = {
     "Bernini-R-1.3B-Diffusers": BERNINI_PARAMS,
 }
-# The default gate already uses the released 480p / 81-frame / 40-step recipe.
 BERNINI_FULL_QUALITY_MODEL_TO_PARAMS = {
     "Bernini-R-1.3B-Diffusers": dict(BERNINI_PARAMS),
 }
