@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 from typing import Any
 
 import torch
@@ -15,6 +16,12 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.layers.pdd import PDDModalitySchedule, PDDSamplingPlan, build_pdd_sampling_plan
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.minimax_h3_token_reduction import (
+    MiniMaxH3TokenReduction,
+    MiniMaxH3TokenReductionSchedule,
+    build_token_reduction,
+    reduced_token_width,
+)
 from fastvideo.profiler import nvtx_range, profiler_region
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -120,6 +127,35 @@ def _h3_vsa_ref2va_segments(
                          f"packed sequence: reached row {cursor} + video {n_target_video} != "
                          f"{layout.real_sequence_length}.")
     return tuple(segments)
+
+
+def _h3_token_reduction_plan(
+    layout: MiniMaxH3PackedLayout,
+    patch_size: tuple[int, int, int],
+    schedule: MiniMaxH3TokenReductionSchedule,
+) -> MiniMaxH3TokenReduction:
+    """Pair rows of the generated video, which every H3 packing places last in row-major ``(t, h, w)`` order."""
+    if layout.pad_tokens:
+        raise ValueError("MiniMax-H3 token reduction does not support capacity padding rows.")
+    grid = (layout.num_video_latent_frames // patch_size[0], layout.latent_height // patch_size[1],
+            layout.latent_width // patch_size[2])
+    num_target_rows = grid[0] * grid[1] * grid[2]
+    video_start = layout.sequence_length - num_target_rows
+    target_rows = layout.video_indices[layout.num_condition_video_rows:]
+    if target_rows.numel() != num_target_rows or not torch.equal(target_rows.cpu(),
+                                                                 torch.arange(video_start, layout.sequence_length)):
+        raise ValueError("MiniMax-H3 token reduction needs the generated video to end the packed sequence.")
+    return build_token_reduction(layout.position_ids, video_start, grid, schedule)
+
+
+def _h3_token_reduced_segments(
+    segments: tuple[int | tuple[int, int, int], ...],
+    patch_size: tuple[int, int, int],
+) -> tuple[int | tuple[int, int, int], ...]:
+    """VSA-H3 segments of the reduced sequence: the generated video (last region) at half token width."""
+    frames, height, width = segments[-1]  # type: ignore[misc]
+    reduced_width = reduced_token_width(width // patch_size[2]) * patch_size[2]
+    return (*segments[:-1], (frames, height, reduced_width))
 
 
 class MiniMaxH3DenoisingStage(PipelineStage):
@@ -284,6 +320,25 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 logger.info("MiniMax-H3 VSA-H3: %d reference video region(s); %s; %d-token tiles.",
                             num_reference_regions, effect, vsa_tile_size)
 
+        token_reduction_schedule = MiniMaxH3TokenReductionSchedule.from_options(
+            getattr(fastvideo_args, "h3_token_reduction", {}))
+        token_reduction = None
+        reduced_vsa_metadata_builder = None
+        reduced_vsa_packed_segments: tuple[int | tuple[int, int, int], ...] = ()
+        if token_reduction_schedule is not None:
+            dit_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+            token_reduction = _h3_token_reduction_plan(layout, dit_patch_size, token_reduction_schedule).to(device)
+            logger.info(
+                "MiniMax-H3 token reduction: %d -> %d rows in blocks %d:%d (%d:%d for the first %d step(s)), "
+                "update scale %g.", token_reduction.sequence_length, token_reduction.reduced_length,
+                token_reduction_schedule.begin, token_reduction_schedule.end, token_reduction_schedule.begin,
+                token_reduction_schedule.early_end, token_reduction_schedule.early_steps,
+                token_reduction_schedule.update_scale)
+            if vsa_metadata_builder is not None:
+                # Its own builder, so each sequence length keeps its own tile buffers.
+                reduced_vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+                reduced_vsa_packed_segments = _h3_token_reduced_segments(vsa_packed_segments, vsa_patch_size)
+
         try:
             if full_cpu_offload:
                 self.transformer.to(device)
@@ -302,6 +357,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         break
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
+                    step_token_reduction = None
+                    if token_reduction is not None:
+                        assert token_reduction_schedule is not None
+                        step_token_reduction = dataclasses.replace(token_reduction,
+                                                                   end=token_reduction_schedule.end_for_step(index))
                     if vsa_metadata_builder is not None:
                         # Optional schedule: run the first N steps dense (sparsity 0
                         # selects every tile — parity-proven ≡ dense ≤2e-4); early
@@ -318,6 +378,23 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             tile_size=vsa_tile_size,
                             ref_keep_rate=vsa_ref_keep_rate,
                         )
+                        if step_token_reduction is not None:
+                            assert reduced_vsa_metadata_builder is not None
+                            reduced_attn_metadata = reduced_vsa_metadata_builder.build(
+                                current_timestep=index,
+                                patch_size=vsa_patch_size,
+                                VSA_sparsity=vsa_sparsity,
+                                packed_segments=reduced_vsa_packed_segments,
+                                device=device,
+                                exempt=vsa_exempt,
+                                dense_layers=vsa_dense_layers,
+                                tile_size=vsa_tile_size,
+                                ref_keep_rate=vsa_ref_keep_rate,
+                            )
+                            step_token_reduction = dataclasses.replace(step_token_reduction,
+                                                                       attn_metadata=reduced_attn_metadata)
+                    # Only pass the argument when reducing, so transformers without it keep working.
+                    reduction_kwargs = {} if step_token_reduction is None else {"token_reduction": step_token_reduction}
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
                     # reuse of pooled outputs as "accessing tensor output of
@@ -342,6 +419,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             video_indices=video_indices,
                             audio_indices=audio_indices,
                             text_indices=text_indices,
+                            **reduction_kwargs,
                         )
 
                     video_start = layout.num_condition_video_rows
