@@ -883,6 +883,10 @@ FASTVIDEO_TEST_GRADNORM_UPDATE = EnvBool(False,
                                          category="test",
                                          doc="Gradient-norm regression tests update their references.",
                                          deprecated_names=("FASTVIDEO_GRADNORM_UPDATE", ))
+FASTVIDEO_TEST_BERNINI_MODEL_DIR = EnvPath(
+    None,
+    category="test",
+    doc="Pinned official Bernini-R checkpoint directory for SSIM; unset downloads the immutable Hub revision.")
 FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR = EnvStr("black-forest-labs/FLUX.1-dev",
                                            category="test",
                                            doc="Model for the Flux text-to-image SSIM test.",

@@ -132,6 +132,11 @@ class FamilyCoverage:
 
 FAMILY_COVERAGE = (
     FamilyCoverage(
+        re.compile(r"(^|[/_.-])bernini([/_.-]|$)"),
+        (),
+        ("test_bernini_similarity.py", ),
+    ),
+    FamilyCoverage(
         re.compile(r"(^|[/_.-])flux[_-]?2([/_.-]|$)"),
         ("test_flux2_klein.py", ),
         ("test_flux2_similarity.py", ),

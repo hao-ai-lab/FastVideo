@@ -37,6 +37,24 @@ test("documentation navigation opens transferred guides", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30000 });
 });
 
+test("Bernini editing guide publishes the pinned recipe and links from the basic tutorial", async ({ page }) => {
+  await page.goto("/FastVideo/inference/examples/basic");
+  await expect(page.getByRole("link", { name: "basic_bernini_r.py", exact: true })).toHaveAttribute(
+    "href",
+    "https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_bernini_r.py",
+  );
+  await page.getByRole("link", { name: "checkpoint preparation and inference guide", exact: true }).click();
+  await expect(page).toHaveURL(/\/inference\/bernini_r\/?$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Bernini-R video editing" })).toBeVisible();
+  await expect(page.locator("main")).toContainText("ff4c5d4d2d31365c2ffeb30e9753065ee18f58ce");
+  await expect(page.locator("main")).toContainText("test_bernini_similarity.py");
+  await expect(page.locator("main")).toContainText("Minimum VRAM is unknown");
+  await expect(page.locator("main")).toContainText("Serving YAML and cookbook deployment: N/A");
+  await expect(
+    page.locator("#blume-nav-drawer").getByRole("link", { name: "Bernini-R video editing", exact: true }),
+  ).toHaveAttribute("href", "/FastVideo/inference/bernini_r");
+});
+
 test("the welcome page introduces the project and opens the cookbook", async ({ page }) => {
   await page.goto("/FastVideo");
   const logo = page.getByRole("heading", { level: 1, name: "Welcome to FastVideo" }).getByRole("img");

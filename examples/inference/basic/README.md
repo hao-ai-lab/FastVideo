@@ -18,6 +18,12 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 python examples/inference/basic/basic.py
 ```
 
+### Bernini-R video editing
+
+Use [basic_bernini_r.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_bernini_r.py) with a locally prepared
+Bernini-R 1.3B checkpoint and a source video. See the
+[checkpoint preparation and inference guide](https://haoailab.com/FastVideo/inference/bernini_r/).
+
 ### Apple Silicon (FastMetal-QAD)
 
 Use the MLX runtime with FastMetal-QAD. See the
