@@ -33,6 +33,11 @@ and the coordination contract with that bundle.
   A Spark runner sets `FASTVIDEO_CI_BACKEND=spark4`; gate cluster-only tests on
   that flag, never on memory heuristics. Keep
   `SPARK_CAPABLE_LANES` in `test_ci_test_collection.py` in sync.
+- The trusted uploader fills `FV_SPARK_BACKEND`: `spark4` for `fastcheck`,
+  `merge` and `direct` builds while an agent tagged
+  `queue=ci-runner,backend=spark4` is connected and not paused, `slurm`
+  otherwise. It rejects any other `backend` value. The upload step in each
+  entry pipeline requires `backend=slurm` so it never lands on the Spark runner.
 - Active CI contains no `pr_test.sh` command, Modal invocation, default queue,
   Buildkite plugin, `soft_fail`, or job-controlled artifact glob.
 - The six Fastcheck lanes use `:microscope:` labels. Full-Suite-only lanes use
