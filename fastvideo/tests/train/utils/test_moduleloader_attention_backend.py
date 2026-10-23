@@ -12,6 +12,7 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.utils import moduleloader
 from fastvideo.train.utils.training_config import (
     DistributedConfig,
+    ModelTrainingConfig,
     TrainingConfig,
 )
 
@@ -92,3 +93,75 @@ def test_load_transformer_restores_backend_when_loading_fails(
             attention_backend="ATTN_QAT_TRAIN",
         )
     assert _active_component_attention_backend_scope() is None
+
+
+def test_training_args_propagate_compile_settings() -> None:
+    training_config = TrainingConfig(
+        distributed=DistributedConfig(hsdp_shard_dim=1),
+        model=ModelTrainingConfig(
+            enable_torch_compile=True,
+            torch_compile_kwargs={"dynamic": False},
+        ),
+        pipeline_config=PipelineConfig(),
+    )
+
+    args = moduleloader._make_training_args(training_config, model_path="fake/model")
+
+    assert args.enable_torch_compile is True
+    assert args.torch_compile_kwargs == {"dynamic": False}
+
+
+def test_load_transformer_forwards_pre_fsdp_transform(monkeypatch, tmp_path) -> None:
+    training_config = TrainingConfig(
+        distributed=DistributedConfig(hsdp_shard_dim=1),
+        pipeline_config=PipelineConfig(),
+    )
+
+    def transform(module):
+        return module
+
+    captured = None
+
+    monkeypatch.setattr(moduleloader, "maybe_download_model", lambda path: str(tmp_path))
+    monkeypatch.setattr(
+        moduleloader,
+        "verify_model_config_and_directory",
+        lambda path: {"transformer": ("diffusers", "FakeTransformer")},
+    )
+
+    def _fake_load_module(**kwargs):
+        nonlocal captured
+        captured = getattr(kwargs["fastvideo_args"], "_pre_fsdp_transform", None)
+        return torch.nn.Linear(1, 1)
+
+    monkeypatch.setattr(moduleloader.PipelineComponentLoader, "load_module", _fake_load_module)
+
+    moduleloader.load_module_from_path(
+        model_path="fake/model",
+        module_type="transformer",
+        training_config=training_config,
+        pre_fsdp_transform=transform,
+    )
+
+    assert captured is transform
+
+
+def test_pre_fsdp_transform_rejects_non_transformer(monkeypatch, tmp_path) -> None:
+    training_config = TrainingConfig(
+        distributed=DistributedConfig(hsdp_shard_dim=1),
+        pipeline_config=PipelineConfig(),
+    )
+    monkeypatch.setattr(moduleloader, "maybe_download_model", lambda path: str(tmp_path))
+    monkeypatch.setattr(
+        moduleloader,
+        "verify_model_config_and_directory",
+        lambda path: {"vae": ("diffusers", "FakeVAE")},
+    )
+
+    with pytest.raises(ValueError, match="only be set when loading a transformer"):
+        moduleloader.load_module_from_path(
+            model_path="fake/model",
+            module_type="vae",
+            training_config=training_config,
+            pre_fsdp_transform=lambda module: module,
+        )

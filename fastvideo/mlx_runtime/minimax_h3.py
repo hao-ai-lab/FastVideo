@@ -50,13 +50,20 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from fastvideo.logger import init_logger
+
+if TYPE_CHECKING:
+    # Deferred: ``minimax_h3_reference`` imports this module's constants, so a
+    # runtime import here would close the cycle.
+    from fastvideo.mlx_runtime.minimax_h3_reference import MiniMaxH3PreparedReference
+
 from fastvideo.mlx_runtime.fastwan import (
     MLXQuantizationSpec,
     QuantizedMatrix,
@@ -72,11 +79,12 @@ from fastvideo.mlx_runtime.minimax_h3_vsa import (
     MiniMaxH3VSAGeometry,
     MiniMaxH3VSAStats,
     VSA_GATE_KEY_SUFFIX,
-    build_h3_tile_geometry,
+    build_h3_segment_geometry,
     dense_only_vsa_error,
     dit_seq_shape_from_layout,
     h3_vsa_attention,
     prefix_segments_from_layout,
+    ref2va_vsa_segments_from_layout,
 )
 
 logger = init_logger(__name__)
@@ -97,6 +105,8 @@ MINIMAX_H3_AUDIO_TAG = 2
 MINIMAX_H3_MODALITY_NUM = 3
 
 MINIMAX_H3_FPS = 24
+MINIMAX_H3_MIN_DURATION = 5.0
+MINIMAX_H3_MAX_DURATION = 15.0
 MINIMAX_H3_FRAMES_PER_CHUNK = 17
 MINIMAX_H3_LATENTS_PER_CHUNK = 5
 MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
@@ -105,6 +115,13 @@ MINIMAX_H3_KEYFRAME_NOISE_AUG = 0.999
 
 MINIMAX_H3_VIDEO_SHIFT = 12.0
 MINIMAX_H3_AUDIO_SHIFT = 3.0
+FASTH3_INFERENCE_CONTRACT = "fastvideo_inference.json"
+FASTH3_INFERENCE_CONTRACT_SCHEMA = "fasth3-inference-contract-v1"
+
+# A FastH3 Ref2VA PDD export writes a *different* contract than a DMD export
+# (``pdd_steps`` / ``pdd_step_indices`` / ``grid_max_t`` instead of
+# ``dmd_denoising_steps``); its fields are validated in
+# ``minimax_h3_contract_validation`` against the CUDA reader's rules.
 
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)
@@ -159,6 +176,13 @@ def align_num_frames(num_frames: int) -> int:
     while num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
         num_frames += 1
     return num_frames
+
+
+# Mirrors fastvideo/pipelines/basic/minimax_h3/packing.py: duration limits are
+# seconds, validated against the aligned buckets they map to. The 15-second
+# target (360 frames) pads to 362 on the causal-VAE grid.
+MINIMAX_H3_MIN_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS))
+MINIMAX_H3_MAX_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
 
 
 def video_latent_num_frames(num_frames: int) -> int:
@@ -267,6 +291,14 @@ class MiniMaxH3PackedLayout:
     latent_height: int
     latent_width: int
     num_audio_latents: int
+    # Per-reference conditioning spans in packed order (Ref2VA only; empty
+    # elsewhere): (kind, row_count, latent_shape) covering exactly the rows
+    # between the text tokens and the target audio. kind is "audio", "image",
+    # or "video"; latent_shape is the reference's raw latent (frames, height,
+    # width) for visual kinds and (0, 0, 0) for audio. A video reference with
+    # sound contributes two entries, its audio rows first. VSA-H3 uses them to
+    # tile (and sparsify) reference-video regions in place.
+    reference_segments: tuple[tuple[str, int, tuple[int, int, int]], ...] = ()
 
 
 def build_packed_layout(
@@ -362,6 +394,209 @@ def build_packed_layout(
     )
 
 
+def _reference_temporal_span(num_latent_frames: int) -> float:
+    """Advance the Ref2VA clock using its required sequential summation order."""
+    return sum(MINIMAX_H3_ROPE_FRAME_RESCALE *
+               MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
+               for index in range(num_latent_frames))
+
+
+def _frame_position_grid(
+    latent_height: int,
+    latent_width: int,
+    patch_h: int,
+    patch_w: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    sqrt_area = np.sqrt(latent_height * latent_width)
+    height_grid = spatial_position_grid(latent_height, patch_h, sqrt_area)
+    width_grid = spatial_position_grid(latent_width, patch_w, sqrt_area)
+    mesh_h, mesh_w = np.meshgrid(height_grid, width_grid, indexing="ij")
+    return np.stack([mesh_h.reshape(-1), mesh_w.reshape(-1)], axis=-1), width_grid
+
+
+def _fill_audio_positions(
+    position_ids: np.ndarray,
+    rows: slice,
+    num_audio_latents: int,
+    rotary_time: float,
+    width_grid: np.ndarray,
+) -> None:
+    time = rotary_time + np.arange(num_audio_latents, dtype=np.float64)
+    position_ids[rows, 0] = np.tile(time, MINIMAX_H3_AUDIO_CHANNELS)
+    position_ids[rows, 2] = np.concatenate([
+        np.full((num_audio_latents, ), float(width_grid[0]), dtype=np.float64),
+        np.full((num_audio_latents, ), float(width_grid[-1]), dtype=np.float64),
+    ])
+
+
+def _num_reference_video_rows(reference: MiniMaxH3PreparedReference, patch_size: tuple[int, int, int]) -> int:
+    patch_t, patch_h, patch_w = patch_size
+    geometry = (reference.num_latent_frames, reference.latent_height, reference.latent_width)
+    if any(value <= 0 for value in geometry):
+        raise ValueError(f"Incomplete visual reference geometry: {geometry}.")
+    if any(value % patch for value, patch in zip(geometry, patch_size, strict=True)):
+        raise ValueError(f"Visual reference geometry {geometry} is not divisible by patch {patch_size}.")
+    return (reference.num_latent_frames // patch_t) * (reference.latent_height // patch_h) * (reference.latent_width //
+                                                                                              patch_w)
+
+
+def build_ref2va_packed_layout(
+        text_token_tags: np.ndarray,
+        references: list[MiniMaxH3PreparedReference],
+        num_latent_frames: int,
+        latent_height: int,
+        latent_width: int,
+        num_audio_latents: int,
+        patch_size: tuple[int, int, int] = (1, 2, 2),
+) -> MiniMaxH3PackedLayout:
+    """Build the ``[text | ordered references | target audio | target video]`` layout.
+
+    Mirrors ``fastvideo.pipelines.basic.minimax_h3.packing.build_ref2va_packed_sequence``
+    so a reference-conditioned request packs the same rows, positions and
+    regions on both runtimes. References keep their declared order and each one
+    advances the shared rotary clock by what it occupies, which is what makes
+    the target rows continue after them rather than overlap.
+    """
+    if patch_size != (1, 2, 2):
+        raise ValueError(f"MiniMax-H3 Ref2VA requires patch_size=(1, 2, 2), got {patch_size}.")
+    if text_token_tags.ndim != 1:
+        raise ValueError(f"text_token_tags must be one-dimensional, got {text_token_tags.shape}.")
+    if not np.isin(text_token_tags, (MINIMAX_H3_TEXT_TAG, MINIMAX_H3_VIDEO_TAG)).all():
+        raise ValueError("text_token_tags may contain only text and vision tags.")
+    if not references:
+        raise ValueError("Ref2VA requires at least one prepared reference.")
+
+    patch_t, patch_h, patch_w = patch_size
+    target_geometry = (num_latent_frames, latent_height, latent_width)
+    if any(value <= 0 for value in target_geometry) or num_audio_latents <= 0:
+        raise ValueError("Ref2VA target latent geometry must be positive.")
+    if any(value % patch for value, patch in zip(target_geometry, patch_size, strict=True)):
+        raise ValueError(f"Target geometry {target_geometry} is not divisible by patch {patch_size}.")
+
+    visual_row_counts = [
+        0 if reference.media_type == "audio" else _num_reference_video_rows(reference, patch_size)
+        for reference in references
+    ]
+    for reference in references:
+        if reference.media_type == "audio" and not reference.has_audio:
+            raise ValueError("An audio reference must carry decoded waveform latents.")
+        if reference.has_audio and reference.num_audio_latents <= 0:
+            raise ValueError("An audio-bearing reference has no resolved audio latents.")
+
+    num_text_tokens = int(text_token_tags.shape[0])
+    num_target_video_rows = (num_latent_frames // patch_t) * (latent_height // patch_h) * (latent_width // patch_w)
+    num_target_audio_rows = num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+    num_reference_video_rows = sum(visual_row_counts)
+    num_reference_audio_rows = sum(reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS for reference in references
+                                   if reference.has_audio)
+    sequence_length = (num_text_tokens + num_reference_video_rows + num_reference_audio_rows + num_target_audio_rows +
+                       num_target_video_rows)
+
+    position_ids = np.zeros((sequence_length, 3), dtype=np.float64)
+    position_ids[:num_text_tokens, 0] = np.arange(num_text_tokens, dtype=np.float64)
+    target_frame_grid, target_width_grid = _frame_position_grid(latent_height, latent_width, patch_h, patch_w)
+
+    video_indices: list[np.ndarray] = []
+    audio_indices: list[np.ndarray] = []
+    reference_segments: list[tuple[str, int, tuple[int, int, int]]] = []
+    cursor = num_text_tokens
+    rotary_time = float(num_text_tokens)
+    for reference, visual_row_count in zip(references, visual_row_counts, strict=True):
+        visual_latent_shape = (reference.num_latent_frames, reference.latent_height, reference.latent_width)
+        if reference.media_type == "image":
+            reference_segments.append(("image", visual_row_count, visual_latent_shape))
+            rows = slice(cursor, cursor + visual_row_count)
+            cursor = rows.stop
+            video_indices.append(np.arange(rows.start, rows.stop))
+            frame_grid, _ = _frame_position_grid(
+                reference.latent_height,
+                reference.latent_width,
+                patch_h,
+                patch_w,
+            )
+            position_ids[rows, 0] = rotary_time
+            position_ids[rows, 1:] = frame_grid
+            rotary_time += 1.0
+        elif reference.media_type == "audio":
+            count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+            reference_segments.append(("audio", count, (0, 0, 0)))
+            rows = slice(cursor, cursor + count)
+            cursor = rows.stop
+            audio_indices.append(np.arange(rows.start, rows.stop))
+            _fill_audio_positions(position_ids, rows, reference.num_audio_latents, rotary_time, target_width_grid)
+            rotary_time += float(reference.num_audio_latents)
+        elif reference.media_type == "video":
+            audio_count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS if reference.has_audio else 0
+            if audio_count:
+                reference_segments.append(("audio", audio_count, (0, 0, 0)))
+            reference_segments.append(("video", visual_row_count, visual_latent_shape))
+            audio_rows = slice(cursor, cursor + audio_count)
+            video_rows = slice(audio_rows.stop, audio_rows.stop + visual_row_count)
+            cursor = video_rows.stop
+            if audio_count:
+                audio_indices.append(np.arange(audio_rows.start, audio_rows.stop))
+            video_indices.append(np.arange(video_rows.start, video_rows.stop))
+
+            frame_grid, width_grid = _frame_position_grid(
+                reference.latent_height,
+                reference.latent_width,
+                patch_h,
+                patch_w,
+            )
+            if audio_count:
+                _fill_audio_positions(
+                    position_ids,
+                    audio_rows,
+                    reference.num_audio_latents,
+                    rotary_time,
+                    width_grid,
+                )
+            frame_time = temporal_position_grid(reference.num_latent_frames, rotary_time)
+            rows_per_frame = frame_grid.shape[0]
+            position_ids[video_rows, 0] = np.repeat(frame_time, rows_per_frame)
+            position_ids[video_rows, 1:] = np.tile(frame_grid, (reference.num_latent_frames // patch_t, 1))
+            rotary_time += max(
+                float(reference.num_audio_latents if reference.has_audio else 0),
+                _reference_temporal_span(reference.num_latent_frames),
+            )
+        else:
+            raise ValueError(f"Unsupported prepared reference type: {reference.media_type!r}.")
+
+    audio_start = cursor
+    video_start = audio_start + num_target_audio_rows
+    _fill_audio_positions(position_ids, slice(audio_start, video_start), num_audio_latents, rotary_time,
+                          target_width_grid)
+    frame_time = temporal_position_grid(num_latent_frames, rotary_time)
+    position_ids[video_start:, 0] = np.repeat(frame_time, target_frame_grid.shape[0])
+    position_ids[video_start:, 1:] = np.tile(target_frame_grid, (num_latent_frames // patch_t, 1))
+
+    video_indices.append(np.arange(video_start, sequence_length))
+    audio_indices.append(np.arange(audio_start, video_start))
+    packed_video_indices = np.concatenate(video_indices)
+    packed_audio_indices = np.concatenate(audio_indices)
+    text_indices = np.arange(num_text_tokens)
+    token_tags = np.empty(sequence_length, dtype=np.int64)
+    token_tags[text_indices] = text_token_tags.astype(np.int64)
+    token_tags[packed_audio_indices] = MINIMAX_H3_AUDIO_TAG
+    token_tags[packed_video_indices] = MINIMAX_H3_VIDEO_TAG
+
+    return MiniMaxH3PackedLayout(
+        sequence_length=sequence_length,
+        position_ids=position_ids,
+        token_tags=token_tags,
+        video_indices=packed_video_indices,
+        audio_indices=packed_audio_indices,
+        text_indices=text_indices,
+        num_condition_video_rows=num_reference_video_rows,
+        num_condition_audio_rows=num_reference_audio_rows,
+        num_video_latent_frames=num_latent_frames,
+        latent_height=latent_height,
+        latent_width=latent_width,
+        num_audio_latents=num_audio_latents,
+        reference_segments=tuple(reference_segments),
+    )
+
+
 def build_row_timesteps(
     layout: MiniMaxH3PackedLayout,
     video_timestep: float,
@@ -409,6 +644,239 @@ def minimax_h3_sigmas(shift: float, num_denoise_steps: int) -> np.ndarray:
     return _unique_consecutive(sigmas).astype(np.float32)
 
 
+def validate_fasth3_dmd_rungs(dmd_steps: object) -> list[int]:
+    """Strictly decreasing integer rungs on the 1000-step training clock."""
+    if (not isinstance(dmd_steps, list) or not dmd_steps
+            or any(type(step) is not int or not 0 < step <= 1000 for step in dmd_steps)
+            or any(left <= right for left, right in zip(dmd_steps, dmd_steps[1:], strict=False))):
+        raise ValueError("FastH3 DMD rungs must be strictly decreasing integers in (0, 1000].")
+    return dmd_steps
+
+
+def _positive_shift(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number, got {value!r}.")
+    return float(value)
+
+
+def find_fasth3_inference_contract(model_root: str | Path | None) -> Path | None:
+    """Return the snapshot contract, also checking the parent of a transformer dir."""
+    if model_root is None:
+        return None
+    root = Path(model_root)
+    direct = root / FASTH3_INFERENCE_CONTRACT
+    if direct.is_file():
+        return direct
+    parent = root.parent / FASTH3_INFERENCE_CONTRACT
+    if parent.is_file() and parent != direct:
+        return parent
+    return None
+
+
+def _is_pdd_contract(contract: dict[str, Any]) -> bool:
+    """A PDD export names itself ``ref2va`` or carries the PDD partition."""
+    return contract.get("model_type") == "ref2va" or "pdd_step_indices" in contract
+
+
+def _load_pdd_contract(contract: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Validate a FastH3 Ref2VA PDD contract and normalize its partition and shifts."""
+    from fastvideo.mlx_runtime.minimax_h3_pdd import PDD_GRID_MAX_T
+
+    from fastvideo.mlx_runtime.minimax_h3_contract_validation import (
+        validate_pdd_contract_fields,
+        validate_pdd_contract_siblings,
+    )
+
+    contract = dict(contract)
+    if contract.get("schema_version") != FASTH3_INFERENCE_CONTRACT_SCHEMA:
+        raise ValueError(f"Unsupported FastH3 inference contract schema in {path}.")
+    validate_pdd_contract_fields(contract, path)
+    pdd_steps = contract.get("pdd_steps")
+    if isinstance(pdd_steps, bool) or not isinstance(pdd_steps, int) or pdd_steps < 2:
+        raise ValueError(f"{path} pdd_steps must be an int >= 2, got {pdd_steps!r}.")
+    grid_max_t = contract.get("grid_max_t")
+    if grid_max_t != PDD_GRID_MAX_T:
+        raise ValueError(f"{path} grid_max_t={grid_max_t!r} is unsupported; the PDD fine grid ends at "
+                         f"{PDD_GRID_MAX_T}.")
+    indices = contract.get("pdd_step_indices")
+    if (not isinstance(indices, list) or len(indices) < 2 or any(type(index) is not int for index in indices)
+            or indices[0] != 0 or indices[-1] != pdd_steps
+            or any(left >= right for left, right in zip(indices, indices[1:], strict=False))):
+        raise ValueError(f"{path} pdd_step_indices={indices!r} must increase strictly from 0 to "
+                         f"pdd_steps={pdd_steps}.")
+    blocks = len(indices) - 1
+    for key in ("num_inference_steps", "transformer_forwards"):
+        if contract.get(key) != blocks:
+            raise ValueError(f"{path} {key}={contract.get(key)!r} must equal the {blocks} blocks of pdd_step_indices.")
+    for key in ("video_scheduler_shift", "audio_scheduler_shift"):
+        if key not in contract:
+            raise ValueError(f"{path} is a FastH3 PDD contract but declares no {key}.")
+        contract[key] = _positive_shift(contract[key], name=key)
+    validate_pdd_contract_siblings(contract, path)
+    contract["pdd_step_indices"] = indices
+    contract["kind"] = "pdd"
+    return contract
+
+
+def load_fasth3_inference_contract(model_root: str | Path | None) -> dict[str, Any] | None:
+    """Load a shift-declaring FastH3 contract, DMD or Ref2VA PDD.
+
+    Four-step exports ship a sidecar without scheduler shifts and keep the
+    uniform ladder. A contract that declares both shifts selects an explicit
+    ladder: a FastH3 Ref2VA PDD export (``pdd_steps`` / ``pdd_step_indices``)
+    is tagged ``kind="pdd"`` and a FastH3 8-Step V2 DMD export (which carries
+    ``dmd_denoising_steps``) is tagged ``kind="dmd"``. A shifted sidecar that
+    cannot be parsed fails instead of silently baking the four-step grid.
+    """
+    path = find_fasth3_inference_contract(model_root)
+    if path is None:
+        return None
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed FastH3 inference contract {path}: {exc}") from exc
+    if not isinstance(contract, dict):
+        raise ValueError(f"Malformed FastH3 inference contract {path}.")
+    if _is_pdd_contract(contract):
+        return _load_pdd_contract(contract, path)
+    declares_shifts = "video_scheduler_shift" in contract or "audio_scheduler_shift" in contract
+    if not declares_shifts:
+        return None
+    if contract.get("schema_version") != FASTH3_INFERENCE_CONTRACT_SCHEMA:
+        raise ValueError(f"Unsupported FastH3 inference contract schema in {path}.")
+    if "video_scheduler_shift" not in contract or "audio_scheduler_shift" not in contract:
+        raise ValueError(f"{path} must declare both video_scheduler_shift and audio_scheduler_shift.")
+    steps = validate_fasth3_dmd_rungs(contract.get("dmd_denoising_steps"))
+    forwards = contract.get("transformer_forwards")
+    grid_points = contract.get("num_inference_steps")
+    if type(forwards) is not int or forwards != len(steps):
+        raise ValueError("FastH3 transformer_forwards must equal the DMD rung count.")
+    if type(grid_points) is not int or grid_points != len(steps) + 1:
+        raise ValueError("FastH3 num_inference_steps must equal the DMD rung count plus one.")
+    contract["video_scheduler_shift"] = _positive_shift(contract["video_scheduler_shift"], name="video_scheduler_shift")
+    contract["audio_scheduler_shift"] = _positive_shift(contract["audio_scheduler_shift"], name="audio_scheduler_shift")
+    contract["dmd_denoising_steps"] = steps
+    contract["kind"] = "dmd"
+    return contract
+
+
+def _require_cached_schedule(cached: np.ndarray | None, requested: np.ndarray, num_steps: int) -> None:
+    if cached is None:
+        return
+    cached_union = np.unique(np.asarray(cached, dtype=np.float32))
+    if np.array_equal(cached_union, requested):
+        return
+    raise ValueError(f"MLX H3 checkpoint has a fixed AdaLN ladder that does not support --steps "
+                     f"{num_steps}. Use the step count used during conversion, or re-export the checkpoint.")
+
+
+def adaln_timestep_union(video: MiniMaxH3SchedulerState, audio: MiniMaxH3SchedulerState) -> np.ndarray:
+    """Sorted unique AdaLN timesteps for one video/audio pair, plus clean time 1."""
+    return np.unique(
+        np.concatenate([
+            np.asarray(video.timesteps, dtype=np.float32),
+            np.asarray(audio.timesteps, dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+        ])).astype(np.float32)
+
+
+@dataclass(frozen=True)
+class ResolvedH3Schedule:
+    """The denoise ladder a request is allowed to run."""
+
+    video: MiniMaxH3SchedulerState
+    audio: MiniMaxH3SchedulerState
+    adaln_timesteps: np.ndarray
+    num_steps: int
+    source: str
+    # The fused-block plan of a PDD contract (its per-modality coefficients and
+    # blocks); None for every other source.
+    pdd_plan: Any = None
+
+
+def pdd_plan_from_contract(contract: dict[str, Any]) -> Any:
+    """Build the fused-block plan a FastH3 PDD contract trained."""
+    from fastvideo.mlx_runtime.minimax_h3_pdd import PDDModalitySchedule, build_pdd_sampling_plan
+
+    schedules = {
+        "video": PDDModalitySchedule(shift=contract["video_scheduler_shift"]),
+        "audio": PDDModalitySchedule(shift=contract["audio_scheduler_shift"]),
+    }
+    return build_pdd_sampling_plan(contract["pdd_step_indices"], schedules)
+
+
+def pdd_adaln_timesteps(contract: dict[str, Any], video: MiniMaxH3SchedulerState,
+                        audio: MiniMaxH3SchedulerState) -> np.ndarray:
+    """A PDD contract's AdaLN ladder; Ref2VA adds the 0.999 its reference rows always run at."""
+    union = adaln_timestep_union(video, audio)
+    if contract.get("model_type") != "ref2va":
+        return union
+    return np.unique(np.append(union, np.float32(MINIMAX_H3_KEYFRAME_NOISE_AUG))).astype(np.float32)
+
+
+def _resolve_pdd_schedule(
+    contract: dict[str, Any],
+    num_steps: int,
+    cached_timesteps: np.ndarray | None,
+) -> ResolvedH3Schedule:
+    """A FastH3 PDD contract's fused-block ladder; ``--steps`` must match its blocks exactly."""
+    plan = pdd_plan_from_contract(contract)
+    blocks = len(contract["pdd_step_indices"]) - 1
+    if num_steps != blocks:
+        raise ValueError(f"Requested {num_steps} steps, but this FastH3 PDD contract runs exactly {blocks} "
+                         "transformer forwards (one per trained fused block).")
+    video = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["video_scheduler_shift"], plan.node_sigmas["video"])
+    audio = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["audio_scheduler_shift"], plan.node_sigmas["audio"])
+    union = pdd_adaln_timesteps(contract, video, audio)
+    if cached_timesteps is not None:
+        _require_cached_schedule(cached_timesteps, union, num_steps)
+    return ResolvedH3Schedule(video, audio, union, blocks, "contract-pdd", plan)
+
+
+def resolve_h3_denoise_schedule(
+    model_root: str | Path | None,
+    num_steps: int,
+    *,
+    cached_timesteps: np.ndarray | None = None,
+) -> ResolvedH3Schedule:
+    """Keep the uniform ladder unless the snapshot declares its own shifts.
+
+    ``num_steps`` is the transformer-forward count. A shift-declaring DMD
+    contract also accepts that count plus one, the CUDA sigma-grid convention,
+    and then runs exactly its trained rung count. A FastH3 Ref2VA PDD contract
+    instead runs its trained fused-block count exactly and the schedulers carry
+    the plan's node sigmas.
+    """
+    if type(num_steps) is not int or num_steps < 1:
+        raise ValueError(f"num_steps must be a positive integer, got {num_steps!r}.")
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
+        audio = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
+        union = adaln_timestep_union(video, audio)
+        if cached_timesteps is not None and not np.array_equal(np.asarray(cached_timesteps, dtype=np.float32), union):
+            raise ValueError(f"MLX H3 checkpoint has a fixed AdaLN ladder that does not support --steps "
+                             f"{num_steps}. Use the step count used during conversion (normally 4), or re-export "
+                             "the checkpoint.")
+        return ResolvedH3Schedule(video, audio, union, num_steps, "uniform")
+
+    if contract["kind"] == "pdd":
+        return _resolve_pdd_schedule(contract, num_steps, cached_timesteps)
+
+    rungs = contract["dmd_denoising_steps"]
+    forwards = len(rungs)
+    if num_steps not in (forwards, forwards + 1):
+        raise ValueError(f"Requested {num_steps} steps, but the FastH3 contract trains {forwards} transformer "
+                         f"forwards ({forwards + 1} sigma-grid points).")
+    video = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"], rungs)
+    audio = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"], rungs)
+    union = adaln_timestep_union(video, audio)
+    if cached_timesteps is not None and not np.array_equal(np.unique(np.asarray(cached_timesteps, dtype=np.float32)),
+                                                           union):
+        _require_cached_schedule(cached_timesteps, union, num_steps)
+    return ResolvedH3Schedule(video, audio, union, forwards, "contract-dmd")
+
+
 @dataclass
 class MiniMaxH3SchedulerState:
     """One rectified-flow scheduler (use two: video shift 12, audio shift 3)."""
@@ -422,6 +890,33 @@ class MiniMaxH3SchedulerState:
         if shift <= 0:
             raise ValueError(f"`shift` must be positive, got {shift}.")
         sigmas = minimax_h3_sigmas(shift, num_denoise_steps)
+        return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
+
+    @classmethod
+    def from_dmd_steps(cls, shift: float, dmd_steps: list[int]) -> MiniMaxH3SchedulerState:
+        """Shift explicit DMD rungs the way the CUDA denoiser does."""
+        shift = _positive_shift(shift, name="shift")
+        rungs = validate_fasth3_dmd_rungs(dmd_steps)
+        base = np.array([step / 1000.0 for step in rungs] + [0.0], dtype=np.float64)
+        # Float64 shift, then one cast. Shipped MLX AdaLN tables are keyed by
+        # that rounding; casting the sigma before 1 - sigma misses the cache.
+        sigmas64 = shift * base / (1.0 + (shift - 1.0) * base)
+        if sigmas64.size < 2 or not bool(np.all(sigmas64[1:] < sigmas64[:-1])) or float(sigmas64[-1]) != 0.0:
+            raise ValueError("DMD sigmas must be strictly decreasing and end at 0.")
+        return cls(shift=shift, sigmas=sigmas64.astype(np.float32), timesteps=(1.0 - sigmas64[:-1]).astype(np.float32))
+
+    @classmethod
+    def from_pdd_node_sigmas(cls, shift: float, node_sigmas: np.ndarray) -> MiniMaxH3SchedulerState:
+        """Carry a PDD plan's shifted node sigmas as the sampling ladder.
+
+        ``node_sigmas`` are already shifted (one noise level per fused-block
+        node, descending to 0), so an ordinary Euler step between consecutive
+        nodes applies exactly the block's total integration weight.
+        """
+        shift = _positive_shift(shift, name="shift")
+        sigmas = np.asarray(node_sigmas, dtype=np.float32)
+        if sigmas.size < 2 or float(sigmas[-1]) != 0.0 or not bool(np.all(sigmas[1:] < sigmas[:-1])):
+            raise ValueError("PDD node sigmas must be strictly decreasing and end at 0.")
         return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
 
     @property
@@ -480,23 +975,36 @@ def rope_cos_sin(position_ids, rope_freq_dim: int, rope_theta: float):
     return mx.cos(freqs), mx.sin(freqs)
 
 
-def apply_h3_rotary(x, cos, sin):
-    """Rotate the RoPE prefix of each head, preserving the rest.
-
-    x: (S, H, D); cos/sin: (S, R) with R <= D. Half-split (GPT-NeoX style)
-    rotation inside the rotary prefix, computed in fp32.
-    """
+def _rotate_half_fp32(x, cos, sin):
+    """fp32 half-split rotation of a rotary prefix; cast back to the input dtype."""
     import mlx.core as mx
 
-    rotary_dim = cos.shape[-1]
-    x_rotary = x[..., :rotary_dim].astype(mx.float32)
-    x_pass = x[..., rotary_dim:]
+    x_rotary = x.astype(mx.float32)
     cos_b = cos[:, None, :].astype(mx.float32)
     sin_b = sin[:, None, :].astype(mx.float32)
     first_half, second_half = mx.split(x_rotary, 2, axis=-1)
     rotated = mx.concatenate([-second_half, first_half], axis=-1)
-    out = x_rotary * cos_b + rotated * sin_b
-    return mx.concatenate([out.astype(x.dtype), x_pass], axis=-1)
+    return (x_rotary * cos_b + rotated * sin_b).astype(x.dtype)
+
+
+_compiled_rotate_half = None
+
+
+def apply_h3_rotary(x, cos, sin):
+    """Rotate the RoPE prefix of each head, preserving the rest.
+
+    x: (S, H, D); cos/sin: (S, R) with R <= D. Half-split (GPT-NeoX style)
+    rotation inside the rotary prefix, computed in fp32. The fp32 math runs in
+    one compiled kernel so the (S, H, R) fp32 intermediates never hit memory.
+    """
+    import mlx.core as mx
+
+    global _compiled_rotate_half
+    if _compiled_rotate_half is None:
+        _compiled_rotate_half = mx.compile(_rotate_half_fp32)
+    rotary_dim = cos.shape[-1]
+    out = _compiled_rotate_half(x[..., :rotary_dim], cos, sin)
+    return mx.concatenate([out, x[..., rotary_dim:]], axis=-1)
 
 
 def _gate_weight_is_active(weight: Any) -> bool:
@@ -546,11 +1054,17 @@ def _attention(
     vsa_geometry: MiniMaxH3VSAGeometry | None = None,
     vsa_sparsity: float = 0.0,
     vsa_exempt: bool = True,
+    vsa_ref_keep_rate: float | None = None,
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
+    kv_sink: Callable[[Any, Any], None] | None = None,
 ):
-    """H3 attention: bias-free qkv, per-head qk RMSNorm, partial RoPE."""
+    """H3 attention: bias-free qkv, per-head qk RMSNorm, partial RoPE.
+
+    ``kv_sink`` receives the post-norm, post-rotary K and V ([S, H, D]); the
+    prefix K/V cache uses it to record the frozen rows.
+    """
     import mlx.core as mx
 
     seq_len = x.shape[0]
@@ -562,6 +1076,8 @@ def _attention(
     if use_rope:
         q = apply_h3_rotary(q, cos, sin)
         k = apply_h3_rotary(k, cos, sin)
+    if kv_sink is not None:
+        kv_sink(k, v)
     gate = None
     if use_gate_compress and "attn.to_gate_compress.weight" in weights:
         gate = linear(x, weights["attn.to_gate_compress.weight"]).reshape(seq_len, num_heads, head_dim)
@@ -576,6 +1092,7 @@ def _attention(
             vsa_geometry,
             sparsity=vsa_sparsity,
             exempt=vsa_exempt,
+            ref_keep_rate=vsa_ref_keep_rate,
             gate_compress=gate,
             impl=vsa_impl,  # type: ignore[arg-type]
             stats=vsa_stats,
@@ -606,12 +1123,12 @@ def _feed_forward(weights: dict[str, Any], x):
     return linear(value * silu(gate), weights["ff.net.2.weight"])
 
 
-def _adaln_tables(weights: dict[str, Any], temb):
+def _adaln_tables(weights: dict[str, Any], temb, *, apply_silu: bool = True):
     """Six (n_t * 3, hidden) modulation tables from (n_t, time_embed_dim)."""
     import mlx.core as mx
 
     projected = linear(
-        silu(temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
+        (silu(temb) if apply_silu else temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
         weights["adaln_proj.linear.weight"],
         weights["adaln_proj.linear.bias"],
     )
@@ -635,9 +1152,11 @@ def _transformer_block(
     vsa_geometry: MiniMaxH3VSAGeometry | None = None,
     vsa_sparsity: float = 0.0,
     vsa_exempt: bool = True,
+    vsa_ref_keep_rate: float | None = None,
     vsa_impl: str = "auto",
     vsa_stats: MiniMaxH3VSAStats | None = None,
     use_gate_compress: bool = False,
+    kv_sink: Callable[[Any, Any], None] | None = None,
 ):
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = tables
 
@@ -656,9 +1175,11 @@ def _transformer_block(
         vsa_geometry=vsa_geometry,
         vsa_sparsity=vsa_sparsity,
         vsa_exempt=vsa_exempt,
+        vsa_ref_keep_rate=vsa_ref_keep_rate,
         vsa_impl=vsa_impl,
         vsa_stats=vsa_stats,
         use_gate_compress=use_gate_compress,
+        kv_sink=kv_sink,
     )
     hidden_states = residual + gate_msa[adaln_indices] * attn_output
 
@@ -754,12 +1275,78 @@ class MLXMiniMaxH3DiT:
         self.qk_norm_eps = float(config["qk_norm_eps"])
         self.final_norm_eps = float(config["final_norm_eps"])
         self.patch_dim = self.in_channels * math.prod(self.patch_size)
+        self.adaln_rank = config.get("adaln_rank")
         self._adaln_cache: MiniMaxH3StepCache | None = None
         self.vsa_config = MiniMaxH3VSAConfig()
         self._vsa_geometry: MiniMaxH3VSAGeometry | None = None
         self._vsa_capable = any("attn.to_gate_compress.weight" in block for block in blocks)
         self._gate_active: list[bool | None] = [None] * len(blocks)
         self.last_vsa_stats: MiniMaxH3VSAStats | None = None
+        self.pdd_grid_size = self._resolve_pdd_grid_size()
+
+    def _resolve_pdd_grid_size(self) -> int | None:
+        """The PDD head count of this checkpoint, or None for a single-headed DiT.
+
+        A PDD student widens ``proj_out`` / ``audio_proj_out`` head-major to
+        ``(grid, output_size)``. The grid comes from the packed manifest's
+        ``config["pdd_steps"]`` when present; otherwise it is inferred from the
+        projection's leading dimension and cross-checked against the audio head.
+        A widened head that would silently mis-project raises here.
+        """
+        from fastvideo.mlx_runtime.minimax_h3_pdd import resolved_grid_size
+
+        declared = self.config.get("pdd_steps")
+        if declared is not None and (isinstance(declared, bool) or not isinstance(declared, int) or declared < 2):
+            raise ValueError(f"MiniMax H3 pdd_steps must be an int >= 2, got {declared!r}.")
+        video_weight = self.weights.get("proj_out.weight")
+        audio_weight = self.weights.get("audio_proj_out.weight")
+        video_grid = None if video_weight is None else resolved_grid_size(
+            video_weight, self.weights.get("proj_out.bias"), self.patch_dim)
+        audio_grid = None if audio_weight is None else resolved_grid_size(
+            audio_weight, self.weights.get("audio_proj_out.bias"), self.audio_in_channels)
+        if video_grid is not None and audio_grid is not None and video_grid != audio_grid:
+            raise ValueError(f"MiniMax H3 PDD heads disagree between proj_out (grid {video_grid}) and "
+                             f"audio_proj_out (grid {audio_grid}).")
+        grid = video_grid if video_grid is not None else audio_grid
+        if declared is not None and grid is not None and grid != declared:
+            raise ValueError(f"MiniMax H3 checkpoint config pdd_steps={declared} disagrees with its widened heads "
+                             f"(grid {grid}).")
+        return grid if grid is not None else declared
+
+    def _fused_output_params(
+        self,
+        key: str,
+        modality: str,
+        pdd_block: tuple[int, int] | None,
+        pdd_integration_weights: dict[str, np.ndarray] | None,
+    ):
+        """The projection (weight, bias) to use, fusing a PDD block when one is supplied.
+
+        Without a block a single-headed head passes through and a widened head
+        (which would otherwise project with the raw ``grid * output_size`` rows)
+        is refused. With a block an unwidened head is refused.
+        """
+        weight = self.weights[key]
+        bias = self.weights.get(f"{key.rsplit('.', 1)[0]}.bias")
+        if pdd_block is None:
+            if self.pdd_grid_size is not None:
+                raise ValueError(f"MiniMax H3 checkpoint has a PDD-widened `{key}` but no PDD block was supplied; "
+                                 "pass pdd_block= and pdd_integration_weights= to the forward.")
+            return weight, bias
+        if self.pdd_grid_size is None:
+            raise ValueError(f"A PDD block was supplied but `{key}` is not widened (single-headed checkpoint).")
+        if pdd_integration_weights is None or modality not in pdd_integration_weights:
+            raise ValueError(f"A PDD block needs this modality's integration weights ({modality!r}).")
+        from fastvideo.mlx_runtime.minimax_h3_pdd import fuse_block_params
+
+        return fuse_block_params(
+            weight,
+            bias,
+            grid_size=self.pdd_grid_size,
+            start=pdd_block[0],
+            end=pdd_block[1],
+            weights=pdd_integration_weights[modality],
+        )
 
     # -- conditioning ------------------------------------------------------
 
@@ -772,11 +1359,15 @@ class MLXMiniMaxH3DiT:
             self.weights["time_embedder.linear_1.weight"],
             self.weights["time_embedder.linear_1.bias"],
         )
-        return linear(
+        temb = linear(
             silu(temb),
             self.weights["time_embedder.linear_2.weight"],
             self.weights["time_embedder.linear_2.bias"],
         )
+        if self.adaln_rank is not None:
+            temb = linear(
+                silu(temb).astype(weight_dtype(self.weights["adaln_basis.weight"])), self.weights["adaln_basis.weight"])
+        return temb
 
     def refine_text(self, text_rows):
         hidden = linear(
@@ -809,9 +1400,10 @@ class MLXMiniMaxH3DiT:
 
         timesteps = np.unique(np.asarray(timesteps, dtype=np.float32))
         temb = self.compute_temb(mx.array(timesteps))
-        block_tables = [_adaln_tables(block, temb) for block in self.blocks]
+        block_tables = [_adaln_tables(block, temb, apply_silu=self.adaln_rank is None) for block in self.blocks]
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
@@ -854,18 +1446,23 @@ class MLXMiniMaxH3DiT:
         if not self.vsa_config.enabled:
             self._vsa_geometry = None
             return None
-        prefix = tuple(segment for segment in prefix_segments_from_layout(layout, self.patch_size) if segment > 0)
-        video_shape = dit_seq_shape_from_layout(layout, self.patch_size)
+        config = self.vsa_config
+        ref_keep_rate = config.effective_ref_keep_rate
+        if ref_keep_rate is not None and layout.reference_segments:
+            segments = ref2va_vsa_segments_from_layout(layout, self.patch_size)
+        else:
+            segments = (*prefix_segments_from_layout(layout, self.patch_size),
+                        dit_seq_shape_from_layout(layout, self.patch_size))
+        segments = tuple(segment for segment in segments if isinstance(segment, tuple) or segment > 0)
         geometry = self._vsa_geometry
-        if geometry is not None and (geometry.prefix_segments, geometry.dit_seq_shape,
-                                     geometry.tile_elems) == (prefix, video_shape, self.vsa_config.tile_size):
+        if geometry is not None and (geometry.segments, geometry.tile_elems) == (segments, config.tile_size):
             return geometry
         try:
-            geometry = build_h3_tile_geometry(prefix, video_shape, self.vsa_config.tile_size)
+            geometry = build_h3_segment_geometry(segments, config.tile_size)
         except ValueError as error:
-            raise ValueError(f"H3 VSA cannot run with this packed layout (prefix={prefix}, "
-                             f"video={video_shape}, tile_size={self.vsa_config.tile_size}): {error}. "
-                             "Disable VSA or pick a supported tile size (64 or 256).") from error
+            raise ValueError(f"H3 VSA cannot run with this packed layout (segments={segments}, "
+                             f"tile_size={config.tile_size}): {error}. "
+                             "Disable VSA or pick a supported tile size (64, 128 or 256).") from error
         self._vsa_geometry = geometry
         return self._vsa_geometry
 
@@ -888,6 +1485,7 @@ class MLXMiniMaxH3DiT:
             "vsa_geometry": geometry,
             "vsa_sparsity": sparsity,
             "vsa_exempt": self.vsa_config.exempt,
+            "vsa_ref_keep_rate": self.vsa_config.effective_ref_keep_rate,
             "vsa_impl": self.vsa_config.impl,
             "vsa_stats": stats,
             "use_gate_compress": geometry is not None and self._block_gate_active(block_index),
@@ -908,6 +1506,8 @@ class MLXMiniMaxH3DiT:
         video_indices,
         audio_indices,
         text_indices,
+        pdd_block: tuple[int, int] | None = None,
+        pdd_integration_weights: dict[str, np.ndarray] | None = None,
     ):
         """Faithful port of the torch forward (batch-1, rows already patchified).
 
@@ -917,7 +1517,9 @@ class MLXMiniMaxH3DiT:
         identical math at a fraction of the cost.
 
         This entrypoint is dense-only. VSA requires ``forward_with_cache``
-        with a packed layout and step index.
+        with a packed layout and step index. With a PDD checkpoint pass the
+        step's ``pdd_block`` and ``pdd_integration_weights`` so the widened
+        heads are fused.
         """
         import mlx.core as mx
 
@@ -947,7 +1549,7 @@ class MLXMiniMaxH3DiT:
         adaln_indices = (timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags).astype(mx.int32)
 
         for block_index, block in enumerate(self.blocks):
-            tables = _adaln_tables(block, temb)
+            tables = _adaln_tables(block, temb, apply_silu=self.adaln_rank is None)
             packed = _transformer_block(
                 block,
                 packed,
@@ -964,22 +1566,27 @@ class MLXMiniMaxH3DiT:
             mx.eval(packed)  # per-block sync: see forward_with_cache note
 
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
         shift_rows, scale_rows = mx.split(shift_scale, 2, axis=-1)
         normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + scale_rows[timestep_indices]) + shift_rows[timestep_indices]
+        video_weight, video_bias = self._fused_output_params("proj_out.weight", "video", pdd_block,
+                                                             pdd_integration_weights)
+        audio_weight, audio_bias = self._fused_output_params("audio_proj_out.weight", "audio", pdd_block,
+                                                             pdd_integration_weights)
         video_output = linear(
-            normed[_as_mx_indices(video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
-            self.weights["proj_out.weight"],
-            self.weights["proj_out.bias"],
+            normed[_as_mx_indices(video_indices)].astype(weight_dtype(video_weight)),
+            video_weight,
+            video_bias,
         )
         audio_output = linear(
-            normed[_as_mx_indices(audio_indices)].astype(weight_dtype(self.weights["audio_proj_out.weight"])),
-            self.weights["audio_proj_out.weight"],
-            self.weights["audio_proj_out.bias"],
+            normed[_as_mx_indices(audio_indices)].astype(weight_dtype(audio_weight)),
+            audio_weight,
+            audio_bias,
         )
         return video_output, audio_output
 
@@ -993,13 +1600,22 @@ class MLXMiniMaxH3DiT:
         step_timesteps: np.ndarray,
         row_timestep_inverse: np.ndarray,
         step_index: int = 0,
+        pdd_block: tuple[int, int] | None = None,
+        pdd_integration_weights: dict[str, np.ndarray] | None = None,
+        record_prefix_kv: Any | None = None,
     ):
         """Denoise-step forward served entirely from the AdaLN cache.
+
+        ``record_prefix_kv`` (a ``MiniMaxH3PrefixKVCache``) additionally keeps
+        every block's K/V of the frozen text/reference rows for later
+        ``forward_target_rows`` steps; the outputs are unchanged.
 
         ``step_timesteps`` are this step's unique timesteps (sorted);
         ``row_timestep_inverse`` maps each packed row to one of them (the
         ``build_row_timesteps`` inverse). The cache must cover every value in
-        ``step_timesteps``.
+        ``step_timesteps``. With a PDD checkpoint pass the step's
+        ``pdd_block`` and ``pdd_integration_weights`` so the widened output
+        heads are fused into the block's weighted mean.
         """
         import mlx.core as mx
 
@@ -1038,8 +1654,24 @@ class MLXMiniMaxH3DiT:
         # Sync per block: without this, MLX enqueues the entire 50-block graph
         # while the GPU lags behind, allocating every intermediate at once
         # (observed as an OOM kill on 36 GiB Macs at 480x832).
+        recorded: list[Any] = []
+        if record_prefix_kv is not None:
+            from fastvideo.mlx_runtime.minimax_h3_prefix_kv import frozen_prefix_rows
+
+            frozen_rows = frozen_prefix_rows(layout)
+            if record_prefix_kv.rows != frozen_rows or record_prefix_kv.num_layers != len(self.blocks):
+                raise ValueError(f"Prefix K/V cache is sized for {record_prefix_kv.num_layers} layers x "
+                                 f"{record_prefix_kv.rows} rows, the step has {len(self.blocks)} x {frozen_rows}.")
+            record_prefix_kv.hidden_dtype = packed.dtype
+            record_prefix_kv.recorded_step = step_index
         for block_index, (block, tables) in enumerate(zip(self.blocks, cache.block_tables, strict=True)):
             vsa_kwargs = self._vsa_block_kwargs(block_index, step_index)
+            if record_prefix_kv is not None:
+
+                def kv_sink(k, v, _layer=block_index):
+                    recorded.extend(record_prefix_kv.store(_layer, k[:frozen_rows], v[:frozen_rows]))
+
+                vsa_kwargs["kv_sink"] = kv_sink
             packed = _transformer_block(
                 block,
                 packed,
@@ -1053,24 +1685,39 @@ class MLXMiniMaxH3DiT:
                 qk_norm_eps=self.qk_norm_eps,
                 **vsa_kwargs,
             )
-            mx.eval(packed)
+            mx.eval(packed, *recorded)
+            recorded.clear()
             if self.last_vsa_stats is not None:
                 self.last_vsa_stats.record(vsa_kwargs["vsa_stats"])
 
         row_positions = positions[row_inverse]
         normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + cache.norm_out_scale[row_positions]) + cache.norm_out_shift[row_positions]
+        video_weight, video_bias = self._fused_output_params("proj_out.weight", "video", pdd_block,
+                                                             pdd_integration_weights)
+        audio_weight, audio_bias = self._fused_output_params("audio_proj_out.weight", "audio", pdd_block,
+                                                             pdd_integration_weights)
         video_output = linear(
-            normed[mx.array(layout.video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
-            self.weights["proj_out.weight"],
-            self.weights["proj_out.bias"],
+            normed[mx.array(layout.video_indices)].astype(weight_dtype(video_weight)),
+            video_weight,
+            video_bias,
         )
         audio_output = linear(
-            normed[mx.array(layout.audio_indices)].astype(weight_dtype(self.weights["audio_proj_out.weight"])),
-            self.weights["audio_proj_out.weight"],
-            self.weights["audio_proj_out.bias"],
+            normed[mx.array(layout.audio_indices)].astype(weight_dtype(audio_weight)),
+            audio_weight,
+            audio_bias,
         )
         return video_output, audio_output
+
+    def forward_target_rows(self, video_target_rows, audio_target_rows, **kwargs):
+        """Denoise-step forward over the target rows only, reusing recorded prefix K/V.
+
+        See ``minimax_h3_prefix_kv_forward.forward_target_rows``; returns the
+        (video, audio) outputs of the target rows alone.
+        """
+        from fastvideo.mlx_runtime.minimax_h3_prefix_kv_forward import forward_target_rows
+
+        return forward_target_rows(self, video_target_rows, audio_target_rows, **kwargs)
 
     __call__ = forward
 
@@ -1193,10 +1840,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for shard in _safetensors_shards(transformer_path):
             shard_arrays = mx.load(str(shard))
             for key, source in shard_arrays.items():
-                if not key.startswith("time_embedder."):
+                if not (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                     continue
                 keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-                target_dtype = mx.float32 if keep_fp32 else cast_dtype
+                target_dtype = mx.float32 if keep_fp32 else (mx.float16 if key == "adaln_basis.weight" else cast_dtype)
                 assign(key, _load_array(source, target_dtype))
             del shard_arrays
         required_time_keys = {
@@ -1213,6 +1860,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
             weight_dtype(weights["time_embedder.linear_1.weight"]))
         temb = linear(t_freq, weights["time_embedder.linear_1.weight"], weights["time_embedder.linear_1.bias"])
         temb = linear(silu(temb), weights["time_embedder.linear_2.weight"], weights["time_embedder.linear_2.bias"])
+        if config.get("adaln_rank") is not None:
+            if "adaln_basis.weight" not in weights:
+                raise KeyError("Rank-reduced AdaLN checkpoint is missing adaln_basis.weight")
+            temb = linear(silu(temb).astype(weight_dtype(weights["adaln_basis.weight"])), weights["adaln_basis.weight"])
         mx.eval(temb)
         cached_block_tables = [None] * num_blocks
 
@@ -1221,7 +1872,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for key, source in shard_arrays.items():
             if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
-            if temb is not None and key.startswith("time_embedder."):
+            if source.dtype == mx.uint8 and key.endswith(".weight"):
+                raise ValueError(f"Packed transformer weight {key} is not a floating-point source. "
+                                 "Convert the released BF16 transformer to MLX INT6 instead.")
+            if temb is not None and (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                 continue
             if key.startswith("transformer_blocks."):
                 index = int(key.split(".")[1])
@@ -1230,7 +1884,9 @@ def mlx_h3_dit_from_diffusers_safetensors(
             if key.startswith("rope."):
                 continue  # non-persistent analytic buffer, rebuilt on the fly
             keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-            target_dtype = mx.float32 if keep_fp32 else cast_dtype
+            factorized_adaln = config.get("adaln_rank") is not None and (".adaln_proj." in key or key.startswith(
+                ("norm_out.linear.", "adaln_basis.")))
+            target_dtype = mx.float32 if keep_fp32 else (mx.float16 if factorized_adaln else cast_dtype)
             array = _load_array(source, target_dtype)
             if temb is not None and ".adaln_proj.linear." in key:
                 _, index_str, sub = key.split(".", 2)
@@ -1238,7 +1894,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
                 block_pending = pending_adaln.setdefault(index, {})
                 block_pending[sub] = array
                 if {"adaln_proj.linear.weight", "adaln_proj.linear.bias"} <= block_pending.keys():
-                    tables = _adaln_tables(block_pending, temb)
+                    tables = _adaln_tables(block_pending, temb, apply_silu=config.get("adaln_rank") is None)
                     mx.eval(tables)
                     assert cached_block_tables is not None
                     cached_block_tables[index] = tables
@@ -1268,7 +1924,8 @@ def mlx_h3_dit_from_diffusers_safetensors(
         if missing_cache_blocks:
             raise KeyError(f"Missing AdaLN cache tables for blocks {missing_cache_blocks}")
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(weights["norm_out.linear.weight"])),
+            (silu(temb) if config.get("adaln_rank") is None else temb).astype(
+                weight_dtype(weights["norm_out.linear.weight"])),
             weights["norm_out.linear.weight"],
             weights["norm_out.linear.bias"],
         )

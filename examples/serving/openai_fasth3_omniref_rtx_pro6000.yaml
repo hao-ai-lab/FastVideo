@@ -1,0 +1,74 @@
+# OpenAI-compatible FastH3 OmniRef (Ref2VA) server on one RTX PRO 6000 Blackwell (96 GB).
+#
+# Serving adaptation of examples/inference/basic/basic_fasth3_omniref_rtx_pro6000.yaml; the same NVFP4 stack and
+# device policy, not yet GPU-validated as a server.
+#
+# Point model_path at a composed OmniRef directory. Build it once with
+#   python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+#     --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-pro-6000 \
+#     --composed-dir ./FastH3-OmniRef-Composed --image assets/images/couple.jpg --prompt "..."
+#
+# Requests carry ordered references: image_reference / input_reference for images,
+# video_reference for clips. Local paths must sit under server.media_roots.
+#
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8 \
+# FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P=1 FASTVIDEO_H3_VSA_FP4_K_SMOOTH=1 \
+# FASTVIDEO_H3_GATE_CHUNK_ROWS=8192 \
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all \
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
+# FASTVIDEO_H3_VAE_TILE_BATCH=8 \
+# fastvideo serve --config examples/serving/openai_fasth3_omniref_rtx_pro6000.yaml
+#
+# See docs/inference/fasth3_omniref.md.
+generator:
+  model_path: ./FastH3-OmniRef-Composed
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      vae: false
+      pin_cpu_memory: true
+      lazy_module_load: false
+  pipeline:
+    workload_type: i2v
+    components:
+      override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
+        prefix_precision: fp8
+        two_level_p: true
+        smooth_k: true
+      video_decode_backend: h3-vae
+      h3_sequential_load: false
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_fasth3_omniref_rtx_pro6000
+  served_model_name: fasth3-omniref
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    height: 768
+    width: 1344
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 8  # eight fused PDD blocks; the contract sets it
+    guidance_scale: 1.0
+    batch_cfg: false
+    seed: 1234
+  output:
+    return_frames: false

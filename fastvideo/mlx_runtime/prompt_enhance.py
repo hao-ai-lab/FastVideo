@@ -194,6 +194,7 @@ def enhance_prompt_mlx_lm(
     """
     try:
         from mlx_lm import generate, load
+        from mlx_lm.sample_utils import make_sampler
     except ImportError as exc:  # pragma: no cover - optional dep
         raise RuntimeError("mlx-lm is not installed. `uv pip install mlx-lm` or use "
                            "--enhance-prompt-backend template.") from exc
@@ -226,7 +227,7 @@ def enhance_prompt_mlx_lm(
         tokenizer,
         prompt=chat,
         max_tokens=max_tokens,
-        temp=temp,
+        sampler=make_sampler(temp=temp),
         verbose=False,
     )
     enhanced = _clean_llm_output(raw, original=text)

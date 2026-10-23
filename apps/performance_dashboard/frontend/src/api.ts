@@ -23,6 +23,15 @@ export type ComparisonCohort = {
   hardware_profile_id: CohortValue;
   software_profile_id: CohortValue;
 };
+export type CohortKind = "v2" | "legacy_v1" | "invalid_v2";
+
+export type DashboardRecordMetadata = {
+  cohort_kind: CohortKind;
+  result_schema_version: CohortValue;
+  baseline_status: string;
+  comparison_status: string;
+  comparison_status_reason: string;
+};
 
 export type SummaryRow = {
   model_id: string;
@@ -45,7 +54,7 @@ export type SummaryRow = {
   build_id: string;
   job_id: string;
   metrics: Record<string, MetricValue>;
-} & ComparisonCohort;
+} & ComparisonCohort & DashboardRecordMetadata;
 
 export type RunSource = "pr" | "local" | "scheduled_main" | "unknown";
 
@@ -79,13 +88,13 @@ export type TrendPoint = {
   build_id: string;
   job_id: string;
   metrics: Record<string, number | null>;
-} & ComparisonCohort;
+} & ComparisonCohort & DashboardRecordMetadata;
 
 export type TrendGroup = {
   model_id: string;
   gpu_type: string;
   points: TrendPoint[];
-} & ComparisonCohort;
+} & ComparisonCohort & DashboardRecordMetadata;
 
 export type TrendsResponse = {
   groups: TrendGroup[];

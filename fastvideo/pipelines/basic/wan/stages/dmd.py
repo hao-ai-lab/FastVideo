@@ -9,6 +9,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
+from fastvideo.profiler import profiler_region
 from fastvideo.utils import dict_to_3d_list
 
 try:
@@ -90,7 +91,7 @@ class DmdDenoisingStage(DenoisingStage):
                                  device=get_local_torch_device())
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
+        with profiler_region("inference_denoising"), self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:

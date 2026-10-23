@@ -20,8 +20,12 @@ from __future__ import annotations
 
 import gc
 import json
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import mlx.core as mx
@@ -45,11 +49,18 @@ class ConditionerConfig:
     rope_theta: float = 5_000_000.0
     mrope_section: tuple[int, ...] = (24, 20, 20)
     vocab_size: int = 151936
+    vision_start_token_id: int = 151652
+    image_token_id: int = 151655
+    video_token_id: int = 151656
+    # Vision merge size drives the MRoPE image/video layout; the vision tower
+    # itself re-reads its own ``vision_config`` from config.json.
+    vision_spatial_merge_size: int = 2
 
     @classmethod
     def from_config_json(cls, path: str | Path) -> ConditionerConfig:
         raw = json.loads(Path(path).read_text())
         text = raw.get("text_config", raw)
+        vision = raw.get("vision_config", {})
         scaling = text.get("rope_scaling", {}) or {}
         return cls(
             hidden_size=int(text["hidden_size"]),
@@ -62,6 +73,10 @@ class ConditionerConfig:
             rope_theta=float(text["rope_theta"]),
             mrope_section=tuple(int(v) for v in scaling.get("mrope_section", (24, 20, 20))),
             vocab_size=int(text.get("vocab_size", 151936)),
+            vision_start_token_id=int(raw.get("vision_start_token_id", text.get("vision_start_token_id", 151652))),
+            image_token_id=int(raw.get("image_token_id", text.get("image_token_id", 151655))),
+            video_token_id=int(raw.get("video_token_id", text.get("video_token_id", 151656))),
+            vision_spatial_merge_size=int(vision.get("spatial_merge_size", 2)),
         )
 
 
@@ -77,9 +92,24 @@ class _ShardIndex:
         index_path = component_dir / "model.safetensors.index.json"
         self.key_to_shard: dict[str, str] = {}
         self._header_cache: dict[str, tuple[dict, int]] = {}
+
+        def needed(key: str) -> bool:
+            if key == "model.language_model.embed_tokens.weight":
+                return True
+            # The vision tower (Ref2VA references) streams through the same index;
+            # its keys are few and small next to the language layers, so keeping
+            # them resident in the mapping does not touch text-path laziness.
+            if key.startswith("model.visual."):
+                return True
+            prefix = "model.language_model.layers."
+            if not key.startswith(prefix):
+                return False
+            layer = key[len(prefix):].split(".", 1)[0]
+            return layer.isdigit() and int(layer) < TEXT_ENCODER_LAYER
+
         if index_path.exists():
             weight_map = json.loads(index_path.read_text())["weight_map"]
-            self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items()}
+            self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items() if needed(k)}
         else:
             single = component_dir / "model.safetensors"
             if not single.exists():
@@ -88,10 +118,11 @@ class _ShardIndex:
             with open(single, "rb") as handle:
                 (header_len, ) = struct.unpack("<Q", handle.read(8))
                 header = json.loads(handle.read(header_len))
-            self.key_to_shard = {k: str(single) for k in header if k != "__metadata__"}
-        # Pre-cache all shard headers
+            self.key_to_shard = {k: str(single) for k in header if needed(k)}
+        # Pre-cache only existing shard headers
         for shard_path in set(self.key_to_shard.values()):
-            self._cache_header(shard_path)
+            if Path(shard_path).exists():
+                self._cache_header(shard_path)
 
     def _cache_header(self, path: str) -> tuple[dict, int]:
         """Parse and cache a shard's header, returning (header_dict, data_start_offset)."""
@@ -104,15 +135,20 @@ class _ShardIndex:
             self._header_cache[path] = (header, data_start)
         return self._header_cache[path]
 
-    def get(self, key: str) -> np.ndarray:
+    def _header(self, key: str) -> tuple[str, dict, int]:
         shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        if not Path(shard).is_file():
+            raise FileNotFoundError(f"Conditioner shard listed in the index is missing: {shard}")
+        header, data_start = self._cache_header(shard)
+        return shard, header, data_start
+
+    def get(self, key: str) -> np.ndarray:
+        shard, header, data_start = self._header(key)
         return _read_safetensors_bf16(shard, key, header, data_start)
 
     def get_mlx(self, key: str) -> mx.array:
         """Read one weight in FP32 without expanding BF16 on the CPU."""
-        shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        shard, header, data_start = self._header(key)
         if header[key]["dtype"] != "BF16":
             return mx.array(np.asarray(self.get(key), dtype=np.float32))
         raw = _read_bf16_words(shard, key, header, data_start)
@@ -123,15 +159,14 @@ class _ShardIndex:
         return weight
 
     def get_row(self, key: str, row: int) -> np.ndarray:
-        shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        shard, header, data_start = self._header(key)
         return _read_safetensors_row(shard, key, row, header, data_start)
 
     def close(self) -> None:
         gc.collect()
 
 
-_DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32}
+_DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32, "U8": np.uint8}
 
 
 def _read_bf16_words(path: str, key: str, header: dict, data_start: int) -> np.ndarray:
@@ -200,8 +235,20 @@ def _rms_norm(x, weight, eps: float):
     return x / mx.sqrt(mx.mean(x * x, axis=-1, keepdims=True) + eps) * weight
 
 
+@dataclass(frozen=True)
+class NVFP4Matrix:
+    """MLX row-major E2M1/E4M3 weights and the export's inverse global scale."""
+
+    weight: mx.array
+    scales: mx.array
+    global_scale: float
+
+    def matmul(self, x):
+        return mx.quantized_matmul(x, self.weight, self.scales, mode="nvfp4") / self.global_scale
+
+
 def _linear(x, weight, bias=None):
-    y = x @ weight.T
+    y = weight.matmul(x) if isinstance(weight, NVFP4Matrix) else x @ weight.T
     if bias is not None:
         y = y + bias
     return y
@@ -233,8 +280,11 @@ class StreamedMiniMaxH3TextConditioner:
     def __init__(self, component_dir: str | Path, tokenizer_dir: str | Path | None = None):
         self.component_dir = Path(component_dir)
         self.config = ConditionerConfig.from_config_json(self.component_dir / "config.json")
-        self.index = _ShardIndex(self.component_dir)
+        self.index: Any = _ShardIndex(self.component_dir)
         self.tokenizer = self._load_tokenizer(tokenizer_dir)
+        # Vision weights load on first Ref2VA encode; text-only callers never
+        # pay for the tower.
+        self._vision: Any = None
 
     def _load_tokenizer(self, tokenizer_dir: str | Path | None):
         from transformers import AutoTokenizer
@@ -279,8 +329,162 @@ class StreamedMiniMaxH3TextConditioner:
         ])
         cos, sin = _mrope_cos_sin(positions, cfg)
 
-        # Embedding rows gathered individually; the (151936, 5120) table is
-        # never fully materialized.
+        hidden = self._embed_tokens(token_ids)
+
+        if cfg.num_layers < TEXT_ENCODER_LAYER:
+            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
+        for layer in range(TEXT_ENCODER_LAYER):
+            hidden = self._decoder_layer(layer, hidden, cos, sin)
+            # Per-layer sync keeps the 50-layer activation graph bounded.
+            mx.eval(hidden)
+            gc.collect()
+
+        tags = np.full((seq_len, ), 1, dtype=np.int64)  # MINIMAX_H3_TEXT_TAG
+        return np.asarray(hidden).astype(np.float32), tags
+
+    def encode_tokens_with_vision(
+        self,
+        token_ids: list[int],
+        token_tags,
+        *,
+        pixel_values: np.ndarray | None = None,
+        image_grid_thw: np.ndarray | None = None,
+        pixel_values_videos: np.ndarray | None = None,
+        video_grid_thw: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Ref2VA encode: splice visual tokens into the prompt, then run the stack.
+
+        Mirrors ``MiniMaxH3Qwen3VLConditioner.encode_ids``: image/video features
+        replace the placeholder rows (in placeholder order), the mixed
+        text/image/video MRoPE positions replace the plain ``arange``, and each
+        of the first ``len(deepstack)`` layers adds its DeEPSTACK block back onto
+        the visual rows. Returns ``(hidden (S, hidden) fp32, token_tags (S,) int64)``
+        with the caller's tags passed through unchanged.
+        """
+        import mlx.core as mx
+
+        from fastvideo.mlx_runtime.minimax_h3_vision import qwen3_vl_rope_index
+
+        if (pixel_values is None) != (image_grid_thw is None):
+            raise ValueError("pixel_values and image_grid_thw must be provided together")
+        if (pixel_values_videos is None) != (video_grid_thw is None):
+            raise ValueError("pixel_values_videos and video_grid_thw must be provided together")
+
+        cfg = self.config
+        seq_len = len(token_ids)
+        ids = np.asarray(token_ids, dtype=np.int64)
+        has_vision = pixel_values is not None or pixel_values_videos is not None
+        if has_vision:
+            positions = qwen3_vl_rope_index(
+                ids,
+                image_grid_thw,
+                video_grid_thw,
+                vision_start_token_id=cfg.vision_start_token_id,
+                image_token_id=cfg.image_token_id,
+                video_token_id=cfg.video_token_id,
+                spatial_merge_size=cfg.vision_spatial_merge_size,
+            )
+        else:
+            positions = np.stack([np.arange(seq_len, dtype=np.float64)] * 3)
+        cos, sin = _mrope_cos_sin(positions, cfg)
+
+        hidden = self._embed_tokens(token_ids)
+        hidden, deepstack, visual_rows = self._splice_visual_tokens(hidden, ids, pixel_values, image_grid_thw,
+                                                                    pixel_values_videos, video_grid_thw)
+
+        if cfg.num_layers < TEXT_ENCODER_LAYER:
+            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
+        for layer in range(TEXT_ENCODER_LAYER):
+            hidden = self._decoder_layer(layer, hidden, cos, sin)
+            if layer < len(deepstack):
+                merged = np.asarray(hidden, dtype=np.float32)
+                merged[visual_rows] += deepstack[layer]
+                hidden = mx.array(merged)
+            # Per-layer sync keeps the 50-layer activation graph bounded.
+            mx.eval(hidden)
+            gc.collect()
+
+        return np.asarray(hidden).astype(np.float32), np.asarray(token_tags, dtype=np.int64)
+
+    def _vision_model(self):
+        if self._vision is None:
+            from fastvideo.mlx_runtime.minimax_h3_vision import MLXQwen3VLVisionModel
+
+            weights = getattr(self.index, "weights", None)
+            if weights is not None and _VISUAL_PROBE_KEY in weights:
+                # A resident index (and a format-2 cache) carries the whole tower.
+                self._vision = MLXQwen3VLVisionModel.from_arrays(self.component_dir / "config.json", weights)
+            else:
+                self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self._vision_source_dir())
+        return self._vision
+
+    def _vision_source_dir(self) -> Path:
+        """Where the vision tower's weights are read from when the encoder index lacks its biases.
+
+        Caches written before format 2 stored only the ``.weight`` tensors the
+        resident loader kept, so the tower's LayerNorm, patch-embed and
+        projection biases are read from the checkpoint the cache records. Newer
+        caches carry the whole tower and never reach this.
+        """
+        manifest_path = self.component_dir / MLX_NVFP4_ENCODER_MANIFEST
+        if not manifest_path.is_file():
+            return self.component_dir
+        source = json.loads(manifest_path.read_text(encoding="utf-8")).get("source_dir")
+        if not source:
+            raise ValueError(f"{manifest_path} records no source_dir, so the vision tower cannot be read "
+                             "from the encoder cache.")
+        if not Path(source).is_dir():
+            raise FileNotFoundError(f"The checkpoint this older encoder cache was built from, {source}, is gone; "
+                                    "the vision tower's biases live there. Re-export the cache to include the "
+                                    "vision tower, or point --conditioner-dir at the checkpoint.")
+        return Path(source)
+
+    def _splice_visual_tokens(self, hidden, ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw):
+        """Return ``(hidden, deepstack blocks, visual rows)`` with features spliced in."""
+        cfg = self.config
+        image_features = image_deepstack = video_features = video_deepstack = None
+        if pixel_values is not None:
+            image_features, image_deepstack = self._vision_model().encode(pixel_values, image_grid_thw)
+        if pixel_values_videos is not None:
+            video_features, video_deepstack = self._vision_model().encode(pixel_values_videos, video_grid_thw)
+
+        embedded = np.asarray(hidden, dtype=np.float32)
+        image_rows = video_rows = None
+        if image_features is not None:
+            image_rows = np.where(ids == cfg.image_token_id)[0]
+            if image_rows.size != image_features.shape[0]:
+                raise ValueError(f"Qwen3-VL image features and placeholders disagree: "
+                                 f"placeholders={image_rows.size}, features={image_features.shape[0]}")
+            embedded[image_rows] = image_features
+        if video_features is not None:
+            video_rows = np.where(ids == cfg.video_token_id)[0]
+            if video_rows.size != video_features.shape[0]:
+                raise ValueError(f"Qwen3-VL video features and placeholders disagree: "
+                                 f"placeholders={video_rows.size}, features={video_features.shape[0]}")
+            embedded[video_rows] = video_features
+        hidden = mx.array(embedded)
+
+        if image_rows is None and video_rows is None:
+            return hidden, [], np.empty((0, ), dtype=np.int64)
+        if image_rows is not None and video_rows is not None:
+            assert image_deepstack is not None and video_deepstack is not None
+            visual_rows = np.sort(np.concatenate([image_rows, video_rows]))
+            image_joint = np.isin(visual_rows, image_rows)
+            video_joint = np.isin(visual_rows, video_rows)
+            blocks = []
+            for image_block, video_block in zip(image_deepstack, video_deepstack, strict=True):
+                combined = np.zeros((visual_rows.size, image_block.shape[-1]), dtype=np.float32)
+                combined[image_joint] = image_block
+                combined[video_joint] = video_block
+                blocks.append(combined)
+            return hidden, blocks, visual_rows
+        if image_rows is not None:
+            return hidden, [np.asarray(block, dtype=np.float32) for block in image_deepstack], image_rows
+        return hidden, [np.asarray(block, dtype=np.float32) for block in video_deepstack], video_rows
+
+    def _embed_tokens(self, token_ids: list[int]):
+        # Embedding rows gathered individually; the full table is never
+        # materialized by the BF16 streaming path.
         rows = []
         for token in token_ids:
             key = "model.language_model.embed_tokens.weight"
@@ -288,18 +492,7 @@ class StreamedMiniMaxH3TextConditioner:
         hidden = mx.array(np.stack(rows).astype(np.float32))
         del rows
         gc.collect()
-
-        if cfg.num_layers <= TEXT_ENCODER_LAYER:
-            raise ValueError(f"Conditioner needs > {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
-        for layer in range(TEXT_ENCODER_LAYER):
-            hidden = self._decoder_layer(layer, hidden, cos, sin)
-            # Per-layer sync: without this the whole 50-layer graph accumulates
-            # and the machine runs out of memory (same failure mode as the DiT).
-            mx.eval(hidden)
-            gc.collect()
-
-        tags = np.full((seq_len, ), 1, dtype=np.int64)  # MINIMAX_H3_TEXT_TAG
-        return np.asarray(hidden).astype(np.float32), tags
+        return hidden
 
     # -- layers ----------------------------------------------------------
 
@@ -336,15 +529,14 @@ class StreamedMiniMaxH3TextConditioner:
         query = _apply_mrope(query, cos, sin)
         key = _apply_mrope(key, cos, sin)
 
-        # GQA: repeat KV heads.
-        repeats = heads // kv_heads
-        key = mx.repeat(key, repeats, axis=1)
-        value = mx.repeat(value, repeats, axis=1)
-
-        scores = (query.transpose(1, 0, 2) @ key.transpose(1, 2, 0)) * head_dim**-0.5
-        mask = mx.triu(mx.ones((seq_len, seq_len), dtype=mx.bool_), k=1)
-        scores = mx.where(mask[None], mx.array(-np.inf, dtype=scores.dtype), scores)
-        attended = mx.softmax(scores, axis=-1) @ value.transpose(1, 0, 2)
+        # Fused causal attention with native GQA. A reference request carries
+        # thousands of vision tokens; explicit fp32 scores would need
+        # heads * seq^2 * 4 bytes (~14 GB at 7.5k tokens) per layer.
+        attended = mx.fast.scaled_dot_product_attention(query.transpose(1, 0, 2)[None],
+                                                        key.transpose(1, 0, 2)[None],
+                                                        value.transpose(1, 0, 2)[None],
+                                                        scale=head_dim**-0.5,
+                                                        mask="causal")[0]
         # Attention is head-major here: (heads, sequence, head_dim).  Restore
         # sequence-major ordering before concatenating heads for o_proj.
         attended = attended.transpose(1, 0, 2)
@@ -360,7 +552,202 @@ class StreamedMiniMaxH3TextConditioner:
         return residual + down
 
     def close(self) -> None:
+        self._vision = None
         self.index.close()
+
+
+def unswizzle_nvfp4_scales(scale: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """FlashInfer 128x4 scale bytes -> MLX row-major group-16 scale bytes."""
+    pad_rows, pad_cols = -(-rows // 128) * 128, -(-cols // 4) * 4
+    if scale.size < pad_rows * pad_cols:
+        raise ValueError(f"NVFP4 scales need {pad_rows * pad_cols} bytes, got {scale.size}.")
+    tiles = scale.reshape(-1)[:pad_rows * pad_cols].reshape(pad_rows // 128, pad_cols // 4, 32, 4, 4)
+    return np.ascontiguousarray(tiles.transpose(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols])
+
+
+MLX_NVFP4_ENCODER_MANIFEST = "mlx_h3_nvfp4_encoder.json"
+
+
+def _read_nvfp4_encoder_config(component_dir: str | Path) -> dict[str, Any]:
+    raw = json.loads((Path(component_dir) / "config.json").read_text())
+    # Same accepted spellings as the CUDA loader (MiniMaxH3SerializedNVFP4Config.from_config).
+    accepted = {
+        "quant_method": ("nvfp4", ),
+        "fmt": ("e2m1", "float4_e2m1fn", "nvfp4"),
+        "scale_fmt": ("e4m3", "float8_e4m3fn"),
+        "activation_scheme": ("dynamic", ),
+    }
+    quant = raw.get("quantization_config", {})
+    group_size = quant.get("group_size")
+    if (any(str(quant.get(key, "")).lower() not in values for key, values in accepted.items())
+            or isinstance(group_size, bool) or group_size != 16 or quant.get("scale_layout") != "128x4"):
+        raise ValueError("MLX NVFP4 conditioning requires the FastVideo group-16, 128x4 encoder export.")
+    return raw
+
+
+def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Path) -> Path:
+    """Cache the released packed encoder in MLX layout, without requantization.
+
+    Keep original packed nibbles, row-major scale bytes, global scales and
+    embedding/norm values. Later loads skip CPU scale unswizzling and staging.
+    """
+    raw = _read_nvfp4_encoder_config(component_dir)
+    final_dir = Path(output_dir)
+    if final_dir.exists() and any(final_dir.iterdir()):
+        raise FileExistsError(f"Encoder cache output must be empty: {final_dir}")
+    # Build in a sibling staging directory and publish it with one rename, so an
+    # out-of-memory or out-of-disk failure never leaves a partial cache behind.
+    final_dir.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(tempfile.mkdtemp(prefix=f".{final_dir.name}.partial-", dir=final_dir.parent))
+    index = _ResidentNVFP4Index(_ShardIndex(Path(component_dir)))
+    published = False
+    try:
+        arrays = {}
+        matrices = {}
+        dense_keys = []
+        for key, value in index.weights.items():
+            if isinstance(value, NVFP4Matrix):
+                arrays[key] = value.weight
+                arrays[key + ".scales"] = value.scales
+                matrices[key] = {"global_scale": value.global_scale}
+            else:
+                arrays[key] = value
+                dense_keys.append(key)
+        mx.save_safetensors(str(output_dir / "model.safetensors"), arrays)
+        (output_dir / "config.json").write_text(json.dumps(raw, indent=2) + "\n")
+        manifest = {
+            "format_version": _NVFP4_CACHE_FORMAT_VERSION,
+            "language_layers": TEXT_ENCODER_LAYER,
+            "matrices": matrices,
+            "dense_keys": dense_keys,
+            "source_dir": str(Path(component_dir).resolve())
+        }
+        (output_dir / MLX_NVFP4_ENCODER_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+        umask = os.umask(0)
+        os.umask(umask)
+        output_dir.chmod(0o777 & ~umask)  # mkdtemp is owner-only; shared model dirs need the umask mode
+        if final_dir.exists():
+            final_dir.rmdir()  # empty, checked above
+        output_dir.rename(final_dir)
+        published = True
+    finally:
+        index.close()
+        if not published:
+            shutil.rmtree(output_dir, ignore_errors=True)
+    return final_dir
+
+
+_VISUAL_PREFIX = "model.visual."
+# Present in a cache that carries the vision tower's biases (and so the whole tower).
+_VISUAL_PROBE_KEY = "model.visual.patch_embed.proj.bias"
+_NVFP4_CACHE_FORMAT_VERSION = 2
+_NVFP4_CACHE_READABLE_VERSIONS = (1, 2)
+
+
+def _read_native(source: _ShardIndex, key: str):
+    """One tensor in its stored dtype; BF16 stays BF16 instead of widening to FP32."""
+    shard = source.key_to_shard[key]
+    header, data_start = source._cache_header(shard)
+    if header[key]["dtype"] == "BF16":
+        return mx.array(_read_bf16_words(shard, key, header, data_start)).view(mx.bfloat16)
+    return mx.array(source.get(key))
+
+
+class _ResidentNVFP4Index:
+    """Load the released 50-layer encoder without expanding packed matrices."""
+
+    def __init__(self, source: _ShardIndex):
+        self.weights: dict[str, mx.array | NVFP4Matrix] = {}
+        for key in sorted(source.key_to_shard):
+            if key.endswith(".weight_packed"):
+                prefix = key.removesuffix(".weight_packed")
+                packed = np.array(source.get(key), copy=True)
+                if packed.dtype != np.uint8 or packed.ndim != 2 or packed.shape[1] % 4:
+                    raise ValueError(f"Invalid packed NVFP4 matrix {key}: {packed.shape}, {packed.dtype}")
+                rows, cols = packed.shape[0], packed.shape[1] * 2
+                if cols % 16:
+                    raise ValueError(f"NVFP4 input width must be divisible by 16: {key}")
+                scales = unswizzle_nvfp4_scales(source.get(prefix + ".weight_scale"), rows, cols // 16)
+                global_scale = float(source.get(prefix + ".weight_global_scale").reshape(-1)[0])
+                if not np.isfinite(global_scale) or global_scale <= 0:
+                    raise ValueError(f"Invalid NVFP4 global scale for {prefix}: {global_scale}")
+                weight = mx.array(packed).view(mx.uint32)
+                scale_bytes = mx.array(scales)
+                if not bool(mx.all(mx.isfinite(mx.from_fp8(scale_bytes, dtype=mx.float32)))):
+                    raise ValueError(f"Non-finite NVFP4 block scales for {prefix}")
+                mx.eval(weight, scale_bytes)
+                self.weights[prefix + ".weight"] = NVFP4Matrix(weight, scale_bytes, global_scale)
+            elif key.endswith(".weight") or key.startswith(_VISUAL_PREFIX):
+                # The embedding table and the whole vision tower (weights and
+                # biases) keep their source dtype; the tower is BF16 in the
+                # release and its loader casts as needed.
+                if key == "model.language_model.embed_tokens.weight" or key.startswith(_VISUAL_PREFIX):
+                    value = _read_native(source, key)
+                else:
+                    value = source.get_mlx(key)
+                mx.eval(value)
+                self.weights[key] = value
+        source.close()
+
+    @classmethod
+    def from_mlx_checkpoint(cls, component_dir: str | Path):
+        component_dir = Path(component_dir)
+        manifest = json.loads((component_dir / MLX_NVFP4_ENCODER_MANIFEST).read_text())
+        if manifest.get("format_version") not in _NVFP4_CACHE_READABLE_VERSIONS or manifest.get(
+                "language_layers") != TEXT_ENCODER_LAYER:
+            raise ValueError("Unsupported native MLX NVFP4 encoder cache")
+        arrays = mx.load(str(component_dir / "model.safetensors"))
+        matrices = manifest["matrices"]
+        expected = set(manifest["dense_keys"]) | set(matrices) | {key + ".scales" for key in matrices}
+        if set(arrays) != expected:
+            raise ValueError("Native MLX encoder arrays do not match the manifest")
+        index = cls.__new__(cls)
+        index.weights = {key: arrays[key] for key in manifest["dense_keys"]}
+        for key, info in matrices.items():
+            weight, scales = arrays[key], arrays[key + ".scales"]
+            factor = float(info["global_scale"])
+            if (weight.ndim != 2 or weight.dtype != mx.uint32 or scales.dtype != mx.uint8
+                    or scales.shape != (weight.shape[0], weight.shape[1] // 2) or weight.shape[1] % 2
+                    or not np.isfinite(factor) or factor <= 0):
+                raise ValueError(f"Invalid native MLX NVFP4 matrix: {key}")
+            index.weights[key] = NVFP4Matrix(weight, scales, factor)
+        mx.eval(list(arrays.values()))
+        return index
+
+    def get_mlx(self, key: str):
+        return self.weights[key]
+
+    def close(self) -> None:
+        self.weights.clear()
+        gc.collect()
+
+
+class ResidentNVFP4MiniMaxH3TextConditioner(StreamedMiniMaxH3TextConditioner):
+    """Released NVFP4 encoder weights with floating-point MLX activations.
+
+    The packed weights and embedding table stay resident. CUDA quantizes
+    activations to FP4; this path keeps FP32 activations, so hidden states are
+    not expected to be bit-exact with the CUDA encoder.
+    """
+
+    def __init__(self, component_dir: str | Path, tokenizer_dir: str | Path | None = None):
+        _read_nvfp4_encoder_config(component_dir)
+        # Fail on an older MLX before reading the encoder's large shards.
+        try:
+            packed, scales = mx.quantize(mx.ones((1, 64)), mode="nvfp4")
+            mx.eval(mx.quantized_matmul(mx.ones((1, 64)), packed, scales, mode="nvfp4"))
+        except (ValueError, RuntimeError) as error:
+            raise RuntimeError("Native NVFP4 conditioning requires an MLX build with nvfp4 matmul support.") from error
+        super().__init__(component_dir, tokenizer_dir)
+        if (Path(component_dir) / MLX_NVFP4_ENCODER_MANIFEST).exists():
+            self.index.close()
+            self.index = _ResidentNVFP4Index.from_mlx_checkpoint(component_dir)
+        else:
+            self.index = _ResidentNVFP4Index(self.index)
+
+    def _embed_tokens(self, token_ids: list[int]):
+        table = self.index.get_mlx("model.language_model.embed_tokens.weight")
+        return table[mx.array(token_ids, dtype=mx.int32)].astype(mx.float32)
 
 
 def _apply_mrope(q_or_k, cos, sin):

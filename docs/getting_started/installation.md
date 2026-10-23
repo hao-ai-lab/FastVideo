@@ -1,13 +1,17 @@
 
 # 🔧 Installation
 
-FastVideo supports the following hardware platforms:
+Start with [Hardware and runtimes](hardware.md) to distinguish NVIDIA RTX and
+data center GPUs, DGX Spark, Apple Silicon MLX, and AMD ROCm.
+
+The installation paths below cover:
 
 - [NVIDIA CUDA](installation/gpu.md)
 - **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
   [performance](installation/spark_performance.md),
   [pair two Sparks](installation/spark_pair.md)
-- [Apple silicon](installation/mps.md)
+- [Apple silicon (MLX)](installation/mlx.md)
+- [AMD / ROCm support and current limits](installation/amd.md)
 
 ## Quick Installation
 
@@ -15,7 +19,7 @@ FastVideo supports the following hardware platforms:
 
 Use uv as the default environment manager for faster and more stable installs.
 The commands below target NVIDIA CUDA 12; use `UV_TORCH_BACKEND=cu130` on
-CUDA 13. Apple silicon users should follow the [MPS guide](installation/mps.md).
+CUDA 13. Apple silicon users should follow the [MLX install guide](installation/mlx.md).
 
 ```bash
 # Create and activate a new uv environment

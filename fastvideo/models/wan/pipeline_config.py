@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig as WanAnimateDiTConfig
+from fastvideo.configs.models.dits.wan_s2v import WanS2VConfig as WanS2VDiTConfig
 from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -319,6 +321,61 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     boundary_ratio: float | None = 0.875
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
     warp_denoising_step: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+
+
+# =============================================
+# ========== Wan2.2 Animate (14B) =============
+# =============================================
+@dataclass
+class WanAnimate14BConfig(WanI2V720PConfig):
+    """Configuration for Wan2.2-Animate-14B character animation / replacement.
+
+    Despite the Wan2.2 branding this is a *dense* 14B DiT on the Wan2.1-I2V
+    skeleton (single expert, Wan2.1 16-channel VAE, CLIP image branch), so it
+    subclasses the I2V config -- not the A14B MoE one. The inherited pieces
+    are all correct as-is: CLIPVisionConfig matches the checkpoint's ViT-H
+    image encoder (image_dim 1280), the I2V ``__post_init__`` loads the VAE
+    encoder (needed for the reference image, the pose video and the previous
+    segment's guidance frames), and flow_shift 5.0 matches the official
+    runner (``wan_animate_14B.py``: sample_shift 5.0, 20 steps, CFG 1.0 --
+    steps and guidance land in the preset, not here).
+    """
+
+    dit_config: DiTConfig = field(default_factory=WanAnimateDiTConfig)
+
+
+# =============================================
+# ============= Wan2.2 S2V (speech-to-video) ==
+# =============================================
+@dataclass
+class WanS2V14BConfig(WanT2V480PConfig):
+    """Configuration for Wan2.2-S2V-14B audio-driven video generation.
+
+    S2V keeps the Wan2.1 16-channel VAE (the checkpoint ships ``Wan2.1_VAE.pth``),
+    unlike the Wan2.2 TI2V line which moved to the 48-channel VAE. The encoder is
+    needed to embed the reference image and motion frames, not just to decode.
+    """
+
+    dit_config: DiTConfig = field(default_factory=WanS2VDiTConfig)
+    flow_shift: float | None = 5.0
+    # wav2vec2 stays fp32: its 25 hidden states are mixed down by a learned
+    # weighting whose output drives lip-sync, and the encoder is cheap.
+    audio_encoder_precision: str = "fp32"
+    # (raw frames, latent frames) of motion context carried between clips.
+    # The official runner uses 73 raw / 19 latent (wan_s2v_14B.py:
+    # transformer.motion_frames = 73); the (17, 5) in the model's function
+    # signature is a stale default. The first number pads the audio before
+    # downsampling, the second trims it after, re-aligning audio with video.
+    motion_frames: tuple[int, int] = (73, 19)
+    # Frames the transformer generates per clip (the official runner's
+    # ``infer_frames``; must be 4n). The first clip loses 3 warm-up frames on
+    # decode, so 84 makes a single clip show exactly the 81-frame default that
+    # FastVideo's 4k+1 frame contract expects. Longer requests chain clips.
+    clip_frames: int = 84
 
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True

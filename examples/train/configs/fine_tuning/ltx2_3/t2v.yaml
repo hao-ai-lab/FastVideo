@@ -12,7 +12,7 @@
 # (see docs/training/data_preprocess.md;
 # fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py is a minimal
 # LTX-2 reference to adapt — set
-# LTX2_OVERFIT_MODEL=FastVideo/LTX-2.3-Distilled-Diffusers).
+# FASTVIDEO_TEST_LTX2_OVERFIT_MODEL=FastVideo/LTX-2.3-Distilled-Diffusers).
 #
 # Run:
 #   NUM_GPUS=4 bash examples/train/run.sh \

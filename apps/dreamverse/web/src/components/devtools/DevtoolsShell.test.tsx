@@ -35,6 +35,7 @@ describe('DevtoolsShell', () => {
     expect(screen.getByText('Devtools Mode')).toBeInTheDocument();
     expect(screen.getByText('Your video will appear here')).toBeInTheDocument();
     expect(screen.getByLabelText('Story preset')).toBeInTheDocument();
+    expect(screen.getByLabelText('Generation mode')).toBeInTheDocument();
     expect(screen.getByLabelText('Continuation prompt')).toBeDisabled();
 
     expect(screen.getByText('Advanced controls')).toBeInTheDocument();

@@ -25,7 +25,7 @@ from fastvideo import envs
 
 
 def _resolve_flash_attn_varlen_func() -> tuple[Any, str]:
-    if envs.FASTVIDEO_FA4:
+    if envs.FASTVIDEO_FA4.get():
         # FA4 cute is explicit opt-in (see fastvideo/attention/backends/
         # flash_attn.py); with FASTVIDEO_FA4=1 an unimportable FA4 build must
         # fail loudly here rather than fall through to FA3/FA2. RuntimeError,

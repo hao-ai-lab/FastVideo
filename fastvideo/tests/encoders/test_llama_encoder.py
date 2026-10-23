@@ -6,6 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, LlamaModel
 import gc
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import HunyuanConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -18,8 +19,8 @@ from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29503")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))

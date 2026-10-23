@@ -79,12 +79,8 @@ The parity tests import the official LingBot-Video implementation as the Python
 package `lingbot_video`. Clone the official repository at the validated commit:
 
 ```bash
-cd "$FV_HUB/fastvideo-port-lingbot-video"
-python3 \
-  .agents/skills/add-model-01-prep/scripts/clone_reference_repo.py \
-  https://github.com/robbyant/lingbot-video.git \
-  "$FV_HUB/lingbot-video-reference" \
-  --commit a638721cf2271804d02738b69f2ad788c4a559fc
+git clone https://github.com/robbyant/lingbot-video.git "$FV_HUB/lingbot-video-reference"
+git -C "$FV_HUB/lingbot-video-reference" checkout a638721cf2271804d02738b69f2ad788c4a559fc
 ```
 
 ### Step 2: Prepare The Virtual Environment

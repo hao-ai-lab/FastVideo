@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
-import os
 import time
 from collections import deque
 from typing import Any
@@ -47,7 +46,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the self-forcing training pipeline."""
         # Check if FSDP2 auto wrap is enabled - not supported for self-forcing distillation
-        if os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1":
+        if envs.FASTVIDEO_FSDP2_AUTOWRAP.get():
             raise NotImplementedError("FASTVIDEO_FSDP2_AUTOWRAP is not implemented for self-forcing distillation. "
                                       "Please set FASTVIDEO_FSDP2_AUTOWRAP=0 or unset the environment variable.")
 
@@ -833,7 +832,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             disable=self.local_rank > 0,
         )
 
-        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
+        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1, self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
             if use_vsa:
@@ -1008,7 +1007,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
 
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")
             self.profiler_controller.stop()
             logger.info("Profiler stopped.")

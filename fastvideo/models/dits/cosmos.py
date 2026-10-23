@@ -91,7 +91,7 @@ class CosmosAdaLayerNorm(nn.Module):
             embedded_timestep = embedded_timestep + temb[..., :2 * self.embedding_dim]
 
         shift, scale = embedded_timestep.chunk(2, dim=-1)
-        with torch.autocast(device_type="cuda", enabled=False):
+        with torch.autocast(device_type=hidden_states.device.type, enabled=False):
             hidden_states = self.norm(hidden_states)
 
         if embedded_timestep.ndim == 2:
@@ -131,7 +131,7 @@ class CosmosAdaLayerNormZero(nn.Module):
 
         shift, scale, gate = embedded_timestep.chunk(3, dim=-1)
 
-        with torch.autocast(device_type="cuda", enabled=False):
+        with torch.autocast(device_type=hidden_states.device.type, enabled=False):
             hidden_states = self.norm(hidden_states)
 
         if embedded_timestep.ndim == 2:

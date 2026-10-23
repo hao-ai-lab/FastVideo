@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _build_block_mask,
-                                                               _pool_tiles, _validate_h3_tile_geometry,
+                                                               _pool_tiles, _validate_h3_segment_geometry,
                                                                token_tile_and_valid)
 
 _720P = dict(raw_latent_shape=(30, 44, 80), patch_size=(1, 2, 2), prefix_segments=(512, 1760, 400))
@@ -30,10 +30,9 @@ _CPU = torch.device("cpu")
 def _build(spec, sparsity=0.0, device=_CPU, tile_size=_TILE_ELEMS):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=spec["raw_latent_shape"],
         patch_size=spec["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=spec["prefix_segments"],
+        packed_segments=(*spec["prefix_segments"], spec["raw_latent_shape"]),
         device=device,
         tile_size=tile_size,
     )
@@ -92,16 +91,16 @@ def test_mask_policy():
     k_vid = math.ceil(0.1 * V)
     scores = torch.randn(1, 2, n, n)
 
-    exempt = _build_block_mask(scores, P, V, 0.9, exempt=True)
+    exempt = _build_block_mask(scores, P, 0.9, True, meta.video_tile_spans, meta.span_sparsities)
     assert exempt[:, :, :P].all(), "prefix queries must be dense"
     assert exempt[..., :P].all(), "prefix keys must be visible to every query"
     assert (exempt[:, :, P:, P:].sum(-1) == k_vid).all(), "video rows select exactly k_vid video tiles"
 
-    compete = _build_block_mask(scores, P, V, 0.9, exempt=False)
+    compete = _build_block_mask(scores, P, 0.9, False, meta.video_tile_spans, meta.span_sparsities)
     assert compete[:, :, :P].all()
     assert (compete[:, :, P:].sum(-1) == min(k_vid + P, n)).all(), "budget-matched top-k"
 
-    dense = _build_block_mask(scores, P, V, 0.0, exempt=True)
+    dense = _build_block_mask(scores, P, 0.0, True, meta.video_tile_spans, meta.span_sparsities)
     assert dense.all(), "sparsity 0 must select everything"
 
 
@@ -115,7 +114,8 @@ def test_sparsity_zero_matches_dense_sdpa():
 
     scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes),
                           _pool_tiles(tk, meta.variable_block_sizes).transpose(-2, -1))
-    mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, 0.0, exempt=True)
+    mask = _build_block_mask(scores, meta.num_prefix_tiles, 0.0, True, meta.video_tile_spans,
+                             meta.span_sparsities)
     sparse_out = impl.postprocess_output(reference_sparse_attention(tq, tk, tv, mask, meta), meta)
 
     dense_out = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).transpose(1, 2)
@@ -134,7 +134,8 @@ def test_prefix_queries_stay_dense_at_high_sparsity():
     scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes),
                           _pool_tiles(tk, meta.variable_block_sizes).transpose(-2, -1))
     for exempt in (True, False):
-        mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, 0.75, exempt=exempt)
+        mask = _build_block_mask(scores, meta.num_prefix_tiles, 0.75, exempt, meta.video_tile_spans,
+                                 meta.span_sparsities)
         sparse_out = impl.postprocess_output(reference_sparse_attention(tq, tk, tv, mask, meta), meta)
         dense_out = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2),
                                                    v.transpose(1, 2)).transpose(1, 2)
@@ -220,7 +221,8 @@ def test_sparsity_zero_matches_dense_sdpa_tile64():
 
     scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes, meta.tile_elems),
                           _pool_tiles(tk, meta.variable_block_sizes, meta.tile_elems).transpose(-2, -1))
-    mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, 0.0, exempt=True)
+    mask = _build_block_mask(scores, meta.num_prefix_tiles, 0.0, True, meta.video_tile_spans,
+                             meta.span_sparsities)
     sparse_out = impl.postprocess_output(reference_sparse_attention(tq, tk, tv, mask, meta), meta)
 
     dense_out = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).transpose(1, 2)
@@ -230,18 +232,17 @@ def test_sparsity_zero_matches_dense_sdpa_tile64():
 def test_geometry_guard_enforces_tile64_bound():
     """A 65-token tile passes the 256 bound but must fail the 64 one."""
     meta = _build(_TINY64, tile_size=64)
-    prefix = tuple(s for s in _TINY64["prefix_segments"] if s > 0)
-    dit_shape = (9, 10, 13)
+    segments = (*(s for s in _TINY64["prefix_segments"] if s > 0), (9, 10, 13))
     sizes = meta.variable_block_sizes.clone()
     sizes[0] = 65
     with pytest.raises(ValueError, match="tile sizes out of bounds"):
-        _validate_h3_tile_geometry(prefix, dit_shape, sizes, meta.untile_combined_index, 64)
+        _validate_h3_segment_geometry(segments, sizes, meta.untile_combined_index, 64)
     # the untampered tile-64 geometry passes its own bound
-    _validate_h3_tile_geometry(prefix, dit_shape, meta.variable_block_sizes, meta.untile_combined_index, 64)
+    _validate_h3_segment_geometry(segments, meta.variable_block_sizes, meta.untile_combined_index, 64)
 
 
 def test_builder_rejects_unknown_tile_size():
-    for bad in (0, 128, 512):
+    for bad in (0, 96, 512):
         with pytest.raises(ValueError, match="tile_size"):
             _build(_TINY, tile_size=bad)
 

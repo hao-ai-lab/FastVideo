@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 from functools import wraps
 
 import torch
 import torch.nn as nn
 
+import fastvideo.envs as envs
+from fastvideo.attention.backends.abstract import AttentionMetadata
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
                                                     sequence_model_parallel_all_to_all_4D)
@@ -23,10 +24,7 @@ def _attention_compile_disabled() -> bool:
     ``torch.compiler.disable``). Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=0``
     to let attention instances constructed under that environment be traced.
     """
-    val = os.environ.get("FASTVIDEO_DISABLE_ATTENTION_COMPILE")
-    if val is None:
-        return True
-    return val.strip().lower() not in ("0", "false", "no", "off", "")
+    return envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.get()
 
 
 def _attention_compile_explicitly_disabled() -> bool:
@@ -35,7 +33,7 @@ def _attention_compile_explicitly_disabled() -> bool:
     Regional compile can override the historical default for one loaded
     transformer, but it must still honor an explicit debugging escape hatch.
     """
-    return "FASTVIDEO_DISABLE_ATTENTION_COMPILE" in os.environ and _attention_compile_disabled()
+    return envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.is_set() and _attention_compile_disabled()
 
 
 def _maybe_compiler_disable(fn):
@@ -118,6 +116,7 @@ class DistributedAttention(nn.Module):
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -142,7 +141,7 @@ class DistributedAttention(nn.Module):
         world_size = get_sp_world_size()
 
         forward_context: ForwardContext = get_forward_context()
-        ctx_attn_metadata = forward_context.attn_metadata
+        ctx_attn_metadata = attn_metadata if attn_metadata is not None else forward_context.attn_metadata
 
         # Stack QKV
         qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
@@ -209,6 +208,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -233,9 +233,16 @@ class DistributedAttention_VSA(DistributedAttention):
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
         forward_context: ForwardContext = get_forward_context()
-        ctx_attn_metadata = forward_context.attn_metadata
+        ctx_attn_metadata = attn_metadata if attn_metadata is not None else forward_context.attn_metadata
 
         batch_size, seq_len, num_heads, head_dim = q.shape
+        # VSA kernels compute BF16; FP32 norm outputs otherwise double the
+        # training all-to-all and fresh tile buffers.
+        if (self.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3 and torch.is_grad_enabled() and q.requires_grad
+                and q.dtype is not torch.bfloat16):
+            q, k, v = q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)
+            if gate_compress is not None:
+                gate_compress = gate_compress.to(torch.bfloat16)
         # Stack QKV (a caller with a structurally-zero gate passes None and
         # skips the gate's share of the all-to-all/tile traffic)
         stack = [q, k, v] if gate_compress is None else [q, k, v, gate_compress]

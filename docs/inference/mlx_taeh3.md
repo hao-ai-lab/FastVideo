@@ -10,7 +10,9 @@ that tradeoff. It is not a lossless acceleration of the full VAE.
 
 ## Generate a video
 
-Use your existing MLX FastH3 environment and converted checkpoint:
+Use your existing MLX FastH3 environment and converted checkpoint. The same
+`--video-decode-backend taeh3` flag works on `mlx_fasth3.py` (V1) and
+`mlx_fasth3_8step.py` (V2):
 
 ```bash
 python examples/inference/basic/mlx_fasth3.py \
@@ -68,7 +70,7 @@ Run the numerical tests against a local TAEHV checkout containing the released
 weights:
 
 ```bash
-TAEH3_REFERENCE_DIR=/path/to/taehv \
+FASTVIDEO_TEST_TAEH3_REFERENCE_DIR=/path/to/taehv \
   python -m pytest fastvideo/tests/mlx/test_mlx_taeh3.py -q
 ```
 

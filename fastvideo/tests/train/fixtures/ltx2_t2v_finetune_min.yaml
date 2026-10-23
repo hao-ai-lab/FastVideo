@@ -2,10 +2,12 @@
 # LTX2Model for the per-method smoke test. Uses the real
 # FastVideo/LTX2-Distilled-Diffusers checkpoint (18.9B params, ~38GB
 # in bf16 — needs a large-memory GPU; the test skips below 60GB) with
-# tiny synthetic latents. LTX2 requires training_cfg_rate=0 (CFG
-# dropout would zero post-connector text embeddings, which is not the
-# model's unconditional input) and precondition_outputs=false (the
-# plugin converts the DiT's x0 output to velocity).
+# tiny synthetic latents. training_cfg_rate=0 here only keeps the smoke
+# test from loading Gemma for the unconditional embedding: cfg_rate>0 is
+# supported (LTX2Model swaps in the checkpoint preset's unconditional
+# embedding and disables the collate's zeroing drop). Also
+# precondition_outputs=false (the plugin converts the DiT's x0 output to
+# velocity).
 
 models:
   student:

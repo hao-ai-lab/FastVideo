@@ -173,6 +173,37 @@ def test_flash_attn_func_parity_forward_backward(flash_attn_impls, dtype: torch.
     _assert_close(dv_test, dv_ref, dtype=dtype, is_grad=True)
 
 
+def test_flash_attn_func_fullgraph_compile_backward(flash_attn_impls):
+    custom_flash_attn_func, _, _, _ = flash_attn_impls
+
+    def loss(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        return custom_flash_attn_func(q, k, v).square().mean()
+
+    torch.manual_seed(2)
+    base_inputs = [
+        torch.randn(
+            1,
+            64,
+            4,
+            64,
+            device="cuda",
+            dtype=torch.bfloat16,
+            requires_grad=False,
+        ) for _ in range(3)
+    ]
+    eager_inputs = [tensor.clone().requires_grad_(True) for tensor in base_inputs]
+    compiled_inputs = [tensor.clone().requires_grad_(True) for tensor in base_inputs]
+
+    eager_loss = loss(*eager_inputs)
+    eager_grads = torch.autograd.grad(eager_loss, eager_inputs)
+    compiled_loss = torch.compile(loss, fullgraph=True)(*compiled_inputs)
+    compiled_grads = torch.autograd.grad(compiled_loss, compiled_inputs)
+
+    _assert_close(compiled_loss, eager_loss, dtype=torch.bfloat16)
+    for compiled_grad, eager_grad in zip(compiled_grads, eager_grads):
+        _assert_close(compiled_grad, eager_grad, dtype=torch.bfloat16, is_grad=True)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal", [False, True])
 def test_flash_attn_varlen_func_parity_forward_backward(flash_attn_impls, dtype: torch.dtype, causal: bool):

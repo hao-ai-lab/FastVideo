@@ -43,7 +43,7 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_t
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
                                                get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
-from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
+from fastvideo.utils import (is_vmoba_available, is_vsa_available, pixels_to_uint8, set_random_seed, shallow_asdict)
 
 try:
     vsa_available = is_vsa_available()
@@ -348,7 +348,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
         assert training_batch.timesteps is not None
-        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        if envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN":
             if not vsa_available:
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is set to VIDEO_SPARSE_ATTN, "
                                   "but fastvideo_kernel is not correctly installed or detected. "
@@ -361,7 +361,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device(),
                 cache_tile_buf=self.training_args.VSA_cache_tile_buf)
-        elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        elif envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VMOBA_ATTN":
             if not vmoba_available:
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is set to VMOBA_ATTN, "
                                   "but fastvideo_kernel (or flash_attn>=2.7.4) is not correctly installed.")
@@ -389,7 +389,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _transformer_forward_and_compute_loss(self, training_batch: TrainingBatch) -> TrainingBatch:
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN" or vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get(
+        ) == "VIDEO_SPARSE_ATTN" or vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VMOBA_ATTN":
             assert training_batch.attn_metadata is not None
         else:
             assert training_batch.attn_metadata is None
@@ -642,7 +643,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         self.training_args.max_train_steps, self.optimizer, self.train_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")
             self.profiler_controller.stop()
             logger.info("Profiler stopped.")
@@ -784,7 +785,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 for x in video:
                     x = torchvision.utils.make_grid(x, nrow=6)
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
+                    frames.append(pixels_to_uint8(x).numpy())
                 step_videos.append(frames)
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their

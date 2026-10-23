@@ -3,8 +3,9 @@
 `stable_audio_tools.models.autoencoders.OobleckEncoder/OobleckDecoder`
 from Stability-AI/stable-audio-tools.
 
-This is the skill-compliant parity test (per `add-model` step 5: "clone
-the official reference repo locally"). The companion test in this same
+This is the parity test against the official reference repo, which the
+porting guide (docs/contributing/coding_agents.md) prefers as the numerical
+reference. The companion test in this same
 directory (`test_oobleck_vae_parity.py`) compares against
 `diffusers.AutoencoderOobleck`, which is the canonical *runtime loader*
 for the published HF weights and is already exact (diff=0). This test

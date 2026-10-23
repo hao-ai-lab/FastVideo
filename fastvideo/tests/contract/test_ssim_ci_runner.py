@@ -6,6 +6,8 @@ import sys
 
 import pytest
 
+import fastvideo.envs as envs
+
 SSIM_DIR = Path(__file__).resolve().parents[1] / "ssim"
 sys.path.insert(0, str(SSIM_DIR))
 
@@ -76,10 +78,9 @@ def test_discovery_rejects_missing_or_unsafe_test_file_selections(tmp_path: Path
         discover_tasks(tmp_path, ["../test_alpha.py"])
 
 
-def test_visible_gpu_ids_preserve_the_slurm_lease(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3,2")
-
-    assert visible_gpu_ids() == ["2", "3"]
+def test_visible_gpu_ids_preserve_the_slurm_lease() -> None:
+    with envs.override_external("CUDA_VISIBLE_DEVICES", "2,3,2"):
+        assert visible_gpu_ids() == ["2", "3"]
 
 
 def test_parallel_tasks_get_offsets_in_the_runner_assigned_port_range() -> None:

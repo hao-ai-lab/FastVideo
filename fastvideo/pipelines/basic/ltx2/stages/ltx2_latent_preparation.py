@@ -167,7 +167,8 @@ class LTX2LatentPreparationStage(PipelineStage):
                         device=device,
                         dtype=dtype,
                     )
-                    self._save_initial_latent(latent_path, latents)
+                    if fastvideo_args.is_output_rank:
+                        self._save_initial_latent(latent_path, latents)
                 else:
                     latents = _randn_ltx2_video_latents(
                         shape=shape,
@@ -176,7 +177,8 @@ class LTX2LatentPreparationStage(PipelineStage):
                         device=device,
                         dtype=dtype,
                     )
-                    self._save_initial_latent(latent_path, latents)
+                    if fastvideo_args.is_output_rank:
+                        self._save_initial_latent(latent_path, latents)
             else:
                 if fastvideo_args.ltx2_legacy_native_noise_order:
                     latents = randn_tensor(

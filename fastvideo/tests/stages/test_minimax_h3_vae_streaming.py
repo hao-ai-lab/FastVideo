@@ -3,8 +3,10 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
+from fastvideo.pipelines.basic.minimax_h3 import encoder_split
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MiniMaxH3PackedLayout,
     patchify_video_latents,
@@ -20,12 +22,13 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 
 def _layout(rows: int, latent_shape: tuple[int, ...]) -> MiniMaxH3PackedLayout:
+    # A structurally valid video-only layout: every row is a real video token.
     empty = torch.empty(0, dtype=torch.long)
     return MiniMaxH3PackedLayout(
         sequence_length=rows,
-        position_ids=empty,
-        token_tags=empty,
-        video_indices=empty,
+        position_ids=torch.zeros(rows, 3, dtype=torch.long),
+        token_tags=torch.zeros(rows, dtype=torch.long),
+        video_indices=torch.arange(rows),
         audio_indices=empty,
         text_indices=empty,
         num_condition_video_rows=0,
@@ -95,6 +98,10 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
             observed["latents"] = decoded_latents
             observed["output"] = output
             output.fill_(0.25)
+            # One pixel per quantization case: an interior value, the exact
+            # top of the range, and the VAE overshoot on either side that the
+            # clamp must saturate instead of wrapping.
+            output[0, 0, 0, 0, :4] = torch.tensor([0.5, 1.0, 1.25, -0.25])
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     result = MiniMaxH3VideoDecodingStage(VAE()).forward(
@@ -109,9 +116,125 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
     )
 
     torch.testing.assert_close(observed["latents"], latents)
-    assert observed["output"] is result.output
+    # The VAE still streams into the float32 CPU buffer the stage allocates;
+    # the batch then carries that buffer's uint8 quantization so the
+    # executor boundary moves bytes, not fp32.
+    assert observed["output"].device.type == "cpu"
+    assert observed["output"].dtype == torch.float32
     assert result.output.device.type == "cpu"
-    assert torch.all(result.output == 0.25)
+    assert result.output.dtype == torch.uint8
+    expected = torch.full((1, 3, 5, 16, 16), 63, dtype=torch.uint8)
+    expected[0, 0, 0, 0, :4] = torch.tensor([127, 255, 255, 0], dtype=torch.uint8)
+    assert torch.equal(result.output, expected)
+
+
+def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
+    latent_shape = (1, 4, 2, 4, 4)
+    latents = torch.randn(latent_shape)
+    rows = patchify_video_latents(latents, (1, 1, 1))
+    batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
+    batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+    observed = {}
+
+    class VAE:
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+        def decode_to_pixels(self, decoded_latents, output):
+            output.zero_()
+
+    def fake_allocate(size, *, dtype=None, pin_memory=False):
+        observed["size"] = size
+        observed["dtype"] = dtype
+        observed["pin_memory"] = pin_memory
+        return torch.empty(size, dtype=dtype)
+
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
+
+    MiniMaxH3VideoDecodingStage(VAE()).forward(
+        batch,
+        SimpleNamespace(
+            output_type="pil",
+            pin_cpu_memory=True,
+            vae_cpu_offload=False,
+            vae_parallel_decode=False,
+            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+        ),
+    )
+
+    assert observed == {
+        "size": (1, 3, 5, 16, 16),
+        "dtype": torch.float32,
+        "pin_memory": True,
+    }
+
+
+@pytest.mark.parametrize("unified_memory", [True, False])
+def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory) -> None:
+    """On unified memory, same-geometry requests reuse one pre-touched CPU buffer; returned
+    frames never alias it. Discrete GPUs allocate per request and hold nothing between them."""
+    latent_shape = (1, 4, 2, 4, 4)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    allocations = []
+    buffers = []
+
+    class VAE:
+
+        fill = 0.25
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+        def decode_to_pixels(self, decoded_latents, output):
+            buffers.append((output, bool(torch.isnan(output).any())))
+            output.fill_(VAE.fill)
+
+    def fake_allocate(size, *, dtype=None, pin_memory=False):
+        allocations.append(size)
+        return torch.full(size, float("nan"), dtype=dtype)
+
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
+    monkeypatch.setattr(minimax_h3_decoding, "current_platform",
+                        SimpleNamespace(has_unified_memory=lambda device_id: unified_memory))
+    stage = MiniMaxH3VideoDecodingStage(VAE())
+    args = SimpleNamespace(output_type="pil",
+                           pin_cpu_memory=False,
+                           vae_cpu_offload=False,
+                           vae_parallel_decode=False,
+                           pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))))
+
+    def decode():
+        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
+        batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+        return stage.forward(batch, args).output
+
+    first = decode()
+    VAE.fill = 0.5
+    second = decode()
+    if unified_memory:
+        assert allocations == [(1, 3, 5, 16, 16)]
+        assert buffers[0][0] is buffers[1][0]
+        assert not buffers[0][1]  # zeroed (pages touched) before the decoder writes it
+    else:
+        assert allocations == [(1, 3, 5, 16, 16)] * 2
+        assert buffers[0][0] is not buffers[1][0]
+        assert stage._output_buffer is None
+    assert torch.equal(first, torch.full_like(first, 63)) and torch.equal(second, torch.full_like(second, 127))
 
 
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
@@ -125,7 +248,7 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
     monkeypatch.setattr(minimax_h3_decoding, "get_sp_group",
                         lambda: SimpleNamespace(is_first_rank=True, world_size=4, rank_in_group=0))
-    monkeypatch.setattr(minimax_h3_decoding, "get_world_group", lambda: SimpleNamespace(is_first_rank=False))
+    monkeypatch.setattr(encoder_split, "get_world_group", lambda: SimpleNamespace(rank=1, first_rank=0))
     args = SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=True, vae_parallel_decode=False)
 
     video = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
@@ -142,9 +265,8 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
 
 
 def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
-    """With vae_parallel_decode, non-leader ranks must enter the decode body
-    (the collectives inside require uniform participation) and only the
-    leader owns the CPU output buffer."""
+    """Every rank in the output rank's SP group enters the collective decode,
+    while only the global output rank owns the CPU output buffer."""
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     calls = []
@@ -179,19 +301,124 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
     )
 
     for rank, is_first in ((0, True), (2, False)):
+        monkeypatch.setattr(encoder_split, "get_world_group", lambda rank=rank: SimpleNamespace(rank=rank, first_rank=0))
         monkeypatch.setattr(
             minimax_h3_decoding, "get_sp_group",
             lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
                                                                  world_size=4,
-                                                                 rank_in_group=rank))
+                                                                 rank_in_group=rank,
+                                                                 ranks=[0, 1, 2, 3]))
         batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
         result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
         if is_first:
             assert result.output.shape == (1, 3, 5, 16, 16)
-            assert torch.all(result.output == 0.5)
+            assert result.output.device.type == "cpu"
+            assert result.output.dtype == torch.uint8
+            assert torch.all(result.output == 127)
         else:
             assert result.output.shape == (0, 3, 0, 0, 0)
 
     assert [(rank, output is not None) for rank, output, _ in calls] == [(0, True), (2, False)]
     assert all(strategy == "gather" for _, _, strategy in calls)
+
+
+def test_parallel_decode_skips_entire_sp_group_without_output_rank(monkeypatch) -> None:
+    class VAE:
+
+        def to(self, device):
+            raise AssertionError("an SP group without the output rank must not execute the VAE")
+
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=True,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
+
+    for rank, is_first in ((0, True), (2, False)):
+        monkeypatch.setattr(encoder_split, "get_world_group",
+                            lambda rank=rank: SimpleNamespace(rank=4 + rank, first_rank=0))
+        monkeypatch.setattr(
+            minimax_h3_decoding, "get_sp_group",
+            lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
+                                                                 world_size=4,
+                                                                 rank_in_group=rank,
+                                                                 ranks=[4, 5, 6, 7]))
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
+        assert result.output.shape == (0, 3, 0, 0, 0)
+
+
+def test_encoder_split_decodes_in_the_denoise_group_on_its_first_rank(monkeypatch) -> None:
+    """Under the MiniMax-H3 encoder split world rank 0 is an encoder rank, so the
+    denoise group decodes and its first rank owns the output."""
+    latent_shape = (1, 4, 2, 4, 4)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    calls = []
+
+    class VAE:
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+    class EncoderRankVAE:
+
+        def to(self, device):
+            raise AssertionError("an encoder rank must not execute the VAE")
+
+    def fake_parallel(vae, latents, output, group, strategy):
+        calls.append((group.rank_in_group, output is not None))
+        if output is not None:
+            output.fill_(0.5)
+        return output
+
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "decode_to_pixels_parallel", fake_parallel)
+    args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=True,
+        vae_parallel_decode_strategy="gather",
+        h3_encoder_split=True,
+        h3_encoder_workers=2,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
+    denoise_ranks = [2, 3, 4, 5]
+
+    for rank in (2, 4):
+        monkeypatch.setattr(encoder_split, "get_world_group",
+                            lambda rank=rank: SimpleNamespace(rank=rank, first_rank=0, world_size=6))
+        monkeypatch.setattr(
+            minimax_h3_decoding, "get_sp_group",
+            lambda rank=rank: SimpleNamespace(is_first_rank=rank == 2,
+                                              world_size=len(denoise_ranks),
+                                              rank_in_group=rank - 2,
+                                              ranks=denoise_ranks))
+        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
+        batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
+        if rank == 2:
+            assert result.output.shape == (1, 3, 5, 16, 16)
+            assert torch.all(result.output == 127)
+        else:
+            assert result.output.shape == (0, 3, 0, 0, 0)
+
+    assert calls == [(0, True), (2, False)]
+
+    # Encoder ranks hold singleton SP groups and never own the output.
+    monkeypatch.setattr(encoder_split, "get_world_group",
+                        lambda: SimpleNamespace(rank=0, first_rank=0, world_size=6))
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group",
+                        lambda: SimpleNamespace(is_first_rank=True, world_size=1, rank_in_group=0, ranks=[0]))
+    result = MiniMaxH3VideoDecodingStage(EncoderRankVAE()).forward(ForwardBatch(data_type="video"), args)
+    assert result.output.shape == (0, 3, 0, 0, 0)

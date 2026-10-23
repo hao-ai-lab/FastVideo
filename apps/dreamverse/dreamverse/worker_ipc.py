@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dreamverse.generation_inputs import GenerationInputs
+
 # ---- User-scoped events (carry user_id) ------------------------------------
 
 
@@ -147,6 +149,7 @@ class UserStepPayload:
     segment_idx: int
     image_path: str | None
     reset_conditioning: bool
+    generation_inputs: GenerationInputs | None = None
 
 
 @dataclass(frozen=True)

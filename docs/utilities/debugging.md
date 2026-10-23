@@ -29,6 +29,9 @@ Useful variables:
 - `FASTVIDEO_ATTENTION_BACKEND`: force an attention backend (for example
   `TORCH_SDPA`, `FLASH_ATTN`, `SAGE_ATTN_THREE`, or
   `ATTN_QAT_INFER`, or `ATTN_QAT_TRAIN`)
+- `FASTVIDEO_LOG_ALL_PROCESSES`: set to `1` to log from every process/rank,
+  overriding the default behavior where `logger.info(...)` only emits from the
+  local main process (`LOCAL_RANK=0`). Useful for debugging distributed runs.
 
 ## Layer-by-Layer Activation Tracing
 

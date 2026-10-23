@@ -175,7 +175,7 @@ class TestValidation:
     """Invalid payloads error cleanly."""
 
     def test_wrong_kind_rejected(self):
-        envelope = ContinuationState(kind="longcat.v1", payload={})
+        envelope = ContinuationState(kind="other.v1", payload={})
         with pytest.raises(ValueError, match="Expected ContinuationState.kind"):
             LTX2ContinuationState.from_continuation_state(envelope)
 

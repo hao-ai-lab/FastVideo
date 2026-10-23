@@ -21,6 +21,8 @@ model load, no distributed init needed.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -43,41 +45,43 @@ class _ResolvedLocalAttention(LocalAttention):
         self.backend = backend
 
 
-def _make_stage(resolved_backend: AttentionBackendEnum) -> Kandinsky5DenoisingStage:
-    """Bypass __init__: only set the field the guard reads."""
+def _make_stage(requested_backend: AttentionBackendEnum,
+                resolved_backend: AttentionBackendEnum) -> Kandinsky5DenoisingStage:
+    """Bypass __init__: set only the fields the guard reads.
+
+    ``requested_backend`` is the decision the loader records on the
+    transformer's config; ``resolved_backend`` is what the layer resolved to.
+    """
     stage = Kandinsky5DenoisingStage.__new__(Kandinsky5DenoisingStage)
     transformer = torch.nn.Module()
+    transformer.config = SimpleNamespace(_resolved_attention_backend=requested_backend)
     transformer.attn = _ResolvedLocalAttention(resolved_backend)
     stage.transformer = transformer
     return stage
 
 
-def test_attn_qat_infer_flash_fallback_is_allowed(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
-    stage = _make_stage(AttentionBackendEnum.FLASH_ATTN)
+def test_attn_qat_infer_flash_fallback_is_allowed():
+    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_INFER, AttentionBackendEnum.FLASH_ATTN)
 
     # Must not raise: FlashAttention is the documented ATTN_QAT_INFER
     # fallback on GPUs without the sm_120 kernel.
     stage._assert_local_attention_backend_engaged()
 
 
-def test_attn_qat_infer_exact_match_is_allowed(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
-    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_INFER)
+def test_attn_qat_infer_exact_match_is_allowed():
+    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_INFER, AttentionBackendEnum.ATTN_QAT_INFER)
 
     stage._assert_local_attention_backend_engaged()
 
 
-def test_attn_qat_train_mismatch_raises(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_TRAIN")
-    stage = _make_stage(AttentionBackendEnum.TORCH_SDPA)
+def test_attn_qat_train_mismatch_raises():
+    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_TRAIN, AttentionBackendEnum.TORCH_SDPA)
 
     with pytest.raises(AssertionError, match="ATTN_QAT_TRAIN"):
         stage._assert_local_attention_backend_engaged()
 
 
-def test_attn_qat_train_exact_match_is_allowed(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_TRAIN")
-    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_TRAIN)
+def test_attn_qat_train_exact_match_is_allowed():
+    stage = _make_stage(AttentionBackendEnum.ATTN_QAT_TRAIN, AttentionBackendEnum.ATTN_QAT_TRAIN)
 
     stage._assert_local_attention_backend_engaged()

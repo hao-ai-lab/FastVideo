@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.entrypoints.streaming.prompt.providers import (
     CerebrasProvider,
     GroqProvider,
@@ -98,19 +99,19 @@ class TestCerebrasProvider:
     def test_is_llm_provider(self):
         assert isinstance(CerebrasProvider(api_key="x"), LLMProvider)
 
-    def test_requires_api_key(self, monkeypatch):
-        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    def test_requires_api_key(self, env_overrides):
+        env_overrides.enter_context(envs.override_external("CEREBRAS_API_KEY", None))
         provider = CerebrasProvider()
         with pytest.raises(LLMProviderError, match="CEREBRAS_API_KEY"):
             asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
-    def test_api_key_from_env(self, monkeypatch):
-        monkeypatch.setenv("CEREBRAS_API_KEY", "from-env")
+    def test_api_key_from_env(self, env_overrides):
+        env_overrides.enter_context(envs.override_external("CEREBRAS_API_KEY", "from-env"))
         provider = CerebrasProvider()
         assert provider.api_key == "from-env"
 
-    def test_explicit_api_key_wins(self, monkeypatch):
-        monkeypatch.setenv("CEREBRAS_API_KEY", "from-env")
+    def test_explicit_api_key_wins(self, env_overrides):
+        env_overrides.enter_context(envs.override_external("CEREBRAS_API_KEY", "from-env"))
         provider = CerebrasProvider(api_key="explicit")
         assert provider.api_key == "explicit"
 
@@ -260,14 +261,14 @@ class TestGroqProvider:
     def test_is_llm_provider(self):
         assert isinstance(GroqProvider(api_key="x"), LLMProvider)
 
-    def test_requires_api_key(self, monkeypatch):
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    def test_requires_api_key(self, env_overrides):
+        env_overrides.enter_context(envs.override_external("GROQ_API_KEY", None))
         provider = GroqProvider()
         with pytest.raises(LLMProviderError, match="GROQ_API_KEY"):
             asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
-    def test_api_key_from_env(self, monkeypatch):
-        monkeypatch.setenv("GROQ_API_KEY", "from-env")
+    def test_api_key_from_env(self, env_overrides):
+        env_overrides.enter_context(envs.override_external("GROQ_API_KEY", "from-env"))
         provider = GroqProvider()
         assert provider.api_key == "from-env"
 

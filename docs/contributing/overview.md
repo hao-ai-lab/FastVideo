@@ -74,6 +74,11 @@ If you prefer a containerized environment, use the dev image documented in
 
 See the [Testing Guide](testing.md) for how to add and run tests in FastVideo.
 
+## Cookbook configuration metadata
+
+See [Extending cookbook configuration metadata](cookbook_configuration.md) for
+where to declare model options, ranges and defaults, and how they reach the UI.
+
 ## Attention backend development
 
 If you are adding a new attention kernel or backend, follow

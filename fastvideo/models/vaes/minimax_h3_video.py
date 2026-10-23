@@ -7,13 +7,15 @@ This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
+
+import fastvideo.envs as envs
 
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
@@ -300,6 +302,7 @@ class MiniMaxH3VideoAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
         self.use_bias = bias
+        self._share_int8_qkv = envs.FASTVIDEO_H3_VAE_INT8_SHARED_QKV.get()
         inner_dim = heads * dim_head
         self.norm_q = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
         self.norm_k = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
@@ -339,9 +342,13 @@ class MiniMaxH3VideoAttention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """Apply dense self-attention to one spatial VAE token sequence."""
-        query = self.to_q(hidden_states).unflatten(2, (self.heads, -1))
-        key = self.to_k(hidden_states).unflatten(2, (self.heads, -1))
-        value = self.to_v(hidden_states).unflatten(2, (self.heads, -1))
+        if self._share_int8_qkv and not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import shared_int8_projections
+            projections = shared_int8_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+        else:
+            projections = tuple(layer(hidden_states) for layer in (self.to_q, self.to_k, self.to_v))
+        query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
+        del projections
 
         query = self.norm_q(query.float()).to(query.dtype)
         key = self.norm_k(key.float()).to(key.dtype)
@@ -470,6 +477,8 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.norm_out = nn.LayerNorm(dim, elementwise_affine=True, eps=norm_eps)
         self.proj_out = nn.Linear(dim, out_channels * patch_size_t * patch_size * patch_size)
         self.gradient_checkpointing = False
+        self.fused_blocks_forward: Callable[[nn.ModuleList, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+                                            torch.Tensor | None] | None = None
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Decode one latent spatial input through the H3 video transformer."""
@@ -494,7 +503,12 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         suffix_ids = position_ids.new_zeros((batch_size, self.num_register_tokens + 1, 3))
         rotary_emb = self.rope(torch.cat([position_ids, suffix_ids], dim=1))
 
-        for block in self.transformer_blocks:
+        # Quantized decoders (e.g. NVFP4) may install a fused inference path; it returns None when inapplicable.
+        fused = self.fused_blocks_forward(self.transformer_blocks, hidden_states,
+                                          rotary_emb) if self.fused_blocks_forward is not None else None
+        if fused is not None:
+            hidden_states = fused
+        for block in self.transformer_blocks if fused is None else ():
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = checkpoint(block, hidden_states, rotary_emb, use_reentrant=False)
             else:
@@ -522,6 +536,11 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
+def _tile_batch_size() -> int:
+    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+    return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
+
+
 def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
     """Select the video decoder that serves the H3 VAE ``decode`` path."""
     return name == "decoder" and isinstance(submodule, MiniMaxH3VideoViTDecoder3d)
@@ -538,6 +557,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     # ``prepare_for_compile`` flips this per instance when the pipeline opts
     # into ``enable_torch_compile_vae``; default instances stay fully eager.
     _tile_helpers_compiled = False
+    # Autocast dtype of the pipeline's decode stage; NVFP4 decoders (``apply_nvfp4_decoder_checkpoint``) use bf16.
+    decode_autocast_dtype: torch.dtype = torch.float16
 
     def __init__(self, config: MiniMaxH3VideoVAEConfig) -> None:
         super().__init__()
@@ -817,10 +838,31 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
             ratio = self.spatial_compression_ratio
             rows = []
+            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                # Every tile of the grid has one shape, and the ViT decoder
+                # treats batch entries independently: decode the grid in a few
+                # large calls instead of one small call per tile.
+                with nvtx_range("minimax_h3.vae.decode_clip.decode_tile_batches"):
+                    latent_tiles = [
+                        z[..., y_position // ratio:(y_position + y_length) // ratio,
+                          x_position // ratio:(x_position + x_length) // ratio]
+                        for y_position, y_length in zip(y_indices, y_lengths)
+                        for x_position, x_length in zip(x_indices, x_lengths)
+                    ]
+                    decoded: list[torch.Tensor] = []
+                    per_call = _tile_batch_size()
+                    for start in range(0, len(latent_tiles), per_call):
+                        batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
+                        # Clone before retaining: under the reduce-overhead compile the decoder output lives in
+                        # a CUDA-graph pool that the next batch's replay overwrites.
+                        out = self.decoder(self._project_decoder_tile(batch)).clone()
+                        decoded.extend(out.split(z.shape[0], dim=0))
+                    columns = len(x_indices)
+                    rows = [decoded[index:index + columns] for index in range(0, len(decoded), columns)]
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
-                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
+                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths) if not rows else ()):
                     row = []
                     for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
                         with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
@@ -1067,14 +1109,31 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         """Encode one-frame conditioning inputs without video chunk padding."""
         if x.ndim != 5 or x.shape[2] != 1:
             raise ValueError(f"`x` must contain exactly one video frame, got shape {tuple(x.shape)}.")
-        if self.use_slicing and x.shape[0] > 1:
-            moments = torch.cat([self._encode_clip(x_slice) for x_slice in x.split(1)])
-        else:
-            moments = self._encode_clip(x)
+        moments = self._encode_keyframe_tile_parallel(x)
+        if moments is None:
+            if self.use_slicing and x.shape[0] > 1:
+                moments = torch.cat([self._encode_clip(x_slice) for x_slice in x.split(1)])
+            else:
+                moments = self._encode_clip(x)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
             return (posterior, )
         return AutoencoderKLOutput(latent_dist=posterior)
+
+    def _encode_keyframe_tile_parallel(self, x: torch.Tensor) -> torch.Tensor | None:
+        """FASTVIDEO_H3_VAE_TILE_PARALLEL: split a keyframe's tiles across the sequence-parallel group.
+
+        Every sequence-parallel rank encodes the same keyframes in the same
+        order (the pipeline prepares references identically on all ranks), so
+        the collective inside is entered uniformly.
+        """
+        if not envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get():
+            return None
+        from fastvideo.distributed import get_sp_group, model_parallel_is_initialized
+        if not model_parallel_is_initialized():
+            return None
+        from fastvideo.models.vaes.minimax_h3_parallel import encode_keyframe_tile_parallel
+        return encode_keyframe_tile_parallel(self, x, get_sp_group())
 
     def decode(self, z: torch.Tensor, return_dict: bool = True) -> DecoderOutput | tuple[torch.Tensor]:
         if self.use_slicing and z.shape[0] > 1:

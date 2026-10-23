@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Convert the FastH3 Preview DiT into pre-quantized MLX checkpoints.
+"""Convert the FastH3 DiT into pre-quantized (or dense BF16) MLX checkpoints.
 
 Each output dir is a self-contained, shippable artifact in the
 `mlx_h3_dit.safetensors` format: weights already cast/quantized, optional
@@ -23,6 +23,17 @@ checkpoints to a new directory — do not overwrite an existing dense export.
         --out ~/models/FastH3-MLX-vsa \\
         --formats int6 --include-vsa
 
+``bf16`` writes a dense, unquantized checkpoint (~38 GiB for the 33B body; AdaLN
+table baked and its projection weights dropped, exactly like the quantized
+formats). It targets large-memory Macs (96 GB+) where MLX runs dense BF16
+matmul fastest. Conversion holds the dense body resident while saving, so it
+needs roughly the output size in free memory.
+
+    python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
+        --model-root ~/models/FastH3/transformer_ref \\
+        --out ~/models/FastH3-MLX-vsa \\
+        --formats bf16 --include-vsa
+
 Output layout: `~/models/FastH3-MLX/<format>/mlx_h3_dit.safetensors` + manifest.
 """
 
@@ -42,22 +53,55 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     H3_WEIGHTS_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
+    MiniMaxH3SchedulerState,
+    adaln_timestep_union,
+    load_fasth3_inference_contract,
     mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
+    pdd_adaln_timesteps,
+    pdd_plan_from_contract,
     save_mlx_h3_checkpoint,
 )
 
 logger = init_logger(__name__)
 
-SUPPORTED_FORMATS = ("int8", "int6", "int4")
-DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
+DENSE_FORMAT = "bf16"
+QUANTIZED_FORMATS = ("int8", "int6", "int4")
+SUPPORTED_FORMATS = (*QUANTIZED_FORMATS, DENSE_FORMAT)
+DEFAULT_FORMATS = " ".join(QUANTIZED_FORMATS)
 
 
-def _adaln_cache_timesteps() -> np.ndarray:
-    video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
-    audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
-    return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
+    """Four-step uniform grid, unless the snapshot declares its own shifts.
+
+    FastH3 8-Step V2 carries ``video_scheduler_shift`` / ``audio_scheduler_shift``.
+    Four-step sidecars do not, so those conversions keep the existing cache.
+    A shifted contract that fails to parse aborts conversion.
+    """
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
+        audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
+        return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    if contract["kind"] == "pdd":
+        plan = pdd_plan_from_contract(contract)
+        video_state = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["video_scheduler_shift"],
+                                                                   plan.node_sigmas["video"])
+        audio_state = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["audio_scheduler_shift"],
+                                                                   plan.node_sigmas["audio"])
+        logger.info("FastH3 PDD schedule contract: %d fused blocks of a %d-interval grid, video/audio shift=%g/%g",
+                    plan.num_steps, plan.pdd_steps, contract["video_scheduler_shift"],
+                    contract["audio_scheduler_shift"])
+        return pdd_adaln_timesteps(contract, video_state, audio_state)
+    video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    logger.info("FastH3 shifted schedule contract: %d DMD forwards, video/audio shift=%g/%g",
+                len(contract["dmd_denoising_steps"]), contract["video_scheduler_shift"],
+                contract["audio_scheduler_shift"])
+    return adaln_timestep_union(video_state, audio_state)
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +115,10 @@ def parse_args() -> argparse.Namespace:
         help=("retain and quantize transformer_blocks.*.attn.to_gate_compress.weight "
               "(required for MLX VSA inference; omitted by dense conversion)"),
     )
+    parser.add_argument("--nvfp4-conditioner-root", type=Path,
+                        help="also cache the released packed encoder in native MLX layout, without requantization")
+    parser.add_argument("--nvfp4-conditioner-out", type=Path,
+                        help="empty encoder-cache output directory; defaults to OUT/nvfp4-encoder")
     return parser.parse_args()
 
 
@@ -84,11 +132,11 @@ def main() -> None:
         raise ValueError(f"Unsupported H3 MLX formats: {unsupported}. Choose from {SUPPORTED_FORMATS}.")
     out_base = Path(args.out)
     out_base.mkdir(parents=True, exist_ok=True)
-    cache_timesteps = _adaln_cache_timesteps()
+    cache_timesteps = _adaln_cache_timesteps(args.model_root)
 
     for fmt in formats:
-        spec = MLXQuantizationSpec.from_name(fmt)
-        if spec is None:
+        spec = None if fmt == DENSE_FORMAT else MLXQuantizationSpec.from_name(fmt)
+        if spec is None and fmt != DENSE_FORMAT:
             raise ValueError(f"Expected a quantized H3 format, got {fmt}.")
         ensure_quantization_supported(spec)
         dtype = "bf16"
@@ -124,6 +172,21 @@ def main() -> None:
         gc.collect()
         if hasattr(mx, "clear_cache"):
             mx.clear_cache()
+
+    if args.nvfp4_conditioner_root is not None:
+        from fastvideo.mlx_runtime.minimax_h3_conditioner import (
+            MLX_NVFP4_ENCODER_MANIFEST,
+            export_mlx_h3_nvfp4_encoder,
+        )
+
+        encoder_out = args.nvfp4_conditioner_out or out_base / "nvfp4-encoder"
+        if (encoder_out / MLX_NVFP4_ENCODER_MANIFEST).exists() and (encoder_out / "model.safetensors").exists():
+            print(f"[skip] NVFP4 encoder already cached at {encoder_out}", flush=True)
+        else:
+            started = time.perf_counter()
+            export_mlx_h3_nvfp4_encoder(args.nvfp4_conditioner_root, encoder_out)
+            print(f"[encoder] cached packed NVFP4 encoder in {time.perf_counter() - started:.1f}s at {encoder_out}",
+                  flush=True)
 
 
 if __name__ == "__main__":

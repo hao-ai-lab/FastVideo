@@ -140,6 +140,7 @@ def test_minimax_patterns_filter_unused_repo_partitions(
 ) -> None:
     repo_files = [
         "model_index.json",
+        "fastvideo_inference.json",
         "scheduler/scheduler_config.json",
         "transformer/model.safetensors",
         "transformer_ref/model.safetensors",
@@ -153,6 +154,7 @@ def test_minimax_patterns_filter_unused_repo_partitions(
     ))
 
     assert "model_index.json" in selected
+    assert "fastvideo_inference.json" in selected
     assert "scheduler/scheduler_config.json" in selected
     assert selected_transformer in selected
     assert excluded_transformer not in selected
@@ -173,7 +175,7 @@ def test_direct_pipeline_load_forwards_partial_patterns(tmp_path: Path, monkeypa
     monkeypatch.setattr("fastvideo.pipelines.composed_pipeline_base.maybe_download_model", fake_download)
     pipeline = object.__new__(MiniMaxH3Ref2VAModularPipeline)
     pipeline.model_path = "MiniMaxAI/MiniMax-H3"
-    pipeline.fastvideo_args = SimpleNamespace(revision="test-revision")
+    pipeline.fastvideo_args = SimpleNamespace(revision="test-revision", pipeline_config=SimpleNamespace(pdd_step_indices=None))
 
     pipeline._load_config(pipeline.model_path)
 
@@ -248,3 +250,40 @@ def test_model_index_supports_umbrella_repo_paths(tmp_path: Path, monkeypatch) -
     assert captured["filename"] == "minimax-h3/model_index.json"
     assert captured["revision"] == "test-revision"
     assert config["pipeline_name"] == "MiniMaxH3ModularPipeline"
+
+
+def test_read_optional_model_json_local_directory(tmp_path: Path) -> None:
+    (tmp_path / "scheduler").mkdir()
+    (tmp_path / "scheduler" / "scheduler_config.json").write_text(json.dumps({"shift": 12.0}))
+
+    assert utils.read_optional_model_json(str(tmp_path), "scheduler/scheduler_config.json") == {"shift": 12.0}
+    assert utils.read_optional_model_json(str(tmp_path), "fastvideo_inference.json") is None
+
+
+def test_read_optional_model_json_umbrella_repo_file(tmp_path: Path, monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_hf_hub_download(**kwargs):
+        captured.update(kwargs)
+        path = tmp_path / kwargs["filename"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"pdd_steps": 32}))
+        return str(path)
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)
+
+    config = utils.read_optional_model_json("org/repo/student", "transformer_ref/config.json", revision="rev")
+
+    assert config == {"pdd_steps": 32}
+    assert captured == {"repo_id": "org/repo", "filename": "student/transformer_ref/config.json", "revision": "rev"}
+
+
+def test_read_optional_model_json_absent_hub_file(monkeypatch) -> None:
+    from huggingface_hub.utils import EntryNotFoundError
+
+    def fake_hf_hub_download(**kwargs):
+        raise EntryNotFoundError(f"{kwargs['filename']} is not in the repo")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)
+
+    assert utils.read_optional_model_json("org/repo", "fastvideo_inference.json") is None

@@ -147,6 +147,18 @@ def _get_initialized_node_group():
     return None
 
 
+def _is_node_leader(node_group) -> bool:
+    """Return True on the rank that reads the checkpoint files for its node.
+
+    The node group broadcasts from its rank 0, so that rank reads. The local
+    rank is the CUDA device ordinal, and a node can have no rank on device 0
+    (for example, Ray workers on GPUs 2 and 3 of a 4-GPU node).
+    """
+    if node_group is not None:
+        return node_group.rank_in_group == 0
+    return int(os.environ.get("LOCAL_RANK", 0)) == 0
+
+
 def safetensors_weights_iterator(hf_weights_files: list[str],
                                  to_cpu: bool = False,
                                  broadcast: bool = True,
@@ -156,14 +168,14 @@ def safetensors_weights_iterator(hf_weights_files: list[str],
         hf_weights_files: List of safetensor files to load.
         to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current
             process.
-        broadcast: Whether local rank 0 should read GPU weights and broadcast them to the other local ranks.
+        broadcast: Whether node-group rank 0 should read GPU weights and broadcast them to the other ranks of the node.
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
             must iterate over all the weights before use. Only used when broadcast is True and to_cpu is False.
     """
     node_group = _get_initialized_node_group()
-    local_rank = node_group.local_rank if node_group is not None else int(os.environ.get("LOCAL_RANK", 0))
+    is_leader = _is_node_leader(node_group)
     device = str(parallel_state.get_local_torch_device()) if not to_cpu else "cpu"
-    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
+    enable_tqdm = not torch.distributed.is_initialized() or is_leader
     if to_cpu or not broadcast or node_group is None:
         async_broadcast = False
 
@@ -179,7 +191,7 @@ def safetensors_weights_iterator(hf_weights_files: list[str],
                 if to_cpu:
                     param = f.get_tensor(name)
                 elif broadcast and node_group is not None:
-                    if local_rank == 0:
+                    if is_leader:
                         param = f.get_tensor(name)
                     else:
                         sl = f.get_slice(name)
@@ -220,9 +232,8 @@ def pt_weights_iterator(hf_weights_files: list[str],
             torch.load and do not use the safetensors broadcast path.
     """
     node_group = _get_initialized_node_group()
-    local_rank = node_group.local_rank if node_group is not None else int(os.environ.get("LOCAL_RANK", 0))
     device = str(parallel_state.get_local_torch_device()) if not to_cpu else "cpu"
-    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
+    enable_tqdm = not torch.distributed.is_initialized() or _is_node_leader(node_group)
     for bin_file in tqdm(
             hf_weights_files,
             desc="Loading pt checkpoint shards",

@@ -33,11 +33,13 @@ import argparse
 import json
 import math
 import os
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 
 # MiniMax-H3 generates 5-15 s at 24 fps, on a latent grid that only admits frame counts
-# of the form 17n + 5. 124 is the 5-second point the FastH3 profile is measured at.
+# of the form 17n + 5. 124 is the 5-second point the FastH3 profile is measured at;
+# the 15-second cap pads to 362 frames.
 FRAMES_PER_CHUNK = 17
 LATENTS_PER_CHUNK = 5
 FPS = 24
@@ -50,6 +52,10 @@ def align_num_frames(num_frames: int) -> int:
         return LATENTS_PER_CHUNK
     chunks = -(-(num_frames - LATENTS_PER_CHUNK) // FRAMES_PER_CHUNK)
     return LATENTS_PER_CHUNK + chunks * FRAMES_PER_CHUNK
+
+
+MIN_ALIGNED_FRAMES = align_num_frames(int(MIN_DURATION * FPS))
+MAX_ALIGNED_FRAMES = align_num_frames(int(MAX_DURATION * FPS))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -77,18 +83,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="video sparse attention; inferred from the adapter when omitted")
     parser.add_argument("--vsa-sparsity", type=float, default=0.9)
     parser.add_argument("--vsa-tile-size", type=int, choices=(64, 256), default=64)
-    parser.add_argument("--vsa-kernel", choices=("triton", "sm100a"), default="sm100a")
+    parser.add_argument("--vsa-kernel", choices=("triton", "ptx_blackwell", "sm100a"), default="ptx_blackwell")
     parser.add_argument("--fa4", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args(argv)
+    if args.vsa_kernel == "sm100a":
+        warnings.warn("--vsa-kernel sm100a is deprecated; use --vsa-kernel ptx_blackwell", FutureWarning, stacklevel=2)
+        args.vsa_kernel = "ptx_blackwell"
     if not args.prompt and not args.prompts_file:
         parser.error("pass --prompt or --prompts-file")
     # Whether VSA is required is a property of the adapter, not of having one at all --
     # community adapters built against the ComfyUI layout carry no gate. Checked in
     # main(), once the path has been resolved.
     aligned = align_num_frames(args.num_frames)
-    if not MIN_DURATION <= aligned / FPS <= MAX_DURATION:
-        parser.error(f"MiniMax-H3 generates {MIN_DURATION}-{MAX_DURATION}s at {FPS} fps; "
-                     f"aligned num_frames={aligned} is {aligned / FPS:.1f}s")
+    if not MIN_ALIGNED_FRAMES <= aligned <= MAX_ALIGNED_FRAMES:
+        parser.error(f"MiniMax-H3 generates {MIN_DURATION:g}-{MAX_DURATION:g}s at {FPS} fps; "
+                     f"aligned num_frames={aligned} is {aligned / FPS:.1f}s, outside the accepted "
+                     f"{MIN_ALIGNED_FRAMES}-{MAX_ALIGNED_FRAMES} frame range")
     args.num_frames = aligned
     if not math.isfinite(args.lora_strength):
         parser.error("--lora-strength must be finite")
@@ -104,7 +114,7 @@ def configure_environment(args: argparse.Namespace) -> None:
     """
     env: dict[str, str | None] = {
         "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if args.vsa else "FLASH_ATTN",
-        "FASTVIDEO_VSA_SM100A": "1" if (args.vsa and args.vsa_kernel == "sm100a") else "0",
+        "FASTVIDEO_VSA_PTX_BLACKWELL": "1" if (args.vsa and args.vsa_kernel == "ptx_blackwell") else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
         "FASTVIDEO_H3_VSA_PROBE": None,
         "FASTVIDEO_DISABLE_ATTENTION_COMPILE": "0",

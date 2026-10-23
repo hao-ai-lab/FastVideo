@@ -13,6 +13,10 @@ from fastvideo.configs.models.audio.bigvgan import (
     BigVGANV2ArchConfig,
     BigVGANV2Config,
 )
+from fastvideo.configs.models.audio.kandinsky6_audio_vae import (
+    Kandinsky6AudioVAEArchConfig,
+    Kandinsky6AudioVAEConfig,
+)
 
 __all__ = [
     "LTX2AudioEncoderConfig",
@@ -22,4 +26,6 @@ __all__ = [
     "MMAudioVAEConfig",
     "BigVGANV2ArchConfig",
     "BigVGANV2Config",
+    "Kandinsky6AudioVAEArchConfig",
+    "Kandinsky6AudioVAEConfig",
 ]

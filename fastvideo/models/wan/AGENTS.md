@@ -15,8 +15,8 @@ explicit compatibility exports.
 
 - Keep `__init__.py` lightweight: no eager model or pipeline imports.
 - Keep `definition.py` data-only. Config and preset names reference their
-  existing owners; do not copy defaults into the catalog. Its registration
-  groups preserve first-match detector ordering around DreamX. Checkpoint
+  existing owners; do not copy defaults into the catalog. Declaration order
+  is first-match detector order. Checkpoint
   manifests and explicit pipeline overrides still choose the executable
   pipeline; a definition must not silently pin that choice.
 - Keep `configs.pipelines.wan` as explicit compatibility aliases, including
@@ -42,6 +42,12 @@ explicit compatibility exports.
   `__init__.py` are pre-commit checked;
   `transformer.py` and `vae.py` retain the existing model-code exclusion.
   Avoid unrelated reformatting.
+- `WanTransformer3DModel.forward` shards the flattened spatiotemporal token
+  sequence after patch embedding (`sequence_model_parallel_shard`, with
+  padding). Callers pass full-length latents and conditioning; a pipeline must
+  not pre-shard along the temporal axis. Pre-sharding only part of the model
+  input (for example I2V image conditioning) cannot match the full-length noise
+  and double-shards the rest.
 
 ## Focused checks
 

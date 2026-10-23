@@ -62,10 +62,10 @@ parity rationale:
 2. **Use layer-by-layer activation hooks** when DiT parity is close-but-not-
    bit-exact and the gap grows with depth. The
    `fastvideo/hooks/activation_trace.py` infra exists exactly for this case
-   (`add-model-trace` skill). In MagiHuman's case it would have localized the
+   (see `docs/contributing/activation_trace.md`). In MagiHuman's case it would have localized the
    first divergence point in one pass.
 
-3. **The `add-model-port-dit` skill** should explicitly call out:
+3. **DiT ports must account for:**
    - SDPA input dtype must match the upstream kernel's internal cast.
    - Post-attention upcast happens **before** any per-head gate, not after.
    - Residual stream dtype across block boundaries is a parity invariant.

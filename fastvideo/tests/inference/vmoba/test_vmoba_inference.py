@@ -6,14 +6,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import fastvideo.envs as envs
 
-def test_inference_vmoba():
+
+def test_inference_vmoba(env_overrides):
     """Test FastVideo VMOBA_ATTN inference pipeline"""
 
     output_dir = Path("outputs_video/vmoba_1.3B/")
     moba_config = "fastvideo/configs/backend/vmoba/wan_1.3B_77_480_832.json"
 
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VMOBA_ATTN"
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("VMOBA_ATTN"))
 
     config = {
         "generator": {
@@ -92,4 +94,6 @@ def test_inference_vmoba():
 
 
 if __name__ == "__main__":
-    test_inference_vmoba()
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-vs"]))

@@ -3,7 +3,8 @@
 # AdaLN, 4096-d post-connector text embeddings, no in-DiT caption
 # projection) for the per-method smoke test. 18.9B params, ~38GB in
 # bf16 — the test skips below 60GB GPU memory. Same constraints as
-# LTX-2.0: training_cfg_rate=0 and precondition_outputs=false.
+# LTX-2.0: precondition_outputs=false (and training_cfg_rate=0 here only
+# to keep the smoke test from loading Gemma; cfg_rate>0 is supported).
 
 models:
   student:

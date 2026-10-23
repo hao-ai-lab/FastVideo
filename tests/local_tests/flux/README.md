@@ -66,7 +66,7 @@ Reference images must be seeded first via `reference_videos_cli.py`.
 
 ```bash
 FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
-FLUX_T2I_MODEL_DIR=official_weights/FLUX.1-dev \
+FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR=official_weights/FLUX.1-dev \
 pytest fastvideo/tests/ssim/test_flux_t2i_similarity.py -vs
 ```
 

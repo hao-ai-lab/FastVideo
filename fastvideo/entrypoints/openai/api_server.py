@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from fastvideo.api.presets import validate_preset_selection
-from fastvideo.api.schema import GenerationRequest
+from fastvideo.api.schema import DEFAULT_MEDIA_REFERENCE_MAX_BYTES, GenerationRequest
+from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.state import (
     DEFAULT_OUTPUT_DIR,
     clear_state,
@@ -24,6 +25,7 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.registry import get_preset_selection
+from fastvideo.worker.executor import reject_external_launcher
 
 logger = init_logger(__name__)
 
@@ -60,6 +62,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     output_dir: str = app.state.output_dir
     served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
+    media_reference_max_bytes: int = getattr(app.state, "media_reference_max_bytes", DEFAULT_MEDIA_REFERENCE_MAX_BYTES)
+    media_policy: MediaPolicy = getattr(app.state, "media_policy", MediaPolicy())
 
     logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
     factory = app.state.generator_factory
@@ -74,6 +78,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         output_dir,
         default_request=default_request,
         served_model_name=served_model_name,
+        media_reference_max_bytes=media_reference_max_bytes,
+        media_policy=media_policy,
     )
 
     try:
@@ -97,8 +103,17 @@ def create_app(
     generator_factory: Callable[[], ServingGenerator] | None = None,
     video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
     runtime: str = "cuda",
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
+    media_policy: MediaPolicy | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
+
+    # The MLX server passes a lightweight args namespace without an executor
+    # backend; only an explicit external-launcher request is rejected here.
+    reject_external_launcher(
+        getattr(fastvideo_args, "distributed_executor_backend", None),
+        entrypoint="the OpenAI-compatible server",
+    )
 
     app = FastAPI(
         title="FastVideo OpenAI-Compatible API",
@@ -109,6 +124,8 @@ def create_app(
     app.state.output_dir = output_dir
     app.state.default_request = default_request
     app.state.served_model_name = served_model_name
+    app.state.media_reference_max_bytes = media_reference_max_bytes
+    app.state.media_policy = media_policy or MediaPolicy()
     app.state.generator_factory = generator_factory
     app.state.video_request_validator = video_request_validator
     app.state.runtime = runtime
@@ -203,6 +220,8 @@ def run_server(
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
+    media_policy: MediaPolicy | None = None,
 ):
     """Create the app and run it with uvicorn"""
     os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
@@ -214,6 +233,8 @@ def run_server(
         output_dir=output_dir,
         default_request=default_request,
         served_model_name=served_model_name,
+        media_reference_max_bytes=media_reference_max_bytes,
+        media_policy=media_policy,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)

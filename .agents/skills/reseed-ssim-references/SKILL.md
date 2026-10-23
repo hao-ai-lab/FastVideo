@@ -57,7 +57,7 @@ Hardcoded:
 - Quality tier: **`default`**. `full_quality` is a separate, deliberate
   operation.
 - HF repo: `FastVideo/ssim-reference-videos` (override via
-  `FASTVIDEO_SSIM_REFERENCE_HF_REPO`).
+  `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO`).
 - Device folder: `L40S_reference_videos`.
 
 ## Prerequisites

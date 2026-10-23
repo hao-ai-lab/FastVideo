@@ -1,6 +1,6 @@
 # FastH3 on one DGX Spark (one GB10). Install: docs/getting_started/installation/spark.md
 #
-# GB10 has no FA4 / sm_100a VSA kernel. Keep the env prefix below, or pass
+# GB10 has no FA4 / ptx_blackwell VSA kernel. Keep the env prefix below, or pass
 # equivalent CLI flags on examples/inference/basic/basic_fasth3.py
 # (`--vsa-kernel triton --no-fa4 --num-gpus 1`).
 #
@@ -9,7 +9,7 @@
 # counts are 17n+5, max 345 (15 s). Native 16:9 sizes include 832x480 and
 # 1344x768. 1024x576 is a common recipe-matched 16:9.
 #
-#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+#   FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 #     FASTVIDEO_STAGE_LOGGING=1 \
 #     fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml
 generator:

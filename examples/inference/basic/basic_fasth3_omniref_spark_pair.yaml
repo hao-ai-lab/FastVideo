@@ -1,0 +1,91 @@
+# FastH3 OmniRef (Ref2VA) across two DGX Sparks over QSFP RoCE, eight fused PDD
+# forwards per clip. Start Ray on both Sparks and source
+# examples/inference/optimizations/spark_pair_env.sh first; see
+# docs/getting_started/installation/spark_pair.md.
+#
+# Point model_path at a composed OmniRef model directory (see
+# basic_fasth3_omniref_pdd.py): the distilled transformer_ref export, with its
+# packed nvfp4_weights.safetensors, symlinked with base MiniMax-H3's encoder,
+# tokenizer, processor and VAEs.
+#
+# GB10 uses Triton VSA. The two nodes share the sequence (sp_size 2), which is
+# the only split this pipeline has: H3 generates a clip at a time, so there is
+# no depth to pipeline. The FP8 prefix split runs on the sequence-parallel path
+# too: prefix rows stay dense and video rows stay on the FP4 kernel.
+#
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8 \
+# FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P=1 FASTVIDEO_H3_VSA_FP4_K_SMOOTH=1 \
+# FASTVIDEO_H3_GATE_CHUNK_ROWS=8192 \
+# FASTVIDEO_ULYSSES_A2A=auto FASTVIDEO_MINIMAX_H3_EXACT_KERNELS=all \
+# FASTVIDEO_H3_VSA_HEADS_FIRST_TILE=1 FASTVIDEO_H3_VAE_TILE_PARALLEL=1 \
+# FASTVIDEO_H3_REF2VA_MEMO_ENTRIES=16 \
+# FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all \
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
+# FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
+# FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors \
+# fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_spark_pair.yaml
+#
+# See docs/inference/fasth3_omniref.md.
+generator:
+  model_path: ./FastH3-OmniRef-Composed
+  engine:
+    num_gpus: 2
+    execution_backend: ray
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    parallelism:
+      tp_size: 1
+      sp_size: 2
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      image_encoder: false
+      vae: false
+      pin_cpu_memory: false
+      lazy_module_load: false
+    compile:
+      enabled: false
+      vae_enabled: true
+  pipeline:
+    workload_type: i2v
+    components:
+      override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
+    vae_tiling: true
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
+        prefix_precision: fp8
+        two_level_p: true
+        smooth_k: true
+      vae_parallel_decode: true
+      vae_parallel_encode: true
+      video_decode_backend: h3-vae
+request:
+  prompt: >-
+    A person on a sofa, lit by a warm lamp, speaking to camera.
+  negative_prompt: ""
+  inputs:
+    references:
+      # Ordered: the clip is conditioned on these. Replace with your own media.
+      - source: assets/images/couple.jpg
+        media_type: image
+  sampling:
+    seed: 1234
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 8  # eight fused PDD blocks; the contract sets it
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/fasth3_omniref_spark_pair/
+    save_video: true
+    return_frames: false

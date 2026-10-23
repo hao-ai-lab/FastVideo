@@ -10,10 +10,10 @@ nonzero gradients reaching the first transformer block.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29520")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29520")
 
 from pathlib import Path
 

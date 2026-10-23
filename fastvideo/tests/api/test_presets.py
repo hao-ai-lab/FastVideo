@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+from pathlib import Path
 
 import pytest
 
@@ -64,6 +65,32 @@ def _make_preset(
         stage_schemas=stage_schemas,
         **kwargs,
     )
+
+
+def _write_minimal_model_index(model_dir: Path, class_name: str) -> None:
+    """Minimal on-disk diffusers repo so registry resolution can read ``_class_name``."""
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "transformer").mkdir(exist_ok=True)
+    (model_dir / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": class_name,
+            "_diffusers_version": "0.39.0"
+        }),
+        encoding="utf-8",
+    )
+
+
+def _record_registry_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Capture ``fastvideo.registry`` warnings.
+
+    The ``fastvideo`` logger sets ``propagate = False``, so ``caplog`` never
+    sees these records.
+    """
+    from fastvideo import registry
+
+    warnings: list[tuple] = []
+    monkeypatch.setattr(registry.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+    return warnings
 
 
 # -------------------------------------------------------------------
@@ -326,6 +353,19 @@ class TestWanPresets:
         family = get_model_family("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
         assert family == "wan"
 
+    def test_more_specific_later_detector_match_keeps_first_and_warns(self, tmp_path, monkeypatch) -> None:
+        """A later detector match that shares more of the path never overrides
+        registration order (test_wan_definitions pins that resolution), so the
+        choice stays ambiguous and still warns."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / "lucy-edit-custom"
+        _write_minimal_model_index(model_dir, "WanPipeline")
+        assert get_preset_selection(str(model_dir)) == ("wan_t2v_1_3b", "wan")
+        assert len(warnings) == 1
+        assert "Multiple models matched" in warnings[0][0]
+
 
 # -------------------------------------------------------------------
 # LTX2 preset integration
@@ -338,7 +378,15 @@ class TestLtx2Presets:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("ltx2")
         names = {p.name for p in presets}
-        assert names == {"ltx2_base", "ltx2_3_base", "ltx2_distilled", "ltx2_two_stage"}
+        assert names == {
+            "ltx2_base",
+            "ltx2_3_base",
+            "ltx2_distilled",
+            "ltx2_two_stage",
+            "ltx2_5_dev",
+            "ltx2_5_distilled",
+            "ltx2_5_distilled_two_stage",
+        }
 
     def test_ltx2_base_lookup(self) -> None:
         import fastvideo.registry  # noqa: F401
@@ -385,6 +433,38 @@ class TestLtx2Presets:
         with pytest.raises(ConfigValidationError):
             validate_stage_overrides(p, {"refine": {"bogus_field": 1}})
 
+    @pytest.mark.parametrize(
+        "directory_name",
+        ("ltx-2.3-distilled", "ltx2.3-distilled", "LTX-2.3-Distilled-Diffusers-ckpt"),
+    )
+    def test_ltx23_distilled_local_dir_resolves_to_distilled(
+        self,
+        tmp_path,
+        monkeypatch,
+        directory_name: str,
+    ) -> None:
+        """Truncated/re-hyphenated local dirs must not be shadowed by the base
+        entry, whose detector fires on the shared pipeline class name."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / directory_name
+        _write_minimal_model_index(model_dir, "LTX2Pipeline")
+        assert get_preset_selection(str(model_dir)) == ("ltx2_distilled", "ltx2")
+        assert warnings == []
+
+    def test_ltx2_equally_specific_local_dir_still_warns(self, tmp_path, monkeypatch) -> None:
+        """Equally specific matches stay ambiguous: warn, keep registration order."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / "ltx2_distilled_diffusers"
+        _write_minimal_model_index(model_dir, "LTX2Pipeline")
+        assert get_preset_selection(str(model_dir)) == ("ltx2_distilled", "ltx2")
+        assert len(warnings) == 1
+        assert "Multiple models matched" in warnings[0][0]
+        assert str(model_dir) in warnings[0][1]
+
 
 # -------------------------------------------------------------------
 # Hunyuan preset integration
@@ -403,6 +483,22 @@ class TestHunyuanPresets:
         import fastvideo.registry  # noqa: F401
         p = get_preset("fast_hunyuan_t2v", "hunyuan")
         assert p.defaults["num_inference_steps"] == 6
+
+    def test_removed_gamecraft_checkpoint_is_not_detected_as_hunyuan(self, tmp_path) -> None:
+        from fastvideo.registry import get_model_family
+
+        def make_checkpoint(name: str, class_name: str) -> str:
+            model_dir = tmp_path / name
+            model_dir.mkdir()
+            (model_dir / "model_index.json").write_text(
+                json.dumps({
+                    "_class_name": class_name,
+                    "_diffusers_version": "0.33.1"
+                }))
+            return str(model_dir)
+
+        assert get_model_family(make_checkpoint("HunyuanVideo-Custom", "HunyuanVideoPipeline")) == "hunyuan"
+        assert get_model_family(make_checkpoint("Hunyuan-GameCraft-Diffusers", "HunyuanGameCraftPipeline")) is None
 
 
 # -------------------------------------------------------------------
@@ -441,6 +537,20 @@ class TestHunyuan15Presets:
         with pytest.raises(ConfigValidationError):
             validate_stage_overrides(p, {"sr": {"height": 1080}})
 
+    def test_hunyuan15_local_dir_resolves_to_15(self, tmp_path) -> None:
+        """A truncated local dir must not fall back to the generic Hunyuan entry.
+
+        Both entries share the same amount of text with this name, so the tie
+        is broken by registration order, which keeps the dedicated entry.
+        """
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig
+        from fastvideo.registry import get_pipeline_config_cls_from_name, get_preset_selection
+        model_dir = tmp_path / "hunyuanvideo15-480p_t2v"
+        _write_minimal_model_index(model_dir, "HunyuanVideoPipeline")
+        assert get_pipeline_config_cls_from_name(str(model_dir)) is Hunyuan15T2V480PConfig
+        assert get_preset_selection(str(model_dir)) == ("hunyuan15_t2v_480p", "hunyuan15")
+
 
 # -------------------------------------------------------------------
 # Cosmos / Cosmos25 preset integration
@@ -458,8 +568,10 @@ class TestCosmosPresets:
     def test_cosmos25_separate_family(self) -> None:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("cosmos25")
-        assert len(presets) == 1
-        assert presets[0].name == "cosmos25_predict2_2b"
+        assert {preset.name for preset in presets} == {
+            "cosmos25_predict2_2b",
+            "cosmos25_dfd_v2w_2b",
+        }
 
     def test_cosmos25_2b_path_resolves_to_preset(self) -> None:
         """Regression: the Cosmos-Predict2.5 2B model path must select the
@@ -479,29 +591,20 @@ class TestCosmosPresets:
         assert c.defaults["fps"] == 16
         assert c25.defaults["fps"] == 24
 
-
-# -------------------------------------------------------------------
-# TurboDiffusion preset integration
-# -------------------------------------------------------------------
-
-
-class TestTurboDiffusionPresets:
-
-    def test_turbo_presets_registered(self) -> None:
+    def test_cosmos25_dfd_path_resolves_to_four_step_i2v_preset(self, tmp_path) -> None:
         import fastvideo.registry  # noqa: F401
-        presets = get_presets_for_family("turbodiffusion")
-        names = {p.name for p in presets}
-        assert names == {
-            "turbo_t2v_1_3b",
-            "turbo_t2v_14b",
-            "turbo_i2v_a14b",
-        }
+        from fastvideo.api.sampling_param import SamplingParam
 
-    def test_turbo_4_step(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        p = get_preset("turbo_t2v_14b", "turbodiffusion")
-        assert p.defaults["num_inference_steps"] == 4
-        assert p.defaults["guidance_scale"] == 1.0
+        model_dir = tmp_path / "Cosmos-Predict2.5-2B-DFD"
+        model_dir.mkdir()
+        (model_dir / "model_index.json").write_text(
+            '{"_class_name": "Cosmos2_5Pipeline", "_diffusers_version": "0.37.0"}'
+        )
+        sp = SamplingParam.from_pretrained(str(model_dir))
+        assert sp.guidance_scale == 1.0
+        assert sp.num_inference_steps == 4
+        assert sp.num_frames == 81
+        assert sp.fps == 24
 
 
 # -------------------------------------------------------------------
@@ -630,6 +733,48 @@ class TestLingBotVideoPresets:
 
 
 # -------------------------------------------------------------------
+# LingBot-World-Fast preset integration
+# -------------------------------------------------------------------
+
+
+class TestLingBotWorldFastPresets:
+
+    def test_registered_defaults_are_fixed(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+
+        model_path = "FastVideo/LingBot-World-Fast-Diffusers"
+        assert get_preset_selection(model_path) == ("lingbotworld_fast_i2v", "lingbotworld_fast")
+
+        preset = get_preset("lingbotworld_fast_i2v", "lingbotworld_fast")
+        assert preset.defaults["num_inference_steps"] == 4
+        assert preset.defaults["guidance_scale"] == 1.0
+        assert preset.stage_schemas[0].allowed_overrides == frozenset()
+        with pytest.raises(ConfigValidationError, match="does not accept overrides"):
+            validate_stage_overrides(preset, {"denoise": {"num_inference_steps": 8}})
+
+    def test_local_checkpoint_resolves_fast_pipeline(self, tmp_path) -> None:
+        from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
+        from fastvideo.fastvideo_args import WorkloadType
+        from fastvideo.pipelines.basic.lingbotworld_fast import LingBotWorldFastPipeline
+        from fastvideo.registry import get_model_info
+
+        model_dir = tmp_path / "lingbot-world-fast"
+        (model_dir / "transformer").mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(
+            json.dumps({
+                "_class_name": "LingBotWorldCausalDMDPipeline",
+                "_diffusers_version": "0.36.0",
+            }),
+            encoding="utf-8",
+        )
+
+        info = get_model_info(str(model_dir), workload_type=WorkloadType.I2V)
+        assert info.pipeline_cls is LingBotWorldFastPipeline
+        assert info.pipeline_config_cls is LingBotWorldFastI2V480PConfig
+
+
+# -------------------------------------------------------------------
 # LingBotWorld preset integration (dual guidance)
 # -------------------------------------------------------------------
 
@@ -663,12 +808,6 @@ class TestSinglePresetFamilies:
         p = get_preset("hyworld_t2v", "hyworld")
         assert p.workload_type == "t2v"
 
-    def test_gamecraft_registered(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        p = get_preset("gamecraft_i2v", "gamecraft")
-        assert p.workload_type == "i2v"
-        assert p.defaults["num_frames"] == 33
-
     def test_gen3c_registered(self) -> None:
         import fastvideo.registry  # noqa: F401
         p = get_preset("gen3c_cosmos_7b", "gen3c")
@@ -682,12 +821,6 @@ class TestSinglePresetFamilies:
         p3 = get_preset("matrixgame3_i2v", "matrixgame")
         assert p3.defaults["num_inference_steps"] == 3
         assert p3.defaults["height"] == 720
-
-    def test_longcat_presets_registered(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        presets = get_presets_for_family("longcat")
-        names = {p.name for p in presets}
-        assert names == {"longcat_t2v", "longcat_i2v", "longcat_vc"}
 
 
 # -------------------------------------------------------------------
@@ -718,8 +851,8 @@ class TestPresetDefaultTypes:
         ``ltx2_cfg_scale_video`` or ``ltx2_cfg_scale_audio`` is != 1.0,
         so any non-1.0 default silently forces CFG on for every model
         family that doesn't explicitly override these fields. Guard
-        against the regression that surfaced as the TurboDiffusion I2V
-        SSIM crash (``text_encoding.py:81`` assertion on
+        against the regression that surfaced as a Wan-based I2V SSIM
+        crash (``text_encoding.py:81`` assertion on
         ``negative_prompt``)."""
         from fastvideo.api.sampling_param import SamplingParam
         sp = SamplingParam()

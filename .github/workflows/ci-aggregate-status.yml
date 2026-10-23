@@ -65,7 +65,13 @@ jobs:
               && fullSuiteOnly.size === 14
               && [...fullSuiteOnly.values()].every(s => s.state === 'success');
 
-            if (fastcheckPassed) {
+            // Direct reruns may repair a failed suite, never create a gate for
+            // a suite that did not run.
+            const failedAggregate = context => data.statuses.some(
+              s => s.context === context && s.state === 'failure'
+            );
+
+            if (failedAggregate('fastcheck-passed') && fastcheckPassed) {
               core.info(
                 `All ${fastcheck.size} fastcheck tests passed — updating fastcheck-passed`
               );
@@ -79,7 +85,7 @@ jobs:
               });
             }
 
-            if (fullSuitePassed) {
+            if (failedAggregate('full-suite-passed') && fullSuitePassed) {
               core.info(
                 'All 20 full suite tests passed — updating full-suite-passed'
               );

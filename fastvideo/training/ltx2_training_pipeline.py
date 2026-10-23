@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import sys
 from copy import deepcopy
 from pathlib import Path
 import torch
@@ -14,13 +13,16 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline
-from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.trackers import (DummyTracker, TrackerType, Trackers, initialize_trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler)
 from fastvideo.utils import set_random_seed
 
 logger = init_logger(__name__)
+
+# Preset fps of the LTX-2 checkpoints, used when a batch carries no fps.
+_DEFAULT_ROPE_FPS = 24.0
 
 
 class LTX2TrainingPipeline(TrainingPipeline):
@@ -38,6 +40,8 @@ class LTX2TrainingPipeline(TrainingPipeline):
     text_encoder: torch.nn.Module
     with_audio: bool = False
     tracker: TrackerType
+    # fps of the current batch; the DiT divides temporal RoPE positions by it.
+    _rope_fps: float = _DEFAULT_ROPE_FPS
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         # TODO (David): Change to port LTX2 scheduler into self.modules["scheduler"]
@@ -98,6 +102,13 @@ class LTX2TrainingPipeline(TrainingPipeline):
             last_epoch=self.init_steps - 1,
         )
 
+        if float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0) > 0.0:
+            raise NotImplementedError("--training-cfg-rate > 0 is not implemented in LTX2TrainingPipeline: "
+                                      "this legacy pipeline never instantiates LTX2Model, so nothing would "
+                                      "perform the CFG drop and the flag would be silently ignored. Use the "
+                                      "modular trainer (fastvideo/train LTX2Model, which swaps in the "
+                                      "unconditional embedding) or set --training-cfg-rate 0.")
+
         if self._has_precomputed_pt_data(training_args.data_path):
             data_sources = self._get_ltx2_data_sources(training_args.data_path)
             self.with_audio = "audio_latents" in data_sources
@@ -114,12 +125,17 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
             self.with_audio = False
+            # cfg_rate stays 0 here: this pipeline performs no CFG drop
+            # (LTX2Model.prepare_batch's drop lives in the modular trainer,
+            # which this pipeline never instantiates), and the shared
+            # zeroing drop would train against an all-zero embedding.
+            # --training-cfg-rate > 0 is rejected above.
             self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
                 num_data_workers=training_args.dataloader_num_workers,
                 parquet_schema=pyarrow_schema_text_only,
-                cfg_rate=training_args.training_cfg_rate,
+                cfg_rate=0.0,
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
@@ -246,6 +262,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
         training_batch.encoder_attention_mask = attention_mask.to(device, dtype=torch.bfloat16)
         training_batch.infos = []
         training_batch.raw_latent_shape = latents.shape
+        self._rope_fps = _DEFAULT_ROPE_FPS
         return training_batch
 
     def _get_next_batch_pt(
@@ -286,7 +303,19 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             training_batch.infos = []
         training_batch.raw_latent_shape = latents.shape
+        self._rope_fps = self._batch_fps(batch["latents"].get("fps"))
         return training_batch
+
+    @staticmethod
+    def _batch_fps(fps: torch.Tensor | list[float] | float | None) -> float:
+        if fps is None:
+            return _DEFAULT_ROPE_FPS
+        values = [float(v) for v in torch.as_tensor(fps).flatten().tolist()]
+        if not values or values[0] <= 0:
+            return _DEFAULT_ROPE_FPS
+        if any(v != values[0] for v in values):
+            logger.warning("Batch mixes fps %s; using %s for RoPE", values, values[0])
+        return values[0]
 
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
         return training_batch
@@ -421,8 +450,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
         assert training_batch.noisy_model_input is not None
         assert training_batch.noise is not None
 
+        # Without fps in the forward context the DiT leaves temporal RoPE positions in
+        # frames, while inference divides them by the preset fps into seconds.
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
-                current_timestep=training_batch.current_timestep, attn_metadata=training_batch.attn_metadata):
+                current_timestep=training_batch.current_timestep,
+                attn_metadata=training_batch.attn_metadata,
+                forward_batch=ForwardBatch(data_type="video", fps=self._rope_fps)):
             with torch.autocast("cuda", dtype=training_batch.latents.dtype), torch.autograd.set_detect_anomaly(True):
                 outputs = self.transformer(**input_kwargs)
 
@@ -475,22 +508,16 @@ class LTX2TrainingPipeline(TrainingPipeline):
         return training_batch
 
 
-def main(args) -> None:
-    logger.info("Starting LTX-2 training pipeline...")
-    pipeline = LTX2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
-
-
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
+    from fastvideo.training.runner import main
+    from fastvideo.utils import build_parser
 
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser("LTX2TrainingPipeline", "fastvideo.training.ltx2_training_pipeline")
     args = parser.parse_args()
     args.dit_cpu_offload = False
     main(args)

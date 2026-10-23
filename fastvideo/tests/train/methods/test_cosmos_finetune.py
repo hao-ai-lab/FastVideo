@@ -12,10 +12,10 @@ the fixture (``training_cfg_rate=0`` is required, and
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29521")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29521")
 
 from pathlib import Path
 

@@ -5,10 +5,10 @@ This page contains step-by-step instructions to get you quickly started with vid
 ## Requirements
 
 - **OS**: Linux (tested on Ubuntu 22.04+), or macOS on Apple silicon via the
-  [MPS installation guide](../getting_started/installation/mps.md)
+  [MLX install guide](../getting_started/installation/mlx.md)
 - **Python**: 3.10-3.12
 - **CUDA**: 12.6 or 13.0 (NVIDIA GPUs)
-- **GPU**: At least one NVIDIA GPU, or an Apple silicon chip with MPS
+- **GPU**: At least one NVIDIA GPU, or an Apple silicon chip with the MLX runtime
 
 ## Installation
 
@@ -54,6 +54,10 @@ def main():
 if __name__ == '__main__':
     main()
 ```
+
+`num_gpus=1` uses the in-process executor (no worker subprocess). On Colab/Kaggle
+free-tier hosts (~16GB system RAM), keep `num_gpus=1`; extra T4s do not add host
+memory, so `num_gpus>1` is likely to OOM.
 
 Run the script with:
 
@@ -102,6 +106,10 @@ if __name__ == '__main__':
 Common issues and their solutions:
 
 ### Out of Memory Errors
+
+Host RAM and GPU memory are separate. The default `num_gpus=1` path now loads
+weights once in the current process. Free-tier Colab/Kaggle notebooks (~16GB
+host RAM) should not set `num_gpus>1`.
 
 If you encounter CUDA out of memory errors:
 
