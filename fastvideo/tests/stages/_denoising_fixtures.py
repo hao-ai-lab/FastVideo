@@ -80,7 +80,7 @@ def _tiny_args():
             embedded_cfg_scale=None,
             ti2v_task=False,
             lucy_edit_task=False,
-            dit_config=SimpleNamespace(boundary_ratio=None, patch_size=(1, 1, 1)),
+            dit_config=SimpleNamespace(boundary_ratio=None, patch_size=(1, 1, 1), arch_config=SimpleNamespace()),
         ),
     )
 
