@@ -37,6 +37,8 @@ from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
                                                        vsa_fp4_requested, vsa_tile_first_attention)
+from fastvideo.models.dits.minimax_h3_token_reduction import (MiniMaxH3TokenReduction, expand_token_pairs,
+                                                              pool_token_pairs)
 from fastvideo.models.dits.minimax_h3_fusions import exact as exact_kernels
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
@@ -899,6 +901,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         # per-generation caches for loop-invariant work (see _rotary_for /
         # _refined_text); plain attrs, never in state_dict
         self._rope_cache: tuple | None = None
+        self._reduced_rope_cache: tuple | None = None
         self._text_cache: tuple | None = None
         self.token_refiner = MiniMaxH3TokenRefiner(
             arch.hidden_size,
@@ -1153,23 +1156,60 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                                  (2 * arch.rope_freq_dim)))
             self.rope._buffers["inv_freq"] = inv_freq
 
-    def _rotary_for(self, position_ids: torch.Tensor, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    def _rotary_for(self,
+                    position_ids: torch.Tensor,
+                    dtype: torch.dtype,
+                    cache_name: str = "_rope_cache") -> tuple[torch.Tensor, torch.Tensor]:
         """cos/sin depend only on positions; the denoising stage holds one
         position_ids tensor for the whole loop, so cache per layout and
         pre-cast once instead of rebuilding every step and re-casting in
         every block. Holding the source tensor keeps the identity check safe
-        against id reuse."""
+        against id reuse. Token reduction keeps its pair positions in a
+        second slot so the two layouts do not evict each other."""
         if torch.compiler.is_compiling():
             cos, sin = self.rope(position_ids)
             return cos.to(dtype), sin.to(dtype)
-        cached = self._rope_cache
+        cached = getattr(self, cache_name)
         if (cached is not None and cached[0] is position_ids and cached[1] == dtype
                 and cached[2][0].device == position_ids.device):
             return cached[2]
         cos, sin = self.rope(position_ids)
         value = (cos.to(dtype), sin.to(dtype))
-        self._rope_cache = (position_ids, dtype, value)
+        setattr(self, cache_name, (position_ids, dtype, value))
         return value
+
+    def _enter_token_reduction(self, packed_hidden_states: torch.Tensor, plan: MiniMaxH3TokenReduction,
+                               sequence_length: int,
+                               sp_world_size: int) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        """Pool video pairs; returns the reduced block input and the full rows plus pooled baseline to restore from.
+
+        Under sequence parallelism pooling changes how many rows each rank
+        holds, so the full sequence is gathered, pooled and sharded again.
+        """
+        with nvtx_range("minimax_h3.token_reduction.pool"):
+            if sp_world_size > 1:
+                packed_hidden_states = sequence_model_parallel_all_gather_with_unpad(packed_hidden_states,
+                                                                                      sequence_length,
+                                                                                      dim=1)
+            pooled = pool_token_pairs(packed_hidden_states, plan)
+            reduced = pooled
+            if sp_world_size > 1:
+                reduced = self._block_input(sequence_model_parallel_shard(pooled, dim=1)[0])
+        return reduced, (packed_hidden_states, pooled)
+
+    def _leave_token_reduction(self, packed_hidden_states: torch.Tensor, saved: tuple[torch.Tensor, torch.Tensor],
+                               plan: MiniMaxH3TokenReduction, sp_world_size: int) -> torch.Tensor:
+        """Restore the full sequence from the reduced stack's output."""
+        original, pooled = saved
+        with nvtx_range("minimax_h3.token_reduction.expand"):
+            if sp_world_size > 1:
+                packed_hidden_states = sequence_model_parallel_all_gather_with_unpad(packed_hidden_states,
+                                                                                      plan.reduced_length,
+                                                                                      dim=1)
+            restored = expand_token_pairs(original, packed_hidden_states, pooled, plan)
+            if sp_world_size > 1:
+                restored = self._block_input(sequence_model_parallel_shard(restored, dim=1)[0])
+        return restored
 
     def attach_step_splice(self, late: nn.Module, from_step: int) -> None:
         """Hand denoising steps ``from_step`` onward to ``late`` (same architecture, other weights).
@@ -1263,13 +1303,18 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         audio_indices: torch.Tensor,
         text_indices: torch.Tensor,
         text_attn_metadata: AttentionMetadata | None = None,
+        token_reduction: MiniMaxH3TokenReduction | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Predict video and audio velocities from one caller-defined packed layout."""
+        """Predict video and audio velocities from one caller-defined packed layout.
+
+        ``token_reduction`` (inference only) runs blocks ``[begin, end)`` on
+        horizontally paired generated-video rows; see minimax_h3_token_reduction.
+        """
         late = self.__dict__.get("_splice_late")
         if late is not None and get_forward_context().current_timestep >= self._splice_from_step:
             return late(hidden_states, audio_hidden_states, encoder_hidden_states, timestep, timestep_indices,
                         token_tags, position_ids, video_indices, audio_indices, text_indices,
-                        text_attn_metadata=text_attn_metadata)
+                        text_attn_metadata=text_attn_metadata, token_reduction=token_reduction)
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
@@ -1281,6 +1326,15 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             raise ValueError("audio_hidden_states row count must match audio_indices.")
         if encoder_hidden_states.shape[1] != text_indices.numel():
             raise ValueError("encoder_hidden_states row count must match text_indices.")
+        if token_reduction is not None:
+            if torch.is_grad_enabled():
+                raise ValueError("MiniMax H3 token reduction is inference-only.")
+            if token_reduction.sequence_length != sequence_length:
+                raise ValueError(f"Token reduction was built for {token_reduction.sequence_length} rows, "
+                                 f"the packed sequence has {sequence_length}.")
+            if not 0 <= token_reduction.begin < token_reduction.end <= len(self.transformer_blocks):
+                raise ValueError(f"Token reduction blocks {token_reduction.begin}:{token_reduction.end} must lie in "
+                                 f"0:{len(self.transformer_blocks)}.")
 
         video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
         audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
@@ -1295,6 +1349,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         pad_tokens = sequence_length - real_tokens
         if pad_tokens < 0:
             raise ValueError("Real H3 token counts exceed the packed sequence length")
+        if pad_tokens and token_reduction is not None:
+            raise ValueError("MiniMax H3 token reduction does not support capacity padding rows.")
         if pad_tokens:
             metadata = get_forward_context().attn_metadata
             packed_sequence = getattr(metadata, "packed_sequence", None)
@@ -1315,6 +1371,12 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
         local_timestep_indices = timestep_indices
         original_seq_len = sequence_length
+        reduced_rotary_emb = reduced_adaln_indices = None
+        if token_reduction is not None:
+            # A pair takes its first source's modulation row and the mean of both positions.
+            reduced_rotary_emb = self._rotary_for(token_reduction.position_ids, text_embeds.dtype,
+                                                  "_reduced_rope_cache")
+            reduced_adaln_indices = adaln_indices.index_select(0, token_reduction.first)
 
         if sp_world_size > 1:
             packed_hidden_states = self._block_input(sequence_model_parallel_shard(packed_hidden_states, dim=1)[0])
@@ -1323,6 +1385,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             adaln_indices, _ = sequence_model_parallel_shard(adaln_indices, dim=0)
             local_timestep_indices, _ = sequence_model_parallel_shard(local_timestep_indices, dim=0)
             rotary_emb = (rotary_cos, rotary_sin)
+            if reduced_rotary_emb is not None:
+                reduced_rotary_emb = (sequence_model_parallel_shard(reduced_rotary_emb[0], dim=0)[0],
+                                      sequence_model_parallel_shard(reduced_rotary_emb[1], dim=0)[0])
+                reduced_adaln_indices, _ = sequence_model_parallel_shard(reduced_adaln_indices, dim=0)
 
         if getattr(self, "_adaln_host_cache", False):
             # One host read per forward keys every block's modulation cache by the timestep values.
@@ -1331,20 +1397,53 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 block.adaln_proj._cache_key = key
             self._move_adaln_tables(temb.device)
 
-        # The eager driver owns profiling markers while each block's compiled
-        # forward owns the graph that the marker surrounds.
-        for block_index, block in enumerate(self.transformer_blocks):
-            if STAGES.enabled:
-                logger.info("H3_MEMORY_BLOCK %d allocated=%.3f GiB reserved=%.3f GiB", block_index,
-                            torch.cuda.memory_allocated() / 2**30, torch.cuda.memory_reserved() / 2**30)
-            with nvtx_range(f"minimax_h3.transformer_block.{block_index}"), STAGES.span("block_total"):
-                packed_hidden_states = block(
-                    packed_hidden_states,
-                    temb,
-                    adaln_indices,
-                    rotary_emb,
-                    original_seq_len,
-                )
+        # Reduced blocks attend over the shorter sequence, so they read its own
+        # attention metadata from the forward context; the full one is put back
+        # on exit and on error.
+        forward_context = get_forward_context() if token_reduction is not None else None
+        full_attn_metadata = forward_context.attn_metadata if forward_context is not None else None
+        reduction_saved = None
+        try:
+            # The eager driver owns profiling markers while each block's compiled
+            # forward owns the graph that the marker surrounds.
+            for block_index, block in enumerate(self.transformer_blocks):
+                if token_reduction is not None and block_index == token_reduction.begin:
+                    assert forward_context is not None
+                    packed_hidden_states, reduction_saved = self._enter_token_reduction(
+                        packed_hidden_states, token_reduction, original_seq_len, sp_world_size)
+                    forward_context.attn_metadata = token_reduction.attn_metadata
+                if token_reduction is not None and block_index == token_reduction.end:
+                    assert forward_context is not None and reduction_saved is not None
+                    packed_hidden_states = self._leave_token_reduction(packed_hidden_states, reduction_saved,
+                                                                       token_reduction, sp_world_size)
+                    forward_context.attn_metadata = full_attn_metadata
+                    reduction_saved = None
+                if reduction_saved is None:
+                    block_adaln_indices, block_rotary_emb, block_seq_len = adaln_indices, rotary_emb, original_seq_len
+                else:
+                    assert token_reduction is not None and reduced_adaln_indices is not None
+                    assert reduced_rotary_emb is not None
+                    block_adaln_indices, block_rotary_emb = reduced_adaln_indices, reduced_rotary_emb
+                    block_seq_len = token_reduction.reduced_length
+                if STAGES.enabled:
+                    logger.info("H3_MEMORY_BLOCK %d allocated=%.3f GiB reserved=%.3f GiB", block_index,
+                                torch.cuda.memory_allocated() / 2**30, torch.cuda.memory_reserved() / 2**30)
+                with nvtx_range(f"minimax_h3.transformer_block.{block_index}"), STAGES.span("block_total"):
+                    packed_hidden_states = block(
+                        packed_hidden_states,
+                        temb,
+                        block_adaln_indices,
+                        block_rotary_emb,
+                        block_seq_len,
+                    )
+            if reduction_saved is not None:
+                assert token_reduction is not None
+                packed_hidden_states = self._leave_token_reduction(packed_hidden_states, reduction_saved,
+                                                                   token_reduction, sp_world_size)
+                reduction_saved = None
+        finally:
+            if forward_context is not None:
+                forward_context.attn_metadata = full_attn_metadata
 
         packed_hidden_states = self.norm_out(
             packed_hidden_states,
