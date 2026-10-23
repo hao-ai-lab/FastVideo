@@ -45,9 +45,10 @@ CI is not one monolithic job:
 - Buildkite owns the GPU test graph, statuses, and trusted dispatch control
   plane. Its agent runs on the Slurm login plane; it does not execute test
   payloads.
-- Slinky Slurm is the only active CI compute backend. A host-owned dispatcher
+- Slinky Slurm is the main CI compute backend. A host-owned dispatcher
   leases GPUs from a persistent four-GPU allocation and runs each lane in an
-  isolated Enroot container at the immutable PR SHA.
+  isolated Enroot container at the immutable PR SHA. Single-GPU lanes move to
+  the spark4 DGX Spark runner while it is online; see Backend routing below.
 - Mergify owns merge protection, labeling, and the final squash merge.
 
 The old files under `fastvideo/tests/modal/` are retained as dormant manual
@@ -99,7 +100,7 @@ debugging a hook implementation.
 | Attribute | Value |
 |---|---|
 | Triggered by | Buildkite PR builds with `TEST_SCOPE=fastcheck` or unset |
-| Compute | Slinky Slurm (`ci-runner` queue) |
+| Compute | The spark4 GB10 runner while it is online, otherwise Slinky Slurm; both on the `ci-runner` queue |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | Trusted host driver -> `.buildkite/scripts/unit_test.sh` or `.buildkite/scripts/lanes/*.sh` |
 
@@ -122,15 +123,28 @@ Setting it to `spark4` moves only the Spark-capable lanes to a GB10 runner.
 That runner exports `FASTVIDEO_CI_BACKEND=spark4`, which the lane scripts and
 a few tests honor to skip GB200-only coverage (for example the LTX-2 finetune
 test, which needs more than 128 GB). GB10 golden references are keyed by
-`NVIDIA_GB10`; see `fastvideo/tests/golden_gate`. The private uploader policy
-must allow the `backend` agent key before this routing is active.
+`NVIDIA_GB10`; see `fastvideo/tests/golden_gate`.
+
+The trusted uploader on the Slurm login plane picks the value at upload time.
+It sets `FV_SPARK_BACKEND=spark4` only when both hold:
+
+- the build's `TEST_SCOPE` is `fastcheck`, `merge` or `direct`, or is unset;
+- the Buildkite agents API reports an agent tagged
+  `queue=ci-runner,backend=spark4` that is connected and not paused.
+
+Otherwise it sets `slurm`. `/test full`, the weekly Full Suite, a paused or
+disconnected Spark agent, and any failure to read the agents API all keep every
+lane on Slurm. The uploader rejects any `backend` value other than the two
+forms in the table, so a pull request cannot pin a lane to the Spark runner
+directly. The upload step in each entry pipeline requires `backend=slurm`, so
+the Spark runner never takes it and this policy always runs on the login plane.
 
 ### Tier 3: Change-Aware Merge Gate
 
 | Attribute | Value |
 |---|---|
 | Triggered by | `/merge`, adding `ready`, or a new push to a PR that already has `ready` |
-| Compute | Slinky Slurm only (`ci-runner` queue) |
+| Compute | Slinky Slurm; Spark-capable lanes use the spark4 GB10 runner while it is online. Both on the `ci-runner` queue |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `/opt/fastvideo-ci-runner/run-ci` (`run-unit` is a compatibility wrapper) |
 
