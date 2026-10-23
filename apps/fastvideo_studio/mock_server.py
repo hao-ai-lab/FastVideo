@@ -29,6 +29,7 @@ Usage (from the ``apps/`` directory)::
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import logging
 import os
@@ -50,6 +51,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastvideo_studio.database import Database, default_settings_dict
 from fastvideo_studio.job_queue import circular_dependency, dependencies, plan_dispatch
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.scene_writer.routes import router as scene_writer_router
+from fastvideo_studio.scene_writer.runner import use_server_data_dir
 from fastvideo_studio.trim import BRIGHTNESS_RANGE, CONTRAST_RANGE, SATURATION_RANGE
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GradeSegment, MergeSceneRequest,
                                      QueueJobsRequest, SettingsUpdate, TrimRequest, UpdateCaptionRequest,
@@ -534,6 +537,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# The real scene writer: drafting runs the agent against a real model, but
+# writes only job files and creates nothing, so it is safe beside mock jobs.
+app.include_router(scene_writer_router)
 
 
 @app.get("/api/__mock__")
@@ -675,6 +681,17 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         if _settings.get("autoStartJob"):
             _start(job)
         return _public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/duplicate", status_code=201)
+def duplicate_job(job_id: str) -> dict[str, Any]:
+    """A new pending job with an existing job's configuration, like the real server's."""
+    with _state_lock:
+        source = _jobs.get(job_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        config = {k: copy.deepcopy(source[k]) for k in CreateJobRequest.model_fields if k in source}
+    return create_job(CreateJobRequest(**config))
 
 
 def _start(job: dict[str, Any], at: float | None = None) -> None:
@@ -1201,6 +1218,8 @@ def main() -> None:
 
     if args.data_dir is None or not _load_snapshot_from_db(Path(args.data_dir).resolve()):
         _seed()
+    if args.data_dir is not None:
+        use_server_data_dir(Path(args.data_dir).resolve())
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

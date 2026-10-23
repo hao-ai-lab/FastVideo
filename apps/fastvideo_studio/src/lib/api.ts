@@ -69,6 +69,8 @@ export interface CreateJobRequest {
 	workload_type?: string;
 	job_type?: JobType;
 	image_path?: string;
+	/** Ref2VA reference media, numbered by type in this order (<Picture 1>, <Audio 1>, ...). */
+	references?: { source: string; media_type: MediaType }[];
 	data_path?: string;
 	max_train_steps?: number;
 	train_batch_size?: number;
@@ -637,4 +639,119 @@ export function getDatasetMediaUrl(
 ): string {
 	const baseApiUrl = getApiBaseUrl();
 	return `${baseApiUrl}/datasets/${datasetId}/media/${encodeURIComponent(fileName)}`;
+}
+
+// MARK: - Scene writer
+
+export interface SceneDraftReference {
+	path: string;
+	media_type: MediaType;
+	description: string;
+}
+
+export interface SceneDraftRequest {
+	script: string;
+	/** Lowercase words joined by "-"; clips are named `<scene_name>-clip-NN`. */
+	scene_name: string;
+	references: SceneDraftReference[];
+	instructions: string;
+	/** Let the writer download reference photos from Wikimedia Commons for subjects with none. */
+	find_references: boolean;
+}
+
+/** A photo the writer downloaded, with where it came from so it can be checked and credited. */
+export interface FetchedReference {
+	path: string;
+	subject: string;
+	query: string;
+	title: string;
+	/** The Wikimedia Commons file page. */
+	page: string;
+	license: string;
+	artist: string;
+	width: number;
+	height: number;
+}
+
+/** A drafted job, in the job-file shape: `prompt` is a list of lines. */
+export type DraftedJob = Omit<CreateJobRequest, "prompt"> & { prompt: string[] };
+
+export interface SceneDraft {
+	run_id: string;
+	scene_name: string;
+	status: "running" | "completed" | "failed";
+	started_at: number;
+	finished_at: number | null;
+	/** Clips written so far (while running) or in the end; every one passed validation. */
+	jobs: DraftedJob[];
+	error: string | null;
+	final_response?: string | null;
+	fetched_references: FetchedReference[];
+}
+
+/** URL of an image the writer downloaded for a draft. */
+export function getFetchedReferenceUrl(runId: string, ref: FetchedReference): string {
+	const name = ref.path.split("/").pop() ?? "";
+	return `${getApiBaseUrl()}/scene-writer/drafts/${runId}/references/${encodeURIComponent(name)}`;
+}
+
+/** Start drafting a scene's jobs; poll `getSceneDraft` until it finishes. */
+export async function startSceneDraft(req: SceneDraftRequest): Promise<SceneDraft> {
+	const response = await fetch(`${getApiBaseUrl()}/scene-writer/drafts`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: "Failed to start the draft" }));
+		throw new Error(typeof error.detail === "string" ? error.detail : "Failed to start the draft");
+	}
+	return response.json();
+}
+
+export async function getSceneDraft(runId: string): Promise<SceneDraft> {
+	const response = await fetch(`${getApiBaseUrl()}/scene-writer/drafts/${runId}`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch the draft");
+	}
+	return response.json();
+}
+
+/** A clip revision: the agent's rewrite of one clip's job from feedback on its take. */
+export interface ClipRevision {
+	run_id: string;
+	status: "running" | "completed" | "failed";
+	started_at: number;
+	finished_at: number | null;
+	/** the clip's job as it was sent, in job-file form */
+	original: DraftedJob;
+	/** the revised job; null until it is written */
+	job: DraftedJob | null;
+	/** the agent's explanation: the cause it found and each change it made */
+	final_response: string | null;
+	error: string | null;
+}
+
+/** Start revising a clip; poll `getClipRevision` until it finishes. */
+export async function startClipRevision(req: {
+	job: Job;
+	feedback: string;
+	neighbors: Job[];
+}): Promise<ClipRevision> {
+	const response = await fetch(`${getApiBaseUrl()}/scene-writer/revisions`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: "Failed to start the revision" }));
+		throw new Error(typeof error.detail === "string" ? error.detail : "Failed to start the revision");
+	}
+	return response.json();
+}
+
+export async function getClipRevision(runId: string): Promise<ClipRevision> {
+	const response = await fetch(`${getApiBaseUrl()}/scene-writer/revisions/${runId}`);
+	if (!response.ok) throw new Error("Failed to load the revision");
+	return response.json();
 }

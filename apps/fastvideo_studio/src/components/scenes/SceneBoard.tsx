@@ -117,6 +117,7 @@ function ClipRow({
   onQueueClip,
   onDequeueClip,
   onTrimClip,
+  onReviseClip,
   videoVersionFor,
 }: {
   clip: SceneClip;
@@ -130,6 +131,7 @@ function ClipRow({
   onQueueClip: (clip: SceneClip) => Promise<void>;
   onDequeueClip: (clip: SceneClip) => Promise<void>;
   onTrimClip: (clip: SceneClip) => void;
+  onReviseClip: (clip: SceneClip) => void;
   videoVersionFor: (jobId: string) => number;
 }) {
   const [previewing, setPreviewing] = React.useState(false);
@@ -264,6 +266,17 @@ function ClipRow({
               Edit video
             </Button>
           )}
+          {canPreview && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onReviseClip(clip)}
+              title="Describe what went wrong; the scene writer rewrites the prompt as a new take"
+            >
+              Revise
+            </Button>
+          )}
           {canQueue && (
             <Button
               type="button"
@@ -341,6 +354,8 @@ export interface SceneBoardProps {
   onDequeueClip: (clip: SceneClip) => Promise<void>;
   /** open the trim dialog for one clip's video */
   onTrimClip: (clip: SceneClip) => void;
+  /** open the revise dialog for one clip's shown take */
+  onReviseClip: (clip: SceneClip) => void;
   /** cache-busting version for a job's video preview, bumped after each edit */
   videoVersionFor: (jobId: string) => number;
 }
@@ -357,6 +372,7 @@ export function SceneBoard({
   onQueueClip,
   onDequeueClip,
   onTrimClip,
+  onReviseClip,
   videoVersionFor,
 }: SceneBoardProps) {
   let shotNumber = 1;
@@ -457,6 +473,7 @@ export function SceneBoard({
               onQueueClip={onQueueClip}
               onDequeueClip={onDequeueClip}
               onTrimClip={onTrimClip}
+              onReviseClip={onReviseClip}
               videoVersionFor={videoVersionFor}
             />
           );

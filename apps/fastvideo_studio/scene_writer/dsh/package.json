@@ -1,0 +1,28 @@
+{
+  "name": "fastvideo-h3-scene-writer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH bundle for FastVideo Studio's scene writer: the h3_write_job and find_reference_image tools.",
+  "type": "module",
+  "main": "./dist/h3-scene-writer.js",
+  "exports": {
+    ".": "./dist/h3-scene-writer.js"
+  },
+  "files": [
+    "dist/h3-scene-writer.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "scripts": {
+    "build": "esbuild h3-scene-writer.ts --bundle --external:@deepseek-ai/* --format=esm --platform=node --target=node22 --outfile=dist/h3-scene-writer.js"
+  }
+}

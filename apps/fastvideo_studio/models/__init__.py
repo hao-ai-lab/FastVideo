@@ -9,6 +9,7 @@ from fastvideo_studio.models.update_caption_request import UpdateCaptionRequest
 from fastvideo_studio.models.queue_jobs_request import QueueJobsRequest
 from fastvideo_studio.models.merge_scene_request import MergeSceneRequest
 from fastvideo_studio.models.trim_request import GradeSegment, TrimRequest
+from fastvideo_studio.models.scene_draft_request import ClipRevisionRequest, SceneDraftReference, SceneDraftRequest
 
 
 def model_label(model_path: str) -> str:
@@ -25,5 +26,8 @@ __all__ = [
     "MergeSceneRequest",
     "GradeSegment",
     "TrimRequest",
+    "ClipRevisionRequest",
+    "SceneDraftReference",
+    "SceneDraftRequest",
     "model_label",
 ]

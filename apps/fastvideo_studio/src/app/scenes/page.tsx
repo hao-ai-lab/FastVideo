@@ -1,13 +1,15 @@
 'use client';
 
-import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Loader2, PenLine, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
 import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { EDITABLE_STATUSES, SceneBoard } from '@/components/scenes/SceneBoard';
 import { MergedSceneDialog } from '@/components/scenes/MergedSceneDialog';
 import { SceneQueueDialog } from '@/components/scenes/SceneQueueDialog';
+import { ReviseClipDialog } from '@/components/scenes/ReviseClipDialog';
 import { TrimClipDialog } from '@/components/scenes/TrimClipDialog';
+import { WriteSceneDialog } from '@/components/scenes/WriteSceneDialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -29,9 +31,11 @@ export default function ScenesPage() {
   const [openJob, setOpenJob] = React.useState<Job | null>(null);
   // which re-run of a clip number the user picked, by clip
   const [choices, setChoices] = React.useState<Record<string, string>>({});
+  const [writing, setWriting] = React.useState(false);
   const [queueTarget, setQueueTarget] = React.useState<Scene | null>(null);
   const [merged, setMerged] = React.useState<(MergedScene & { title: string }) | null>(null);
   const [trimTarget, setTrimTarget] = React.useState<Job | null>(null);
+  const [reviseTarget, setReviseTarget] = React.useState<SceneClip | null>(null);
   // Bumped per job id whenever its video is edited in place, to cache-bust every
   // <video> for that job (the dialog's own preview and the scene board's). Owned
   // here, not by the dialog, so it survives the dialog re-rendering with a fresh
@@ -172,6 +176,15 @@ export default function ScenesPage() {
 
   const scenes = React.useMemo(() => buildScenes(jobs, choices), [jobs, choices]);
   const scene = scenes.find((s) => s.key === selectedKey) ?? scenes[0];
+  // The shown takes of the clips on either side of the one being revised.
+  const reviseNeighbors = React.useMemo(() => {
+    if (!reviseTarget) return [];
+    for (const s of scenes) {
+      const i = s.clips.findIndex((c) => c.job.id === reviseTarget.job.id);
+      if (i >= 0) return [s.clips[i - 1], s.clips[i + 1]].filter((c) => c !== undefined).map((c) => c.job);
+    }
+    return [];
+  }, [scenes, reviseTarget]);
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 pb-12 pt-4">
@@ -183,6 +196,16 @@ export default function ScenesPage() {
             variant="outline"
             size="sm"
             className="ml-auto gap-1.5"
+            onClick={() => setWriting(true)}
+          >
+            <PenLine className="size-3.5" aria-hidden />
+            Write scene
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
             onClick={reload}
             disabled={isLoading}
           >
@@ -237,6 +260,7 @@ export default function ScenesPage() {
               onQueueClip={queueClip}
               onDequeueClip={dequeueClip}
               onTrimClip={(clip) => setTrimTarget(clip.job)}
+              onReviseClip={setReviseTarget}
               onChooseTake={(takeKey, jobId) => setChoices((c) => ({ ...c, [takeKey]: jobId }))}
               videoVersionFor={(jobId) => videoVersions[jobId] ?? 0}
             />
@@ -245,6 +269,13 @@ export default function ScenesPage() {
       </Card>
 
       <MergedSceneDialog merged={merged} onClose={() => setMerged(null)} />
+      <WriteSceneDialog open={writing} onClose={() => setWriting(false)} onCreated={reload} />
+      <ReviseClipDialog
+        clip={reviseTarget}
+        neighbors={reviseNeighbors}
+        onClose={() => setReviseTarget(null)}
+        onCreated={reload}
+      />
       <SceneQueueDialog scene={queueTarget} onConfirm={queueScene} onClose={() => setQueueTarget(null)} />
       <TrimClipDialog
         clip={trimTarget}

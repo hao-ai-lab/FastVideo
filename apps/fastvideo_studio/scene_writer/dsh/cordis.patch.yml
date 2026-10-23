@@ -1,0 +1,5 @@
+# Mounts the h3_write_job tool. Each scene-writer run replaces this row's
+# config (outDir, references) with an id-targeted patch.
+- insert:
+    - id: h3-scene-writer
+      name: fastvideo-h3-scene-writer

@@ -37,6 +37,8 @@ from fastvideo_studio.frames import FrameError, last_clip_for_job, last_frame_fo
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.scene_writer.routes import router as scene_writer_router
+from fastvideo_studio.scene_writer.runner import use_server_data_dir
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
                                      SettingsUpdate, TrimRequest, UpdateCaptionRequest, model_label)
 
@@ -71,6 +73,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(scene_writer_router)
 
 
 @app.get("/api/settings")
@@ -914,6 +918,7 @@ def main() -> None:
     data_dir = Path(args.data_dir).resolve()
     upload_dir = str(data_dir / "uploads")
     datasets_upload_dir = str(data_dir / "uploads" / "datasets")
+    use_server_data_dir(data_dir)
 
     create_local_env(args.host, args.port)
 
