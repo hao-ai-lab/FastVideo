@@ -813,12 +813,11 @@ def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, e
     monkeypatch.setattr(attn_layer, "sequence_model_parallel_all_to_all_4D", lambda x, **_: x)
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
-    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
-    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
-    layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
-    torch.nn.Module.__init__(layer)
-    layer.attn_impl = impl
-    layer._compile_forward_enabled = True
+    monkeypatch.setattr(attn_layer, "get_attn_backend", lambda *args, **kwargs: vsa_h3.MiniMaxH3VSABackend)
+    layer = attn_layer.DistributedAttention_VSA(num_heads=_HEADS, head_size=_DIM)
+    layer._set_compile_forward_enabled(True)
+    assert layer.backend is attn_layer.AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3
+    assert layer.attn_impl.prepare_for_regional_compile(torch.device("cpu")) is None
     builder = MiniMaxH3VSAMetadataBuilder()
     counter = CompileCounter()
 
