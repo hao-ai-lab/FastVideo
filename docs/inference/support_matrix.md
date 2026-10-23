@@ -137,6 +137,12 @@ The symbols used have the following meanings:
 - ❌ = No compatibility
 - ⭕ = Does not apply to this model
 
+## Locally prepared models
+
+| Model | Source checkpoint | Supported path | Example |
+| --- | --- | --- | --- |
+| Bernini-R 1.3B | `ByteDance/Bernini-R-1.3B-Diffusers` | Single-GPU video editing; [prepare the local manifest](bernini_r.md) first | [basic_bernini_r.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_bernini_r.py) |
+
 ## Models x Optimization
 
 The `HuggingFace Model ID` can be passed directly to

@@ -15,6 +15,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.bernini import BerniniRPipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
@@ -330,6 +331,15 @@ def _register_wan_configs(definitions: tuple[WanModelDefinition, ...]) -> None:
 
 
 def _register_configs() -> None:
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=BerniniRPipelineConfig,
+        workload_types=(),  # Video editing has no V2V WorkloadType yet.
+        model_detectors=[lambda name: name == "berninirpipeline"],
+        model_family="bernini",
+        default_preset="bernini_r_1_3b",
+        pipeline_cls_name="BerniniRPipeline",
+    )
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=HeliosPipelineConfig,
@@ -1293,6 +1303,7 @@ _register_configs()
 
 def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
+    from fastvideo.pipelines.basic.bernini.presets import ALL_PRESETS as BERNINI_PRESETS
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
@@ -1341,6 +1352,7 @@ def _register_presets() -> None:
         ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
+        BERNINI_PRESETS,
         COSMOS_PRESETS,
         FLUX2_PRESETS,
         GEN3C_PRESETS,

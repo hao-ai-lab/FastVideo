@@ -67,6 +67,22 @@ def test_hunyuan15_change_selects_its_i2v_ssim_test():
 
 
 @pytest.mark.parametrize("path", [
+    "fastvideo/models/dits/bernini.py",
+    "fastvideo/configs/models/dits/bernini.py",
+    "fastvideo/configs/models/encoders/bernini.py",
+    "fastvideo/configs/pipelines/bernini.py",
+    "fastvideo/pipelines/basic/bernini/bernini_pipeline.py",
+    "fastvideo/pipelines/basic/bernini/stages.py",
+])
+def test_bernini_change_selects_its_video_editing_ssim_test(path):
+    plan = PLAN_MERGE_CI.classify_paths([path])
+    assert plan.encoded_lanes() == ",golden-gate,ssim,"
+    # No approved Bernini tensor golden exists yet; retain the strict fallback.
+    assert plan.encoded_golden_tests() == "all"
+    assert plan.encoded_ssim_tests() == "test_bernini_similarity.py"
+
+
+@pytest.mark.parametrize("path", [
     "fastvideo/configs/models/dits/wanvideo.py",
     "fastvideo/models/wan/config.py",
     "fastvideo/models/wan/__init__.py",
