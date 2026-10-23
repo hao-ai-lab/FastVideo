@@ -65,7 +65,7 @@ class InputValidationStage(PipelineStage):
 
         # Ensure negative prompt is properly formatted if using classifier-free guidance
         if (batch.do_classifier_free_guidance and batch.negative_prompt is None
-                and batch.negative_prompt_embeds is None):
+                and not batch.negative_prompt_embeds):
             raise ValueError("For classifier-free guidance, either `negative_prompt` or "
                              "`negative_prompt_embeds` must be provided")
 
