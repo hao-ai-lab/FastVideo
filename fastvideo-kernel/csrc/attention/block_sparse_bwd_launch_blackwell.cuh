@@ -173,6 +173,22 @@ __host__ inline cudaError_t make_tma_kv_units(CUtensorMap* map, const __nv_bfloa
   return (r == CUDA_SUCCESS) ? cudaSuccess : cudaErrorInvalidValue;
 }
 
+// Every launch carries the programmatic-stream-serialization attribute when the kernels are
+// built with KERNEL_PDL (their griddepcontrol.wait guards the predecessor's data).
+__host__ inline cudaLaunchConfig_t pdl_launch_config(dim3 grid, dim3 block, size_t smem,
+                                                     cudaStream_t stream, cudaLaunchAttribute* at) {
+  cudaLaunchConfig_t cfg = {};
+  cfg.gridDim            = grid;
+  cfg.blockDim           = block;
+  cfg.dynamicSmemBytes   = smem;
+  cfg.stream             = stream;
+  at->id                 = cudaLaunchAttributeProgrammaticStreamSerialization;
+  at->val.programmaticStreamSerializationAllowed = 1;
+  cfg.attrs                                      = at;
+  cfg.numAttrs                                   = KERNEL_PDL ? 1 : 0;
+  return cfg;
+}
+
 template <bool DQ_L2_KEEP, bool USE_CLC, bool BHSD>
 __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const int* work_remap,
                                         const CUtensorMap& tk, const CUtensorMap& tv,
@@ -196,13 +212,15 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
     cfg.blockDim           = dim3(N_WARPS * 32, 1, 1);
     cfg.dynamicSmemBytes   = SMEM_TOTAL;
     cfg.stream             = stream;
-    cudaLaunchAttribute at[1];
+    cudaLaunchAttribute at[2];
     at[0].id               = cudaLaunchAttributeClusterDimension;
     at[0].val.clusterDim.x = 1;
     at[0].val.clusterDim.y = 1;
     at[0].val.clusterDim.z = 1;
+    at[1].id               = cudaLaunchAttributeProgrammaticStreamSerialization;
+    at[1].val.programmaticStreamSerializationAllowed = 1;
     cfg.attrs              = at;
-    cfg.numAttrs           = 1;
+    cfg.numAttrs           = KERNEL_PDL ? 2 : 1;
     if (work_remap == nullptr && chunk != total) {
       return cudaErrorInvalidValue;
     }
@@ -222,11 +240,13 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
     return cudaSuccess;
   } else {
     const int grid = std::min(total, sms);
-    kernel<<<dim3((unsigned)grid, 1, 1), dim3(N_WARPS * 32, 1, 1), SMEM_TOTAL, stream>>>(
-        tk, tv, tqt, tdot, tdk, tdv, args.dqaccum, args.lse, args.delta, args.k2q_idx, args.k2q_num,
-        work_remap, args.variable_block_sizes, args.max_q_blocks, B, H, S, scale_log2,
-        args.sm_scale);
-    return cudaGetLastError();
+    cudaLaunchAttribute at[1];
+    cudaLaunchConfig_t cfg = pdl_launch_config(dim3((unsigned)grid, 1, 1),
+                                               dim3(N_WARPS * 32, 1, 1), SMEM_TOTAL, stream, at);
+    return cudaLaunchKernelEx(&cfg, kernel, tk, tv, tqt, tdot, tdk, tdv, args.dqaccum, args.lse,
+                              args.delta, args.k2q_idx, args.k2q_num, work_remap,
+                              args.variable_block_sizes, args.max_q_blocks, B, H, S, scale_log2,
+                              args.sm_scale);
   }
 }
 
@@ -273,11 +293,12 @@ __host__ inline cudaError_t launch_block_sparse_bwd_ptx_blackwell(const BlockSpa
     return e;
   }
 
-  vsa_bwd_preprocess_kernel<VSA_BHSD, dq_accum_t>
-      <<<dim3((unsigned)(S / PRE_TOKENS), (unsigned)(B * H), 1), dim3(256, 1, 1), 0, stream>>>(
-          args.q, args.o, args.dout, args.delta, args.dqaccum, args.qt, args.dot, args.dk, args.dv,
-          args.k2q_num, B, H, S);
-  e = cudaGetLastError();
+  cudaLaunchAttribute pre_at[1];
+  cudaLaunchConfig_t pre_cfg = pdl_launch_config(
+      dim3((unsigned)(S / PRE_TOKENS), (unsigned)(B * H), 1), dim3(256, 1, 1), 0, stream, pre_at);
+  e = cudaLaunchKernelEx(&pre_cfg, vsa_bwd_preprocess_kernel<VSA_BHSD, dq_accum_t>, args.q, args.o,
+                         args.dout, args.delta, args.dqaccum, args.qt, args.dot, args.dk, args.dv,
+                         args.k2q_num, B, H, S);
   if (e != cudaSuccess) {
     return e;
   }
@@ -317,10 +338,11 @@ __host__ inline cudaError_t launch_block_sparse_bwd_ptx_blackwell(const BlockSpa
     return e;
   }
 
-  vsa_bwd_postprocess_kernel<VSA_BHSD, dq_accum_t>
-      <<<dim3((unsigned)(S / BLOCK), (unsigned)(B * H), 1), dim3(128, 1, 1), 0, stream>>>(
-          args.dqaccum, args.dq, H, S, args.sm_scale);
-  return cudaGetLastError();
+  cudaLaunchAttribute post_at[1];
+  cudaLaunchConfig_t post_cfg = pdl_launch_config(
+      dim3((unsigned)(S / BLOCK), (unsigned)(B * H), 1), dim3(128, 1, 1), 0, stream, post_at);
+  return cudaLaunchKernelEx(&post_cfg, vsa_bwd_postprocess_kernel<VSA_BHSD, dq_accum_t>,
+                            args.dqaccum, args.dq, H, S, args.sm_scale);
 }
 
 }  // namespace vsa_bwd_blk64
