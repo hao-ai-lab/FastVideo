@@ -222,14 +222,21 @@ def _get_config_info(
     revision: str | None = None,
     allow_remote: bool = True,
 ) -> ConfigInfo | None:
+    # Normalize only the lookup key; keep the real path for manifest IO and detectors.
+    lookup_path = model_path.rstrip("/") or model_path
+    parts = lookup_path.split("/")
+    # Standard Hugging Face cache layout: models--{org}--{name}/snapshots/{revision}.
+    if len(parts) >= 3 and parts[-2] == "snapshots" and parts[-3].startswith("models--"):
+        lookup_path = parts[-3][len("models--"):].replace("--", "/", 1)
+
     # 1. Exact match
-    if model_path in _MODEL_HF_PATH_TO_NAME:
-        model_id = _MODEL_HF_PATH_TO_NAME[model_path]
+    if lookup_path in _MODEL_HF_PATH_TO_NAME:
+        model_id = _MODEL_HF_PATH_TO_NAME[lookup_path]
         logger.debug("Resolved model path '%s' from exact path match.", model_path)
         return _CONFIG_REGISTRY.get(model_id)
 
     # 2. Partial match: use short model name.
-    model_name = get_model_short_name(model_path.lower())
+    model_name = get_model_short_name(lookup_path.lower())
     all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(), key=len, reverse=True)
     for registered_model_hf_id in all_model_hf_paths:
         registered_model_name = get_model_short_name(registered_model_hf_id.lower())
