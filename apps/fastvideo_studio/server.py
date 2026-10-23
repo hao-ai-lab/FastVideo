@@ -37,6 +37,7 @@ from fastvideo_studio.frames import FrameError, last_clip_for_job, last_frame_fo
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.reference_preview import reference_image_response
 from fastvideo_studio.scene_writer.routes import router as scene_writer_router
 from fastvideo_studio.scene_writer.runner import use_server_data_dir
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
@@ -704,6 +705,15 @@ def get_video(job_id: str) -> FileResponse:
 
     media_type = ("video/mp4" if job.output_path.endswith(".mp4") else "image/png")
     return FileResponse(job.output_path, media_type=media_type)
+
+
+@app.get("/api/jobs/{job_id}/reference")
+def get_reference_image(job_id: str, source: str) -> FileResponse:
+    """One of the job's image references, for a thumbnail in the job form."""
+    job = job_runner.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return reference_image_response(job.references, source)
 
 
 @app.post("/api/jobs/{job_id}/last-frame")

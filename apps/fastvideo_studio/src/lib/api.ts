@@ -61,6 +61,11 @@ export function getJobVideoUrl(jobId: string, version?: number): string {
 	return version ? `${base}?v=${version}` : base;
 }
 
+/** One of a job's image references, served only when the job lists it. */
+export function getJobReferenceUrl(jobId: string, source: string): string {
+	return `${getApiBaseUrl()}/jobs/${jobId}/reference?source=${encodeURIComponent(source)}`;
+}
+
 export interface CreateJobRequest {
 	model_id: string;
 	/** Optional label; the card and output filename fall back to the prompt. */

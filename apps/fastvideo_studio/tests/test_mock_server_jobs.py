@@ -470,3 +470,59 @@ def test_snapshot_job_never_edited_has_an_empty_segment_list(client, snapshot_db
     assert mock_server._load_snapshot_from_db(data_dir)
 
     assert client.get("/api/jobs/fresh").json()["edit_segments"] == []
+
+
+def test_reference_preview_serves_only_the_jobs_own_image_references(tmp_path):
+    from fastapi.testclient import TestClient
+
+    image = tmp_path / "dana.jpg"
+    image.write_bytes(b"\xff\xd8\xff\xe0 not really a jpeg")
+    audio = tmp_path / "voice.mp3"
+    audio.write_bytes(b"ID3")
+    other = tmp_path / "secret.png"
+    other.write_bytes(b"\x89PNG")
+    client = TestClient(mock_server.app)
+    job = client.post("/api/jobs", json={"model_id": "MiniMaxAI/MiniMax-H3", "name": "p-clip-01", "prompt": "p",
+                                         "references": [{"source": str(image), "media_type": "image"},
+                                                        {"source": str(audio), "media_type": "audio"}]}).json()
+
+    def get(source, job_id=job["id"]):
+        return client.get(f"/api/jobs/{job_id}/reference", params={"source": source})
+
+    ok = get(str(image))
+    assert ok.status_code == 200 and ok.headers["content-type"] == "image/jpeg"
+    assert get(str(other)).status_code == 404  # an existing file the job does not list
+    assert get(str(audio)).status_code == 404  # listed, but not an image
+    assert get(str(image), job_id="missing").status_code == 404
+
+
+def test_state_file_keeps_mock_job_changes_across_a_restart(client, tmp_path, monkeypatch):
+    state = tmp_path / "mock_state.json"
+    snapshot_kept = {"id": "kept", "status": "completed", "prompt": "old", mock_server._FROM_SNAPSHOT_KEY: True}
+    snapshot_gone = {"id": "gone", "status": "completed", "prompt": "old", mock_server._FROM_SNAPSHOT_KEY: True}
+    monkeypatch.setattr(mock_server, "_state_file", state)
+    monkeypatch.setattr(mock_server, "_snapshot_originals", {"kept": dict(snapshot_kept), "gone": dict(snapshot_gone)})
+    mock_server._jobs.update({"kept": dict(snapshot_kept), "gone": dict(snapshot_gone)})
+
+    job = _create(client, name="diner-envelope-clip-01")
+    client.patch(f"/api/jobs/{job['id']}", json={"prompt": "edited"})
+    assert client.delete("/api/jobs/gone").status_code == 200
+
+    saved = __import__("json").loads(state.read_text())
+    assert [j["id"] for j in saved["jobs"]] == [job["id"]]  # the untouched snapshot job is not copied
+    assert saved["deleted_job_ids"] == ["gone"]
+
+    # "Restart": the snapshot loads again, then the saved state goes on top.
+    mock_server._jobs.clear()
+    mock_server._jobs.update({"kept": dict(snapshot_kept), "gone": dict(snapshot_gone)})
+    mock_server._load_state(state)
+
+    assert set(mock_server._jobs) == {"kept", job["id"]}
+    assert client.get(f"/api/jobs/{job['id']}").json()["prompt"] == "edited"
+
+
+def test_without_a_state_file_nothing_is_written(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_server, "_state_file", None)
+    monkeypatch.chdir(tmp_path)
+    _create(client)
+    assert list(tmp_path.iterdir()) == []

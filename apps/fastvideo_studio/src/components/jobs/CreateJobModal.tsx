@@ -24,6 +24,7 @@ import {
   createJob,
   updateJob,
   getDatasets,
+  getJobReferenceUrl,
   getModels,
   uploadImage,
   uploadMedia,
@@ -55,6 +56,7 @@ import { applyH3Tag, type H3Tag } from '@/lib/h3Tags';
 import { H3TagConsole } from '@/components/jobs/H3TagConsole';
 import { H3DialogueEditor } from '@/components/jobs/H3DialogueEditor';
 import { H3ShotListEditor } from '@/components/jobs/H3ShotListEditor';
+import { ReferenceThumbnail } from '@/components/jobs/ReferenceThumbnail';
 import { jobToFormFields, type JobLike } from '@/lib/jobToFields';
 import { readField, shotTarget, writeField, writeShotTarget } from '@/lib/h3PromptFields';
 import { toast } from 'sonner';
@@ -100,6 +102,16 @@ export default function CreateJobModal({
   const [lastImagePath, setLastImagePath] = React.useState('');
   const [references, setReferences] = React.useState<H3Reference[]>([]);
   const [isUploadingReference, setIsUploadingReference] = React.useState(false);
+  // Local previews of references uploaded in this session, by reference id; a saved job's own
+  // references are previewed from the server instead.
+  const [uploadPreviews, setUploadPreviews] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (isOpen) return;
+    setUploadPreviews((previews) => {
+      Object.values(previews).forEach((url) => URL.revokeObjectURL(url));
+      return {};
+    });
+  }, [isOpen]);
   const [referenceError, setReferenceError] = React.useState<string | null>(null);
   const [promptFields, setPromptFields] = React.useState<H3PromptFields>(
     EMPTY_H3_PROMPT_FIELDS,
@@ -531,10 +543,15 @@ export default function CreateJobModal({
     setReferenceError(null);
     try {
       const { path, media_type } = await uploadMedia(file);
+      const id = `${Date.now()}-${file.name}`;
+      if (media_type === 'image') {
+        const url = URL.createObjectURL(file);
+        setUploadPreviews((previews) => ({ ...previews, [id]: url }));
+      }
       const next: H3Reference[] = [
         ...references,
         {
-          id: `${Date.now()}-${file.name}`,
+          id,
           source: path,
           media_type,
           fileName: file.name,
@@ -911,6 +928,14 @@ export default function CreateJobModal({
                       key={reference.id}
                       className="flex items-center gap-2 text-xs text-muted-foreground"
                     >
+                      <ReferenceThumbnail
+                        mediaType={reference.media_type}
+                        src={
+                          uploadPreviews[reference.id] ??
+                          (editingJob ? getJobReferenceUrl(editingJob.id, reference.source) : null)
+                        }
+                        alt={reference.fileName}
+                      />
                       <code className="font-mono text-accent-blue">
                         {labelReferences(references)[index]}
                       </code>

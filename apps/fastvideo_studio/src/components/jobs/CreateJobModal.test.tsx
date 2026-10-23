@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CreateJobModal from './CreateJobModal';
 import { toast } from 'sonner';
-import { createJob, getDatasets, getModels, uploadImage } from '@/lib/api';
+import { createJob, getDatasets, getModels, uploadImage, uploadMedia } from '@/lib/api';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
 import { DEFAULT_OPTIONS } from '@/lib/defaultOptions';
 
@@ -16,6 +16,9 @@ vi.mock('@/lib/api', () => ({
   getModels: vi.fn(),
   getDatasets: vi.fn(),
   uploadImage: vi.fn(),
+  uploadMedia: vi.fn(),
+  updateJob: vi.fn(),
+  getJobReferenceUrl: (jobId: string, source: string) => `/api/jobs/${jobId}/reference?source=${encodeURIComponent(source)}`,
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
 }));
@@ -383,5 +386,45 @@ describe('CreateJobModal shot list on a raw prompt', () => {
     renderModal({ workloadType: 't2v' });
     await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
     expect(screen.queryByRole('button', { name: 'Open shot list' })).not.toBeInTheDocument();
+  });
+});
+
+describe('CreateJobModal reference previews', () => {
+  beforeEach(() => {
+    vi.mocked(getModels).mockResolvedValue([...MODELS, H3]);
+  });
+
+  const job = {
+    id: 'job-9',
+    model_id: H3.id,
+    name: 'diner-clip-01',
+    prompt: BASE_PROMPT,
+    workload_type: 'i2v',
+    status: 'pending',
+    references: [
+      { source: '/refs/dana.jpg', media_type: 'image' },
+      { source: '/refs/voice.mp3', media_type: 'audio' },
+    ],
+  };
+
+  it("shows a saved job's image references from the server and an icon for other media", async () => {
+    renderModal({ workloadType: 'i2v', editingJob: job as never });
+
+    const thumb = await screen.findByRole('img', { name: 'dana.jpg' });
+    expect(thumb).toHaveAttribute('src', '/api/jobs/job-9/reference?source=%2Frefs%2Fdana.jpg');
+    expect(screen.queryByRole('img', { name: 'voice.mp3' })).not.toBeInTheDocument();
+  });
+
+  it('previews a newly uploaded image from the local file', async () => {
+    const user = userEvent.setup();
+    URL.createObjectURL = vi.fn(() => 'blob:local-preview');
+    URL.revokeObjectURL = vi.fn();
+    vi.mocked(uploadMedia).mockResolvedValue({ path: '/uploads/u1/marcus.jpg', media_type: 'image' });
+    renderModal({ workloadType: 'i2v', editingJob: job as never });
+
+    await screen.findByRole('img', { name: 'dana.jpg' });
+    await user.upload(screen.getByLabelText('References (Ref2VA)'), new File(['x'], 'marcus.jpg', { type: 'image/jpeg' }));
+
+    expect(await screen.findByRole('img', { name: 'marcus.jpg' })).toHaveAttribute('src', 'blob:local-preview');
   });
 });

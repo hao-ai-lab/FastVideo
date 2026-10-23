@@ -20,10 +20,17 @@ snapshot taken once at startup: nothing created or changed while the mock
 runs is ever written back to that database, so it's safe to point at the
 same ``--data-dir`` a real ``server.py`` is using.
 
+Pass ``--state-file`` to keep the mock's own job changes across restarts:
+after every job create/edit/queue/delete the mock writes the jobs it created
+or changed (and the snapshot jobs it deleted) to that JSON file, and applies
+it on top of the snapshot at the next startup. The SQLite database is still
+never written; delete the file to reset the mock.
+
 Usage (from the ``apps/`` directory)::
 
     PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190
-    PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190 --data-dir ../outputs/ui_data
+    PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190 --data-dir ../outputs/ui_data \
+        --state-file ../outputs/ui_data/mock_state.json
 """
 
 from __future__ import annotations
@@ -51,12 +58,12 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastvideo_studio.database import Database, default_settings_dict
 from fastvideo_studio.job_queue import circular_dependency, dependencies, plan_dispatch
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.reference_preview import reference_image_response
 from fastvideo_studio.scene_writer.routes import router as scene_writer_router
 from fastvideo_studio.scene_writer.runner import use_server_data_dir
 from fastvideo_studio.trim import BRIGHTNESS_RANGE, CONTRAST_RANGE, SATURATION_RANGE
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GradeSegment, MergeSceneRequest,
-                                     QueueJobsRequest, SettingsUpdate, TrimRequest, UpdateCaptionRequest,
-                                     model_label)
+                                     QueueJobsRequest, SettingsUpdate, TrimRequest, UpdateCaptionRequest, model_label)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("fastvideo.studio.mock")
@@ -122,6 +129,9 @@ _jobs: dict[str, dict[str, Any]] = {}
 _datasets: dict[str, dict[str, Any]] = {}
 # dataset_id -> {"file_names": [...], "captions": {file_name: caption}}
 _dataset_files: dict[str, dict[str, Any]] = {}
+# Each snapshot job as loaded, so --state-file saves only what the mock changed.
+_snapshot_originals: dict[str, dict[str, Any]] = {}
+_state_file: Path | None = None
 
 # Lazily-built, cached media clips (shared by every job/dataset media response),
 # keyed by extension: "mp4" (1s testsrc video) or "png" (single testsrc frame).
@@ -161,7 +171,7 @@ def _build_mock_media_with_pyav(kind: str, path: str) -> None:
         codec_name = "h264"
     except Exception:
         logger.warning("PyAV has no h264 encoder available; falling back to mpeg4, which most "
-                        "browsers cannot play in <video>. Install ffmpeg for real preview playback.")
+                       "browsers cannot play in <video>. Install ffmpeg for real preview playback.")
         codec_name = "mpeg4"
 
     container = pyav.open(path, mode="w")
@@ -194,7 +204,8 @@ def _build_mock_media(kind: str) -> str:
             except Exception as exc:
                 with contextlib.suppress(OSError):
                     os.remove(path)
-                raise HTTPException(status_code=500, detail=f"PyAV fallback failed to build mock {kind}: {exc}") from exc
+                raise HTTPException(status_code=500,
+                                    detail=f"PyAV fallback failed to build mock {kind}: {exc}") from exc
             if not os.path.isfile(path) or os.path.getsize(path) == 0:
                 raise HTTPException(status_code=500, detail=f"PyAV fallback produced no mock {kind} bytes")
             _mock_media_cache[kind] = path
@@ -511,6 +522,8 @@ def _load_snapshot_from_db(data_dir: Path) -> bool:
         _settings.update({k: v for k, v in settings.items() if v is not None})
         _jobs.clear()
         _jobs.update({j["id"]: j for j in jobs})
+        _snapshot_originals.clear()
+        _snapshot_originals.update({j["id"]: copy.deepcopy(j) for j in jobs})
         _datasets.clear()
         _datasets.update({d["id"]: d for d in datasets})
         _dataset_files.clear()
@@ -527,6 +540,45 @@ def _load_snapshot_from_db(data_dir: Path) -> bool:
     return True
 
 
+# --- Saved mock state (--state-file) -----------------------------------------
+
+
+def _save_state() -> None:
+    """Write the jobs the mock created or changed to _state_file. Lock held.
+
+    Snapshot jobs left as loaded are not saved, so later changes to the real
+    database still show through; deleted snapshot jobs are listed by id.
+    """
+    if _state_file is None:
+        return
+    jobs = [j for jid, j in _jobs.items() if _snapshot_originals.get(jid) != j]
+    deleted = [jid for jid in _snapshot_originals if jid not in _jobs]
+    tmp = _state_file.with_name(_state_file.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps({"jobs": jobs, "deleted_job_ids": deleted}, indent=1))
+        os.replace(tmp, _state_file)
+    except (OSError, TypeError, ValueError):
+        logger.exception("Could not save mock state to %s", _state_file)
+
+
+def _load_state(path: Path) -> None:
+    """Apply a saved --state-file on top of whatever was seeded or snapshotted."""
+    if not path.is_file():
+        logger.info("No mock state at %s yet; it will be created on the first job change.", path)
+        return
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, ValueError):
+        logger.exception("Could not read mock state from %s; starting without it.", path)
+        return
+    with _state_lock:
+        for job_id in state.get("deleted_job_ids", []):
+            _jobs.pop(job_id, None)
+        for job in state.get("jobs", []):
+            _jobs[job["id"]] = job
+    logger.info("Loaded %d saved job(s) from %s.", len(state.get("jobs", [])), path)
+
+
 # --- App --------------------------------------------------------------------
 
 app = FastAPI(title="FastVideo Studio Mock API", version="0.1.0")
@@ -540,6 +592,15 @@ app.add_middleware(
 # The real scene writer: drafting runs the agent against a real model, but
 # writes only job files and creates nothing, so it is safe beside mock jobs.
 app.include_router(scene_writer_router)
+
+
+@app.middleware("http")
+async def save_state_after_job_changes(request, call_next):
+    response = await call_next(request)
+    if _state_file is not None and request.method != "GET" and request.url.path.startswith("/api/jobs"):
+        with _state_lock:
+            _save_state()
+    return response
 
 
 @app.get("/api/__mock__")
@@ -939,8 +1000,16 @@ def _enqueue(job_ids: list[str]) -> list[dict[str, Any]]:
             )
     for job in jobs:
         job.pop(_FROM_SNAPSHOT_KEY, None)
-        job.update(status="queued", queued_at=time.time(), error=None, output_path=None, log_file_path=None,
-                   started_at=None, finished_at=None, progress=0.0, progress_msg="", phase="queued")
+        job.update(status="queued",
+                   queued_at=time.time(),
+                   error=None,
+                   output_path=None,
+                   log_file_path=None,
+                   started_at=None,
+                   finished_at=None,
+                   progress=0.0,
+                   progress_msg="",
+                   phase="queued")
         # Strictly increasing, so jobs queued together keep their order.
         others = [j["queued_at"] for j in _jobs.values() if j.get("queued_at") and j is not job]
         job["queued_at"] = max([job["queued_at"], *[o + 1e-6 for o in others]])
@@ -1063,6 +1132,16 @@ def get_video(job_id: str) -> FileResponse:
     if output_path.endswith(".png"):
         return FileResponse(_build_mock_media("png"), media_type="image/png", filename=f"job_{job_id}.png")
     return FileResponse(_build_mock_media("mp4"), media_type="video/mp4", filename=f"job_{job_id}.mp4")
+
+
+@app.get("/api/jobs/{job_id}/reference")
+def get_reference_image(job_id: str, source: str) -> FileResponse:
+    with _state_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        references = list(job.get("references") or [])
+    return reference_image_response(references, source)
 
 
 _MERGED_DIR = tempfile.mkdtemp(prefix="fvstudio_merged_")
@@ -1199,6 +1278,7 @@ def delete_dataset(dataset_id: str) -> dict[str, str]:
 
 
 def main() -> None:
+    global _state_file
     import argparse
 
     import uvicorn
@@ -1214,12 +1294,21 @@ def main() -> None:
               "fastvideo_ui.db under this directory (its --data-dir) instead "
               "of fake demo data. Nothing the mock does is written back."),
     )
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help=("JSON file that keeps jobs created or changed in the mock across "
+              "restarts (applied on top of --data-dir). Delete it to reset."),
+    )
     args = parser.parse_args()
 
     if args.data_dir is None or not _load_snapshot_from_db(Path(args.data_dir).resolve()):
         _seed()
     if args.data_dir is not None:
         use_server_data_dir(Path(args.data_dir).resolve())
+    if args.state_file:
+        _state_file = Path(args.state_file).resolve()
+        _load_state(_state_file)
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
