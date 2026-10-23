@@ -18,6 +18,7 @@ from fastvideo.configs.models.dits.mmaudio import (
 )
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.models.wan.config import WanVideoConfig
+from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, QwenImage21Config
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 from fastvideo.configs.models.dits.kandinsky6 import Kandinsky6ArchConfig, Kandinsky6VideoAudioConfig
@@ -33,5 +34,5 @@ __all__ = [
     "StableAudioConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotWorldFastVideoConfig",
     "LingBotVideoConfig", "MiniMaxH3Config", "MMAudioArchConfig", "MMAudioTransformerConfig",
     "MMAUDIO_VARIANT_ARCHITECTURES", "MMAUDIO_TRAINING_VARIANTS", "MMAUDIO_44K_TRAINING_VARIANTS",
-    "get_mmaudio_transformer_config"
+    "get_mmaudio_transformer_config", "QwenImage21ArchConfig", "QwenImage21Config"
 ]

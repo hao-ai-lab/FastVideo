@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(36);
+  await expect(cards).toHaveCount(37);
   await expect(cards.first()).toContainText("FastH3 OmniRef");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -277,7 +277,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(37);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -297,7 +297,7 @@ test("cookbook cards and controls remain readable in dark mode and reflow at 320
 test("image and audio models have logos and dedicated source recipe pages", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(4);
+  await expect(page.locator(".recipe-card")).toHaveCount(5);
   const card = page.locator(".recipe-card").filter({ hasText: "FLUX.2 Klein" });
   await expect(card.locator("img")).toBeVisible();
   await card.click();
@@ -308,6 +308,26 @@ test("image and audio models have logos and dedicated source recipe pages", asyn
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Serving", exact: true })).toHaveCount(0);
   await page.getByLabel("Seed", { exact: true }).fill("0");
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
+  await page.goto("/FastVideo/cookbook/qwen-image21");
+  const qwen = page.locator(".recipe-card").filter({ hasText: "Qwen-Image-2.1" });
+  await expect(qwen.locator("img")).toHaveAttribute("src", /\/qwen\.webp$/);
+  await qwen.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Qwen-Image-2.1");
+  await expect(page.getByRole("button", { name: "Serving", exact: true })).toHaveCount(0);
+  await page.getByLabel("Height", { exact: true }).fill("512");
+  await page.getByRole("tab", { name: "config.yaml", exact: true }).click();
+  const qwenConfig = page.getByLabel("Source example", { exact: true });
+  await expect(qwenConfig).toContainText("model_path: Qwen/Qwen-Image-2.1");
+  await expect(qwenConfig).toContainText("height: 512");
+  await expect(qwenConfig).toContainText("dit_layerwise: true");
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await page
+    .getByRole("group", { name: "Recipe variant", exact: true })
+    .getByRole("button", { name: "Qwen-Image-2.1 references and editing", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "Commands", exact: true }).click();
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--reference source.png");
   await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
   await page.goto("/FastVideo/cookbook");
   await page.getByRole("button", { name: "Audio", exact: true }).click();
@@ -584,11 +604,11 @@ test("directory filters round-trip through the URL", async ({ page }) => {
   await page.goto("/FastVideo/cookbook?category=Image&runtime=cuda");
   await expect(page.getByRole("button", { name: "Image", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Runtime", { exact: true })).toHaveValue("cuda");
-  await expect(page.locator(".recipe-card")).toHaveCount(4);
+  await expect(page.locator(".recipe-card")).toHaveCount(5);
   await page.reload();
   await expect(page.getByRole("button", { name: "Image", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Runtime", { exact: true })).toHaveValue("cuda");
-  await expect(page.locator(".recipe-card")).toHaveCount(4);
+  await expect(page.locator(".recipe-card")).toHaveCount(5);
 });
 
 test("a saved target missing from the catalog stays visible and clearable", async ({ page }) => {

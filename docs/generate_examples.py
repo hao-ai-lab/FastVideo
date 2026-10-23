@@ -36,6 +36,7 @@ COOKBOOK_FAMILIES = {
     "kandinsky5",
     "kandinsky6",
     "flux",
+    "qwen_image21",
     "sd35",
     "minimax_h3",
     "stable_audio",
