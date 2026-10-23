@@ -61,7 +61,9 @@ from fastvideo.api import (
     QuantizationConfig,
     SamplingConfig,
 )
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig
 from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 CONTRACT = "fastvideo_inference.json"
@@ -170,7 +172,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token-reduction-scale",
                         type=float,
                         default=None,
-                        help="scale of the pair update added back to each original token (default 1.0)")
+                        help="scale of the update each paired token gets from its pair (default 1.0); unpaired "
+                        "tokens, such as the last column of an odd-width video, take the full update as in h3.c")
     return parser
 
 
@@ -198,6 +201,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     tuning = (args.token_reduction_blocks, args.token_reduction_early, args.token_reduction_scale)
     if not args.token_reduction and any(value is not None for value in tuning):
         parser.error("--token-reduction-blocks/-early/-scale need --token-reduction")
+    if args.token_reduction:
+        # Reject malformed values and intervals past H3's 50 blocks before any download; the
+        # transformer loader checks the checkpoint's own depth.
+        try:
+            MiniMaxH3TokenReductionSchedule.from_options(token_reduction_options(args),
+                                                         num_blocks=MiniMaxH3ArchConfig().num_layers)
+        except ValueError as error:
+            parser.error(str(error))
     return args
 
 

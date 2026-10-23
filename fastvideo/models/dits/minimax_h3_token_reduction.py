@@ -12,81 +12,21 @@ received, so within-pair detail survives::
 
 Pair positions are the mean of the two source positions; a pair takes the
 modulation row of its first source (every target-video row shares one).
+Unpaired rows, such as the last column of an odd-width video, take the
+reduced output directly, as in h3.c, so ``update_scale`` applies to pairs only.
 
-h3.c reduces blocks 4..29, and 4..39 during its first 10 of about 19
-forwards, where coarse structure forms. The default here keeps that share of
-an eight-forward PDD schedule: blocks 4..39 for the first four forwards.
+The option parsing and the default schedule live in
+``fastvideo/configs/pipelines/minimax_h3_token_reduction.py``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 
 from fastvideo.attention.backends.abstract import AttentionMetadata
-
-TOKEN_REDUCTION_OPTION_KEYS = frozenset({"enabled", "blocks", "early", "update_scale"})
-
-
-@dataclass(frozen=True)
-class MiniMaxH3TokenReductionSchedule:
-    """Which blocks run reduced at each denoising step.
-
-    Blocks ``begin <= block < end`` run reduced. During the first
-    ``early_steps`` steps the interval extends to ``early_end``.
-    """
-
-    begin: int = 4
-    end: int = 30
-    early_steps: int = 4
-    early_end: int = 40
-    update_scale: float = 1.0
-
-    @classmethod
-    def from_options(cls, options: Mapping[str, Any]) -> MiniMaxH3TokenReductionSchedule | None:
-        """Parse ``h3_token_reduction`` options; None unless ``enabled`` is true."""
-        if not isinstance(options, Mapping) or options.keys() - TOKEN_REDUCTION_OPTION_KEYS:
-            raise ValueError(f"h3_token_reduction must be a mapping with keys from {sorted(TOKEN_REDUCTION_OPTION_KEYS)}")
-        enabled = options.get("enabled", False)
-        if not isinstance(enabled, bool):
-            raise ValueError("h3_token_reduction.enabled must be a boolean")
-        if not enabled:
-            return None
-        begin, end = _int_pair(options.get("blocks", (cls.begin, cls.end)), "blocks")
-        if not 0 <= begin < end:
-            raise ValueError(f"h3_token_reduction.blocks must satisfy 0 <= BEGIN < END, got {begin}:{end}")
-        # Same rule as h3.c: the deeper early interval applies only when the
-        # base interval restores before block 40.
-        default_early = (cls.early_steps, cls.early_end) if end < cls.early_end else (0, end)
-        early_steps, early_end = _int_pair(options.get("early", default_early), "early")
-        if early_steps < 0:
-            raise ValueError("h3_token_reduction.early STEPS must be non-negative")
-        if early_steps == 0:
-            early_end = end
-        elif early_end <= end:
-            raise ValueError(f"h3_token_reduction.early END must exceed blocks END {end}, got {early_end}")
-        scale = options.get("update_scale", cls.update_scale)
-        if isinstance(scale, bool) or not isinstance(scale, int | float) or not 0.0 <= float(scale) <= 2.0:
-            raise ValueError("h3_token_reduction.update_scale must be a number in [0, 2]")
-        return cls(begin=begin, end=end, early_steps=early_steps, early_end=early_end, update_scale=float(scale))
-
-    def end_for_step(self, step: int) -> int:
-        return self.early_end if step < self.early_steps else self.end
-
-
-def _int_pair(value: Any, name: str) -> tuple[int, int]:
-    if isinstance(value, str):
-        value = value.split(":")
-    if (not isinstance(value, list | tuple) or len(value) != 2
-            or any(isinstance(item, bool) or not isinstance(item, int | str) for item in value)):
-        raise ValueError(f"h3_token_reduction.{name} must be two integers, e.g. [4, 30] or '4:30'")
-    try:
-        return int(value[0]), int(value[1])
-    except ValueError as error:
-        raise ValueError(f"h3_token_reduction.{name} must be two integers, got {value!r}") from error
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 
 
 @dataclass(frozen=True)
@@ -212,8 +152,6 @@ def expand_token_pairs(original: torch.Tensor, reduced: torch.Tensor, pooled: to
 
 __all__ = [
     "MiniMaxH3TokenReduction",
-    "MiniMaxH3TokenReductionSchedule",
-    "TOKEN_REDUCTION_OPTION_KEYS",
     "build_token_reduction",
     "expand_token_pairs",
     "pool_token_pairs",

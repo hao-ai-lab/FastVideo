@@ -3,21 +3,26 @@
 
 CPU checks cover option parsing, the pair row maps, the pool/restore
 arithmetic and the denoising-stage helpers. The GPU checks run a tiny real
-transformer: a one-token-wide video has no pairs, so the reduced path must be
-bit-identical to the plain forward, which exercises every reduced input
-(positions, modulation rows, the attention metadata swap).
+transformer on the dense SDPA backend. A one-token-wide video has no pairs, so
+the reduced path must be bit-identical to the plain forward; that covers the
+reduced positions, modulation rows and the entry and exit plumbing. Separate
+checks record which attention metadata every block reads, and that the
+full-sequence metadata comes back after the forward and after an error.
 """
 
 from __future__ import annotations
+
+import dataclasses
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from fastvideo import envs
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig, MiniMaxH3Config
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.forward_context import get_forward_context, set_forward_context
 from fastvideo.models.dits.minimax_h3_token_reduction import (
-    MiniMaxH3TokenReductionSchedule,
     build_token_reduction,
     expand_token_pairs,
     pool_token_pairs,
@@ -75,6 +80,13 @@ def test_schedule_accepts_strings_and_disabling_early() -> None:
 def test_schedule_rejects_bad_options(options, match) -> None:
     with pytest.raises(ValueError, match=match):
         MiniMaxH3TokenReductionSchedule.from_options(options)
+
+
+def test_schedule_bounds_both_intervals_by_the_dit_depth() -> None:
+    assert MiniMaxH3TokenReductionSchedule.from_options({"enabled": True, "blocks": "4:50"}, num_blocks=50) is not None
+    for options in ({"blocks": "4:51"}, {"early": "4:60"}):
+        with pytest.raises(ValueError, match="past the 50 DiT blocks"):
+            MiniMaxH3TokenReductionSchedule.from_options({"enabled": True, **options}, num_blocks=50)
 
 
 # ----------------------------------------------------------------------------
@@ -209,23 +221,26 @@ def _tiny_transformer(device: torch.device):
     return transformer.to(device).eval()
 
 
-def _forward(transformer, layout, inputs, token_reduction=None):
+def _call_kwargs(layout, inputs) -> dict[str, torch.Tensor]:
     device = inputs["hidden_states"].device
     unique, inverse = build_row_timesteps(layout, 0.5, 0.5, 0.999, 1.0)
-    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
-        outputs = transformer(
-            timestep=unique.to(device),
-            timestep_indices=inverse.to(device),
-            token_tags=layout.token_tags.to(device),
-            position_ids=layout.position_ids.to(device),
-            video_indices=layout.video_indices.to(device),
-            audio_indices=layout.audio_indices.to(device),
-            text_indices=layout.text_indices.to(device),
-            token_reduction=token_reduction,
-            **inputs,
-        )
+    return {
+        "timestep": unique.to(device),
+        "timestep_indices": inverse.to(device),
+        "token_tags": layout.token_tags.to(device),
+        "position_ids": layout.position_ids.to(device),
+        "video_indices": layout.video_indices.to(device),
+        "audio_indices": layout.audio_indices.to(device),
+        "text_indices": layout.text_indices.to(device),
+        **inputs,
+    }
+
+
+def _forward(transformer, layout, inputs, token_reduction=None, attn_metadata=None):
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
+        outputs = transformer(token_reduction=token_reduction, **_call_kwargs(layout, inputs))
         # The full-sequence metadata is back in place after the forward.
-        assert get_forward_context().attn_metadata is None
+        assert get_forward_context().attn_metadata is attn_metadata
     return outputs
 
 
@@ -272,3 +287,58 @@ def test_reduced_forward_keeps_shapes_and_changes_video(env_overrides, distribut
     assert video.shape == plain_video.shape and audio.shape == plain_audio.shape
     assert torch.isfinite(video).all() and torch.isfinite(audio).all()
     assert not torch.equal(video, plain_video)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="MiniMax H3 attention layers require a CUDA device for a real forward")
+@pytest.mark.parametrize("blocks", ["1:2", "1:3"])
+def test_reduced_blocks_read_their_own_attention_metadata(env_overrides, distributed_setup, blocks) -> None:
+    # "1:3" ends at the last block, so the exit and restore happen after the block loop.
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+    device = torch.device("cuda")
+    transformer = _tiny_transformer(device)
+    layout = _layout(latent_width=8)
+    inputs = _inputs(transformer, layout, device)
+    full_metadata, reduced_metadata = SimpleNamespace(name="full"), SimpleNamespace(name="reduced")
+    plan = _h3_token_reduction_plan(layout, _PATCH, _schedule(blocks=blocks, early="0:0")).to(device)
+    plan = dataclasses.replace(plan, attn_metadata=reduced_metadata)
+    seen = []
+    hooks = [
+        block.register_forward_pre_hook(lambda module, args: seen.append(get_forward_context().attn_metadata))
+        for block in transformer.transformer_blocks
+    ]
+    try:
+        _forward(transformer, layout, inputs, plan, attn_metadata=full_metadata)
+    finally:
+        for hook in hooks:
+            hook.remove()
+    expected = [
+        reduced_metadata if plan.begin <= index < plan.end else full_metadata
+        for index in range(len(transformer.transformer_blocks))
+    ]
+    assert [metadata.name for metadata in seen] == [metadata.name for metadata in expected]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="MiniMax H3 attention layers require a CUDA device for a real forward")
+def test_attention_metadata_is_restored_after_an_error_in_a_reduced_block(env_overrides, distributed_setup) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+    device = torch.device("cuda")
+    transformer = _tiny_transformer(device)
+    layout = _layout(latent_width=8)
+    inputs = _inputs(transformer, layout, device)
+    full_metadata = SimpleNamespace(name="full")
+    plan = _h3_token_reduction_plan(layout, _PATCH, _schedule(blocks="1:2", early="0:0")).to(device)
+    plan = dataclasses.replace(plan, attn_metadata=SimpleNamespace(name="reduced"))
+
+    def fail(module, args):
+        raise RuntimeError("block failed")
+
+    hook = transformer.transformer_blocks[1].register_forward_pre_hook(fail)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=full_metadata):
+            with pytest.raises(RuntimeError, match="block failed"):
+                transformer(token_reduction=plan, **_call_kwargs(layout, inputs))
+            assert get_forward_context().attn_metadata is full_metadata
+    finally:
+        hook.remove()

@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -18,7 +19,6 @@ from fastvideo.layers.pdd import PDDModalitySchedule, PDDSamplingPlan, build_pdd
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.minimax_h3_token_reduction import (
     MiniMaxH3TokenReduction,
-    MiniMaxH3TokenReductionSchedule,
     build_token_reduction,
     reduced_token_width,
 )
@@ -334,6 +334,12 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 token_reduction_schedule.begin, token_reduction_schedule.end, token_reduction_schedule.begin,
                 token_reduction_schedule.early_end, token_reduction_schedule.early_steps,
                 token_reduction_schedule.update_scale)
+            if (token_reduction_schedule.early_steps >= len(video_timesteps)
+                    and token_reduction_schedule.early_end != token_reduction_schedule.end):
+                logger.warning(
+                    "MiniMax-H3 token reduction: the early interval covers all %d forwards, so every forward "
+                    "reduces blocks %d:%d.", len(video_timesteps), token_reduction_schedule.begin,
+                    token_reduction_schedule.early_end)
             if vsa_metadata_builder is not None:
                 # Its own builder, so each sequence length keeps its own tile buffers.
                 reduced_vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
