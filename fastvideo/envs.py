@@ -795,6 +795,12 @@ FASTVIDEO_TEST_WAN_S2V_MODEL_PATH = EnvPath(None,
                                             doc="Wan2.2-S2V-14B weights for test_wan_s2v.py; unset means "
                                             "official_weights/Wan2.2-S2V-14B in the repository.",
                                             deprecated_names=("WAN_S2V_MODEL_PATH", ))
+FASTVIDEO_TEST_RING_DEBUG = EnvBool(
+    False,
+    category="test",
+    doc="Enable default NCCL and PyTorch distributed debug logging for Ring test workers.",
+)
+
 FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",
                                               category="test",
                                               doc="Raw data directory for preprocess_ltx2_overfit.py.",

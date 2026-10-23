@@ -265,6 +265,15 @@ python fastvideo/tests/ssim/reference_videos_cli.py promote-draft \
   --model-id <model_id>
 ```
 
+## Ring Attention Parity
+
+The four-GPU SSIM inference lane runs
+`fastvideo/tests/distributed/test_ring_attention.py` before the SSIM scheduler.
+It covers pure Ring and hybrid Ring/Ulysses parity, including padded sequences.
+The lane rejects allocations with fewer than four visible GPUs so hybrid
+coverage cannot silently skip. Configuration, FA2 dependency, and topology
+unit tests run in the unit lane.
+
 ## CI Integration
 
 FastVideo GPU CI is orchestrated by Buildkite and runs only on isolated Slinky

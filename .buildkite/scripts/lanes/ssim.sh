@@ -37,4 +37,12 @@ fi
 uv pip install git+https://github.com/microsoft/MoGe.git
 uv pip install k_diffusion einops_exts alias_free_torch torchsde
 
+# Ring/USP parity shares this lane's four-GPU inference allocation.
+python - <<'PY_CHECK_GPUS'
+import torch
+if torch.cuda.device_count() < 4:
+    raise RuntimeError("Ring/USP inference parity requires four visible GPUs")
+PY_CHECK_GPUS
+pytest ./fastvideo/tests/distributed/test_ring_attention.py -srP
+
 exec python fastvideo/tests/ssim/ci_runner.py "${args[@]}"

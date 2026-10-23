@@ -202,3 +202,12 @@ def _stub_fastvideo_args_from_kwargs(monkeypatch):
             self.kwargs = kw
 
     monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _Captured)
+
+
+def test_ring_parallelism_round_trip(monkeypatch):
+    _stub_fastvideo_args_from_kwargs(monkeypatch)
+    config = legacy_from_pretrained_to_config(
+        "/models/ltx2", {"num_gpus": 4, "sp_size": 4, "ring_size": 2})
+    assert config.engine.parallelism.ring_size == 2
+    args = generator_config_to_fastvideo_args(config)
+    assert args.kwargs["ring_size"] == 2

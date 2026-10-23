@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits import HunyuanVideoConfig
+from fastvideo.distributed.parallel_state import get_ring_size
 from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
@@ -400,6 +401,10 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     lora_param_names_mapping = HunyuanVideoConfig().lora_param_names_mapping
 
     def __init__(self, config: HunyuanVideoConfig, hf_config: dict[str, Any]):
+        if get_ring_size() > 1:
+            raise NotImplementedError(
+                "HunyuanVideo uses replicated text Q/K/V tokens, which Ring Attention does not support. "
+                "Set ring_size=1 for HunyuanVideo.")
         super().__init__(config=config, hf_config=hf_config)
 
         self.patch_size = [config.patch_size_t, config.patch_size, config.patch_size]

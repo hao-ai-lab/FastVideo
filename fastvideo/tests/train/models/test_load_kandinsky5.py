@@ -13,8 +13,6 @@ and ``Kandinsky5DenoisingStage``.
 
 from __future__ import annotations
 
-import os
-
 import fastvideo.envs as envs
 
 envs.setdefault_external("MASTER_ADDR", "localhost")
@@ -33,11 +31,11 @@ _FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_kandinsky5_model_loads_and_forwards(monkeypatch: pytest.MonkeyPatch):
+def test_kandinsky5_model_loads_and_forwards(env_overrides):
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
-    if "FASTVIDEO_ATTENTION_BACKEND" not in os.environ:
-        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    if envs.FASTVIDEO_ATTENTION_BACKEND.get() is None:
+        env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
 
     cfg = load_run_config(_FIXTURE)
     model = Kandinsky5Model(

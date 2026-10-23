@@ -17,6 +17,7 @@ surfaces:
       num_gpus: generator.engine.num_gpus
       tp_size: generator.engine.parallelism.tp_size
       sp_size: generator.engine.parallelism.sp_size
+      ring_size: generator.engine.parallelism.ring_size
       hsdp_replicate_dim: generator.engine.parallelism.hsdp_replicate_dim
       hsdp_shard_dim: generator.engine.parallelism.hsdp_shard_dim
       dist_timeout: generator.engine.parallelism.dist_timeout

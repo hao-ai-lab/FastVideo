@@ -27,7 +27,7 @@ from fastvideo.models.wan.transformer import (
 )
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.parallel_state import get_sp_world_size, get_ulysses_size
 
 logger = init_logger(__name__)
 
@@ -227,8 +227,8 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         self.patch_size = config.patch_size
         self.text_len = config.text_len
 
-        assert config.num_attention_heads % get_sp_world_size(
-        ) == 0, f"The number of attention heads ({config.num_attention_heads}) must be divisible by the sequence parallel size ({get_sp_world_size()})"
+        assert config.num_attention_heads % get_ulysses_size(
+        ) == 0, f"The number of attention heads ({config.num_attention_heads}) must be divisible by the Ulysses size ({get_ulysses_size()})"
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
