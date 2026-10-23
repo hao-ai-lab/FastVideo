@@ -36,6 +36,9 @@ class ModelBase(ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+    _transformer_module_type = "transformer"
+    # Full-weight plugins cannot retain all unsharded accumulation gradients.
+    supports_gradient_accumulation_no_sync = False
 
     def __init__(
         self,
@@ -59,6 +62,11 @@ class ModelBase(ABC):
         return self.attention_backend.name
 
     @property
+    def transformer_module_type(self) -> str:
+        """Physical checkpoint component that owns this role's transformer."""
+        return str(self._transformer_module_type)
+
+    @property
     def device(self) -> torch.device:
         """The local CUDA device for this rank."""
         return get_local_torch_device()
@@ -66,6 +74,9 @@ class ModelBase(ABC):
     def _enable_lora_if_configured(
         self,
         transformer: torch.nn.Module,
+        *,
+        prepare_for_fsdp: bool = False,
+        initialization_seed: int = 0,
     ) -> bool:
         """Enable LoRA training for model plugins that request it.
 
@@ -86,6 +97,8 @@ class ModelBase(ABC):
             lora_rank=cfg.rank,
             lora_alpha=cfg.alpha,
             lora_target_modules=cfg.target_modules,
+            prepare_for_fsdp=prepare_for_fsdp,
+            initialization_seed=initialization_seed,
         )
         return True
 
@@ -105,6 +118,15 @@ class ModelBase(ABC):
 
     def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
+
+    def eager_optimizer_state_parameters(self, ) -> tuple[torch.nn.Parameter, ...]:
+        """Parameters whose optimizer state must exist before their first grad.
+
+        Most models return an empty tuple. Models with intermittently used
+        trainable parameters can override this so strict distributed
+        checkpoints retain a stable optimizer-state schema across steps.
+        """
+        return ()
 
     def decode_latents(
         self,
@@ -152,6 +174,22 @@ class ModelBase(ABC):
         timestep: torch.Tensor,
     ) -> torch.Tensor:
         """Apply forward-process noise at *timestep*."""
+
+    def add_noise_for_batch(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+    ) -> torch.Tensor:
+        """Apply noise with optional immutable geometry carried by ``batch``.
+
+        Video-only and fixed-shape models keep their existing behavior. Joint
+        packed models override this hook when splitting the tensor requires
+        batch-local shape context.
+        """
+        del batch
+        return self.add_noise(clean_latents, noise, timestep)
 
     @abstractmethod
     def predict_noise(

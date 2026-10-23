@@ -21,6 +21,7 @@ import time
 import torch
 import torch.distributed as dist
 
+import fastvideo.envs as envs
 from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory,
     get_node_group,
@@ -121,14 +122,10 @@ def main() -> None:
     files = resolve_safetensors_files(load_path)
 
     # Set default env vars for single-GPU standalone mode (no torchrun)
-    if "MASTER_ADDR" not in os.environ:
-        os.environ["MASTER_ADDR"] = "localhost"
-    if "MASTER_PORT" not in os.environ:
-        os.environ["MASTER_PORT"] = "29500"
-    if "RANK" not in os.environ:
-        os.environ["RANK"] = "0"
-    if "WORLD_SIZE" not in os.environ:
-        os.environ["WORLD_SIZE"] = "1"
+    envs.setdefault_external("MASTER_ADDR", "localhost")
+    envs.setdefault_external("MASTER_PORT", "29500")
+    envs.setdefault_external("RANK", "0")
+    envs.setdefault_external("WORLD_SIZE", "1")
 
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     rank = dist.get_rank() if dist.is_initialized() else 0

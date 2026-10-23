@@ -13,6 +13,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -132,8 +133,8 @@ TEST_PROMPTS = [
 
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LINGBOT_PARAMS, LINGBOT_FULL_QUALITY_PARAMS)
 

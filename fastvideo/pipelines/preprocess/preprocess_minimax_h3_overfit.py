@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -20,6 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2va
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -50,11 +50,11 @@ TRAINING_VIDEO_NAME = "1gGQy4nxyUo-Scene-016.mp4"
 
 def _init_single_process_distributed() -> None:
     """Initialize the one-rank process groups required by component loaders."""
-    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-    os.environ.setdefault("MASTER_PORT", "29531")
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
-    os.environ.setdefault("LOCAL_RANK", "0")
+    envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+    envs.setdefault_external("MASTER_PORT", "29531")
+    envs.setdefault_external("RANK", "0")
+    envs.setdefault_external("WORLD_SIZE", "1")
+    envs.setdefault_external("LOCAL_RANK", "0")
     from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
 
     maybe_init_distributed_environment_and_model_parallel(1, 1)
@@ -238,7 +238,7 @@ def build_parquet_record(
     """Serialize one synchronized H3 sample for the Parquet schema collator.
 
     ``collate_rows_from_parquet_schema`` reconstructs every tensor from a
-    bytes/shape/dtype triplet and reads the byte payload as float32, so this
+    bytes/shape/dtype triplet and decodes it with the serialized dtype, so this
     boundary stores contiguous float32 tensors for lossless reconstruction.
     """
     tensors = {

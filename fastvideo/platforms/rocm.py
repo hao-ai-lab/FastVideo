@@ -5,6 +5,8 @@ This file is a platform abstraction for ROCm GPUs,
 adjusted to match the structure and interface of `cuda.py`.
 """
 
+import os
+
 import torch
 
 import fastvideo.envs as envs
@@ -12,6 +14,19 @@ from fastvideo.logger import init_logger
 from fastvideo.platforms.interface import (AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum)
 
 logger = init_logger(__name__)
+
+
+def _vsa_cute_opt_in() -> bool:
+    """True when fastvideo_kernel would send its 128/256-token block-sparse
+    forward to the FlashAttention-4 CuTe kernels, which are CUDA-only.
+
+    These variables belong to fastvideo-kernel; this mirrors its rule in
+    fastvideo_kernel.block_sparse_attn_256._resolve_backend: the CuTe opt-in
+    applies unless one of the force-Triton switches is set.
+    """
+    force_triton = (os.environ.get("FASTVIDEO_VSA_TRITON", "0") == "1"
+                    or os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1")
+    return not force_triton and os.environ.get("FASTVIDEO_VSA_CUTEDSL", "0") == "1"
 
 
 # ROCm uses the same torch.cuda interface
@@ -63,7 +78,7 @@ class RocmPlatform(Platform):
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
-        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
+        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
 
         if selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
@@ -72,7 +87,38 @@ class RocmPlatform(Platform):
         elif selected_backend in (AttentionBackendEnum.FLASH_ATTN, None):
             pass
 
-        elif selected_backend in (AttentionBackendEnum.SAGE_ATTN):
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            # fastvideo_kernel's block-sparse attention dispatcher takes its
+            # Triton route here: the ThunderKittens kernels are CUDA-only and
+            # the CuTe fastpath (FASTVIDEO_VSA_CUTEDSL) is not available on ROCm.
+            try:
+                from fastvideo_kernel import video_sparse_attn  # noqa: F401
+            except ImportError as e:
+                raise ImportError("VIDEO_SPARSE_ATTN selected but fastvideo_kernel is not importable. On ROCm it "
+                                  "runs through its Triton kernels; build it with fastvideo-kernel/build.sh --rocm "
+                                  "or pick a different FASTVIDEO_ATTENTION_BACKEND.") from e
+            logger.info("Using Video Sparse Attention backend (Triton kernels).")
+            return "fastvideo.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
+
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3:
+            try:
+                from fastvideo_kernel.block_sparse_attn_256 import (  # noqa: F401
+                    block_sparse_attn_256_bshd)
+            except ImportError as e:
+                raise ImportError("VIDEO_SPARSE_ATTN_H3 selected but fastvideo_kernel is not importable. On ROCm "
+                                  "its block-sparse kernels run through Triton; build it with "
+                                  "fastvideo-kernel/build.sh --rocm or pick a different "
+                                  "FASTVIDEO_ATTENTION_BACKEND.") from e
+            if _vsa_cute_opt_in():
+                # Without this check the backend is selected and the first
+                # 256-token forward fails inside the CuTe import.
+                raise ValueError("FASTVIDEO_VSA_CUTEDSL=1 sends VIDEO_SPARSE_ATTN_H3 to the FlashAttention-4 CuTe "
+                                 "kernels, which are CUDA-only. Unset it on ROCm, or set FASTVIDEO_VSA_TRITON=1 "
+                                 "to keep the Triton kernels.")
+            logger.info("Using MiniMax-H3 Video Sparse Attention backend (Triton kernels).")
+            return "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"
+
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             raise ValueError(f"{selected_backend.name} is not supported on {cls.device_name}.")
         elif selected_backend:
             raise ValueError(f"Invalid attention backend for {cls.device_name}: {selected_backend}")

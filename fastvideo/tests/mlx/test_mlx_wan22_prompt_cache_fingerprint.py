@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime.prompt_cache import load_prompt_cache, save_prompt_cache
 
 
@@ -268,6 +269,7 @@ def test_wan22_default_cache_path_tracks_encoder_files(tmp_path: Path) -> None:
 )
 def test_wan22_main_resolves_prompt_cache(
     monkeypatch,
+    env_overrides,
     tmp_path: Path,
     cache_args: list[str],
     expected: str | None,
@@ -293,7 +295,7 @@ def test_wan22_main_resolves_prompt_cache(
         raise CacheProbe
 
     resolved_args = [str(explicit) if arg == "explicit.npy" else arg for arg in cache_args]
-    monkeypatch.setenv("HOME", str(tmp_path))
+    env_overrides.enter_context(envs.override_external("HOME", str(tmp_path)))
     monkeypatch.setattr(module, "load_prompt_cache", probe)
     monkeypatch.setattr(
         sys,

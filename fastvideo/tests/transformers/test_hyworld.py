@@ -4,6 +4,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.dits import HYWorldConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
@@ -20,8 +21,8 @@ from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29503")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 MODEL_PATH = maybe_download_model("FastVideo/HY-WorldPlay-Bidirectional-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
@@ -34,6 +35,11 @@ GB200_REFERENCE_LATENTS = {
     # Measured on the Slinky NVIDIA GB200 CI tray (build 4967).
     AttentionBackendEnum.FLASH_ATTN: -201149.9431345705,
 }
+GB10_REFERENCE_LATENTS: dict[AttentionBackendEnum, float] = {
+    # NVIDIA GB10 (DGX Spark, sm_121) accumulates differently from H100 and GB200.
+    # Record per-backend values here from a real GB10 run; until then the test
+    # skips on GB10 instead of comparing against another architecture's sum.
+}
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -43,7 +49,7 @@ def test_hyworld_transformer():
     # An env-forced backend is knowable before the multi-GB download and GPU
     # load; the authoritative check on the layer's resolved backend still runs
     # after construction below.
-    forced_backend_name = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+    forced_backend_name = envs.FASTVIDEO_ATTENTION_BACKEND.get()
     if forced_backend_name:
         forced_backend = getattr(AttentionBackendEnum, forced_backend_name, None)
         if forced_backend is not None and forced_backend not in REFERENCE_LATENTS:
@@ -152,7 +158,12 @@ def test_hyworld_transformer():
     latent = output.double().sum().item()
 
     device_name = torch.cuda.get_device_name(device)
-    device_references = GB200_REFERENCE_LATENTS if "B200" in device_name else REFERENCE_LATENTS
+    if "GB10" in device_name:
+        if attention_backend not in GB10_REFERENCE_LATENTS:
+            pytest.skip(f"HYWorld transformer test has no GB10 reference latent for {attention_backend}.")
+        device_references = GB10_REFERENCE_LATENTS
+    else:
+        device_references = GB200_REFERENCE_LATENTS if "B200" in device_name else REFERENCE_LATENTS
     reference_latent = device_references.get(attention_backend, REFERENCE_LATENTS[attention_backend])
     diff = abs(reference_latent - latent)
     relative_diff = diff / abs(reference_latent)

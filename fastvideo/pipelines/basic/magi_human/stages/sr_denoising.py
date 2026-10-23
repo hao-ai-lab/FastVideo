@@ -101,6 +101,9 @@ class MagiHumanSRDenoisingStage(PipelineStage):
 
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(video_scheduler.timesteps, disable=disable_tqdm)):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             static_packed = build_static_packed_inputs(
                 video_latent=video_latent,

@@ -21,7 +21,7 @@ if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
 
 def _init_log_paths() -> tuple[Path, Path]:
     base_dir = Path(os.getenv("LTX2_DEBUG_DIR", "ltx2_debug"))
-    fastvideo_log = Path(os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", base_dir / "fastvideo_gemma.log"))
+    fastvideo_log = Path(os.getenv("FASTVIDEO_LTX2_GEMMA_LOG", base_dir / "fastvideo_gemma.log"))
     reference_log = Path(os.getenv("LTX2_REFERENCE_GEMMA_LOG", base_dir / "reference_gemma.log"))
     fastvideo_log.parent.mkdir(parents=True, exist_ok=True)
     reference_log.parent.mkdir(parents=True, exist_ok=True)

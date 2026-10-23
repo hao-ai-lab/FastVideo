@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import torch
 
+import fastvideo.envs as envs
+
 
 class RecordingLogger:
 
@@ -102,20 +104,20 @@ def _tiny_batch():
     )
 
 
-def _patch_denoising_module(monkeypatch, cfg_gate_step):
+def _patch_denoising_module(monkeypatch, env_overrides, cfg_gate_step):
     if cfg_gate_step is None:
-        monkeypatch.delenv("FASTVIDEO_CFG_GATE_STEP", raising=False)
+        env_overrides.enter_context(envs.FASTVIDEO_CFG_GATE_STEP.override(None))
         expected_gate_step = 1.0
     else:
-        monkeypatch.setenv("FASTVIDEO_CFG_GATE_STEP", str(cfg_gate_step))
+        env_overrides.enter_context(envs.FASTVIDEO_CFG_GATE_STEP.override(float(cfg_gate_step)))
         expected_gate_step = float(cfg_gate_step)
 
     import fastvideo.pipelines.stages.denoising as denoising
     from fastvideo.pipelines.stages.base import PipelineStage
 
-    # envs.py evaluates FASTVIDEO_CFG_GATE_STEP lazily via __getattr__, so the
-    # stage sees monkeypatched values without reloading the module.
-    assert denoising.envs.FASTVIDEO_CFG_GATE_STEP == expected_gate_step
+    # envs.FASTVIDEO_CFG_GATE_STEP.get() reads the environment on each call, so
+    # the stage sees overridden values without reloading the module.
+    assert denoising.envs.FASTVIDEO_CFG_GATE_STEP.get() == expected_gate_step
 
     logger = RecordingLogger()
     monkeypatch.setattr(denoising, "logger", logger)

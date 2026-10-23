@@ -94,7 +94,9 @@ torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
   --master_port 29502 \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

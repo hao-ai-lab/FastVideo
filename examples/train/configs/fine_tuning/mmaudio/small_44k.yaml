@@ -1,0 +1,69 @@
+# MMAudio v1 small_44k conditional flow-matching fine-tuning.
+#
+# This config intentionally leaves data_path empty. Point it at an official-
+# compatible TensorDict memmap feature cache before starting training.
+
+models:
+  student:
+    _target_: fastvideo.train.models.mmaudio.MMAudioModel
+    init_from: converted_weights/mmaudio/small_44k
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.flow_matching.FlowMatchingFineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+    pin_cpu_memory: false
+
+  data:
+    # Fill this after the precomputed MMAudio feature cache is ready.
+    data_path: ""
+    preprocessed_data_type: mmaudio_features
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.1
+    seed: 14159265
+
+  # These match the official MMAudio optimizer defaults. FastVideo currently
+  # uses constant-with-warmup here; the original recipe adds LR drops at
+  # iterations 240k and 270k.
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.95]
+    eps: 1.0e-6
+    weight_decay: 1.0e-6
+    lr_scheduler: constant_with_warmup
+    lr_warmup_steps: 1000
+
+  loop:
+    max_train_steps: 300000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/mmaudio_small_44k_finetune
+    training_state_checkpointing_steps: 10000
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: fastvideo_mmaudio
+    run_name: mmaudio_small_44k_finetune
+
+  model:
+    logit_mean: 0.0
+    logit_std: 1.0
+    precondition_outputs: false
+
+  # Official MMAudio trains FP32 weights under BF16 autocast.
+  dit_precision: fp32
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0

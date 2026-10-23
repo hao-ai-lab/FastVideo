@@ -9,13 +9,12 @@ case validates the released FP32 checkpoint end to end.
     pytest tests/local_tests/minimax_h3/test_mlx_audio_vae_parity.py -v
 
 The real-weight case activates automatically when the released snapshot is
-present; point MINIMAX_H3_MODEL_ROOT at another checkout otherwise.
+present; point FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT at another checkout otherwise.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +23,7 @@ import pytest
 torch = pytest.importorskip("torch", reason="PyTorch reference needed for audio VAE parity")
 mx = pytest.importorskip("mlx.core", reason="MLX needed for audio VAE parity")
 
+import fastvideo.envs as envs  # noqa: E402
 from fastvideo.configs.models.vaes.minimax_h3_audio import (  # noqa: E402
     MiniMaxH3AudioVAEArchConfig,
     MiniMaxH3AudioVAEConfig,
@@ -256,7 +256,7 @@ def test_audio_loader_validates_decoder_weights_before_construction(tmp_path) ->
 # Real released weights (bounded segment)
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL_ROOT = Path(os.environ.get("MINIMAX_H3_MODEL_ROOT", Path.home() / "models/FastH3-Preview-v0.2"))
+DEFAULT_MODEL_ROOT = Path(envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get() or Path.home() / "models/FastH3-Preview-v0.2")
 REAL_WEIGHTS_PRESENT = (DEFAULT_MODEL_ROOT / "audio_vae").is_dir() and any(
     (DEFAULT_MODEL_ROOT / "audio_vae").glob("*.safetensors"))
 

@@ -1,0 +1,527 @@
+[
+  {
+    "label": "Welcome",
+    "href": "/"
+  },
+  {
+    "label": "Fast Models",
+    "href": "/fast-models",
+    "icon": "boxes"
+  },
+  {
+    "label": "Get started",
+    "icon": "rocket",
+    "items": [
+      {
+        "label": "Quick start",
+        "href": "/getting_started/quick_start"
+      },
+      {
+        "label": "Installation",
+        "href": "/getting_started/installation"
+      },
+      {
+        "label": "Hardware and runtimes",
+        "href": "/getting_started/hardware"
+      },
+      {
+        "label": "Python API basics",
+        "href": "/getting_started/v1_api"
+      }
+    ]
+  },
+  {
+    "label": "Run inference",
+    "items": [
+      {
+        "label": "Inference guide",
+        "href": "/inference/inference_quick_start"
+      },
+      {
+        "label": "Configuration",
+        "href": "/inference/configuration"
+      },
+      {
+        "label": "CLI",
+        "href": "/inference/cli"
+      },
+      {
+        "label": "Supported models",
+        "href": "/inference/support_matrix"
+      },
+      {
+        "label": "Memory and offloading",
+        "href": "/inference/offloading"
+      },
+      {
+        "label": "Performance and attention",
+        "href": "/inference/optimizations"
+      },
+      {
+        "label": "LoRA adapters",
+        "href": "/utilities/lora"
+      },
+      {
+        "label": "Community LoRAs for MiniMax-H3",
+        "href": "/inference/h3_community_lora"
+      },
+      {
+        "label": "Hardware",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Choose your runtime",
+            "href": "/getting_started/hardware"
+          },
+          {
+            "label": "NVIDIA GPU setup",
+            "href": "/getting_started/installation/gpu"
+          },
+          {
+            "label": "Apple Silicon / MLX",
+            "href": "/getting_started/installation/mlx"
+          },
+          {
+            "label": "NVIDIA DGX Spark",
+            "href": "/getting_started/installation/spark"
+          },
+          {
+            "label": "Two DGX Sparks",
+            "href": "/getting_started/installation/spark_pair"
+          },
+          {
+            "label": "RTX PRO 6000 / FastH3",
+            "href": "/inference/fasth3_rtx_pro_6000"
+          },
+          {
+            "label": "FastH3 OmniRef on consumer GPUs",
+            "href": "/inference/fasth3_omniref"
+          },
+          {
+            "label": "FastH3 OmniRef on Apple Silicon",
+            "href": "/inference/fasth3_omniref_mlx"
+          },
+          {
+            "label": "DGX Spark tuning",
+            "href": "/getting_started/installation/spark_performance"
+          },
+          {
+            "label": "AMD / ROCm",
+            "href": "/getting_started/installation/amd"
+          }
+        ],
+        "display": "group"
+      },
+      {
+        "label": "Integrations",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "ComfyUI",
+            "href": "/inference/comfyui"
+          },
+          {
+            "label": "Server and API clients",
+            "href": "/cookbook/openai-api"
+          }
+        ],
+        "display": "group"
+      },
+      {
+        "label": "Examples",
+        "href": "/inference/examples/examples_inference_index"
+      }
+    ]
+  },
+  {
+    "label": "Cookbook",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "All recipes",
+        "href": "/cookbook"
+      },
+      {
+        "label": "H3 server and playground",
+        "href": "/cookbook/openai-api"
+      },
+      {
+        "label": "MiniMax H3",
+        "display": "group",
+        "collapsed": false,
+        "items": [
+          {
+            "label": "MiniMax H3",
+            "href": "/cookbook/minimax-h3/models/minimax-h3-t2v"
+          },
+          {
+            "label": "FastH3 OmniRef",
+            "href": "/cookbook/minimax-h3/fasth3-omniref"
+          },
+          {
+            "label": "FastH3 8-Step V2",
+            "href": "/cookbook/minimax-h3/fasth3-8step"
+          },
+          {
+            "label": "FastH3 Trim",
+            "href": "/cookbook/minimax-h3/fasth3-trim"
+          },
+          {
+            "label": "FastH3 Preview V0.2",
+            "href": "/cookbook/minimax-h3/fasth3-preview"
+          },
+          {
+            "label": "FastH3 4-Step V1",
+            "href": "/cookbook/minimax-h3/fasth3-4step"
+          },
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/minimax-h3"
+          },
+          {
+            "label": "Checkpoint schedules",
+            "href": "/inference/fasth3-distilled"
+          }
+        ]
+      },
+      {
+        "label": "Wan",
+        "display": "group",
+        "collapsed": false,
+        "items": [
+          {
+            "label": "FastWan2.1 1.3B",
+            "href": "/cookbook/wan/fastwan21"
+          },
+          {
+            "label": "Wan2.1 I2V 14B",
+            "href": "/cookbook/wan/wan21-i2v"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/wan"
+          }
+        ]
+      },
+      {
+        "label": "LTX",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "LTX2 Distilled",
+            "href": "/cookbook/ltx/ltx2-distilled"
+          },
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/ltx"
+          },
+          {
+            "label": "LTX-2.5 reference",
+            "href": "/inference/ltx2_5"
+          }
+        ]
+      },
+      {
+        "label": "Hunyuan",
+        "href": "/cookbook/hunyuan"
+      },
+      {
+        "label": "Kandinsky 5",
+        "href": "/cookbook/kandinsky5"
+      },
+      {
+        "label": "Kandinsky 6",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/kandinsky6"
+          },
+          {
+            "label": "Generation reference",
+            "href": "/inference/kandinsky6"
+          },
+          {
+            "label": "Upscaling reference",
+            "href": "/inference/kandinsky6_sr"
+          }
+        ]
+      },
+      {
+        "label": "FLUX",
+        "href": "/cookbook/flux"
+      },
+      {
+        "label": "Stable Diffusion",
+        "href": "/cookbook/stable-diffusion"
+      },
+      {
+        "label": "Stable Audio",
+        "href": "/cookbook/stable-audio"
+      },
+      {
+        "label": "MMAudio",
+        "href": "/cookbook/mmaudio"
+      },
+      {
+        "label": "Cosmos",
+        "href": "/cookbook/cosmos"
+      },
+      {
+        "label": "Matrix Game",
+        "href": "/cookbook/matrix-game"
+      }
+    ],
+    "display": "group",
+    "root": "/cookbook"
+  },
+  {
+    "label": "Train and fine-tune",
+    "display": "group",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Overview",
+        "href": "/training/overview"
+      },
+      {
+        "label": "Training Infrastructure",
+        "href": "/training/train_infra"
+      },
+      {
+        "label": "Experiment Tracking",
+        "href": "/training/trackers"
+      },
+      {
+        "label": "Data Preprocessing",
+        "href": "/training/data_preprocess"
+      },
+      {
+        "label": "Fine-tuning",
+        "href": "/training/finetune"
+      },
+      {
+        "label": "Attn-QAT Training",
+        "href": "/training/attn_qat"
+      },
+      {
+        "label": "HunyuanVideo 1.5 T2V",
+        "href": "/training/hunyuan15_overfit"
+      },
+      {
+        "label": "Examples",
+        "items": [
+          {
+            "label": "Training Index",
+            "href": "/training/examples/examples_training_index"
+          },
+          {
+            "label": "Wan T2V 1.3B",
+            "href": "/training/examples/wan_t2v_1.3B"
+          },
+          {
+            "label": "Wan I2V 14B 480p",
+            "href": "/training/examples/wan_i2v_14B_480p"
+          },
+          {
+            "label": "Wan2.1 Fun 1.3B InP",
+            "href": "/training/examples/Wan2.1-Fun-1.3B-InP"
+          },
+          {
+            "label": "Wan2.1 VSA",
+            "href": "/training/examples/Wan2.1-VSA"
+          },
+          {
+            "label": "Fine-tuning",
+            "href": "/training/examples/finetune"
+          }
+        ],
+        "collapsed": true,
+        "display": "group"
+      }
+    ]
+  },
+  {
+    "label": "Distill models",
+    "display": "group",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Data Preprocessing",
+        "href": "/distillation/data_preprocess"
+      },
+      {
+        "label": "DMD",
+        "href": "/distillation/dmd"
+      },
+      {
+        "label": "AnyFlow",
+        "href": "/distillation/anyflow"
+      }
+    ]
+  },
+  {
+    "label": "Attention research",
+    "display": "group",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Overview",
+        "href": "/attention"
+      },
+      {
+        "label": "Video Sparse Attention",
+        "href": "/attention/vsa"
+      },
+      {
+        "label": "Sliding Tile Attention (Archived)",
+        "href": "/attention/sta"
+      },
+      {
+        "label": "Backend Development",
+        "href": "/contributing/attention_backend"
+      }
+    ]
+  },
+  {
+    "label": "Contribute",
+    "display": "group",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Overview",
+        "href": "/contributing/overview"
+      },
+      {
+        "label": "Developer Environment",
+        "items": [
+          {
+            "label": "Index",
+            "href": "/contributing/developer_env"
+          },
+          {
+            "label": "Docker",
+            "href": "/contributing/developer_env/docker"
+          },
+          {
+            "label": "RunPod",
+            "href": "/contributing/developer_env/runpod"
+          }
+        ],
+        "collapsed": true,
+        "display": "group"
+      },
+      {
+        "label": "Pull Requests",
+        "href": "/contributing/pull_requests"
+      },
+      {
+        "label": "CI/CD Architecture",
+        "href": "/contributing/ci_architecture"
+      },
+      {
+        "label": "Testing",
+        "href": "/contributing/testing"
+      },
+      {
+        "label": "Environment Variables",
+        "href": "/contributing/env_vars"
+      },
+      {
+        "label": "Performance Benchmarks",
+        "href": "/contributing/performance_benchmarks"
+      },
+      {
+        "label": "Profiling",
+        "href": "/contributing/profiling"
+      },
+      {
+        "label": "Activation Trace",
+        "href": "/contributing/activation_trace"
+      },
+      {
+        "label": "Coding Agents",
+        "href": "/contributing/coding_agents"
+      },
+      {
+        "label": "Dreamverse Development",
+        "href": "/contributing/dreamverse-development"
+      },
+      {
+        "label": "Attention Backend Development",
+        "href": "/contributing/attention_backend"
+      },
+      {
+        "label": "Add a pipeline",
+        "href": "/inference/add_pipeline"
+      },
+      {
+        "label": "Debugging",
+        "href": "/utilities/debugging"
+      },
+      {
+        "label": "Documenting FastVideo",
+        "href": "/contributing/documentation"
+      }
+    ]
+  },
+  {
+    "label": "Architecture",
+    "display": "group",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Overview",
+        "href": "/design/overview"
+      },
+      {
+        "label": "Training Architecture",
+        "href": "/design/training_architecture"
+      },
+      {
+        "label": "Server Contracts",
+        "items": [
+          {
+            "label": "Overview",
+            "href": "/design/server_contracts"
+          },
+          {
+            "label": "OpenAI HTTP",
+            "href": "/design/server_contracts/openai"
+          },
+          {
+            "label": "Streaming WebSocket",
+            "href": "/design/server_contracts/streaming"
+          },
+          {
+            "label": "Dynamo Integration",
+            "href": "/design/server_contracts/dynamo"
+          }
+        ],
+        "collapsed": true,
+        "display": "group"
+      }
+    ]
+  },
+  {
+    "label": "API reference",
+    "collapsed": true,
+    "items": [
+      {
+        "label": "Overview",
+        "href": "/api"
+      },
+      {
+        "label": "Python package",
+        "href": "/api/fastvideo"
+      }
+    ],
+    "display": "group"
+  },
+  {
+    "label": "Contact",
+    "href": "/contact"
+  }
+]

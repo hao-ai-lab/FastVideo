@@ -123,7 +123,7 @@ cross-attention; key and value must have the same sequence length.
 
 | Hardware/configuration | Route |
 |---|---|
-| SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split 64x64 backward; optimized backward requires a 16-aligned KV length |
+| SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split backward. Long equal-length sequences (at least 16,384 tokens) use 64x128 backward tiles with tuned launch parameters in every forward mode; in `fast` mode without exact-M they also use complete forward tiles without bounds masks and accumulator lifetime tuning. Other optimized cases use the masked forward loop and 64x64 backward. Optimized backward requires a 16-aligned KV length |
 | SM120, including RTX 5090 | Previous forward tiling with joined quantized/STE P@V operations and a shallower backward pipeline for long sequences |
 | Unsupported configurations | Previous Triton implementation |
 
@@ -138,10 +138,15 @@ The available tuning and comparison controls are:
 | `FASTVIDEO_ATTN_QAT_FWD_MODE` | `fast` | Selects `fast`, `balanced`, or `reference` forward tiling on the SM100 optimized route |
 | `FASTVIDEO_ATTN_QAT_FWD_EXACT_M` | `0` | Set to `1` to recompute reference-order softmax statistics and keep `dV` bitwise-compatible on the SM100 optimized route |
 | `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED` | `1` | Set to `0` to force the previous SM100 forward and backward for comparison |
+| `FASTVIDEO_ATTN_QAT_SM100_WIDE_BWD` | `1` | Set to `0` to retain 64x64 backward tiles for long equal-length SM100 attention. Applies in every forward mode, including `reference` and `FWD_EXACT_M=1` |
 | `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` | `1` | Set to `0` to compare SM120 against the split P@V path |
 
 The first invocation JIT-compiles the selected configuration; later calls reuse
 the Triton cache. To measure the production shape, run
 `python benchmarks/benchmark_attn_qat_train.py` from `fastvideo-kernel/`.
+
+On two B200 GPUs with Wan2.1 1.3B, 31,200 tokens, full activation checkpointing,
+and AdamW, the default long-sequence SM100 route measured about 10% lower full-step
+latency than the previous SM100 optimized path in guarded SP2 acceptance runs.
 
 For import and backend-selection failures, see [Debugging](../utilities/debugging.md).

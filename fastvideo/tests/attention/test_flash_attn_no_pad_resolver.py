@@ -25,6 +25,8 @@ import sys
 
 import pytest
 
+import fastvideo.envs as envs
+
 if importlib.util.find_spec("flash_attn") is None:
     pytest.skip(
         "flash_attn not installed; resolver tests require it for the unconditional top-level imports in flash_attn_no_pad",
@@ -37,10 +39,10 @@ def _reload_resolver_module():
     return importlib.import_module("fastvideo.attention.utils.flash_attn_no_pad")
 
 
-def test_resolver_skips_cute_without_opt_in(monkeypatch) -> None:
+def test_resolver_skips_cute_without_opt_in(monkeypatch, env_overrides) -> None:
     """Without ``FASTVIDEO_FA4=1`` the resolver must not even attempt the cute
     import."""
-    monkeypatch.delenv("FASTVIDEO_FA4", raising=False)
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(None))
     attempted: list[str] = []
     real_import = builtins.__import__
 
@@ -58,7 +60,7 @@ def test_resolver_skips_cute_without_opt_in(monkeypatch) -> None:
     assert "fastvideo.attention.utils.flash_attn_cute" not in attempted
 
 
-def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None:
+def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch, env_overrides) -> None:
     """With ``FASTVIDEO_FA4=1`` an unimportable cute build fails loudly instead
     of silently falling through to FA3/FA2.
 
@@ -67,7 +69,7 @@ def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None
     ImportError as "flash-attn not installed" (``bsa_attn.py``) cannot swallow
     the opted-in failure.
     """
-    monkeypatch.setenv("FASTVIDEO_FA4", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(True))
     real_import = builtins.__import__
 
     def patched_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -81,9 +83,9 @@ def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None
         _reload_resolver_module()
 
 
-def test_resolver_returns_flash_attn_when_interface_unavailable(monkeypatch) -> None:
+def test_resolver_returns_flash_attn_when_interface_unavailable(monkeypatch, env_overrides) -> None:
     """The terminal fallback is the plain ``flash_attn`` import."""
-    monkeypatch.delenv("FASTVIDEO_FA4", raising=False)
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(None))
     real_import = builtins.__import__
 
     def patched_import(name, globals=None, locals=None, fromlist=(), level=0):

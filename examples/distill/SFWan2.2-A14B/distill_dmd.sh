@@ -145,7 +145,9 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/wan_self_forcing_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanSelfForcingDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_self_forcing_distillation_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

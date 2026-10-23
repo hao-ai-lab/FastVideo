@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
@@ -18,8 +19,8 @@ from fastvideo.worker import MultiprocExecutor
 import torch
 
 logger = init_logger(__name__)
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29500")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29500")
 
 # Base parameters for LoRA inference tests
 WAN_LORA_PARAMS = {
@@ -59,9 +60,8 @@ LORA_CONFIGS = [{
 }
                 # TODO: Add a LoRA with lora_alpha values to test alpha scaling
                 #
-                # Context: This change is mainly for an in-progress ticket porting over LongCat-Video,
-                # where they used an alpha value that is two times smaller than their rank. This fix
-                # ensures that LoRA weights are correctly scaled by the alpha/rank ratio when merged.
+                # Context: Some LoRAs use an alpha value that is two times smaller than their rank.
+                # This fix ensures that LoRA weights are correctly scaled by the alpha/rank ratio when merged.
                 #
                 # Issue: Currently, we cannot add a test for LoRA adapters with alpha values because:
                 # - The existing public LoRAs for Wan-AI/Wan2.1-T2V-1.3B-Diffusers don't store lora_alpha
@@ -69,7 +69,7 @@ LORA_CONFIGS = [{
                 # - This is why the alpha/rank scaling bug wasn't caught by existing tests
                 #
                 # The fix has been validated with:
-                # - LongCat-Video distilled LoRA (which includes alpha values)
+                # - A distilled LoRA that includes alpha values
                 # - Manual testing shows correct alpha/rank scaling behavior
                 # - Backward compatibility confirmed with LoRAs without alpha values
                 #
@@ -127,17 +127,19 @@ def test_merge_lora_weights(model_id):
         hf_param = hf_state_dict[key]
         custom_param = custom_state_dict[key].to_local() if isinstance(custom_state_dict[key],
                                                                        DTensor) else custom_state_dict[key]
-        assert_close(hf_param, custom_param, atol=7e-4, rtol=7e-4)
+        # Unified-memory devices (GB10) disable dit_cpu_offload, so the custom params stay on the GPU
+        # while the HF pipeline's offloaded params are on the CPU; compare on one device.
+        assert_close(hf_param, custom_param.to(hf_param.device), atol=7e-4, rtol=7e-4)
 
 
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
+def test_lora_inference_similarity(ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs LoRA inference with LoRA switching and compares the output
     to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 

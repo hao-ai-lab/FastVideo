@@ -1,8 +1,6 @@
 // primitives.cuh -- device primitives for the sm_100a/sm_103a VSA block-sparse attention
 // forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
 // tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
-//
-// Generated and pruned to what the kernel reaches -- do not edit by hand.
 #pragma once
 #include <cstdint>
 #include <cstdio>
@@ -218,8 +216,8 @@ template <int CLUSTER_SHAPE_M, int CLUSTER_SHAPE_N, ClcRasterOrder ORDER>
 __device__ __forceinline__
 ClcTileInfo clc_parse_response(uint32_t resp_smem_addr) {
   uint32_t d0, d1, d2, d3;
-  fence_proxy_async_shared_cta();
   clc_load_response(resp_smem_addr, d0, d1, d2, d3);
+  fence_proxy_async_shared_cta();
   const int  ctaid_x = static_cast<int>(d0);
   const int  ctaid_y = static_cast<int>(d1 & 0xFFFFu);
   const bool valid   = (d2 & 1u) != 0u;
@@ -251,6 +249,7 @@ ClcTileInfo clc_fetch_next_tile(
       __cvta_generic_to_shared(&clc_response[clc_cons_stage * 4]));
   ClcTileInfo t = clc_parse_response<
       CLUSTER_SHAPE_M, CLUSTER_SHAPE_N, ORDER>(resp_addr);
+  __syncwarp();
   if (do_release) {
     uint32_t empty_local = static_cast<uint32_t>(
         __cvta_generic_to_shared(&clc_empty_bar[clc_cons_stage]));
@@ -984,4 +983,31 @@ uint64_t make_l2cache_policy_fractional_evict_last_unchanged(float fraction_f32)
       : "=l"(policy)
       : "f"(fraction_f32));
   return policy;
+}
+
+__device__ __forceinline__
+void cp_async_cg_16(uint32_t smem_dst, const void* gmem_src) {
+  asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n"
+               :: "r"(smem_dst), "l"(gmem_src) : "memory");
+}
+
+__device__ __forceinline__
+void cp_async_commit_group() {
+  asm volatile("cp.async.commit_group;\n" ::: "memory");
+}
+
+template <int N>
+__device__ __forceinline__
+void cp_async_wait_group() {
+  asm volatile("cp.async.wait_group %0;\n" :: "n"(N) : "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_wait() {
+  asm volatile("griddepcontrol.wait;\n" ::: "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_launch_dependents() {
+  asm volatile("griddepcontrol.launch_dependents;\n" ::: "memory");
 }

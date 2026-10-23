@@ -1,26 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """TAEH3 port parity. Requires Apple MLX and an explicit upstream checkout.
 
-TAEH3_REFERENCE_DIR=/path/to/taehv python -m pytest fastvideo/tests/mlx/test_mlx_taeh3.py
+FASTVIDEO_TEST_TAEH3_REFERENCE_DIR=/path/to/taehv python -m pytest fastvideo/tests/mlx/test_mlx_taeh3.py
 No weights or source code are downloaded by this test.
 """
 import importlib.util
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 mx = pytest.importorskip('mlx.core')
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime.minimax_h3_taeh3 import MLXTAEH3Decoder, ensure_taeh3_checkpoint
 
 
 @pytest.fixture(scope='module')
 def models():
     torch = pytest.importorskip('torch')
-    location = os.environ.get('TAEH3_REFERENCE_DIR')
+    location = envs.FASTVIDEO_TEST_TAEH3_REFERENCE_DIR.get()
     if not location:
-        pytest.skip('Set TAEH3_REFERENCE_DIR to an upstream taehv checkout')
+        pytest.skip('Set FASTVIDEO_TEST_TAEH3_REFERENCE_DIR to an upstream taehv checkout')
     root = Path(location)
     spec = importlib.util.spec_from_file_location('taeh3_reference', root / 'taehv.py')
     module = importlib.util.module_from_spec(spec)

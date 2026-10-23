@@ -21,16 +21,36 @@ from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
-MODEL: Literal["FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"] = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
+PREVIEW_MODEL: Literal["FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"] = (
+    "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2")
+EIGHT_STEP_MODEL: Literal["FastVideo/FastVideo-FastH3-8-Step-V2"] = "FastVideo/FastVideo-FastH3-8-Step-V2"
+# HTTP convention: sigma-grid points. Native MLX generate() uses transformer forwards.
+HTTP_STEPS_TO_FORWARDS = {5: 4, 9: 8}
+
+
+def mlx_http_steps(model_path: str) -> int:
+    return 9 if model_path == EIGHT_STEP_MODEL else 5
+
+
+def mlx_num_steps(num_inference_steps: int | None, *, model_path: str) -> int:
+    expected = mlx_http_steps(model_path)
+    if num_inference_steps not in (None, expected):
+        raise ValueError(f"This FastH3 MLX server uses {expected} sigma points "
+                         f"({HTTP_STEPS_TO_FORWARDS[expected]} transformer forwards).")
+    return HTTP_STEPS_TO_FORWARDS[expected]
 
 
 class MLXGeneratorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model_path: Literal["FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"] = MODEL
+    model_path: Literal["FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
+                        "FastVideo/FastVideo-FastH3-8-Step-V2"] = PREVIEW_MODEL
     model_root: str
     mlx_checkpoint: str
     prompt_cache_dir: str = "outputs/h3_prompt_cache"
     vae_dtype: Literal["fp32", "fp16", "bf16"] = "fp32"
+    vsa: bool = False
+    vsa_sparsity: float = Field(default=0.9, ge=0.0, lt=1.0)
+    vsa_tile_size: Literal[64, 256] = 64
 
 
 class MLXServerConfig(BaseModel):
@@ -49,7 +69,7 @@ class MLXServeConfig(BaseModel):
     default_request: dict[str, Any]
 
 
-def validate_mlx_video_request(request: VideoGenerationRequest) -> None:
+def validate_mlx_video_request(request: VideoGenerationRequest, *, model_path: str = PREVIEW_MODEL) -> None:
     """Reject unsupported inputs before fetching media or creating a job."""
     allowed = {
         "model",
@@ -76,9 +96,10 @@ def validate_mlx_video_request(request: VideoGenerationRequest) -> None:
         raise ValueError("FastH3 MLX requires guidance_scale=1.")
     if request.negative_prompt not in (None, ""):
         raise ValueError("FastH3 MLX does not use a negative prompt.")
-    if request.num_inference_steps not in (None, 5):
-        raise ValueError(
-            "FastH3 MLX serving uses five sigma points and four DiT forwards; num_inference_steps must be 5.")
+    expected = mlx_http_steps(model_path)
+    if request.num_inference_steps not in (None, expected):
+        raise ValueError(f"This FastH3 MLX server uses {expected} sigma points "
+                         f"({HTTP_STEPS_TO_FORWARDS[expected]} transformer forwards).")
     if request.seed is not None and not 0 <= request.seed <= 2**32 - 1:
         raise ValueError("H3 MLX seed must be between 0 and 4294967295.")
 
@@ -87,6 +108,10 @@ class MLXH3Generator:
     """Keep one pipeline on one MLX thread; preserve its phase-memory policy."""
 
     def __init__(self, config: MLXGeneratorConfig) -> None:
+        self._model_path = config.model_path
+        self._vsa = config.vsa
+        self._vsa_sparsity = config.vsa_sparsity
+        self._vsa_tile_size = config.vsa_tile_size
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="h3-mlx")
         try:
             self._pipeline = self._worker.submit(self._load, config).result()
@@ -114,15 +139,21 @@ class MLXH3Generator:
 
     def _generate(self, request: GenerationRequest) -> dict[str, Any]:
         started = time.perf_counter()
-        result = self._pipeline.generate(
-            request.prompt,
-            output_path=request.output.output_path,
-            width=request.sampling.width,
-            height=request.sampling.height,
-            num_frames=request.sampling.num_frames,
-            seed=request.sampling.seed,
-            num_steps=4,
-        )
+        generate_kwargs: dict[str, Any] = {
+            "output_path": request.output.output_path,
+            "width": request.sampling.width,
+            "height": request.sampling.height,
+            "num_frames": request.sampling.num_frames,
+            "seed": request.sampling.seed,
+            "num_steps": mlx_num_steps(request.sampling.num_inference_steps, model_path=self._model_path),
+        }
+        if self._vsa:
+            generate_kwargs.update(
+                vsa=True,
+                vsa_sparsity=self._vsa_sparsity,
+                vsa_tile_size=self._vsa_tile_size,
+            )
+        result = self._pipeline.generate(request.prompt, **generate_kwargs)
         # Do not retain decoded frames/waveforms or label phase peaks as total RAM.
         return {"video_path": str(result.video_path), "generation_time": time.perf_counter() - started}
 
@@ -157,9 +188,10 @@ def create_mlx_app(config: MLXServeConfig):
     required = {"width", "height", "num_frames", "fps", "seed", "num_inference_steps", "guidance_scale"}
     if required - set(explicit):
         raise ValueError("MLX default_request must set: " + ", ".join(sorted(required - set(explicit))))
-    validate_mlx_video_request(VideoGenerationRequest(prompt="validate config", **explicit))
+    validate_mlx_video_request(VideoGenerationRequest(prompt="validate config", **explicit),
+                               model_path=config.generator.model_path)
     # Transport admission uses the registered H3 family, not CUDA engine options.
-    args = SimpleNamespace(model_path=MODEL,
+    args = SimpleNamespace(model_path=config.generator.model_path,
                            lora_path=None,
                            lora_nickname="default",
                            lora_strength=1.0,
@@ -172,13 +204,17 @@ def create_mlx_app(config: MLXServeConfig):
                              served_model_name=config.server.served_model_name,
                              output_dir=config.server.output_dir,
                              default_request=request)
+
+    def video_request_validator(request: VideoGenerationRequest) -> None:
+        validate_mlx_video_request(request, model_path=config.generator.model_path)
+
     return create_app(
         args,
         config.server.output_dir,
         request,
         config.server.served_model_name,
         generator_factory=lambda: MLXH3Generator(config.generator),
-        video_request_validator=validate_mlx_video_request,
+        video_request_validator=video_request_validator,
         runtime="mlx",
     )
 

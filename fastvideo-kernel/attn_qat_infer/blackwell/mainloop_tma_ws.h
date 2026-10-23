@@ -174,6 +174,13 @@ struct CollectiveMainloopFwd {
         ShapeQKV const shape_ds;
         StrideQKV const stride_ds;
         float const softmax_scale_log2;
+        int const* ptr_q2k_idx{nullptr};
+        int const* ptr_q2k_num{nullptr};
+        int q2k_max{0};
+        int num_m_blocks{0};
+        int num_heads{0};
+        int const* ptr_kv_valid{nullptr};
+        uint8_t const* ptr_q2k_quad{nullptr};
     };
 
     // Device side kernel params
@@ -194,6 +201,13 @@ struct CollectiveMainloopFwd {
         TMA_SFVt tma_load_SFVt;
         TMA_DS tma_load_DS;
         float const softmax_scale_log2;
+        int const* ptr_q2k_idx;
+        int const* ptr_q2k_num;
+        int q2k_max;
+        int num_m_blocks;
+        int num_heads;
+        int const* ptr_kv_valid;
+        uint8_t const* ptr_q2k_quad;
     };
 
 
@@ -261,7 +275,9 @@ struct CollectiveMainloopFwd {
                 tma_load_K, tma_load_sfk,
                 tma_load_Vt, tma_load_sfvt,
                 tma_load_ds, 
-                args.softmax_scale_log2};
+                args.softmax_scale_log2,
+                args.ptr_q2k_idx, args.ptr_q2k_num, args.q2k_max,
+                args.num_m_blocks, args.num_heads, args.ptr_kv_valid, args.ptr_q2k_quad};
     }
 
     /// Issue Tma Descriptor Prefetch -- ideally from a single thread for best performance
@@ -288,6 +304,51 @@ struct CollectiveMainloopFwd {
                                    cute::ceil_div((m_block + 1) * kBlockM + seqlen_k - seqlen_q, kBlockN));
         }
         return n_block_max;
+    }
+
+    // Number of KV blocks query block m_block visits: all of them when dense,
+    // its index-list length when block-sparse.
+    CUTLASS_DEVICE
+    int get_n_block_count(Params const& mainloop_params, int m_block, int bidh, int bidb) {
+        if (mainloop_params.ptr_q2k_idx == nullptr) {
+            return get_n_block_max(mainloop_params, m_block);
+        }
+        return mainloop_params.ptr_q2k_num[(bidb * mainloop_params.num_heads + bidh) * mainloop_params.num_m_blocks + m_block];
+    }
+
+    // KV block visited at iteration i (iterations run from count-1 down to 0).
+    CUTLASS_DEVICE
+    int get_kv_block(Params const& mainloop_params, int m_block, int bidh, int bidb, int i) {
+        if (mainloop_params.ptr_q2k_idx == nullptr) {
+            return i;
+        }
+        int64_t const row = (int64_t(bidb) * mainloop_params.num_heads + bidh) * mainloop_params.num_m_blocks + m_block;
+        return mainloop_params.ptr_q2k_idx[row * mainloop_params.q2k_max + i];
+    }
+
+    // Valid key columns of each 64-column half of KV block n_block (valid tokens
+    // first within a half). kv_valid, when given, stores two counts per block so
+    // 64-token VSA tiles can pad mid-block; otherwise only the sequence tail is
+    // masked.
+    CUTLASS_DEVICE
+    int get_kv_valid_half(Params const& mainloop_params, int n_block, int half, int unpadded_seqlen_k) {
+        static constexpr int kBlockN = get<1>(TileShape_MNK{});
+        static constexpr int kHalfN = kBlockN / 2;
+        if (mainloop_params.ptr_kv_valid != nullptr) {
+            return mainloop_params.ptr_kv_valid[2 * n_block + half];
+        }
+        return max(0, min(kHalfN, unpadded_seqlen_k - n_block * kBlockN - half * kHalfN));
+    }
+
+    // Quadrant mask of list entry i: bit (2 * row_half + col_half) is set when the
+    // 64-row query half attends the 64-column key half. 0xF when absent.
+    CUTLASS_DEVICE
+    int get_quad(Params const& mainloop_params, int m_block, int bidh, int bidb, int i) {
+        if (mainloop_params.ptr_q2k_quad == nullptr) {
+            return 0xF;
+        }
+        int64_t const row = (int64_t(bidb) * mainloop_params.num_heads + bidh) * mainloop_params.num_m_blocks + m_block;
+        return mainloop_params.ptr_q2k_quad[row * mainloop_params.q2k_max + i];
     }
 
     template <class SFATensor, class Atom, class TiledThr, class TiledPerm>
@@ -450,7 +511,7 @@ struct CollectiveMainloopFwd {
 
         auto [m_block, bidh, bidb] = work_tile_info.get_block_coord(scheduler_params);
 
-        int n_block_max = get_n_block_max(mainloop_params, m_block);
+        int n_block_count = get_n_block_count(mainloop_params, m_block, bidh, bidb);
 
         Tensor sQ = make_tensor(make_smem_ptr(shared_storage.smem_q.begin()), SmemLayoutQ{});
         Tensor sK = make_tensor(make_smem_ptr(shared_storage.smem_k.begin()), SmemLayoutK{});
@@ -506,7 +567,8 @@ struct CollectiveMainloopFwd {
         Tensor tDSsDS = group_modes<0, 3>(block_tma_ds.partition_D(sDS));
         uint16_t mcast_mask_kv = 0;
 
-        int n_block = n_block_max - 1;
+        int n_iter = n_block_count - 1;
+        int n_block = get_kv_block(mainloop_params, m_block, bidh, bidb, n_iter);
         int lane_predicate = cute::elect_one_sync();
         if (lane_predicate) {
         pipeline_q.producer_acquire(smem_pipe_write_q);
@@ -529,11 +591,12 @@ struct CollectiveMainloopFwd {
         ++smem_pipe_write_v;
         }
 
-        n_block--;
+        --n_iter;
         if (lane_predicate) {
             // CUTLASS_PRAGMA_NO_UNROLL
             #pragma unroll 2
-            for (; n_block >= 0; --n_block) {
+            for (; n_iter >= 0; --n_iter) {
+                n_block = get_kv_block(mainloop_params, m_block, bidh, bidb, n_iter);
                 pipeline_k.producer_acquire(smem_pipe_write_k);
                 copy(mainloop_params.tma_load_K.with(*pipeline_k.producer_get_barrier(smem_pipe_write_k), mcast_mask_kv),
                     tKgK(_, n_block), tKsK(_, smem_pipe_write_k.index()));
@@ -585,6 +648,8 @@ struct CollectiveMainloopFwd {
         int thread_idx,
         int work_idx,
         int m_block,
+        int bidh,
+        int bidb,
         SharedStorage& shared_storage
         ) {
 
@@ -667,7 +732,21 @@ struct CollectiveMainloopFwd {
         int const seqlen_q = get<0>(mainloop_params.shape_Q);
         int const seqlen_k = get<0>(mainloop_params.shape_K);
         int const unpadded_seqlen_k = get<0>(mainloop_params.unpadded_shape_K);
-        int n_block = n_block_count - 1;
+        int n_iter = n_block_count - 1;
+        int n_block = get_kv_block(mainloop_params, m_block, bidh, bidb, n_iter);
+        bool const per_block_masking = mainloop_params.ptr_q2k_idx != nullptr || mainloop_params.ptr_kv_valid != nullptr;
+        static_assert(kBlockM == 128 && kBlockN == 128, "quadrant masking assumes 128x128 blocks");
+        // Each MMA warp owns 16 consecutive query rows, so a warp lies in one
+        // 64-row half. With quadrant lists a warp skips blocks its half did not
+        // select and the P.V chunk of a key half it did not select: masked
+        // scores contribute exactly zero, and the warp sharing its tensor-core
+        // partition runs faster meanwhile.
+        int const my_row_half = __shfl_sync(0xffffffff, [&] {
+            Tensor cS0 = cute::make_identity_tensor(select<0, 1>(TileShape_MNK{}));
+            Tensor tScS0 = thread_mma_qk.partition_C(cS0);
+            return int(get<0>(tScS0(0))) >= kBlockM / 2 ? 1 : 0;
+        }(), 0);
+        bool const quad_skip = mainloop_params.ptr_q2k_quad != nullptr;
 
         auto copy_k_block = [&](auto block_id) {
             auto tSsK_stage = tSsK(_, _, _, smem_pipe_read_k.index());
@@ -744,6 +823,26 @@ struct CollectiveMainloopFwd {
             int local = c & 31;
             return (c & ~31) | (local & 1) | ((local & 24) >> 2) | ((local & 6) << 2);
         };
+        // Sparse lists may visit a block whose 64-token halves are partially valid
+        // (VSA tile tails, short prefix chunks) or that only one query half
+        // selected (64-token tiles), at any iteration.
+        auto apply_sparse_mask = [&](auto& acc, int n_blk, int it) {
+            int const quad = get_quad(mainloop_params, m_block, bidh, bidb, it);
+            int const valid0 = get_kv_valid_half(mainloop_params, n_blk, 0, unpadded_seqlen_k);
+            int const valid1 = get_kv_valid_half(mainloop_params, n_blk, 1, unpadded_seqlen_k);
+            if (quad == 0xF && valid0 == kBlockN / 2 && valid1 == kBlockN / 2) { return; }
+            Tensor cS = cute::make_identity_tensor(select<0, 1>(TileShape_MNK{}));
+            Tensor tScS = thread_mma_qk.partition_C(cS);
+            CUTLASS_PRAGMA_UNROLL
+            for (int i = 0; i < size(acc); ++i) {
+                int const col = actual_col(int(get<1>(tScS(i))));
+                int const col_half = col >= kBlockN / 2;
+                int const row_half = int(get<0>(tScS(i))) >= kBlockM / 2;
+                bool const keep = ((quad >> (2 * row_half + col_half)) & 1)
+                                  && (col & (kBlockN / 2 - 1)) < (col_half ? valid1 : valid0);
+                if (!keep) { acc(i) = -INFINITY; }
+            }
+        };
         {
             Tensor cS = cute::make_identity_tensor(select<0, 1>(TileShape_MNK{}));
             Tensor tScS = thread_mma_qk.partition_C(cS);
@@ -751,7 +850,9 @@ struct CollectiveMainloopFwd {
             for (int i = 0; i < size(tSrS); ++i) {
                 int col = actual_col(int(get<1>(tScS(i))));
                 if constexpr (!Is_causal) {  // Just masking based on col
-                    if (col >= int(unpadded_seqlen_k - n_block * kBlockN)) { tSrS(i) = -INFINITY; }
+                    if (!per_block_masking) {
+                        if (col >= int(unpadded_seqlen_k - n_block * kBlockN)) { tSrS(i) = -INFINITY; }
+                    }
                 } else {
                     if (col >= std::min(seqlen_k - n_block * kBlockN,
                                        col_limit_causal(int(get<0>(tScS(i))), n_block))) {
@@ -759,6 +860,9 @@ struct CollectiveMainloopFwd {
                     }
                 }
             }
+        }
+        if constexpr (!Is_causal) {
+            if (per_block_masking) { apply_sparse_mask(tSrS, n_block, n_iter); }
         }
         auto quantize = [&](auto mma_k, auto acc_conversion_view) {
             Tensor AbsMaxP_stagek = AbsMaxP(_, make_coord(_, _, mma_k));
@@ -827,11 +931,12 @@ struct CollectiveMainloopFwd {
             }
         }
         
-        n_block--;
+        --n_iter;
         constexpr int n_masking_steps = !Is_causal ? 1 : cute::ceil_div(kBlockM, kBlockN) + 1;
         // // Only go through these if Is_causal, since n_masking_steps = 1 when !Is_causal
         CUTLASS_PRAGMA_UNROLL
-        for (int masking_step = 0; masking_step < n_masking_steps - 1 && n_block >= 0; ++masking_step, --n_block) {
+        for (int masking_step = 0; masking_step < n_masking_steps - 1 && n_iter >= 0; ++masking_step, --n_iter) {
+            n_block = get_kv_block(mainloop_params, m_block, bidh, bidb, n_iter);
             Tensor tSrS = partition_fragment_C(tiled_mma_qk, select<0, 1>(TileShape_MNK{}));
             Tensor tSrS_converion_view = make_tensor(tSrS.data(), flash::convert_to_conversion_layout(tSrS.layout()));
             consumer_wait(pipeline_k, smem_pipe_read_k);
@@ -878,7 +983,22 @@ struct CollectiveMainloopFwd {
         }
 
         #pragma unroll 1
-        for (; n_block >= 0; --n_block) {
+        for (; n_iter >= 0; --n_iter) {
+            n_block = get_kv_block(mainloop_params, m_block, bidh, bidb, n_iter);
+            int const row_bits = quad_skip
+                                 ? (get_quad(mainloop_params, m_block, bidh, bidb, n_iter) >> (2 * my_row_half)) & 3
+                                 : 3;
+            if (row_bits == 0) {
+                // Neither key half is selected for this warp's rows: its softmax
+                // state and output are unchanged. Keep the pipeline in step.
+                consumer_wait(pipeline_k, smem_pipe_read_k);
+                pipeline_k.consumer_release(smem_pipe_read_k);
+                ++smem_pipe_read_k;
+                consumer_wait(pipeline_v, smem_pipe_read_v);
+                pipeline_v.consumer_release(smem_pipe_read_v);
+                ++smem_pipe_read_v;
+                continue;
+            }
             Tensor tSrS = partition_fragment_C(tiled_mma_qk, select<0, 1>(TileShape_MNK{}));
             Tensor tSrS_converion_view = make_tensor(tSrS.data(), flash::convert_to_conversion_layout(tSrS.layout()));
             consumer_wait(pipeline_k, smem_pipe_read_k);
@@ -896,16 +1016,21 @@ struct CollectiveMainloopFwd {
                 }
             }
 
+            if (per_block_masking) { apply_sparse_mask(tSrS, n_block, n_iter); }
 
             softmax_fused.template online_softmax_with_quant</*Is_first=*/false>(tSrS, AbsMaxP, mainloop_params.softmax_scale_log2);
             Tensor tOrO = make_fragment_like(tOrO_store);
+            clear(tOrO);
             consumer_wait(pipeline_v, smem_pipe_read_v);
             copy_v_block(_0{});
             quantize(_0{}, tSrS_converion_view);
             CUTLASS_PRAGMA_UNROLL
             for (int v_block = 0; v_block < size<2>(tOrP); ++v_block) {
-                cute::gemm(tiled_mma_pv, make_zip_tensor(tOrP(_, _, v_block), tOrSFP(_, _, v_block)),
-                                    make_zip_tensor(tOrVt(_, _, v_block), tOrSFVt(_, _, v_block)), tOrO);
+                // v_block spans one 64-column key half (P's K mode is 2 x 64).
+                if ((row_bits >> v_block) & 1) {
+                    cute::gemm(tiled_mma_pv, make_zip_tensor(tOrP(_, _, v_block), tOrSFP(_, _, v_block)),
+                                        make_zip_tensor(tOrVt(_, _, v_block), tOrSFVt(_, _, v_block)), tOrO);
+                }
                 if (v_block < size<2>(tOrP) - 1) {
                     copy_v_block(v_block + 1);
                     quantize(v_block + 1, tSrS_converion_view);

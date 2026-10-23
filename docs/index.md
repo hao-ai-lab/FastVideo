@@ -1,25 +1,6 @@
 # Welcome to FastVideo
 
-<div style="text-align: center;">
-  <img src="assets/logos/logo.svg" alt="FastVideo" style="width: 60%;" />
-</div>
-
-<div style="text-align: center;">
-<strong>FastVideo is a unified post-training and real-time inference framework for accelerated video generation.</strong>
-</div>
-
-<div style="text-align: center;">
-<script async defer src="https://buttons.github.io/buttons.js"></script>
-<a class="github-button" href="https://github.com/hao-ai-lab/FastVideo/" data-show-count="true" data-size="large" aria-label="Star">Star</a>
-<a class="github-button" href="https://github.com/hao-ai-lab/FastVideo/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch">Watch</a>
-<a class="github-button" href="https://github.com/hao-ai-lab/FastVideo/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork">Fork</a>
-</div>
-
 FastVideo is an inference and post-training framework for diffusion models. It features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
-
-<div style="text-align: center;">
-  <img src="assets/images/fastwan.png" style="width: 100%;"/>
-</div>
 
 ## Key Features
 

@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+import fastvideo.envs as envs
+
 
 def _load_kernel_build_cache():
     module_path = Path(__file__).with_name("kernel_build_cache.py")
@@ -86,18 +88,15 @@ def _write_prebuilt_artifact(prebuilt_root: Path, name: str, cache_key: str) -> 
     return wheel
 
 
-def _patch_stable_metadata(monkeypatch) -> None:
-    for name in (
-            "GPU_BACKEND",
-            "CMAKE_ARGS",
-            "CFLAGS",
-            "CXXFLAGS",
-            "LDFLAGS",
-            "TORCH_CUDA_ARCH_LIST",
-            "FASTVIDEO_CONTAINER_IMAGE_REF",
-            "CUDACXX",
-    ):
-        monkeypatch.delenv(name, raising=False)
+def _patch_stable_metadata(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.override_external("GPU_BACKEND", None))
+    env_overrides.enter_context(envs.override_external("CMAKE_ARGS", None))
+    env_overrides.enter_context(envs.override_external("CFLAGS", None))
+    env_overrides.enter_context(envs.override_external("CXXFLAGS", None))
+    env_overrides.enter_context(envs.override_external("LDFLAGS", None))
+    env_overrides.enter_context(envs.override_external("TORCH_CUDA_ARCH_LIST", None))
+    env_overrides.enter_context(envs.override_external("FASTVIDEO_CONTAINER_IMAGE_REF", None))
+    env_overrides.enter_context(envs.override_external("CUDACXX", None))
     monkeypatch.setattr(kernel_build_cache, "_kernel_source_hash", lambda repo_root: {"source_hash": "source"})
     monkeypatch.setattr(kernel_build_cache, "_read_kernel_version", lambda repo_root: "0.3.2")
     monkeypatch.setattr(
@@ -130,7 +129,7 @@ def _patch_stable_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         kernel_build_cache,
         "_selected_command_metadata",
-        lambda environment_name, default_command: {
+        lambda configured_command, default_command: {
             "raw": default_command,
             "command": json.dumps([default_command]),
             "resolved_executable": f"/usr/bin/{default_command}",
@@ -177,6 +176,33 @@ def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
     assert 'python -c "import cv2; print(\'OpenCV\', cv2.__version__)"' in dockerfile
 
 
+def test_gb10_image_builds_sm121a_without_fa4_cute() -> None:
+    """The CUDA 13 arm64 leg is the DGX Spark image: sm_121a keeps fastvideo-kernel's FP4
+    attention, skipping the FA4 cute overlay keeps flashinfer importable, and leaving FA2
+    out keeps the output identical to a native Spark install."""
+    workflow = yaml.load(
+        (REPO_ROOT / ".github/workflows/infra-build-image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["build-cuda-images"]
+    cuda = {entry["version"]: entry for entry in job["strategy"]["matrix"]["cuda"]}
+
+    assert cuda["13.0.0"]["torch_cuda_arch_list"]["arm64"] == "12.1a"
+    assert cuda["13.0.0"]["install_fa4_cute"] == {"amd64": "1", "arm64": "0"}
+    assert cuda["13.0.0"]["install_flash_attn"] == {"amd64": "1", "arm64": "0"}
+    assert cuda["12.6.3"]["install_flash_attn"] == {"amd64": "1", "arm64": "1"}
+    assert cuda["12.6.3"]["install_fa4_cute"] == {"amd64": "1", "arm64": "1"}
+    for arg in ("INSTALL_FLASH_ATTN", "INSTALL_FA4_CUTE"):
+        key = arg.lower()
+        assert f"{arg}=${{{{ matrix.cuda.{key}[matrix.architecture.name] }}}}" in job["with"]["build_args"]
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    assert "ARG INSTALL_FA4_CUTE=1" in dockerfile
+    assert "ARG INSTALL_FLASH_ATTN=1" in dockerfile
+    assert 'if [ "${INSTALL_FLASH_ATTN}" != "1" ]; then' in dockerfile
+    assert 'if [ "${INSTALL_FA4_CUTE}" = "1" ]; then' in dockerfile
+
+
 def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
     """The dormant Modal rollback image layers apt packages + rustup on top of
     the release image (pr_test.py). Keep those packages baked into the release
@@ -191,14 +217,14 @@ def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
     assert "ENV PATH=/root/.cargo/bin:${PATH}" in dockerfile
 
 
-def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
-    _patch_stable_metadata(monkeypatch)
+def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, env_overrides, tmp_path) -> None:
+    _patch_stable_metadata(monkeypatch, env_overrides)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
 
-    monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "9.0a")
+    env_overrides.enter_context(envs.override_external("TORCH_CUDA_ARCH_LIST", "9.0a"))
     explicit_hopper = kernel_build_cache._build_metadata(tmp_path)
 
-    monkeypatch.delenv("TORCH_CUDA_ARCH_LIST", raising=False)
+    env_overrides.enter_context(envs.override_external("TORCH_CUDA_ARCH_LIST", None))
     detected_hopper = kernel_build_cache._build_metadata(tmp_path)
 
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "8.9")
@@ -210,8 +236,8 @@ def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None
     assert detected_l40s["cache_key"] != detected_hopper["cache_key"]
 
 
-def test_cache_key_ignores_runtime_only_torch_config(monkeypatch, tmp_path) -> None:
-    _patch_stable_metadata(monkeypatch)
+def test_cache_key_ignores_runtime_only_torch_config(monkeypatch, env_overrides, tmp_path) -> None:
+    _patch_stable_metadata(monkeypatch, env_overrides)
     build_host = kernel_build_cache._build_metadata(tmp_path)
     torch_metadata = kernel_build_cache._torch_metadata()
     monkeypatch.setattr(
@@ -230,19 +256,25 @@ def test_cache_key_ignores_runtime_only_torch_config(monkeypatch, tmp_path) -> N
 
 
 @pytest.mark.parametrize("environment_name", ["CFLAGS", "CXXFLAGS", "LDFLAGS"])
-def test_cache_key_changes_with_build_flags(monkeypatch, tmp_path, environment_name) -> None:
-    _patch_stable_metadata(monkeypatch)
+def test_cache_key_changes_with_build_flags(monkeypatch, env_overrides, tmp_path, environment_name) -> None:
+    _patch_stable_metadata(monkeypatch, env_overrides)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
     baseline = kernel_build_cache._build_metadata(tmp_path)
 
-    monkeypatch.setenv(environment_name, "-DFASTVIDEO_ABI_VARIANT=1")
+    # The env policy contract test requires a literal name in override_external, so each flag has its own override.
+    flag_overrides = {
+        "CFLAGS": envs.override_external("CFLAGS", "-DFASTVIDEO_ABI_VARIANT=1"),
+        "CXXFLAGS": envs.override_external("CXXFLAGS", "-DFASTVIDEO_ABI_VARIANT=1"),
+        "LDFLAGS": envs.override_external("LDFLAGS", "-DFASTVIDEO_ABI_VARIANT=1"),
+    }
+    env_overrides.enter_context(flag_overrides[environment_name])
     changed = kernel_build_cache._build_metadata(tmp_path)
 
     assert baseline["cache_key"] != changed["cache_key"]
 
 
-def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, tmp_path) -> None:
-    _patch_stable_metadata(monkeypatch)
+def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, env_overrides, tmp_path) -> None:
+    _patch_stable_metadata(monkeypatch, env_overrides)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
     baseline = kernel_build_cache._build_metadata(tmp_path)
 
@@ -263,7 +295,7 @@ def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, tmp_path) -> 
     )
     compiler_changed = kernel_build_cache._build_metadata(tmp_path)
 
-    _patch_stable_metadata(monkeypatch)
+    _patch_stable_metadata(monkeypatch, env_overrides)
     torch_metadata = kernel_build_cache._torch_metadata()
     monkeypatch.setattr(kernel_build_cache, "_torch_metadata", lambda: {**torch_metadata, "cxx11_abi": False})
     torch_abi_changed = kernel_build_cache._build_metadata(tmp_path)

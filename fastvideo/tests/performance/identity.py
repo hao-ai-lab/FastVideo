@@ -17,6 +17,8 @@ from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
+
 RECIPE_SCHEMA_VERSION = 2
 PROFILE_ID_LENGTH = 16
 _PATH_EXCLUDED_GENERATION_KEYS = {"output_path", "output_video_name"}
@@ -138,7 +140,7 @@ def build_recipe_from_benchmark_config(
     prompts = list(measured_prompts) if measured_prompts is not None else list(
         cfg.get("test_prompts") or ["A cinematic video."])
     if attention_backend is None:
-        attention_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+        attention_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
 
     negative_prompt = generation_kwargs.pop("negative_prompt", generation_kwargs.pop("neg_prompt", None))
     generation_recipe = {
@@ -272,6 +274,17 @@ def software_profile(
     }
 
 
+def _process_profile_env() -> dict[str, str | None]:
+    """Read the variables that _PROFILE_ENV_VARS names from the environment of this process."""
+    return {
+        "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "FASTVIDEO_ATTENTION_BACKEND": envs.FASTVIDEO_ATTENTION_BACKEND.get(),
+        "IMAGE_VERSION": os.environ.get("IMAGE_VERSION"),
+        "UV_TORCH_BACKEND": os.environ.get("UV_TORCH_BACKEND"),
+        "FASTVIDEO_CONTAINER_IMAGE_REF": os.environ.get("FASTVIDEO_CONTAINER_IMAGE_REF"),
+    }
+
+
 def environment_metadata(
     *,
     env: Mapping[str, str] | None = None,
@@ -281,7 +294,7 @@ def environment_metadata(
 ) -> dict[str, Any]:
     """Return audit metadata kept separate from comparable identity keys."""
 
-    source_env = env if env is not None else os.environ
+    source_env = env if env is not None else _process_profile_env()
     full_package_versions = dict(package_versions) if package_versions is not None else _installed_package_versions()
     return {
         "python": {

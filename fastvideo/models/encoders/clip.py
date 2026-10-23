@@ -427,7 +427,19 @@ class CLIPTextModel(TextEncoder):
         ]
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+
+        weights = list(weights)
+        # Some checkpoints (Kandinsky6's, for one) save CLIP's
+        # inner CLIPTextTransformer's own state_dict() directly, without the
+        # `text_model.` prefix this class's `self.text_model` wrapper puts on
+        # every parameter -- unlike other checkpoints already loaded through
+        # this class (e.g. Kandinsky5's), whose keys already include it.
+        # Detect and normalize once, up front, rather than guessing per key.
+        needs_text_model_prefix = bool(weights) and not any(name.startswith("text_model.") for name, _ in weights)
+
         for name, loaded_weight in weights:
+            if needs_text_model_prefix:
+                name = f"text_model.{name}"
             # Handle q_proj, k_proj, v_proj -> qkv_proj mapping
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name in name:

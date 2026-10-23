@@ -31,9 +31,7 @@ def _log_tensor_stats(label: str, tensor: torch.Tensor) -> None:
 
 def _truncate_debug_logs() -> None:
     for env_var in (
-            "LTX2_PIPELINE_DEBUG_PATH",
             "LTX2_REFERENCE_DEBUG_PATH",
-            "LTX2_PIPELINE_DEBUG_DETAIL_PATH",
             "LTX2_REFERENCE_DEBUG_DETAIL_PATH",
     ):
         log_path = os.getenv(env_var, "")
@@ -105,16 +103,8 @@ def test_ltx2_pipeline_smoke():
     repo_root = Path(__file__).resolve().parents[3]
     debug_dir = repo_root / "ltx2_debug"
     os.environ.setdefault(
-        "LTX2_PIPELINE_DEBUG_PATH",
-        str(debug_dir / "fastvideo_pipeline.log"),
-    )
-    os.environ.setdefault(
         "LTX2_REFERENCE_DEBUG_PATH",
         str(debug_dir / "reference_pipeline.log"),
-    )
-    os.environ.setdefault(
-        "LTX2_PIPELINE_DEBUG_DETAIL_PATH",
-        str(debug_dir / "fastvideo_pipeline_detail.log"),
     )
     os.environ.setdefault(
         "LTX2_REFERENCE_DEBUG_DETAIL_PATH",
@@ -316,9 +306,17 @@ def test_ltx2_typed_surface_preflight() -> None:
         LTX2AudioDecodingStage, LTX2DenoisingStage, LTX2LatentPreparationStage, LTX2TextEncodingStage,
     )
 
-    # All three LTX-2 presets registered.
+    # All LTX-2/2.3/2.5 presets registered.
     names = {p.name for p in get_presets_for_family("ltx2")}
-    assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
+    assert names == {
+        "ltx2_base",
+        "ltx2_3_base",
+        "ltx2_distilled",
+        "ltx2_two_stage",
+        "ltx2_5_dev",
+        "ltx2_5_distilled",
+        "ltx2_5_distilled_two_stage",
+    }
 
     # Two-stage preset has the denoise + refine topology and pulls its
     # refine allowed_overrides from the typed dataclass.

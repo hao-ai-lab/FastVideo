@@ -1,0 +1,100 @@
+# Official MMAudio medium_44k transformer training from random initialization.
+# Requires 44.1 kHz TensorDict features with audio latents [345, 40].
+
+models:
+  student:
+    _target_: fastvideo.train.models.mmaudio.MMAudioModel
+    variant: medium_44k
+    from_scratch: true
+    # Official standalone empty_string.pth. No DiT weights are loaded.
+    empty_string_features_path: ""
+    # Optional .pt cache. When empty, stats are recomputed at startup.
+    latent_statistics_path: ""
+    latent_statistics_chunk_size: 32
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.flow_matching.FlowMatchingFineTuneMethod
+
+training:
+  # Matching component-tree template used only by DCP-to-Diffusers export.
+  model_path: converted_weights/mmaudio/medium_44k
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+    pin_cpu_memory: false
+
+  data:
+    # Set with --training.data.data_path or run_train_vggsound_from_scratch.sh.
+    data_path: ""
+    preprocessed_data_type: mmaudio_features
+    dataloader_num_workers: 2
+    train_batch_size: 8
+    training_cfg_rate: 0.1
+    seed: 14159265
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.95]
+    eps: 1.0e-6
+    weight_decay: 1.0e-6
+    lr_scheduler: multistep_with_warmup
+    lr_warmup_steps: 1000
+    lr_milestones: [240000, 270000]
+    lr_gamma: 0.1
+
+  loop:
+    max_train_steps: 300000
+    # 4 GPUs x 8 samples/GPU x 16 rounds = effective global batch 512.
+    gradient_accumulation_steps: 16
+
+  checkpoint:
+    output_dir: outputs/mmaudio_medium_44k_from_scratch
+    training_state_checkpointing_steps: 10000
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: ""
+
+  tracker:
+    project_name: fastvideo_mmaudio
+    run_name: mmaudio_medium_44k_from_scratch
+
+  model:
+    logit_mean: 0.0
+    logit_std: 1.0
+    precondition_outputs: false
+
+  # FP32 master weights; MMAudioModel runs transformer forward under BF16 autocast.
+  dit_precision: fp32
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  posthoc_ema:
+    _target_: fastvideo.train.callbacks.posthoc_ema.PostHocEMACallback
+    sigma_rels: [0.05, 0.1]
+    update_every: 1
+    checkpoint_every: 5000
+    start_iter: 0
+    default_output_sigma: 0.05
+    step_size_correction: true
+  validation:
+    _target_: fastvideo.train.callbacks.mmaudio_validation.MMAudioValidationCallback
+    data_path: ""
+    every_steps: 5000
+    max_batches: 0
+    batch_size: 8
+    num_data_workers: 2
+    run_at_start: false
+    use_ema: false
+    inference_every_steps: 20000
+    inference_model_path: converted_weights/mmaudio/large_44k_v2
+    # Global total across all ranks; fixed by validation seed and sampler.
+    inference_num_samples: 16
+    inference_num_steps: 25
+    inference_guidance_scale: 4.5
+    inference_save_video: true
+    inference_log_to_tracker: true

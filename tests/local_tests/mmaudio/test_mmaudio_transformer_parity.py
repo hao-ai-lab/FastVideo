@@ -21,6 +21,12 @@ OFFICIAL_WEIGHTS = Path(
         REPO_ROOT.parent / "MMAudio/weights/mmaudio_large_44k_v2.pth",
     )
 )
+SMALL_44K_OFFICIAL_WEIGHTS = Path(
+    os.environ.get(
+        "MMAUDIO_SMALL_44K_TRANSFORMER_WEIGHTS",
+        REPO_ROOT.parent / "MMAudio/weights/mmaudio_small_44k.pth",
+    )
+)
 
 
 def _require_cuda_and_weights() -> None:
@@ -33,7 +39,8 @@ def _require_cuda_and_weights() -> None:
         )
 
 
-def test_mmaudio_transformer_implementation_parity() -> None:
+@pytest.mark.parametrize("v2", [False, True])
+def test_mmaudio_transformer_implementation_parity(v2: bool) -> None:
     from mmaudio.model.networks import MMAudio
 
     from fastvideo.configs.models.dits.mmaudio import (
@@ -56,7 +63,7 @@ def test_mmaudio_transformer_implementation_parity() -> None:
         "clip_seq_len": 3,
         "sync_seq_len": 8,
         "text_seq_len": 4,
-        "v2": True,
+        "v2": v2,
     }
     official = MMAudio(**kwargs)
     fastvideo = MMAudioTransformer(MMAudioTransformerConfig(arch_config=MMAudioArchConfig(**kwargs)), hf_config={})
@@ -76,6 +83,75 @@ def test_mmaudio_transformer_implementation_parity() -> None:
         expected = official(latent, clip, sync, text, timestep)
         actual = fastvideo(latent, (clip, sync, text), timestep)
     torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_mmaudio_small_44k_v1_transformer_parity() -> None:
+    if not torch.cuda.is_available():
+        pytest.skip("MMAudio full-transformer parity requires CUDA")
+    if not SMALL_44K_OFFICIAL_WEIGHTS.is_file():
+        pytest.skip(
+            "Official MMAudio small_44k weights are absent. Set "
+            "MMAUDIO_SMALL_44K_TRANSFORMER_WEIGHTS."
+        )
+
+    from mmaudio.model.networks import small_44k
+
+    from fastvideo.configs.models.dits.mmaudio import (
+        MMAudioArchConfig,
+        MMAudioTransformerConfig,
+    )
+    from fastvideo.models.dits.mmaudio import MMAudioTransformer
+    from fastvideo.models.loader.utils import set_default_torch_dtype
+
+    device = torch.device("cuda:0")
+    dtype = torch.bfloat16
+    state = torch.load(
+        SMALL_44K_OFFICIAL_WEIGHTS,
+        map_location="cpu",
+        weights_only=True,
+    )
+    arch = MMAudioArchConfig(
+        hidden_dim=448,
+        depth=12,
+        fused_depth=8,
+        num_heads=7,
+        v2=False,
+    )
+    with torch.device(device), set_default_torch_dtype(dtype):
+        official = small_44k()
+        fastvideo = MMAudioTransformer(
+            MMAudioTransformerConfig(arch_config=arch),
+            hf_config={},
+        )
+    official.load_weights(dict(state))
+    state.pop("latent_rot", None)
+    state.pop("clip_rot", None)
+    missing, unexpected = fastvideo.load_state_dict(state, strict=True)
+    assert missing == []
+    assert unexpected == []
+    official.eval()
+    fastvideo.eval()
+
+    generator = torch.Generator(device=device).manual_seed(5678)
+    latent = torch.randn(
+        (1, 345, 40), generator=generator, device=device, dtype=dtype
+    )
+    clip = torch.randn(
+        (1, 64, 1024), generator=generator, device=device, dtype=dtype
+    )
+    sync = torch.randn(
+        (1, 192, 768), generator=generator, device=device, dtype=dtype
+    )
+    text = torch.randn(
+        (1, 77, 1024), generator=generator, device=device, dtype=dtype
+    )
+    timestep = torch.tensor([0.375], device=device, dtype=dtype)
+
+    with torch.inference_mode(), torch.autocast("cuda", dtype=dtype):
+        expected = official(latent, clip, sync, text, timestep)
+        actual = fastvideo(latent, (clip, sync, text), timestep)
+
+    torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)
 
 
 def test_mmaudio_large_44k_v2_transformer_parity() -> None:

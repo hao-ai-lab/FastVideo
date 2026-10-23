@@ -16,6 +16,7 @@ slash-command mappings, and workflow ownership live in
 | Training tests | `fastvideo/tests/training` | Validate legacy training loops, LoRA, distillation, self-forcing, and VSA behavior. |
 | Inference tests | `fastvideo/tests/inference` | Validate specialized inference paths such as LoRA inference and V-MoBA. |
 | Performance tests | `fastvideo/tests/performance` | Gate latency, throughput, peak memory, and stage timings. See [Performance Benchmarks](performance_benchmarks.md). |
+| Local performance behavior tests | `tests/local_tests/performance` | Validate performance config, policy, identity, result schemas, dashboards, and worker-log capture outside CI. |
 | Eval tests | `fastvideo/tests/eval` | Check eval metrics against pinned reference scores and assets. |
 | DreamVerse app tests | `apps/dreamverse` | Validate the DreamVerse backend, frontend, and mock-backed browser flows. |
 
@@ -51,6 +52,11 @@ Use the golden's matching GPU, dtype, backend, and runtime. A missing reference
 or environment mismatch is not a pass. Do not replace a reference with the
 candidate output just to clear a failure. For a relocation, the unchanged
 parent is the baseline; two imports of the same class are not numerical proof.
+
+FA4 fingerprints record the effective boolean switch. Legacy block references
+with `fastvideo_fa4: <unset>` mean disabled and match an explicit `0`; enabling
+FA4 still fails the environment check. Other runtime pins and zero-tolerance
+tensor comparisons remain strict.
 
 The VAE and transformer CI lanes run their Wan component goldens first.
 Selected integration lanes wait for the golden lane in merge/full builds.
@@ -94,6 +100,14 @@ pytest fastvideo/tests/vaes/test_wan_vae.py -q
 GPU-heavy suites need the right hardware, credentials, local caches, and
 sometimes custom kernels. Document those assumptions in new tests.
 
+The legacy VSA training regression selects a device-specific summary. Its
+GB200 reference was generated from unchanged upstream commit
+`d5253fd71055927f12aa6c4aa679b93a00238851` using two GB200 GPUs, Torch
+2.12.0+cu130, CUDA 13.0 and FA2. Two independent upstream runs produced
+gradient norms 1.909 and 1.935 and losses 0.30861 and 0.30886. The reference
+JSON retains provenance; the H100 reference and all comparison tolerances
+remain unchanged. Candidate outputs must not be used to refresh this reference.
+
 ## SSIM Tests
 
 SSIM tests generate videos using specific models and parameters, then compare
@@ -101,9 +115,10 @@ the output against reference videos with Structural Similarity Index Measure.
 Use them for pipeline-level visual regression coverage when output quality or
 generation behavior must be preserved.
 
-!!! note
-    Add enough prompts, seeds, backends, and parameter combinations to cover the
-    behavior you want to protect, but keep runtime reasonable for CI.
+:::note
+Add enough prompts, seeds, backends, and parameter combinations to cover the
+behavior you want to protect, but keep runtime reasonable for CI.
+:::
 
 ### Directory Structure
 
@@ -232,10 +247,11 @@ test fails. For new-model PRs, CI can run SSIM in bootstrap mode so missing
 references are uploaded as draft artifacts for review instead of immediately
 blocking on a missing canonical reference.
 
-Buildkite enables SSIM bootstrap mode when either condition is true:
-
-- the PR title or Buildkite message contains `[new-model]`;
-- `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1` is set for the Buildkite job.
+The active Slurm SSIM lane (`.buildkite/scripts/lanes/ssim.sh`) enables
+bootstrap mode only when `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1` is set for the
+Buildkite job. A `[new-model]` PR title does not enable it on this path (only
+the retired Modal script `.buildkite/scripts/pr_test.sh` checked the title), so
+ask a maintainer to start the SSIM job with that variable set.
 
 Bootstrap mode passes `--ssim-bootstrap-mode` to pytest. When a generated
 artifact is available, the test uploads it under the `drafts/...` namespace in

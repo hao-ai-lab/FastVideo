@@ -272,8 +272,8 @@ class MMDoubleStreamBlock(nn.Module):
         freqs_cis: tuple,
         original_seq_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Process modulation vectors
-        img_mod_outputs = self.img_mod(vec)
+        # Broadcast per-example conditioning over tokens, not over the batch.
+        img_mod_outputs = self.img_mod(vec).unsqueeze(1)
         (
             img_attn_shift,
             img_attn_scale,
@@ -283,7 +283,7 @@ class MMDoubleStreamBlock(nn.Module):
             img_mlp_gate,
         ) = torch.chunk(img_mod_outputs, 6, dim=-1)
 
-        txt_mod_outputs = self.txt_mod(vec)
+        txt_mod_outputs = self.txt_mod(vec).unsqueeze(1)
         (
             txt_attn_shift,
             txt_attn_scale,
@@ -323,7 +323,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
 
-        img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
+        img_attn_out, _ = self.img_attn_proj(img_attn.reshape(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(img, img_attn_out, img_attn_gate, img_mlp_shift,
                                                                       img_mlp_scale)

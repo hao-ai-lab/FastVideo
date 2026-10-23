@@ -9,9 +9,12 @@ mkdir -p "$PERF_REPORTS_DIR"
 
 if [[ ${BUILDKITE_PULL_REQUEST:-false} =~ ^[1-9][0-9]*$ ]]; then
   export PERF_RUN_SOURCE=pr
-  export PERF_UPLOAD_POLICY=pass
+  export PERF_UPLOAD_POLICY=never
 elif [ "${BUILDKITE_BRANCH:-}" = main ] \
-  && { [ "${BUILDKITE_SOURCE:-}" = schedule ] || [ "${TEST_SCOPE:-}" = full ]; }; then
+  && { [ "${BUILDKITE_SOURCE:-}" = schedule ] || [ "${TEST_SCOPE:-}" = full ] \
+    || { [ "${BUILDKITE_SOURCE:-}" = api ] \
+      && [ "${BUILDKITE_PIPELINE_SLUG:-}" = fastvideo-performance-lane ] \
+      && [ "${TEST_SCOPE:-}" = direct ]; }; }; then
   export PERF_RUN_SOURCE=scheduled_main
   export PERF_UPLOAD_POLICY=always
 elif [ "${TEST_SCOPE:-}" = direct ]; then
@@ -32,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-pytest ./fastvideo/tests/performance -vs
+pytest ./fastvideo/tests/performance/test_inference_performance.py -vs
 pytest_rc=$?
 compare_rc=0
 if [ "$pytest_rc" -eq 0 ] || [ "$PERF_UPLOAD_POLICY" = always ]; then
@@ -41,6 +44,18 @@ if [ "$pytest_rc" -eq 0 ] || [ "$PERF_UPLOAD_POLICY" = always ]; then
 fi
 python ./fastvideo/tests/performance/dashboard.py || true
 cp -f fastvideo/tests/performance/results/*.json "$PERF_REPORTS_DIR/" 2>/dev/null || true
+# The trusted host relays only .md/.html/.json/.csv from PERF_REPORTS_DIR, so
+# mirror each captured worker log with an allowlisted extension.
+for worker_log in fastvideo/tests/performance/results/worker_logs/*.log; do
+  [ -f "$worker_log" ] || continue
+  base=$(basename "${worker_log%.log}")
+  # WorkerLogCapture keeps a .log.1 backup after rollover, and read_log_tail
+  # includes it; mirror that retained history too so the artifact is complete.
+  if [ -f "$worker_log.1" ]; then
+    cp -f "$worker_log.1" "$PERF_REPORTS_DIR/${base}.1.md" 2>/dev/null || true
+  fi
+  cp -f "$worker_log" "$PERF_REPORTS_DIR/${base}.md" 2>/dev/null || true
+done
 
 echo "--- GPU telemetry (clocks.sm vs clocks.max.sm reveals capped hosts) ---"
 cat "$PERF_REPORTS_DIR/gpu_telemetry.csv" || true

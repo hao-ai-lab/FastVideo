@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
+import fastvideo.envs as envs
+
 # The backend module needs a flash-attention package (FA2/FA3, or FA4 with
 # FASTVIDEO_FA4=1) at import. exc_type=ImportError also covers partial
 # installs (e.g. an FA4-only environment without the opt-in env set raises
@@ -44,23 +46,23 @@ def fa4_runtime_available():
         yield
 
 
-def test_nvfp4_disabled_by_default(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_NVFP4_FA4", raising=False)
+def test_nvfp4_disabled_by_default(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4.override(None))
     assert _build_impl().nvfp4_fa4 is False
 
 
-def test_nvfp4_env_opt_in_enables_when_arg_absent(monkeypatch, fa4_runtime_available) -> None:
-    monkeypatch.setenv("FASTVIDEO_NVFP4_FA4", "1")
+def test_nvfp4_env_opt_in_enables_when_arg_absent(env_overrides, fa4_runtime_available) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4.override(True))
     assert _build_impl().nvfp4_fa4 is True
 
 
-def test_explicit_disable_wins_over_env_opt_in(monkeypatch) -> None:
+def test_explicit_disable_wins_over_env_opt_in(env_overrides) -> None:
     """The H3 VAE constructs its impl with ``nvfp4_fa4=False``; the DiT env
     opt-in must not FP4-quantize Q/K inside the FP32-pinned VAE."""
-    monkeypatch.setenv("FASTVIDEO_NVFP4_FA4", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4.override(True))
     assert _build_impl(nvfp4_fa4=False).nvfp4_fa4 is False
 
 
-def test_explicit_enable_works_without_env(monkeypatch, fa4_runtime_available) -> None:
-    monkeypatch.delenv("FASTVIDEO_NVFP4_FA4", raising=False)
+def test_explicit_enable_works_without_env(env_overrides, fa4_runtime_available) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4.override(None))
     assert _build_impl(nvfp4_fa4=True).nvfp4_fa4 is True

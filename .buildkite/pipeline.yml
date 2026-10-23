@@ -23,21 +23,24 @@ notify:
 # dispatcher, and every test payload executes inside the Slinky Slurm tray.
 # fastvideo/tests/modal remains available only for an explicit manual rollback;
 # no active pipeline or slash-command route invokes it.
+# Agent tag `backend` routes a lane: Spark-capable lanes default to slurm and move to a
+# DGX Spark runner when FV_SPARK_BACKEND=spark4; the rest are pinned to slurm.
+# Buildkite hands jobs to free agents in the order they appear here. Golden-gate comes first
+# because every later merge lane waits for it; the fastcheck lanes follow from longest to
+# shortest measured runtime, so the longest lane never starts last and stretches the build.
 steps:
-  - label: ":microscope: Encoder Tests"
-    key: "encoder"
+  - label: ":test_tube: Golden-Gate Tests"
+    key: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,encoder,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
+       build.env("MERGE_TEST_PLAN") =~ /,golden-gate,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "encoder" || build.env("TEST_TYPE") == "encoder_ci"))
+       (build.env("TEST_TYPE") == "golden_gate" || build.env("TEST_TYPE") == "golden_gate_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
     timeout_in_minutes: 90
     env:
-      TEST_TYPE: "encoder_ci"
+      TEST_TYPE: "golden_gate_ci"
     retry:
       automatic:
         - exit_status: 128
@@ -46,75 +49,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
-
-  - label: ":microscope: VAE Tests"
-    key: "vae"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,vae,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "vae" || build.env("TEST_TYPE") == "vae_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "vae_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":microscope: Transformer Tests"
-    key: "transformer"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,transformer,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "transformer" || build.env("TEST_TYPE") == "transformer_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "transformer_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":microscope: Kernel Tests"
-    key: "kernel-tests"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "kernel_tests_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: Unit Tests"
     key: "unit"
@@ -138,6 +73,31 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
+
+  - label: ":microscope: Kernel Tests"
+    key: "kernel-tests"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "kernel_tests_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: DreamVerse App Tests"
     key: "dreamverse"
@@ -161,19 +121,22 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
-  - label: ":test_tube: Golden-Gate Tests"
-    key: "golden-gate"
+  - label: ":microscope: Encoder Tests"
+    key: "encoder"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,golden-gate,/) ||
+       build.env("MERGE_TEST_PLAN") =~ /,encoder,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "golden_gate" || build.env("TEST_TYPE") == "golden_gate_ci"))
+       (build.env("TEST_TYPE") == "encoder" || build.env("TEST_TYPE") == "encoder_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
     timeout_in_minutes: 90
     env:
-      TEST_TYPE: "golden_gate_ci"
+      TEST_TYPE: "encoder_ci"
     retry:
       automatic:
         - exit_status: 128
@@ -182,6 +145,55 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
+
+  - label: ":microscope: VAE Tests"
+    key: "vae"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,vae,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "vae" || build.env("TEST_TYPE") == "vae_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "vae_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
+
+  - label: ":microscope: Transformer Tests"
+    key: "transformer"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,transformer,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "transformer" || build.env("TEST_TYPE") == "transformer_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "transformer_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":bar_chart: SSIM Tests"
     key: "ssim"
@@ -209,6 +221,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: LoRA Inference Tests"
     key: "lora-inference"
@@ -231,6 +244,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: LoRA Extraction Tests"
     key: "lora-extraction"
@@ -253,6 +267,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Training Tests"
     key: "training"
@@ -277,6 +292,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Distillation DMD Tests"
     key: "distillation"
@@ -299,6 +315,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Self-Forcing Tests"
     key: "self-forcing"
@@ -321,6 +338,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: LoRA Training Tests"
     key: "lora-training"
@@ -345,6 +363,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Training Tests VSA"
     key: "training-vsa"
@@ -369,6 +388,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Inference Tests VMoBA"
     key: "inference-vmoba"
@@ -391,6 +411,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Performance Tests"
     key: "performance"
@@ -413,6 +434,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: API Server Tests"
     key: "api-server"
@@ -435,6 +457,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Train Framework Tests"
     key: "train-framework"
@@ -457,6 +480,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Eval Metrics Tests"
     key: "eval"
@@ -479,3 +503,4 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"

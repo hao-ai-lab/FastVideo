@@ -332,8 +332,7 @@ class OobleckVAE(nn.Module):
           * a local directory containing `config.json` + safetensors,
           * a local directory whose `subfolder="vae"` holds those files.
 
-        For gated repos, the HF token is read from `HF_TOKEN` /
-        `HUGGINGFACE_HUB_TOKEN` / `HF_API_KEY` (see `resolve_hf_token`).
+        For gated repos, the HF token is read by `resolve_hf_token`.
         """
         import inspect
         from safetensors.torch import load_file

@@ -21,10 +21,13 @@ role-override tests); no kernels, no GPU.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 import fastvideo.attention.selector as selector
+import fastvideo.envs as envs
 import fastvideo.platforms as platforms
 from fastvideo.platforms import AttentionBackendEnum
 
@@ -66,10 +69,10 @@ class _FakePlatform:
 
 
 @pytest.fixture(autouse=True)
-def _fake_platform(monkeypatch):
+def _fake_platform(monkeypatch, env_overrides):
     monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
     monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
-    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
     selector._cached_get_attn_backend.cache_clear()
     yield
     # Fake-platform resolutions must not outlive the test: mutations no
@@ -92,9 +95,9 @@ def _oracle(requested, env, default):
 @pytest.mark.parametrize("scoped", [None, "unset", SAGE])
 @pytest.mark.parametrize("env", [None, "TORCH_SDPA"])
 @pytest.mark.parametrize("default", [None, SAGE])
-def test_precedence_matrix_matches_previous_semantics(monkeypatch, scoped, env, default) -> None:
+def test_precedence_matrix_matches_previous_semantics(env_overrides, scoped, env, default) -> None:
     if env is not None:
-        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", env)
+        env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(env))
 
     if scoped == "unset":
         # No scope and no explicit request: env is consulted.
@@ -111,21 +114,21 @@ def test_precedence_matrix_matches_previous_semantics(monkeypatch, scoped, env, 
 @pytest.mark.parametrize("requested", [None, SAGE])
 @pytest.mark.parametrize("env", [None, "TORCH_SDPA"])
 @pytest.mark.parametrize("default", [None, SAGE])
-def test_explicit_request_matches_the_same_oracle(monkeypatch, requested, env, default) -> None:
+def test_explicit_request_matches_the_same_oracle(env_overrides, requested, env, default) -> None:
     """An explicit `requested=` resolves exactly as the same request would via
     a scope, and never consults the environment behind it."""
     if env is not None:
-        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", env)
+        env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(env))
 
     got = selector.get_attn_backend(default_backend=default, requested=requested, **KWARGS)
     assert got == _oracle(requested, None, default)
 
 
-def test_scope_none_ignores_env_request(monkeypatch) -> None:
+def test_scope_none_ignores_env_request(env_overrides) -> None:
     """The dense teacher/critic case: auto-select, ignore the process-wide
     request — previously implemented by popping the env var and flushing
     the selector cache around the build."""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
 
     assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
     with selector._component_attention_backend_scope(None, component="transformer"):
@@ -133,10 +136,10 @@ def test_scope_none_ignores_env_request(monkeypatch) -> None:
     assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
 
 
-def test_interleaved_component_scopes_need_no_cache_clear(monkeypatch) -> None:
+def test_interleaved_component_scopes_need_no_cache_clear(env_overrides) -> None:
     """Per-role/per-component builds interleave freely; identical
     shape/dtype keys resolve per scope with zero cache management."""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
 
     for _ in range(2):
         with selector._component_attention_backend_scope(SDPA, component="student"):
@@ -146,8 +149,8 @@ def test_interleaved_component_scopes_need_no_cache_clear(monkeypatch) -> None:
         assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
 
 
-def test_scope_is_exception_safe(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+def test_scope_is_exception_safe(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
     with pytest.raises(RuntimeError, match="boom"):
         with selector._component_attention_backend_scope(SDPA, component="dit"):
             raise RuntimeError("boom")
@@ -155,11 +158,11 @@ def test_scope_is_exception_safe(monkeypatch) -> None:
     assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
 
 
-def test_explicit_none_means_auto_not_absence(monkeypatch) -> None:
+def test_explicit_none_means_auto_not_absence(env_overrides) -> None:
     """`requested=None` is an answer ("this component resolved to automatic
     selection"), so the env var must NOT be consulted behind it. Omitting the
     argument is the absence, and still falls back to the env."""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
 
     # Explicit "automatic selection" -> the fake platform's auto answer.
     assert selector.get_attn_backend(requested=None, **KWARGS) == "FLASH_ATTN"
@@ -168,22 +171,22 @@ def test_explicit_none_means_auto_not_absence(monkeypatch) -> None:
     assert selector.get_attn_backend(requested=selector.NO_REQUEST, **KWARGS) == "SAGE_ATTN"
 
 
-def test_explicit_request_outranks_the_construction_scope(monkeypatch) -> None:
+def test_explicit_request_outranks_the_construction_scope(env_overrides) -> None:
     """A caller that knows its component's decision is not overridden by an
     ambient scope that happens to be active."""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     with selector._component_attention_backend_scope(SDPA, component="dit"):
         assert selector.get_attn_backend(**KWARGS) == "TORCH_SDPA"
         assert selector.get_attn_backend(requested=SAGE, **KWARGS) == "SAGE_ATTN"
 
 
-def test_env_change_takes_effect_without_cache_clear(monkeypatch) -> None:
+def test_env_change_takes_effect_without_cache_clear(env_overrides) -> None:
     """Selection inputs live in the cache key, so an env change is simply a
     different key. (Previously a changed env var was silently ignored until
     someone remembered to flush the cache.)"""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
     assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     assert selector.get_attn_backend(**KWARGS) == "TORCH_SDPA"
 
 
@@ -193,8 +196,8 @@ def test_scope_typo_fails_fast() -> None:
             pass
 
 
-def test_consult_env_scope_keeps_env_visible(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+def test_consult_env_scope_keeps_env_visible(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
     with selector._component_attention_backend_scope(None, component="dit", consult_env=True):
         assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
 
@@ -229,22 +232,22 @@ def test_active_device_is_part_of_the_cache_key(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_env_is_folded_into_the_typed_request_once(monkeypatch):
+def test_env_is_folded_into_the_typed_request_once(env_overrides):
     """``FastVideoArgs.attention_backend`` is the parse-once adapter."""
     from fastvideo.fastvideo_args import FastVideoArgs
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
     assert FastVideoArgs(model_path="x").attention_backend == "SAGE_ATTN"
 
     # An explicit request always wins over the environment.
     assert FastVideoArgs(model_path="x", attention_backend="TORCH_SDPA").attention_backend == "TORCH_SDPA"
 
 
-def test_unparseable_env_falls_through_instead_of_raising(monkeypatch):
+def test_unparseable_env_falls_through_instead_of_raising(env_overrides):
     """The env var keeps its permissive parse; only explicit requests raise."""
     from fastvideo.fastvideo_args import FastVideoArgs
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "flash_atn")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("flash_atn"))
     assert FastVideoArgs(model_path="x").attention_backend is None
 
     with pytest.raises(ValueError, match="Unknown attention backend"):
@@ -310,7 +313,7 @@ def test_component_attention_backend_reads_the_recorded_decision():
     assert selector.component_attention_backend(_Component(config)) == SAGE
 
 
-def test_component_with_no_concrete_decision_reports_no_request(monkeypatch):
+def test_component_with_no_concrete_decision_reports_no_request(env_overrides):
     """"Stamped with no request" and "never stamped" are the SAME stored value.
 
     ``ModelConfig._resolved_attention_backend`` is a field defaulting to None,
@@ -336,7 +339,7 @@ def test_component_with_no_concrete_decision_reports_no_request(monkeypatch):
     assert selector.component_attention_backend(_Component(untouched)) is selector.NO_REQUEST
 
     # (c) and it does NOT suppress the env var, which is the whole point
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     selector._cached_get_attn_backend.cache_clear()
     passthrough = selector.get_attn_backend(requested=selector.component_attention_backend(_Component(untouched)),
                                             **KWARGS)
@@ -372,3 +375,34 @@ def test_component_without_a_recorded_decision_reports_no_request():
 
     assert selector.component_attention_backend(_Bare()) is selector.NO_REQUEST
     assert selector.component_attention_backend(_HFStyle()) is selector.NO_REQUEST
+
+
+def test_effective_backend_prefers_the_recorded_decision(env_overrides) -> None:
+    """A component built by a loader follows the decision recorded on its
+    config, even when the env var asks for something else."""
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
+    config = SimpleNamespace(_resolved_attention_backend=SDPA)
+    assert selector.effective_attention_backend(config) == SDPA
+
+
+def test_effective_backend_follows_env_for_direct_construction(env_overrides) -> None:
+    """A component constructed without a loader has no recorded decision; like
+    the attention layers inside it, it follows the env var."""
+    config = SimpleNamespace(_resolved_attention_backend=None)
+    assert selector.effective_attention_backend(config) is None
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
+    assert selector.effective_attention_backend(config) == SAGE
+    assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
+
+
+def test_effective_backend_follows_the_active_scope(env_overrides) -> None:
+    """While a loader scope is active, the scope's rule applies: a scope that
+    ignores the env var (the dense teacher/critic case) keeps ignoring it."""
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
+    config = SimpleNamespace(_resolved_attention_backend=None)
+    with selector._component_attention_backend_scope(None, component="teacher"):
+        assert selector.effective_attention_backend(config) is None
+    with selector._component_attention_backend_scope(None, component="dit", consult_env=True):
+        assert selector.effective_attention_backend(config) == SAGE
+    with selector._component_attention_backend_scope(SDPA, component="dit"):
+        assert selector.effective_attention_backend(config) == SDPA

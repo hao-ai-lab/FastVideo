@@ -14,10 +14,12 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR", REPO_ROOT / "DiffusersMiniMaxH3"))
 OFFICIAL_SRC = OFFICIAL_REF_DIR / "src"
-MODEL_ROOT = Path(os.environ.get("MINIMAX_H3_MODEL_ROOT", REPO_ROOT / "official_weights" / "MiniMax-H3"))
+MODEL_ROOT = Path(envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get() or REPO_ROOT / "official_weights" / "MiniMax-H3")
 RUN_ENV = "MINIMAX_H3_RUN_VIDEO_VAE_PARITY"
 PARITY_SCOPE = "production_loader"
 

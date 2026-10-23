@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import itertools
 import math
-import os
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
@@ -17,12 +16,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
-
-
-def _is_env_enabled(name: str, default: str = "") -> bool:
-    value = os.getenv(name, default)
-    return value.lower() in {"1", "true", "yes", "on"}
 
 
 # =============================================================================
@@ -1332,6 +1327,7 @@ class VideoDecoder(nn.Module):
         causal: bool = False,
         timestep_conditioning: bool = False,
         decoder_spatial_padding_mode: PaddingModeType = PaddingModeType.REFLECT,
+        base_channels: int = 128,
     ):
         super().__init__()
 
@@ -1346,7 +1342,7 @@ class VideoDecoder(nn.Module):
         self.decode_noise_scale = 0.025
         self.decode_timestep = 0.05
 
-        feature_channels = in_channels
+        feature_channels = base_channels
         for block_name, block_params in list(reversed(decoder_blocks)):
             block_config = block_params if isinstance(block_params, dict) else {}
             if block_name == "res_x_y":
@@ -1526,6 +1522,7 @@ class VideoDecoderConfigurator:
         norm_layer_str = config.get("norm_layer", "pixel_norm")
         causal = config.get("causal_decoder", False)
         timestep_conditioning = config.get("timestep_conditioning", True)
+        base_channels = config.get("decoder_base_channels", 128)
 
         return VideoDecoder(
             convolution_dimensions=convolution_dimensions,
@@ -1537,6 +1534,7 @@ class VideoDecoderConfigurator:
             causal=causal,
             timestep_conditioning=timestep_conditioning,
             decoder_spatial_padding_mode=decoder_spatial_padding_mode,
+            base_channels=base_channels,
         )
 
 
@@ -1595,7 +1593,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         self._use_tiling: bool = False
         self._use_channels_last_3d: bool = False
 
-        if _is_env_enabled("FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D", default="1"):
+        if envs.FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D.get():
             self.enable_channels_last_3d()
 
     def _as_channels_last_3d(self, tensor: torch.Tensor) -> torch.Tensor:

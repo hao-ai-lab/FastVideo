@@ -11,8 +11,8 @@ from fastvideo.tests.stages._denoising_fixtures import NullProgressBar, _patch_d
 from fastvideo.tests.stages._denoising_fixtures import RecordingDenoiser, _args, _batch
 
 
-def test_wan_dmd_uses_full_training_table_and_preserves_rng_order(monkeypatch):
-    _patch_denoising_module(monkeypatch, "1.0")
+def test_wan_dmd_uses_full_training_table_and_preserves_rng_order(monkeypatch, env_overrides):
+    _patch_denoising_module(monkeypatch, env_overrides, "1.0")
     from fastvideo.pipelines.basic.wan.stages import dmd
     monkeypatch.setattr(dmd, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(dmd, "set_forward_context", lambda **kwargs: nullcontext())

@@ -21,6 +21,8 @@ from transformers import T5EncoderModel as RefT5EncoderModel
 from diffusers import FlowMatchEulerDiscreteScheduler as RefScheduler
 from safetensors.torch import safe_open
 
+import fastvideo.envs as envs
+
 pytestmark = [
     pytest.mark.skipif(
         not torch.cuda.is_available(),
@@ -32,10 +34,8 @@ pytestmark = [
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 hf_logging.set_verbosity_error()
 
-MODEL_DIR = Path(os.getenv(
-    "SD35_MODEL_DIR",
-    "/FastVideo/official_weights/stabilityai__stable-diffusion-3.5-medium",
-))
+MODEL_DIR = Path(envs.FASTVIDEO_TEST_SD35_MODEL_DIR.get() if envs.FASTVIDEO_TEST_SD35_MODEL_DIR.is_set() else
+                 "/FastVideo/official_weights/stabilityai__stable-diffusion-3.5-medium")
 
 
 def _load_json(path: Path) -> dict:

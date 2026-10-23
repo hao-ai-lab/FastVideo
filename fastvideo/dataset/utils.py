@@ -1,8 +1,71 @@
+import functools
+import math
+from numbers import Integral
 import random
 from typing import Any, cast
 
 import numpy as np
 import torch
+
+_PYARROW_BINARY_MAX_VALUE_BYTES = (1 << 31) - 1
+
+_DTYPE_ALIASES = {
+    "float": "float32",
+    "double": "float64",
+    "half": "float16",
+    "long": "int64",
+    "int": "int32",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _normalize_tensor_dtype(dtype_value: Any) -> str:
+    """Normalize dtype strings written by NumPy or PyTorch record creators."""
+    dtype_name = str(dtype_value).strip().lower()
+    for prefix in ("torch.", "numpy.", "np."):
+        if dtype_name.startswith(prefix):
+            dtype_name = dtype_name.removeprefix(prefix)
+    return _DTYPE_ALIASES.get(dtype_name, dtype_name)
+
+
+def _decode_tensor_bytes(
+    bytes_data: bytes,
+    shape: list[int] | tuple[int, ...],
+    dtype_value: Any,
+    *,
+    zero: bool = False,
+) -> torch.Tensor:
+    """Decode one tensor using the dtype persisted beside its byte buffer.
+
+    ``zero=True`` still validates the byte length but returns a correctly typed
+    zero tensor instead of copying the payload, for CFG-dropped embeddings.
+    """
+    dtype_name = _normalize_tensor_dtype(dtype_value)
+    is_bfloat16 = dtype_name == "bfloat16"
+    if is_bfloat16:
+        # NumPy has no portable bfloat16 dtype. Read the raw 16-bit storage,
+        # then reinterpret it as torch.bfloat16 without changing the bits.
+        numpy_dtype = np.dtype(np.uint16)
+    else:
+        try:
+            numpy_dtype = np.dtype(dtype_name)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Unsupported serialized tensor dtype: {dtype_value!r}") from exc
+
+    expected_nbytes = math.prod(shape) * numpy_dtype.itemsize
+    if len(bytes_data) != expected_nbytes:
+        raise ValueError(
+            "Serialized tensor byte length does not match its shape and dtype: "
+            f"shape={tuple(shape)}, dtype={dtype_name}, expected={expected_nbytes}, actual={len(bytes_data)}")
+
+    if zero:
+        tensor = torch.from_numpy(np.zeros(shape, dtype=numpy_dtype))
+    else:
+        array = np.frombuffer(bytes_data, dtype=numpy_dtype).reshape(shape).copy()
+        tensor = torch.from_numpy(array)
+    if is_bfloat16:
+        tensor = tensor.view(torch.bfloat16)
+    return tensor
 
 
 def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -26,32 +89,28 @@ def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate, rng=None) -> dict[
     """
     return_dict = {}
     for key in keys:
-        shape, bytes = None, None
         if isinstance(key, tuple):
+            output_key = key[0]
+            serialized_key = None
             for k in key:
-                try:
-                    shape = row_dict[f"{k}_shape"]
-                    bytes = row_dict[f"{k}_bytes"]
-                except KeyError:
-                    continue
-            key = key[0]
-            if shape is None or bytes is None:
-                raise ValueError(f"Key {key} not found in row_dict")
+                if f"{k}_shape" in row_dict and f"{k}_bytes" in row_dict:
+                    serialized_key = k
+            if serialized_key is None:
+                raise ValueError(f"Key {output_key} not found in row_dict")
         else:
-            shape = row_dict[f"{key}_shape"]
-            bytes = row_dict[f"{key}_bytes"]
+            output_key = serialized_key = key
 
-        # TODO (peiyuan): read precision
-        if key == 'text_embedding' and (rng.random() if rng else random.random()) < cfg_rate:
-            data = np.zeros(shape, dtype=np.float32)
-        else:
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-        data = torch.from_numpy(data)
+        shape = row_dict[f"{serialized_key}_shape"]
+        bytes_data = row_dict[f"{serialized_key}_bytes"]
+        dtype_value = row_dict.get(f"{serialized_key}_dtype", "float32")
+        drop = output_key == 'text_embedding' and (rng.random() if rng else random.random()) < cfg_rate
+        data = _decode_tensor_bytes(bytes_data, shape, dtype_value, zero=drop)
+
         if len(data.shape) == 3:
             B, L, D = data.shape
             assert B == 1, "Batch size must be 1"
             data = data.squeeze(0)
-        return_dict[key] = data
+        return_dict[output_key] = data
     return return_dict
 
 
@@ -60,6 +119,12 @@ def collate_latents_embs_masks(batch_to_process,
                                keys,
                                cfg_rate=0.0,
                                rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    """Collate latents and text embeddings for the iterable-style loader.
+
+    The batch is built from the explicit ``keys`` list, so this path is
+    primary-encoder-only: the secondary ByT5 embedding (``text_embedding_2``)
+    and its mask are not read even when the parquet rows contain them.
+    """
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -90,12 +155,22 @@ def collate_latents_embs_masks(batch_to_process,
     return all_latents, all_embs, all_masks, caption_text
 
 
+# Text streams are padded to a fixed length and paired with the attention mask
+# the trainer trims against. The second entry is HunyuanVideo 1.5's ByT5 glyph
+# stream, which rides alongside the primary Qwen one.
+_TEXT_STREAM_MASKS = {
+    "text_embedding": "text_attention_mask",
+    "text_embedding_2": "text_attention_mask_2",
+}
+
+
 def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
-                                     text_padding_length,
+                                     text_padding_length: int | None,
                                      cfg_rate=0.0,
                                      rng=None,
-                                     seed=0) -> dict[str, Any]:
+                                     seed=0,
+                                     max_presentation_tokens: int | None = None) -> dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -109,6 +184,54 @@ def collate_rows_from_parquet_schema(rows,
     """
     if not rows:
         return cast(dict[str, Any], {})
+
+    # Ref2VA's Qwen multimodal presentation is variable-length and must not
+    # inherit the fixed text-encoder crop used by T2V/T2VA. In dynamic mode,
+    # inspect stored shapes before materializing *any* tensor bytes. The cap is
+    # a rejection-only allocation guard; successful batches pad only to their
+    # longest stored presentation.
+    if text_padding_length is None:
+        if (isinstance(max_presentation_tokens, bool) or not isinstance(max_presentation_tokens, Integral)
+                or int(max_presentation_tokens) <= 0):
+            raise ValueError("Dynamic text collation requires max_presentation_tokens to be a positive integer")
+        presentation_lengths: list[int] = []
+        for row_index, row in enumerate(rows):
+            embedding_shape = row.get("text_embedding_shape")
+            if (not isinstance(embedding_shape, list | tuple) or len(embedding_shape) != 2
+                    or any(isinstance(dim, bool) or not isinstance(dim, Integral) or int(dim) <= 0
+                           for dim in embedding_shape)):
+                raise ValueError("Dynamic text collation requires text_embedding_shape=[length, feature_dim] "
+                                 f"with positive integers; row {row_index} has {embedding_shape!r}")
+            presentation_length = int(embedding_shape[0])
+            presentation_width = int(embedding_shape[1])
+            dtype_name = _normalize_tensor_dtype(row.get("text_embedding_dtype", "float32"))
+            itemsize = 2 if dtype_name == "bfloat16" else np.dtype(dtype_name).itemsize
+            expected_embedding_bytes = presentation_length * presentation_width * itemsize
+            if expected_embedding_bytes > _PYARROW_BINARY_MAX_VALUE_BYTES:
+                sample_id = row.get("id", row_index)
+                raise ValueError(
+                    f"Ref2VA presentation {sample_id!r} shape {list(embedding_shape)!r} requires "
+                    f"{expected_embedding_bytes} bytes, exceeding the pa.binary per-value envelope of "
+                    f"{_PYARROW_BINARY_MAX_VALUE_BYTES} bytes; use chunked or external presentation storage")
+            if presentation_length > int(max_presentation_tokens):
+                sample_id = row.get("id", row_index)
+                raise ValueError(f"Ref2VA presentation {sample_id!r} stores {presentation_length} tokens, exceeding "
+                                 f"max_presentation_tokens={int(max_presentation_tokens)}; the presentation will not "
+                                 "be truncated")
+
+            tags_shape = row.get("text_token_tags_shape")
+            if tags_shape is not None:
+                if (not isinstance(tags_shape, list | tuple) or len(tags_shape) != 1
+                        or isinstance(tags_shape[0], bool) or not isinstance(tags_shape[0], Integral)
+                        or int(tags_shape[0]) != presentation_length):
+                    raise ValueError("text_token_tags_shape must equal the stored text_embedding sequence length; "
+                                     f"row {row_index} has {tags_shape!r} and {embedding_shape!r}")
+            presentation_lengths.append(presentation_length)
+        effective_text_padding_length = max(presentation_lengths)
+    else:
+        # Preserve the fixed-length crop/pad contract for existing T2V/T2VA
+        # callers, including their configured text encoder length.
+        effective_text_padding_length = text_padding_length
 
     # Initialize containers for different data types
     batch_data: dict[str, Any] = {}
@@ -128,39 +251,69 @@ def collate_rows_from_parquet_schema(rows,
             # Only add actual metadata fields, not the shape/dtype helper fields
             metadata_fields.append(field)
 
+    # One CFG dropout decision per row, shared by all of its text streams, so
+    # a sample's Qwen and ByT5 embeddings always drop together. With a
+    # ``_sample_index`` it is a pure function of seed ^ index (resume-safe);
+    # without one it is a single ``rng`` draw per row, taken the first time a
+    # stream of that row needs it, so single-stream batches consume ``rng``
+    # exactly as before while a second stream can no longer draw its own.
+    row_drops: dict[int, bool] = {}
+
+    def _cfg_drop(row_idx: int, row: dict[str, Any]) -> bool:
+        if row_idx not in row_drops:
+            sample_idx = row.get("_sample_index")
+            if sample_idx is not None:
+                row_drops[row_idx] = (random.Random(seed ^ int(sample_idx)).random() < cfg_rate)
+            else:
+                row_drops[row_idx] = ((rng.random() if rng else random.random()) < cfg_rate)
+        return row_drops[row_idx]
+
     # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
+        shape_key = f"{tensor_name}_shape"
+        bytes_key = f"{tensor_name}_bytes"
+        dtype_key = f"{tensor_name}_dtype"
 
-        for row in rows:
+        # A secondary text stream that this parquet predates: leave the key out
+        # so the trainer's own zero-token fallback (and its warning) applies,
+        # rather than a placeholder of the wrong width.
+        if (tensor_name == "text_embedding_2" and not any(row.get(bytes_key) is not None for row in rows)):
+            continue
+
+        # The primary stream has no such fallback: a row without it would be
+        # collated as zeros and train unconditioned without a word, so name
+        # the rows instead.
+        if tensor_name == "text_embedding":
+            missing = [i for i, row in enumerate(rows) if row.get(bytes_key) is None or row.get(shape_key) is None]
+            if missing:
+                where = ("every row" if len(missing) == len(rows) else f"rows {missing} of {len(rows)}")
+                raise ValueError(f"text_embedding is missing from {where} in this batch; "
+                                 "the schema declares it, so each parquet row must carry "
+                                 "text_embedding_bytes and text_embedding_shape.")
+
+        for row_idx, row in enumerate(rows):
             # Get tensor data from row using the existing helper function pattern
-            shape_key = f"{tensor_name}_shape"
-            bytes_key = f"{tensor_name}_bytes"
-
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
 
-                if len(bytes_data) == 0:
-                    tensor = torch.zeros(0, dtype=torch.bfloat16)
-                else:
-                    # Deterministic per-sample CFG dropout
-                    # using sample index (resume-safe).
-                    drop = False
-                    if (tensor_name == 'text_embedding' and cfg_rate > 0):
-                        sample_idx = row.get("_sample_index")
-                        if sample_idx is not None:
-                            drop = (random.Random(seed ^ sample_idx).random() < cfg_rate)
-                        else:
-                            drop = ((rng.random() if rng else random.random()) < cfg_rate)
-                    if drop:
-                        data = np.zeros(shape, dtype=np.float32)
+                if bytes_data is None or len(bytes_data) == 0:
+                    # Keep the declared shape: a zero-token stream (e.g. a
+                    # caption with no glyph text) still carries its width.
+                    if shape:
+                        tensor = torch.zeros(*shape, dtype=torch.bfloat16)
                     else:
-                        data = np.frombuffer(
-                            bytes_data,
-                            dtype=np.float32,
-                        ).reshape(shape).copy()
-                    tensor = torch.from_numpy(data)
+                        tensor = torch.zeros(0, dtype=torch.bfloat16)
+                else:
+                    # Per-row CFG dropout, shared across text streams.
+                    drop = (tensor_name in _TEXT_STREAM_MASKS and cfg_rate > 0 and _cfg_drop(row_idx, row))
+                    tensor = _decode_tensor_bytes(
+                        bytes_data,
+                        shape,
+                        row.get(dtype_key, "float32"),
+                        zero=drop,
+                    )
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"
@@ -172,29 +325,57 @@ def collate_rows_from_parquet_schema(rows,
                 tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
-        if tensor_name == 'text_embedding':
+        if tensor_name in _TEXT_STREAM_MASKS:
             # Handle text embeddings with padding
             padded_tensors = []
             attention_masks = []
+            # Empty entries have to stack against the real ones, so follow
+            # their dtype instead of the bfloat16 placeholder default.
+            empty_dtype = next((t.dtype for t in tensor_list if t.numel() > 0), torch.bfloat16)
+            # ...and their width: a row whose stream is missing entirely (a
+            # legacy shard mixed into the same batch) carries only a 1-D
+            # placeholder, and must not inject a 768-wide stub that cannot
+            # stack against the real rows.
+            empty_width = next((int(t.shape[1]) for t in tensor_list if t.dim() > 1), 768)
 
             for tensor in tensor_list:
                 if tensor.numel() > 0:
-                    padded_tensor, mask = pad(tensor, text_padding_length)
+                    padded_tensor, mask = pad(tensor, effective_text_padding_length)
                     padded_tensors.append(padded_tensor)
                     attention_masks.append(mask)
                 else:
                     # Handle empty embeddings - assume default embedding dimension
-                    padded_tensors.append(torch.zeros(text_padding_length, 768, dtype=torch.bfloat16))
-                    attention_masks.append(torch.zeros(text_padding_length))
+                    width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
+                    padded_tensors.append(torch.zeros(effective_text_padding_length, width, dtype=empty_dtype))
+                    attention_masks.append(torch.zeros(effective_text_padding_length))
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
-            batch_data['text_attention_mask'] = torch.stack(attention_masks)
+            batch_data[_TEXT_STREAM_MASKS[tensor_name]] = torch.stack(attention_masks)
+        elif tensor_name == 'text_token_tags':
+            # Ref2VA token tags describe the same variable-length Qwen3-VL
+            # presentation as text_embedding. Keep both sequence axes aligned;
+            # zero-valued padding is ignored through text_attention_mask.
+            padded_tags = []
+            for tensor, row in zip(tensor_list, rows, strict=True):
+                if tensor.ndim != 1:
+                    raise ValueError(f"text_token_tags must have shape [length], got {tuple(tensor.shape)}")
+                embedding_shape = row.get("text_embedding_shape")
+                if (not isinstance(embedding_shape, list | tuple) or len(embedding_shape) != 2
+                        or tensor.shape[0] != embedding_shape[0]):
+                    raise ValueError("text_token_tags length must equal the unpadded text_embedding sequence length")
+                tensor = tensor[:effective_text_padding_length]
+                if tensor.shape[0] < effective_text_padding_length:
+                    tensor = torch.cat((tensor, torch.zeros(effective_text_padding_length - tensor.shape[0],
+                                                            dtype=tensor.dtype,
+                                                            device=tensor.device)))
+                padded_tags.append(tensor)
+            batch_data[tensor_name] = torch.stack(padded_tags)
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 shapes = [t.shape if t is not None and hasattr(t, 'shape') else 'None/Invalid' for t in tensor_list]
                 raise ValueError(f"Failed to stack tensors for field '{tensor_name}'. "
                                  f"Tensor shapes: {shapes}. "

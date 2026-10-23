@@ -5,12 +5,12 @@ Keep weight loading and forward calls in each test. This helper only controls
 determinism and compares device/runtime-matched tensors; it is not a model runner.
 """
 
-import os
 from contextlib import contextmanager
 
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import DEFAULT_SEED, device_folder, env_fingerprint, resolve_golden_path
 
 
@@ -23,7 +23,6 @@ def deterministic_forward(attention_backend=None):
     deterministic = torch.are_deterministic_algorithms_enabled()
     warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
     benchmark = torch.backends.cudnn.benchmark
-    previous_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
     had_precision_state = hasattr(_mixed_precision_state, "state")
     previous_precision_state = getattr(_mixed_precision_state, "state", None)
     try:
@@ -33,11 +32,12 @@ def deterministic_forward(attention_backend=None):
         # backend despite their unchanged torch default dtype and environment.
         if had_precision_state:
             del _mixed_precision_state.state
-        if attention_backend is not None:
-            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = attention_backend
-        torch.use_deterministic_algorithms(True)
-        torch.backends.cudnn.benchmark = False
-        yield torch.device("cuda:0")
+        # Restore the caller's FASTVIDEO_ATTENTION_BACKEND on exit, also when attention_backend is None.
+        with envs.FASTVIDEO_ATTENTION_BACKEND.override(
+                envs.FASTVIDEO_ATTENTION_BACKEND.get() if attention_backend is None else attention_backend):
+            torch.use_deterministic_algorithms(True)
+            torch.backends.cudnn.benchmark = False
+            yield torch.device("cuda:0")
     finally:
         if had_precision_state:
             _mixed_precision_state.state = previous_precision_state
@@ -45,10 +45,6 @@ def deterministic_forward(attention_backend=None):
             del _mixed_precision_state.state
         torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
         torch.backends.cudnn.benchmark = benchmark
-        if previous_backend is None:
-            os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
-        else:
-            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = previous_backend
 
 
 def assert_tensor_golden(name, outputs, *, identity, attention_backend=None, seed=DEFAULT_SEED):

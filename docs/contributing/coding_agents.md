@@ -129,8 +129,9 @@ factors, outputs may not match exactly, but they should be comparable.
 This is an example workflow for adding a full model pipeline (model + configs +
 examples + tests). This guide is in active development; feedback is welcome.
 
-!!! note
-    If you get stuck, refer to existing models/pipelines in FastVideo or ask in Slack.
+:::note
+If you get stuck, refer to existing models/pipelines in FastVideo or ask in Slack.
+:::
 
 ### 0) Fetch official model's code and weights
 
@@ -149,15 +150,18 @@ Action:
   handling and download it directly with
   `scripts/huggingface/download_hf.py`.
 
-!!! note
-    This step is best done manually because large downloads can time out.
-    Example:
-    ```bash
-    python scripts/huggingface/download_hf.py \
-      --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-      --local_dir official_weights/Wan2.1-T2V-1.3B-Diffusers \
-      --repo_type model
-    ```
+:::note
+This step is best done manually because large downloads can time out.
+Example:
+
+```bash
+python scripts/huggingface/download_hf.py \
+  --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+  --local_dir official_weights/Wan2.1-T2V-1.3B-Diffusers \
+  --repo_type model
+```
+
+:::
   
 ### 1) Implement the model + config mapping
 
@@ -189,15 +193,17 @@ Action:
   - If you are using an agent, ask it to implement the model, config mapping,
     and a parity test together so you can validate numerics immediately.
 
-!!! note
-    After the first component is aligned and parity‑tested, open a **DRAFT PR**
-    on FastVideo so the rest of the pipeline work can build on top of it.
+:::note
+After the first component is aligned and parity‑tested, open a **DRAFT PR**
+on FastVideo so the rest of the pipeline work can build on top of it.
+:::
 
-!!! note
-    If a Diffusers-format HF repo already exists and loads correctly, you can
-    skip conversion entirely (no conversion script needed) and just download it
-    with `scripts/huggingface/download_hf.py`. Otherwise, you may need a
-    conversion script + a `converted_weights/<model>/` staging directory.
+:::note
+If a Diffusers-format HF repo already exists and loads correctly, you can
+skip conversion entirely (no conversion script needed) and just download it
+with `scripts/huggingface/download_hf.py`. Otherwise, you may need a
+conversion script + a `converted_weights/<model>/` staging directory.
+:::
 
 Example (key renaming via arch config mapping, Wan2.1‑style):
 
@@ -405,6 +411,9 @@ Action:
   causal masks, and broadcast shapes).
 - **Scheduler / sigma schedule mismatch**: even small differences in schedules
   or timestep shapes can cause noticeable drift.
+- **Skipped parity tests**: local parity tests skip when the reference clone,
+  weights, or a GPU are missing. A skip is not a pass; run them where the
+  reference and weights are available before claiming parity.
 
 ## Diffusers vs manual conversion
 

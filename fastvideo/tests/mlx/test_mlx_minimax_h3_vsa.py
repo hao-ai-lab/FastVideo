@@ -62,10 +62,9 @@ def _dit_shape(spec: dict) -> tuple[int, int, int]:
 def _torch_meta(spec: dict, tile_size: int = 256, sparsity: float = 0.0):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=spec["raw_latent_shape"],
         patch_size=spec["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=spec["prefix_segments"],
+        packed_segments=(*spec["prefix_segments"], spec["raw_latent_shape"]),
         device=_CPU,
         tile_size=tile_size,
     )
@@ -112,7 +111,7 @@ def test_routing_mask_parity_exempt_and_compete() -> None:
     k_vid = compute_topk(0.9, v)
     for exempt in (True, False):
         mlx_mask = build_block_mask(scores, p, v, 0.9, exempt=exempt)
-        torch_mask = _build_block_mask(torch.tensor(scores), p, v, 0.9, exempt=exempt).numpy()
+        torch_mask = _build_block_mask(torch.tensor(scores), p, 0.9, exempt, ((p, p + v), ), (0.9, )).numpy()
         assert mlx_mask[:, :, :p].all()
         if exempt:
             assert mlx_mask[..., :p].all()
@@ -446,6 +445,25 @@ def test_prefix_segments_from_t2va_layout_drop_empty_condition() -> None:
         num_audio_latents=3,
     )
     assert prefix_segments_from_layout(layout, (1, 2, 2)) == (6, 0, 6)
+
+
+def test_ref2va_prefix_splits_per_reference() -> None:
+    """A reference-prefixed layout keeps its interleaved audio rows as their own segment."""
+    from fastvideo.mlx_runtime.minimax_h3 import build_ref2va_packed_layout
+    from fastvideo.mlx_runtime.minimax_h3_reference import MiniMaxH3PreparedReference
+
+    image = MiniMaxH3PreparedReference(media_type="image")
+    image.num_latent_frames, image.latent_height, image.latent_width = 1, 4, 4
+    video = MiniMaxH3PreparedReference(media_type="video", has_audio=True)
+    video.num_latent_frames, video.latent_height, video.latent_width = 2, 4, 4
+    video.num_audio_latents = 3
+    layout = build_ref2va_packed_layout(
+        np.full(6, 1, dtype=np.int64), [image, video], 2, 4, 4, 3, (1, 2, 2))
+
+    # text, image rows, video-reference audio rows, video-reference video rows, target audio.
+    assert prefix_segments_from_layout(layout, (1, 2, 2)) == (6, 4, 6, 8, 6)
+    geometry = build_h3_tile_geometry(prefix_segments_from_layout(layout, (1, 2, 2)), (2, 2, 2), 64)
+    assert geometry.total_seq_length == layout.sequence_length
 
 
 def test_token_tile_and_valid_covers_pad_slots() -> None:

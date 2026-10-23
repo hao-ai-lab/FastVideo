@@ -15,14 +15,17 @@ from fastapi.testclient import TestClient
 
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
     build_generation_request,
     prepare_reference_media,
+    validate_served_model_name,
 )
 from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
+from fastvideo.entrypoints.openai.video_api import _media_type_for_path
 
 
 class _BlockingGenerator:
@@ -39,6 +42,27 @@ class _BlockingGenerator:
 
     def shutdown(self) -> None:
         self.shutdown_called = True
+
+
+class _WaveGenerator:
+
+    def __init__(self) -> None:
+        self.last_output: Path | None = None
+
+    def generate(self, request):
+        output = Path(request.output.output_path)
+        self.last_output = output
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt fastvideo-test")
+        return SimpleNamespace(
+            video_path=str(output),
+            generation_time=0.01,
+            peak_memory_mb=12.5,
+            logging_info=None,
+        )
+
+    def shutdown(self) -> None:
+        return None
 
 
 class _FileGenerator:
@@ -114,6 +138,28 @@ def test_protocol_rejects_unknown_and_client_output_fields() -> None:
         VideoGenerationRequest(prompt="a fox", output_path="/srv/keep.mp4")
 
 
+def test_validate_served_model_name_accepts_omitted_or_matching_name() -> None:
+    args = _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    validate_served_model_name(None, args, "wan")
+    validate_served_model_name("wan", args, "wan")
+
+
+def test_validate_served_model_name_rejects_mismatch() -> None:
+    with pytest.raises(RequestAdaptationError, match="this server provides wan"):
+        validate_served_model_name("other-model", _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"), "wan")
+
+
+def test_validate_served_model_name_uses_lora_nickname() -> None:
+    args = _args(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        lora_path="/models/startup.safetensors",
+        lora_nickname="fast",
+    )
+    validate_served_model_name("fast", args, "wan")
+    with pytest.raises(RequestAdaptationError, match="this server provides fast"):
+        validate_served_model_name("wan", args, "wan")
+
+
 def test_request_adapter_restricts_extra_params(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="a fox", extra_params={"prompt_path": "/srv/prompts.txt"})
     with pytest.raises(RequestAdaptationError, match="Unsupported extra_params fields: prompt_path"):
@@ -140,10 +186,88 @@ def test_request_adapter_owns_output_path(tmp_path: Path) -> None:
     assert adapted.output.output_path == str(tmp_path / "videos" / "video_gen_test.mp4")
 
 
+def test_audio_request_maps_seconds_to_duration_and_wav_output(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="rain on a metal roof", seconds=4, audio_start_in_s=0)
+    adapted = build_generation_request(
+        "audio_gen_test",
+        request,
+        _args("FastVideo/stable-audio-open-1.0-Diffusers", workload_type=SimpleNamespace(value="t2a")),
+        served_model_name="stable-audio",
+        output_dir=str(tmp_path),
+    )
+    assert adapted.sampling.audio_start_in_s == 0.0
+    assert adapted.sampling.audio_end_in_s == 4.0
+    assert adapted.output.output_path == str(tmp_path / "audio" / "audio_gen_test.wav")
+
+
+def test_audio_request_rejects_video_geometry(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="rain", size="512x512")
+    with pytest.raises(RequestAdaptationError, match="does not accept size"):
+        build_generation_request(
+            "audio_gen_test",
+            request,
+            _args("FastVideo/stable-audio-open-1.0-Diffusers", workload_type=SimpleNamespace(value="t2a")),
+            served_model_name="stable-audio",
+            output_dir=str(tmp_path),
+        )
+
+
+def test_audio_seconds_override_operator_duration(tmp_path: Path) -> None:
+    default_request = parse_config(
+        GenerationRequest,
+        {"sampling": {
+            "audio_start_in_s": 1.0,
+            "audio_end_in_s": 10.0,
+        }},
+    )
+    request = VideoGenerationRequest(prompt="rain", seconds=4)
+    adapted = build_generation_request(
+        "audio_gen_test",
+        request,
+        _args("FastVideo/stable-audio-open-1.0-Diffusers", workload_type=SimpleNamespace(value="t2a")),
+        served_model_name="stable-audio",
+        output_dir=str(tmp_path),
+        default_request=default_request,
+    )
+    assert adapted.sampling.audio_start_in_s == 1.0
+    assert adapted.sampling.audio_end_in_s == 5.0
+
+
+def test_wav_media_type_is_detected_from_output_path() -> None:
+    assert _media_type_for_path("/tmp/request.wav") == "audio/wav"
+    assert _media_type_for_path("/tmp/request.MP4") == "video/mp4"
+
+
+def test_missing_video_reference_fails_during_admission(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(tmp_path / "missing.mp4")})
+    with pytest.raises(RequestAdaptationError, match="does not exist"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
+
+
+def test_local_media_paths_need_a_configured_root(tmp_path: Path) -> None:
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+    request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(clip)})
+    with pytest.raises(RequestAdaptationError, match="server.media_roots"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+
+
+def test_mmaudio_v2a_requires_video_reference(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="waves")
+    with pytest.raises(RequestAdaptationError, match="requires video_reference"):
+        build_generation_request(
+            "audio_gen_test",
+            request,
+            _args("FastVideo/MMAudio-large-44k-v2-Diffusers", workload_type=SimpleNamespace(value="v2a")),
+            served_model_name="mmaudio",
+            output_dir=str(tmp_path),
+        )
+
+
 def test_missing_reference_fails_during_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="a fox", input_reference=str(tmp_path / "missing.png"))
     with pytest.raises(RequestAdaptationError, match="does not exist"):
-        asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
 
 
 def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:
@@ -253,8 +377,9 @@ def test_fasth3_invalid_geometry_fails_at_admission(tmp_path: Path, overrides, m
         )
 
 
-def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path) -> None:
-    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", seconds="5")
+@pytest.mark.parametrize(("seconds", "expected_frames"), [("5", 124), ("15", 362)])
+def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path, seconds: str, expected_frames: int) -> None:
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", seconds=seconds)
     adapted = build_generation_request(
         "video_gen_test",
         request,
@@ -262,7 +387,7 @@ def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path) -> None:
         served_model_name="fasth3",
         output_dir=str(tmp_path),
     )
-    assert adapted.sampling.num_frames == 124
+    assert adapted.sampling.num_frames == expected_frames
 
 
 def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
@@ -340,6 +465,61 @@ def test_unsupported_vllm_postprocessing_fails_at_admission(tmp_path: Path) -> N
             served_model_name="wan",
             output_dir=str(tmp_path),
         )
+
+
+def test_audio_jobs_publish_wav_media_type_and_seconds(tmp_path: Path) -> None:
+    from fastvideo.entrypoints.openai import state
+    from fastvideo.entrypoints.openai.video_api import router
+
+    generator = _WaveGenerator()
+    engine = OpenAIServingEngine(generator)  # type: ignore[arg-type,unused-ignore]
+    args = _args("FastVideo/stable-audio-open-1.0-Diffusers", workload_type=SimpleNamespace(value="t2a"))
+    state.set_state(
+        generator,  # type: ignore[arg-type]
+        engine,
+        args,  # type: ignore[arg-type]
+        str(tmp_path),
+        served_model_name="stable-audio",
+    )
+    asyncio.run(VIDEO_STORE.clear())
+    app = FastAPI()
+    app.include_router(router)
+
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/v1/videos",
+                json={"model": "stable-audio", "prompt": "rain", "seconds": 3},
+            )
+            assert created.status_code == 200
+            audio_id = created.json()["id"]
+
+            for _ in range(50):
+                detail = client.get(f"/v1/videos/{audio_id}")
+                if detail.json()["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            body = detail.json()
+            assert body["status"] == "completed"
+            assert body["media_type"] == "audio/wav"
+            assert body["seconds"] == "3"
+            assert body["size"] is None
+            assert body["file_name"].endswith(".wav")
+
+            content = client.get(f"/v1/videos/{audio_id}/content")
+            assert content.status_code == 200
+            assert content.headers["content-type"] == "audio/wav"
+            assert content.content.startswith(b"RIFF")
+
+            sync = client.post("/v1/videos/sync", json={"prompt": "rain", "seconds": 2})
+            assert sync.status_code == 200
+            assert sync.headers["content-type"] == "audio/wav"
+            assert sync.content.startswith(b"RIFF")
+            assert generator.last_output is not None
+            assert not generator.last_output.exists()
+    finally:
+        asyncio.run(VIDEO_STORE.clear())
+        state.clear_state()
 
 
 def test_video_routes_cover_async_sync_list_content_and_delete(tmp_path: Path) -> None:

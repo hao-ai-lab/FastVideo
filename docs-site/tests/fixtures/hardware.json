@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "devices": [
+    {
+      "id": "h100-sxm-80gb",
+      "name": "NVIDIA H100 SXM 80 GB",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "nvidia-h100",
+      "variant": "SXM 80 GB",
+      "form_factor": "sxm",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 80,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "partitionable": true,
+      "partitions": [
+        {
+          "id": "1g.10gb",
+          "label": "1g.10gb",
+          "memory": {
+            "value": 10,
+            "unit": "GB"
+          }
+        },
+        {
+          "id": "3g.40gb",
+          "label": "3g.40gb",
+          "memory": {
+            "value": 40,
+            "unit": "GB"
+          }
+        }
+      ],
+      "aliases": ["h100"],
+      "supported_dtypes": ["fp32", "fp16", "bf16", "fp8"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/data-center/h100/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 80
+    },
+    {
+      "id": "geforce-rtx-5090-32gb",
+      "name": "NVIDIA GeForce RTX 5090 32 GB (desktop)",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "geforce-rtx-50",
+      "variant": "5090 desktop",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 32,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["rtx 5090", "5090"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 32
+    },
+    {
+      "id": "rtx-pro-6000-blackwell-workstation-96gb",
+      "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "rtx-pro-6000",
+      "variant": "Blackwell Workstation Edition",
+      "form_factor": "workstation",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 96,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["pro 6000", "rtx pro 6000"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/design-visualization/desktop-graphics/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 96
+    },
+    {
+      "id": "dgx-spark-gb10-128gb",
+      "name": "NVIDIA DGX Spark GB10 128 GB",
+      "vendor": "nvidia",
+      "kind": "system",
+      "family": "dgx-spark",
+      "variant": "GB10",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 128,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["spark", "gb10"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/products/workstations/dgx-spark/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 128
+    },
+    {
+      "id": "apple-m4-max-128gb",
+      "name": "Apple M4 Max 128 GB",
+      "vendor": "apple",
+      "kind": "soc",
+      "family": "apple-m4",
+      "variant": "M4 Max",
+      "form_factor": "laptop or desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 128,
+          "unit": "GB"
+        }
+      },
+      "backend": "metal",
+      "gpu_count": 1,
+      "aliases": ["m4 max", "macbook m4 max"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.apple.com/macbook-pro/specs/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 128,
+      "usable_memory_gb": 96
+    },
+    {
+      "id": "apple-m3-ultra-192gb",
+      "name": "Apple M3 Ultra 192 GB",
+      "vendor": "apple",
+      "kind": "soc",
+      "family": "apple-m3",
+      "variant": "M3 Ultra",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 192,
+          "unit": "GB"
+        }
+      },
+      "backend": "metal",
+      "gpu_count": 1,
+      "aliases": ["m3 ultra", "mac studio m3 ultra"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.apple.com/mac-studio/specs/",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 192
+    },
+    {
+      "id": "intel-arc-b580-12gb",
+      "name": "Intel Arc B580 12 GB",
+      "vendor": "intel",
+      "kind": "gpu",
+      "family": "arc-b",
+      "variant": "B580",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 12,
+          "unit": "GB"
+        }
+      },
+      "backend": "sycl",
+      "gpu_count": 1,
+      "aliases": ["arc b580", "b580"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.intel.com/content/www/us/en/products/sku/241598/intel-arc-b580-graphics/specifications.html",
+          "checked": "2026-10-19"
+        }
+      ],
+      "memory_gb": 12
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import os
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.kandinsky5.presets import KANDINSKY5_T2V_LITE_5S
 from fastvideo.tests.ssim.inference_similarity_utils import (
@@ -80,9 +81,7 @@ def test_kandinsky5_t2v_inference_similarity(
     # and restored afterwards: the other SSIM references are seeded with FA4
     # on, so a module-level pin would corrupt every test collected in the
     # same pytest process.
-    saved_fa4 = os.environ.get("FASTVIDEO_FA4")
-    os.environ["FASTVIDEO_FA4"] = "0"
-    try:
+    with envs.FASTVIDEO_FA4.override(False):
         run_text_to_video_similarity_test(
             logger=logger,
             script_dir=os.path.dirname(os.path.abspath(__file__)),
@@ -102,8 +101,3 @@ def test_kandinsky5_t2v_inference_similarity(
                 "pin_cpu_memory": True,
             },
         )
-    finally:
-        if saved_fa4 is None:
-            os.environ.pop("FASTVIDEO_FA4", None)
-        else:
-            os.environ["FASTVIDEO_FA4"] = saved_fa4

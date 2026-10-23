@@ -9,8 +9,8 @@ from fastvideo.tests.stages._denoising_fixtures import (
 )
 
 
-def _run_stage(monkeypatch, cfg_gate_step):
-    denoising, logger = _patch_denoising_module(monkeypatch, cfg_gate_step)
+def _run_stage(monkeypatch, env_overrides, cfg_gate_step):
+    denoising, logger = _patch_denoising_module(monkeypatch, env_overrides, cfg_gate_step)
     model = TinyDenoiser()
     stage = denoising.DenoisingStage(model, TinyScheduler())
     stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
@@ -39,8 +39,8 @@ def _run_legacy_two_pass():
 
 
 @pytest.mark.parametrize("cfg_gate_step", [None, "1.0"])
-def test_cfg_gating_default_off_matches_legacy_two_pass(monkeypatch, cfg_gate_step):
-    out, model, logger = _run_stage(monkeypatch, cfg_gate_step)
+def test_cfg_gating_default_off_matches_legacy_two_pass(monkeypatch, env_overrides, cfg_gate_step):
+    out, model, logger = _run_stage(monkeypatch, env_overrides, cfg_gate_step)
     legacy_out = _run_legacy_two_pass()
 
     assert torch.equal(out, legacy_out)
@@ -49,8 +49,8 @@ def test_cfg_gating_default_off_matches_legacy_two_pass(monkeypatch, cfg_gate_st
     assert any("gate_step=-1/4" in msg and "reused=0" in msg for msg in logger.infos)
 
 
-def test_cfg_gating_reuses_cached_delta_after_gate(monkeypatch):
-    out, model, logger = _run_stage(monkeypatch, "0.5")
+def test_cfg_gating_reuses_cached_delta_after_gate(monkeypatch, env_overrides):
+    out, model, logger = _run_stage(monkeypatch, env_overrides, "0.5")
     legacy_out = _run_legacy_two_pass()
 
     assert model.calls == ["cond", "uncond", "cond", "uncond", "cond", "cond"]

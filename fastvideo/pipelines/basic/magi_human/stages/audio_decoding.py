@@ -88,6 +88,12 @@ class MagiHumanAudioDecodingStage(PipelineStage):
             raise ValueError("MagiHumanAudioDecodingStage requires batch.audio_latents to be set. "
                              "Did the denoising stage produce them? Joint AV pipeline expects "
                              "both video and audio latents from MagiHumanDenoisingStage.")
+        if not fastvideo_args.is_output_rank:
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.latents = None
+            batch.audio_latents = None
+            return batch
 
         # Upstream shape: `[B, L, C_latent]` from the DiT; AutoencoderOobleck
         # expects `[B, C_latent, L]`. MagiEvaluator.post_process does

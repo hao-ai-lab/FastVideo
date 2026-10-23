@@ -19,12 +19,10 @@ from fastvideo.tests.stages._denoising_fixtures import RecordingDenoiser, TinyVA
     ("wan.wan_i2v_dmd_pipeline", "DmdDenoisingStage", False),
     ("wan.wan_causal_pipeline", "CausalDenoisingStage", False),
     ("wan.wan_causal_dmd_pipeline", "CausalDMDDenosingStage", True),
-    ("dreamx_world.dreamx_world_pipeline", "WanDenoisingStage", True),
-    ("turbodiffusion.turbodiffusion_pipeline", "WanDenoisingStage", False),
-    ("turbodiffusion.turbodiffusion_i2v_pipeline", "WanDenoisingStage", False),
 ])
-def test_pipeline_wires_family_sampler_and_owns_scheduler(monkeypatch, module_name, sampler, first_frame):
-    _patch_denoising_module(monkeypatch, "1.0")
+def test_pipeline_wires_family_sampler_and_owns_scheduler(monkeypatch, env_overrides, module_name, sampler,
+                                                          first_frame):
+    _patch_denoising_module(monkeypatch, env_overrides, "1.0")
     from fastvideo.pipelines.stages.base import PipelineStage
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
     module = importlib.import_module(f"fastvideo.pipelines.basic.{module_name}")

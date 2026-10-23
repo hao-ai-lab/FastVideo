@@ -1,11 +1,10 @@
+import contextlib
 import os
 
+import fastvideo.envs as envs
 from fastvideo.tests.ssim.reference_utils import (
-    FULL_QUALITY_ENV_VAR,
-    get_output_quality_tier,
-)
+    get_output_quality_tier, )
 from fastvideo.tests.ssim.reference_videos_cli import (
-    BOOTSTRAP_ENV_KEY,
     HF_REPO_ENV_KEY,
     ensure_reference_videos_available,
 )
@@ -21,7 +20,7 @@ def pytest_addoption(parser):
     )
     parser.addoption(
         "--ssim-reference-repo",
-        default=os.environ.get(HF_REPO_ENV_KEY, ""),
+        default="",
         help=("HF repo id for SSIM reference videos "
               f"(overrides {HF_REPO_ENV_KEY})."),
     )
@@ -41,18 +40,20 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     if config.getoption("--ssim-full-quality"):
-        os.environ[FULL_QUALITY_ENV_VAR] = "1"
+        envs.FASTVIDEO_TEST_SSIM_FULL_QUALITY.set(True)
 
     repo_id = config.getoption("--ssim-reference-repo")
     if repo_id:
-        os.environ[HF_REPO_ENV_KEY] = repo_id
+        envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.set(repo_id)
 
     if config.getoption("--ssim-bootstrap-mode"):
-        os.environ[BOOTSTRAP_ENV_KEY] = "1"
+        # Kept for the whole pytest session and restored when pytest exits.
+        session_env = contextlib.ExitStack()
+        config.add_cleanup(session_env.close)
+        session_env.enter_context(envs.override_external("FASTVIDEO_SSIM_BOOTSTRAP_MODE", "1"))
 
     skip_download = config.getoption("--skip-ssim-reference-download")
-    skip_download = skip_download or os.environ.get("FASTVIDEO_SSIM_SKIP_REFERENCE_DOWNLOAD",
-                                                    "").strip().lower() in {"1", "true", "yes", "on"}
+    skip_download = skip_download or envs.FASTVIDEO_TEST_SSIM_SKIP_REFERENCE_DOWNLOAD.get()
 
     if not skip_download:
         ensure_reference_videos_available(

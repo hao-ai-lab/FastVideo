@@ -158,6 +158,22 @@ def test_decode_to_pixels_pinned_buffer_matches_dense_on_cuda() -> None:
     assert_close(pinned, expected, atol=0.0, rtol=0.0)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pageable-buffer streaming requires CUDA")
+@torch.inference_mode()
+def test_decode_to_pixels_pageable_buffer_matches_dense_on_cuda() -> None:
+    """The allocation fallback's blocking chunk copies must equal dense decode."""
+    torch.manual_seed(20260814)
+    vae = _tiny_vae().to("cuda")
+    latents = torch.randn(1, 4, 12, 4, 4, device="cuda")
+    expected = vae.denormalize_pixels(vae.decode(latents).sample.float()).clamp_(0, 1).cpu()
+
+    pageable = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, pageable)
+
+    assert not pageable.is_pinned()
+    assert_close(pageable, expected, atol=0.0, rtol=0.0)
+
+
 def test_decode_to_pixels_rejects_incomplete_output(monkeypatch) -> None:
     vae = _tiny_vae()
     latents = torch.randn(1, 4, 2, 4, 4)

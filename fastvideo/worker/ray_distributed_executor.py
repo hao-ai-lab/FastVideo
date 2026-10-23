@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
-from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port, get_loopback_ip
+from fastvideo.utils import (DEPRECATED_HF_TOKEN_ENV_VARS, HF_TOKEN_ENV_VARS, get_ip, get_distributed_init_method,
+                             get_open_port, get_loopback_ip)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
@@ -46,6 +47,39 @@ def should_use_gloo_loopback(worker_ips: list[str]) -> bool:
     from the driver onto those workers.
     """
     return len(set(worker_ips)) <= 1
+
+
+# Ray narrows each GPU actor's CUDA_VISIBLE_DEVICES to the actor's own GPU unless this is set.
+RAY_NOSET_CUDA_VISIBLE_DEVICES = "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"
+
+
+def keep_raylet_cuda_devices(ray_remote_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return actor options under which Ray leaves CUDA_VISIBLE_DEVICES as the raylet's.
+
+    Ray merges an actor's ``env_vars`` into the job's runtime environment, so
+    only this one variable is added.
+    """
+    runtime_env = dict(ray_remote_kwargs.get("runtime_env") or {})
+    runtime_env["env_vars"] = {**(runtime_env.get("env_vars") or {}), RAY_NOSET_CUDA_VISIBLE_DEVICES: "1"}
+    return {**ray_remote_kwargs, "runtime_env": runtime_env}
+
+
+def ray_worker_device_ordinal(node_gpu_ids: list[int], node_local_index: int, visible_devices: str | None) -> int:
+    """Return the CUDA ordinal of the ``node_local_index``-th worker on a node.
+
+    The worker uses ``node_gpu_ids[node_local_index]`` (the sorted Ray GPU IDs
+    of the node's workers), addressed in the device list it inherited from its
+    raylet. Ray reports GPU IDs as entries of the raylet's CUDA_VISIBLE_DEVICES,
+    or as ordinals when that variable is unset.
+    """
+    gpu_id = node_gpu_ids[node_local_index]
+    if not visible_devices:
+        return gpu_id
+    visible = [entry.strip() for entry in visible_devices.split(",")]
+    if str(gpu_id) not in visible:
+        raise RuntimeError(f"Ray assigned GPU {gpu_id}, which is not in the worker's "
+                           f"CUDA_VISIBLE_DEVICES={visible_devices!r}.")
+    return visible.index(str(gpu_id))
 
 
 @dataclass
@@ -85,14 +119,20 @@ class RayDistributedExecutor(Executor):
     # NCCL_* knobs present on the driver are added dynamically in
     # ``_env_vars_to_copy_from_driver``, except the per-node NIC trio above.
     ADDITIONAL_ENV_VARS = {
-        "HF_TOKEN",
-        "HUGGING_FACE_HUB_TOKEN",
+        *HF_TOKEN_ENV_VARS,
+        *DEPRECATED_HF_TOKEN_ENV_VARS,
         "NCCL_IB_DISABLE",
         "NCCL_P2P_DISABLE",
         "NCCL_CUMEM_ENABLE",
         "NCCL_NVLS_ENABLE",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
+        "LD_LIBRARY_PATH",
+        # MiniMax-H3 encoder split: the driver resolves these into
+        # fastvideo_args, but keep the environment aligned on the workers so
+        # code paths that consult envs directly agree with the driver.
+        "FASTVIDEO_H3_ENCODER_SPLIT",
+        "FASTVIDEO_H3_ENCODER_NODES",
     }
 
     def _init_executor(self) -> None:
@@ -102,7 +142,7 @@ class RayDistributedExecutor(Executor):
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
         if ray_usage != "1":
-            os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
+            envs.set_external("RAY_USAGE_STATS_ENABLED", "0")
 
         self._init_workers_ray(placement_group)
 
@@ -113,7 +153,19 @@ class RayDistributedExecutor(Executor):
     def _init_workers_ray(self, placement_group: "PlacementGroup", **ray_remote_kwargs):
         from fastvideo.platforms import current_platform
 
-        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
+        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS.get()
+
+        # On NVIDIA GPUs every actor keeps its raylet's CUDA_VISIBLE_DEVICES.
+        # Otherwise Ray narrows it to the actor's own GPU before the actor
+        # imports fastvideo, and that import initializes CUDA (diffusers and
+        # Triton query the device at import time). CUDA then keeps the one-GPU
+        # view, a later CUDA_VISIBLE_DEVICES update has no effect, and
+        # cuda:<local_rank> is an invalid ordinal for every worker but the first
+        # on a multi-GPU node. Each worker addresses its GPU by position in the
+        # inherited list instead (ray_worker_device_ordinal).
+        keep_raylet_devices = current_platform.is_cuda()
+        if keep_raylet_devices:
+            ray_remote_kwargs = keep_raylet_cuda_devices(ray_remote_kwargs)
 
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
@@ -191,9 +243,14 @@ class RayDistributedExecutor(Executor):
         rerank_mapping = {item.created_rank: item.adjusted_rank for item in sorted_worker_metadata}
         self._run_ray_workers("adjust_rank", rerank_mapping)
 
+        if getattr(self.fastvideo_args, "h3_encoder_split", False):
+            # The sort keeps every node's workers contiguous, so the first
+            # ``h3_encoder_nodes`` distinct IPs are exactly the encoder group.
+            # Stamped before init_worker pickles the args to every worker.
+            self._setup_h3_encoder_split([item.ip for item in sorted_worker_metadata])
+
         # Get the set of GPU IDs used on each node.
         worker_node_and_gpu_ids = self._run_ray_workers("get_node_and_gpu_ids")
-
         node_workers = defaultdict(list)  # node id -> list of worker ranks
         node_gpus = defaultdict(list)  # node id -> list of gpu ids
 
@@ -222,10 +279,16 @@ class RayDistributedExecutor(Executor):
                                " each node.")
 
         # Set environment variables for the driver and workers.
-        all_args_to_update_environment_variables: list[dict[str, str]] = [{
-            current_platform.device_control_env_var:
-            ",".join(map(str, node_gpus[node_id])),
-        } for (node_id, _) in worker_node_and_gpu_ids]
+        all_args_to_update_environment_variables: list[dict[str, str]]
+        if keep_raylet_devices:
+            # The inherited device list stays; each worker gets its ordinal in it.
+            worker_visible_devices = self._run_ray_workers("get_cuda_visible_devices")
+            all_args_to_update_environment_variables = [{} for _ in worker_node_and_gpu_ids]
+        else:
+            all_args_to_update_environment_variables = [{
+                current_platform.device_control_env_var:
+                ",".join(map(str, node_gpus[node_id])),
+            } for (node_id, _) in worker_node_and_gpu_ids]
 
         # Environment variables to copy from driver to workers
         extra_nccl = {k for k in os.environ if k.startswith("NCCL_") and k not in self.WORKER_LOCAL_NIC_ENV_VARS}
@@ -246,7 +309,8 @@ class RayDistributedExecutor(Executor):
 
         self._run_ray_workers("update_environment_variables", self._get_env_vars_to_be_updated())
 
-        if should_use_gloo_loopback(worker_ips):
+        _lb = should_use_gloo_loopback(worker_ips)
+        if _lb:
             driver_ip = get_loopback_ip()
         distributed_init_method = get_distributed_init_method(driver_ip, get_open_port())
 
@@ -254,6 +318,8 @@ class RayDistributedExecutor(Executor):
         all_kwargs = []
         for rank, (node_id, _) in enumerate(worker_node_and_gpu_ids):
             local_rank = node_workers[node_id].index(rank)
+            if keep_raylet_devices:
+                local_rank = ray_worker_device_ordinal(node_gpus[node_id], local_rank, worker_visible_devices[rank])
             kwargs = dict(
                 fastvideo_args=self.fastvideo_args,
                 local_rank=local_rank,
@@ -281,6 +347,43 @@ class RayDistributedExecutor(Executor):
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
+
+    def _setup_h3_encoder_split(self, sorted_worker_ips: list[str]) -> None:
+        """Reserve the leading encoder nodes' workers and stamp the count onto the args.
+
+        ``sorted_worker_ips`` follows the driver-then-node sort, so workers of one
+        node are contiguous; the first ``h3_encoder_nodes`` distinct IPs form the
+        encoder group (ranks ``0..n-1``). Workers must be one-per-node style
+        placements; multi-GPU nodes simply contribute all of their workers.
+        """
+        args = self.fastvideo_args
+        # ``_fold_h3_encoder_split_env`` already normalized 0/unset to 1.
+        nodes_needed = int(args.h3_encoder_nodes)
+        ordered_ips: list[str] = []
+        for ip in sorted_worker_ips:
+            if ip not in ordered_ips:
+                ordered_ips.append(ip)
+        if len(ordered_ips) < nodes_needed + 1:
+            raise RuntimeError(f"MiniMax-H3 encoder split needs at least {nodes_needed + 1} distinct nodes "
+                               f"({nodes_needed} encoder + 1 denoise), got {len(ordered_ips)}.")
+        encoder_ips = set(ordered_ips[:nodes_needed])
+        encoder_workers = sum(1 for ip in sorted_worker_ips if ip in encoder_ips)
+        if not 1 <= encoder_workers < len(sorted_worker_ips):
+            raise RuntimeError(f"MiniMax-H3 encoder split resolved {encoder_workers} encoder workers out of "
+                               f"{len(sorted_worker_ips)}; need at least one denoise worker.")
+        from fastvideo.fastvideo_args import h3_split_sp_error, probe_h3_attention_heads
+
+        denoise_workers = len(sorted_worker_ips) - encoder_workers
+        heads = probe_h3_attention_heads(args.model_path)
+        if heads and heads % denoise_workers:
+            raise RuntimeError(h3_split_sp_error(heads, denoise_workers, len(sorted_worker_ips), unit="workers"))
+        args.h3_encoder_nodes = nodes_needed
+        args.h3_encoder_workers = encoder_workers
+        logger.info(
+            "MiniMax-H3 encoder split: ranks 0..%d on nodes %s run the Qwen3-VL conditioner only; ranks %d..%d "
+            "run DiT/VAE with sp_size=%d", encoder_workers - 1, sorted(encoder_ips), encoder_workers,
+            len(sorted_worker_ips) - 1,
+            len(sorted_worker_ips) - encoder_workers)
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
@@ -322,19 +425,27 @@ class RayDistributedExecutor(Executor):
                 "fastvideo_args": fastvideo_args,
             },
         )
-        output = responses[0].output.cpu()
+        # Under the MiniMax-H3 encoder split the encoder ranks answer with a
+        # stub batch; the decoded output lives on the first denoise rank.
+        src = 0
+        # The executor's own args carry h3_encoder_workers (stamped when the
+        # workers were placed); fall back to the per-call args when absent.
+        split_args = getattr(self, "fastvideo_args", fastvideo_args)
+        if getattr(split_args, "h3_encoder_split", False):
+            src = int(split_args.h3_encoder_workers)
+        output = responses[src].output.cpu()
 
         logging_info = None
-        if envs.FASTVIDEO_STAGE_LOGGING:
-            logging_info = responses[0].logging_info
+        if envs.FASTVIDEO_STAGE_LOGGING.get():
+            logging_info = responses[src].logging_info
 
         result_batch = ForwardBatch(
             data_type=forward_batch.data_type,
             output=output,
             logging_info=logging_info,
-            extra=responses[0].extra,
-            trajectory_latents=responses[0].trajectory_latents,
-            trajectory_timesteps=responses[0].trajectory_timesteps,
+            extra=responses[src].extra,
+            trajectory_latents=responses[src].trajectory_latents,
+            trajectory_timesteps=responses[src].trajectory_timesteps,
         )
         return result_batch
 
@@ -382,6 +493,9 @@ class RayDistributedExecutor(Executor):
                        timeout: float | None = None,
                        args: tuple = (),
                        kwargs: dict | None = None) -> list[Any]:
+        if timeout is not None:
+            raise NotImplementedError("RayDistributedExecutor.collective_rpc does not support per-call timeouts; "
+                                      "omit the timeout and rely on Ray's own task failure handling instead.")
         return self._run_ray_workers(method, *args, **(kwargs or {}))
 
     def _run_ray_workers(

@@ -11,10 +11,10 @@ forward signature than Wan (no ``encoder_attention_mask``, no
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29517")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29517")
 
 from pathlib import Path
 

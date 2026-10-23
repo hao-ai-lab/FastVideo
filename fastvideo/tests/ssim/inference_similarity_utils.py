@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from logging import Logger
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.tests.ssim.bootstrap_references import (
     xfail_missing_reference_in_bootstrap_mode, )
@@ -18,7 +19,6 @@ from fastvideo.tests.ssim.reference_utils import (
     select_ssim_params,
 )
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 DEVICE_MAPPINGS = (
     ("A40", "A40"),
@@ -35,22 +35,14 @@ DEVICE_MAPPINGS = (
 
 @contextmanager
 def attention_backend(backend: str) -> Iterator[None]:
-    previous = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = backend
-    try:
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(backend):
         yield
-    finally:
-        if previous is None:
-            os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
-        else:
-            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = previous
 
 
 def shutdown_executor(generator: VideoGenerator | None) -> None:
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def resolve_inference_device_reference_folder(logger: Logger) -> str:

@@ -173,7 +173,7 @@ Create a new documentation page for your backend to explain its usage, installat
 
 1. **Create Directory**: `docs/attention/mynew_attn/`
 2. **Create Index**: `docs/attention/mynew_attn/index.md`
-3. **Update Navigation**: Add an entry to `mkdocs.yml` under the "Attention" tab.
+3. **Update Navigation**: Add an entry under Attention research in `docs-site/navigation.json`.
 
 ## Checklist
 
@@ -184,4 +184,4 @@ Create a new documentation page for your backend to explain its usage, installat
 * [ ] (Optional) Exported kernel in `fastvideo-kernel/python/fastvideo_kernel/__init__.py`.
 * [ ] Implemented `forward` method respecting the standard signature.
 * [ ] Added unit tests in `tests/`.
-* [ ] Added documentation in `docs/attention/` and updated `mkdocs.yml`.
+* [ ] Added documentation in `docs/attention/` and updated `docs-site/navigation.json`.

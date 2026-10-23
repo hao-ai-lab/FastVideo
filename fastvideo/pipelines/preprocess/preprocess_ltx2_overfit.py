@@ -32,6 +32,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
 
@@ -41,25 +42,14 @@ MAX_HEIGHT = 480  # divisible by 32 (spatial compression)
 MAX_WIDTH = 832
 TRAIN_FPS = 24.0  # matches the LTX-2 preset fps used at validation
 
-DATA_DIR = os.environ.get("LTX2_OVERFIT_DATA_DIR", "data/cats")
-CAPTION_JSON = os.environ.get("LTX2_OVERFIT_CAPTION_JSON", "videos2caption_1_sample.json")
-VIDEO_SUBDIR = os.environ.get("LTX2_OVERFIT_VIDEO_SUBDIR", "video")
-OUTPUT_DIR = os.environ.get("LTX2_OVERFIT_OUTPUT_DIR", "data/ltx2_overfit_preprocessed")
-MODEL_REPO = os.environ.get("LTX2_OVERFIT_MODEL", "FastVideo/LTX2-Distilled-Diffusers")
-# The train dataloader samples with drop_last=True across data-parallel
-# groups, so the dataset must hold at least num_sp_groups * batch_size
-# rows or every rank gets zero batches. Replicate the overfit sample so
-# a 4-GPU FSDP run still sees one batch per rank.
-NUM_COPIES = int(os.environ.get("LTX2_OVERFIT_NUM_COPIES", "4"))
-
 
 def _init_single_process_distributed() -> None:
     """FastVideo component loaders expect an initialized distributed env."""
-    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-    os.environ.setdefault("MASTER_PORT", "29511")
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
-    os.environ.setdefault("LOCAL_RANK", "0")
+    envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+    envs.setdefault_external("MASTER_PORT", "29511")
+    envs.setdefault_external("RANK", "0")
+    envs.setdefault_external("WORLD_SIZE", "1")
+    envs.setdefault_external("LOCAL_RANK", "0")
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
     maybe_init_distributed_environment_and_model_parallel(1, 1)
@@ -106,16 +96,27 @@ def main() -> None:
         PipelineComponentLoader, )
     from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 
+    data_dir = envs.FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR.get()
+    caption_json = envs.FASTVIDEO_TEST_LTX2_OVERFIT_CAPTION_JSON.get()
+    video_subdir = envs.FASTVIDEO_TEST_LTX2_OVERFIT_VIDEO_SUBDIR.get()
+    output_dir = envs.FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR.get()
+    model_repo = envs.FASTVIDEO_TEST_LTX2_OVERFIT_MODEL.get()
+    # The train dataloader samples with drop_last=True across data-parallel
+    # groups, so the dataset must hold at least num_sp_groups * batch_size
+    # rows or every rank gets zero batches. Replicate the overfit sample so
+    # a 4-GPU FSDP run still sees one batch per rank.
+    num_copies = envs.FASTVIDEO_TEST_LTX2_OVERFIT_NUM_COPIES.get()
+
     device = torch.device("cuda:0")
-    model_path = maybe_download_model(MODEL_REPO)
+    model_path = maybe_download_model(model_repo)
     model_index = verify_model_config_and_directory(model_path)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     # The map-style dataset caches parquet file metadata; a stale cache
     # next to a regenerated parquet can crash or serve old rows.
-    shutil.rmtree(os.path.join(OUTPUT_DIR, "map_style_cache"), ignore_errors=True)
+    shutil.rmtree(os.path.join(output_dir, "map_style_cache"), ignore_errors=True)
 
-    with open(os.path.join(DATA_DIR, CAPTION_JSON)) as f:
+    with open(os.path.join(data_dir, caption_json)) as f:
         caption_data = json.load(f)
 
     pipeline_config = LTX2T2VConfig()
@@ -163,7 +164,7 @@ def main() -> None:
         video_name = item["path"]
         record_id = f"{idx:04d}_{video_name}"
         caption = item["cap"][0] if isinstance(item["cap"], list) else item["cap"]
-        video_path = os.path.join(DATA_DIR, VIDEO_SUBDIR, video_name)
+        video_path = os.path.join(data_dir, video_subdir, video_name)
 
         print(f"\nProcessing: {video_name}")
         print(f"  Caption: {caption[:80]}...")
@@ -213,7 +214,7 @@ def main() -> None:
         # Save the preprocessed clip so overfit tests can compare
         # validation output against the memorization target.
         import imageio
-        ref_path = os.path.join(OUTPUT_DIR, f"training_sample_{idx}.mp4")
+        ref_path = os.path.join(output_dir, f"training_sample_{idx}.mp4")
         with imageio.get_writer(ref_path, fps=TRAIN_FPS) as writer:
             for frame in frames_np:
                 writer.append_data(frame)
@@ -223,9 +224,9 @@ def main() -> None:
     del text_encoder, tokenizer, vae
     torch.cuda.empty_cache()
 
-    # Write parquet (replicated NUM_COPIES times; see comment at top)
+    # Write parquet (replicated num_copies times; see the comment above num_copies)
     replicated = []
-    for copy_idx in range(max(1, NUM_COPIES)):
+    for copy_idx in range(max(1, num_copies)):
         for r in records:
             row = dict(r)
             row["id"] = f"{r['id']}_copy{copy_idx}"
@@ -235,10 +236,10 @@ def main() -> None:
          for k in replicated[0]},
         schema=pyarrow_schema_t2v,
     )
-    output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
+    output_path = os.path.join(output_dir, "data_00000.parquet")
     pq.write_table(table, output_path)
     print(f"\nWrote {len(replicated)} records "
-          f"({len(records)} unique x {max(1, NUM_COPIES)} copies) to {output_path}")
+          f"({len(records)} unique x {max(1, num_copies)} copies) to {output_path}")
 
     # Write validation prompts for the validation callback
     val_prompts = {
@@ -246,12 +247,12 @@ def main() -> None:
             "caption": (item["cap"][0] if isinstance(item["cap"], list) else item["cap"]),
         } for item in caption_data],
     }
-    val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
+    val_path = os.path.join(output_dir, "validation_prompts.json")
     with open(val_path, "w") as f:
         json.dump(val_prompts, f, indent=2)
     print(f"Wrote validation prompts to {val_path}")
 
-    print("\nDone! Use data_path: " + OUTPUT_DIR + " in training config.")
+    print("\nDone! Use data_path: " + output_dir + " in training config.")
 
 
 if __name__ == "__main__":
