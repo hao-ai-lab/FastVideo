@@ -45,3 +45,9 @@ def env_overrides():
     """
     with contextlib.ExitStack() as stack:
         yield stack
+
+
+@pytest.fixture
+def cuda_hidden(env_overrides):
+    """Hide CUDA from child processes started during the test; restored at teardown."""
+    env_overrides.enter_context(envs.override_external("CUDA_VISIBLE_DEVICES", ""))
