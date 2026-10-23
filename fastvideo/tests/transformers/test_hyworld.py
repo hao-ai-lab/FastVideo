@@ -35,6 +35,11 @@ GB200_REFERENCE_LATENTS = {
     # Measured on the Slinky NVIDIA GB200 CI tray (build 4967).
     AttentionBackendEnum.FLASH_ATTN: -201149.9431345705,
 }
+GB10_REFERENCE_LATENTS: dict[AttentionBackendEnum, float] = {
+    # NVIDIA GB10 (DGX Spark, sm_121) accumulates differently from H100 and GB200.
+    # Record per-backend values here from a real GB10 run; until then the test
+    # skips on GB10 instead of comparing against another architecture's sum.
+}
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -153,7 +158,12 @@ def test_hyworld_transformer():
     latent = output.double().sum().item()
 
     device_name = torch.cuda.get_device_name(device)
-    device_references = GB200_REFERENCE_LATENTS if "B200" in device_name else REFERENCE_LATENTS
+    if "GB10" in device_name:
+        if attention_backend not in GB10_REFERENCE_LATENTS:
+            pytest.skip(f"HYWorld transformer test has no GB10 reference latent for {attention_backend}.")
+        device_references = GB10_REFERENCE_LATENTS
+    else:
+        device_references = GB200_REFERENCE_LATENTS if "B200" in device_name else REFERENCE_LATENTS
     reference_latent = device_references.get(attention_backend, REFERENCE_LATENTS[attention_backend])
     diff = abs(reference_latent - latent)
     relative_diff = diff / abs(reference_latent)

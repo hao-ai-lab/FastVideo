@@ -26,7 +26,13 @@ and the coordination contract with that bundle.
   GPU lane. Each step pins a unique key and label, a 90-minute timeout, the
   trusted `/opt/fastvideo-ci-runner/run-ci` command (`run-unit` is the one
   compatibility wrapper), step-level internal `TEST_TYPE`, and
-  `queue: "ci-runner"`.
+  `queue: "ci-runner"` plus a `backend` agent tag.
+- `backend` is `"${FV_SPARK_BACKEND:-slurm}"` for the Spark-capable
+  (single-GPU) lanes and a literal `"slurm"` for ssim, training,
+  distillation, self-forcing, lora-training, training-vsa and performance.
+  A Spark runner sets `FASTVIDEO_CI_BACKEND=spark4`; gate cluster-only tests on
+  that flag, never on memory heuristics. Keep
+  `SPARK_CAPABLE_LANES` in `test_ci_test_collection.py` in sync.
 - Active CI contains no `pr_test.sh` command, Modal invocation, default queue,
   Buildkite plugin, `soft_fail`, or job-controlled artifact glob.
 - The six Fastcheck lanes use `:microscope:` labels. Full-Suite-only lanes use
@@ -45,8 +51,8 @@ and the coordination contract with that bundle.
 - Focused merge builds may pass allowlisted golden-gate and SSIM test basenames.
   The private host validates the lane plan and basenames before staging them,
   and the in-container scripts validate them again. Direct `/test ssim`,
-  explicit `/test full`, and the weekly main-branch schedule run the complete
-  SSIM matrix.
+  explicit `/test full`, and the weekly main-branch Full Suite
+  (`ci-scheduled-full-suite.yml`) run the complete SSIM matrix.
 - The trusted uploader serves exactly three entry pipelines:
   `pr-fastcheck` for automatic PR builds, `ci` for slash-command/ready-label
   API builds, and `fastvideo-performance-lane` for the weekly schedule. Keep
