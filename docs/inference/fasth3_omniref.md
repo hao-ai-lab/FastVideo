@@ -148,6 +148,37 @@ Select the NVFP4 decoder per configuration with
 holds base MiniMax-H3's full 36-block VAE, so both the 36-block quality tier and
 the 8-block fast tier apply.
 
+## Continuing a video
+
+A Ref2VA request can continue an earlier video. It takes the earlier video's last
+5, 22 or 39 frames (and their sound, if any) as a continuation clip, and the
+generated video starts by regenerating those frames at the same positions: the
+clip's latent rows take the coordinates of the target's first latent frames and
+audio latents, the reference context of
+[ComfyUI-H3-Continuum](https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum).
+Drop the clip's frames, and the matching audio, from the new video, then append
+the rest to the earlier one.
+
+- Over HTTP, set `continuation_video` to the clip's URL or local path (under
+  `server.media_roots`) beside the usual references. In Python, append
+  `MiniMaxH3Reference(source=clip, media_type="continuation")` to `references`.
+- The clip is resampled to 24 fps and must then have 5, 22 or 39 frames on the
+  target canvas. A request takes at most one clip and still needs at least one
+  reference; the clip does not count toward the reference limits and is not
+  shown to the text encoder.
+- `num_frames` counts the clip: 22 frames plus five new seconds is 142,
+  aligned up to 158.
+- Write the prompt from the clip's actual end state. When the prompt's opening
+  contradicts the clip, the model tends to cut to a new shot right after it.
+- Each continuation drifts a little toward higher saturation and sharpness, so
+  fewer, longer segments (two 15-second ones rather than six 5-second ones) hold
+  up better.
+
+Measured on a FastH3 OmniRef PDD student at 1344×768, 22-frame clips re-encoded
+from the earlier output: the jump at a join was about half that of conditioning
+the next segment on the earlier last frame as an image reference, and the sound
+continued instead of restarting from near silence.
+
 ## Environment
 
 The profiles set these; set them yourself when driving the YAML recipes.

@@ -411,6 +411,41 @@ def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
         )
 
 
+def test_fasth3_ref2va_continuation_video_becomes_a_continuation_reference(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(
+        prompt="a fox",
+        task="ref2va",
+        aspect_ratio="16:9",
+        num_frames=141,
+        image_reference=[{"image_url": "/tmp/reference.png"}],
+        continuation_video="/tmp/clip.mkv",
+    )
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("MiniMaxAI/MiniMax-H3", override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
+        served_model_name="minimax-h3",
+        output_dir=str(tmp_path),
+    )
+    references = adapted.inputs.references
+    assert [(reference.media_type, reference.source) for reference in references] == [
+        ("image", "/tmp/reference.png"),
+        ("continuation", "/tmp/clip.mkv"),
+    ]
+
+
+def test_continuation_video_needs_a_ref2va_server(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", num_frames=141, continuation_video="/tmp/clip.mkv")
+    with pytest.raises(RequestAdaptationError, match="continuation_video requires"):
+        build_generation_request(
+            "video_gen_test",
+            request,
+            _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+            served_model_name="fasth3",
+            output_dir=str(tmp_path),
+        )
+
+
 def test_aspect_ratio_overrides_operator_dimensions(tmp_path: Path) -> None:
     default_request = parse_config(
         GenerationRequest,
