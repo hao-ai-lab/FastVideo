@@ -849,13 +849,56 @@ class VAELoader(ComponentLoader):
         # The swap runs where the VAE was built (the CPU, see ``_h3_nvfp4_decoder_path``); a pre-packed
         # file never allocates the quantized linears' full-precision weights, a bf16 file packs on the GPU.
         device = next(vae.parameters()).device
-        metadata = apply_nvfp4_decoder_checkpoint(vae, load_nvfp4_decoder_checkpoint(path, device), freeze=False)
+        checkpoint = load_nvfp4_decoder_checkpoint(path, device)
+        student_layers = int(checkpoint["metadata"].get("student_layers", loaded_blocks))
+        if student_layers > loaded_blocks:
+            # A complete decoder export can also replace a shallower light VAE.
+            # Build its topology from the host geometry; strict loading below
+            # requires every exported weight and rejects incompatible widths.
+            from fastvideo.models.vaes.minimax_h3_video import MiniMaxH3VideoViTDecoder3d
+
+            arch = vae.config
+            with torch.device(device):
+                vae.decoder = MiniMaxH3VideoViTDecoder3d(
+                    in_channels=arch.latent_channels,
+                    out_channels=arch.out_channels,
+                    patch_size=vae.spatial_compression_ratio,
+                    patch_size_t=vae.temporal_compression_ratio,
+                    num_layers=student_layers,
+                    num_attention_heads=arch.decoder_num_attention_heads,
+                    attention_head_dim=arch.decoder_attention_head_dim,
+                    num_register_tokens=arch.decoder_num_register_tokens,
+                    ffn_mult=arch.decoder_ffn_mult,
+                    rope_theta=arch.decoder_rope_theta,
+                    rope_dim_ratio=arch.decoder_rope_dim_ratio,
+                    norm_eps=arch.decoder_norm_eps,
+                ).eval()
+        metadata = apply_nvfp4_decoder_checkpoint(vae, checkpoint, freeze=False)
         vae.to(target_device)
         if target_device.type == "cuda":
             # Frozen layers hold only packed FP4 weights; packing needs the CUDA FP4 kernels.
             freeze_nvfp4_linears(vae.decoder)
-        logger.info("MiniMax-H3 VAE decoder: NVFP4 %s (%d of %d blocks, act_scale=%s), bf16 decode autocast", path,
+        logger.info("MiniMax-H3 VAE decoder: NVFP4 %s (%d blocks, original %d, act_scale=%s), bf16 decode autocast", path,
                     len(vae.decoder.transformer_blocks), loaded_blocks, metadata.get("act_scale"))
+
+    @staticmethod
+    def _quantize_h3_dense_decoder(vae: nn.Module) -> None:
+        """Quantize the original full-depth decoder in memory; leave the checkpoint untouched."""
+        from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import (
+            convert_decoder_to_nvfp4,
+            freeze_nvfp4_linears_on_device,
+        )
+
+        # Fused-state caching reads input_amax._version. Even an outer inference
+        # context must create ordinary version-tracked buffers during conversion.
+        with torch.inference_mode(False), torch.no_grad():
+            names = convert_decoder_to_nvfp4(vae.decoder, compute_dtype=torch.bfloat16, act_scale="unit")
+            freeze_nvfp4_linears_on_device(vae.decoder)
+        vae.requires_grad_(False)
+        vae.decode_autocast_dtype = torch.bfloat16
+        logger.info("MiniMax-H3 VAE decoder: runtime NVFP4 quantization of %d original block linears "
+                    "(%d blocks, unit activation scale), bf16 decode autocast", len(names),
+                    len(vae.decoder.transformer_blocks))
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
@@ -867,6 +910,10 @@ class VAELoader(ComponentLoader):
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
         fastvideo_args.model_paths["vae"] = model_path
+        quantize_dense = (class_name == "AutoencoderKLMiniMaxH3"
+                          and getattr(fastvideo_args, "h3_vae_nvfp4_quantize_dense", False))
+        if quantize_dense and self._h3_nvfp4_decoder_path(class_name, fastvideo_args):
+            raise ValueError("h3_vae_nvfp4_quantize_dense and an exported NVFP4 decoder are mutually exclusive")
 
         from fastvideo.platforms import current_platform
 
@@ -993,9 +1040,9 @@ class VAELoader(ComponentLoader):
                 int8_convrot_overlay_to_apply,
             )
             int8_convrot_path = int8_convrot_overlay_to_apply(model_path)
-            if int8_convrot_path is not None and self._h3_nvfp4_decoder_path(class_name, fastvideo_args):
+            if int8_convrot_path is not None and (quantize_dense or self._h3_nvfp4_decoder_path(class_name, fastvideo_args)):
                 logger.info("Skipping MiniMax-H3 INT8 ConvRot VAE overlay %s: the NVFP4 decoder replaces the "
-                            "decoder", int8_convrot_path)
+                            "decoder execution", int8_convrot_path)
                 int8_convrot_path = None
             safetensors_list = dense_vae_safetensors(safetensors_list)
         if not safetensors_list:
@@ -1041,6 +1088,8 @@ class VAELoader(ComponentLoader):
         nvfp4_decoder = self._h3_nvfp4_decoder_path(class_name, fastvideo_args)
         if nvfp4_decoder:
             self._apply_h3_nvfp4_decoder(vae, nvfp4_decoder, target_device)
+        elif quantize_dense:
+            self._quantize_h3_dense_decoder(vae)
         if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
                 and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
             vae.optimize_memory_format()
@@ -1332,7 +1381,12 @@ class TransformerLoader(ComponentLoader):
             adaln_table = envs.FASTVIDEO_H3_ADALN_TABLE.get() or None
             adaln_host_cache = (fastvideo_args.inference_mode and not fastvideo_args.use_fsdp_inference
                                 and (envs.FASTVIDEO_H3_ADALN_CACHE.get() or adaln_table is not None))
-            layerwise_load = layerwise_load or adaln_host_cache
+            from fastvideo.platforms import current_platform
+            adaln_resident_cache = (adaln_host_cache and adaln_table is None
+                                    and not fastvideo_args.dit_layerwise_offload
+                                    and current_platform.has_unified_memory())
+            # Tables skip the projections; unified-memory caches reuse the device allocation.
+            layerwise_load = layerwise_load or (adaln_host_cache and adaln_table is None and not adaln_resident_cache)
             model = maybe_load_fsdp_model(
                 model_cls=model_cls,
                 init_params={
@@ -1381,8 +1435,9 @@ class TransformerLoader(ComponentLoader):
         model = model.eval()
 
         if adaln_host_cache and hasattr(model, "enable_adaln_host_cache"):
-            model.enable_adaln_host_cache(adaln_table)
+            model.enable_adaln_host_cache(adaln_table, keep_resident=adaln_resident_cache)
             logger.info("AdaLN modulation: %s", "precomputed tables from " + adaln_table if adaln_table
+                        else "resident per-timestep cache" if adaln_resident_cache
                         else "projections in pinned host memory behind a per-timestep cache")
         if layerwise_load and not fastvideo_args.dit_layerwise_offload:
             model = model.to(get_local_torch_device())

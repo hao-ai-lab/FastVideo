@@ -390,10 +390,9 @@ off on other GPUs unless a matched benchmark validates the split there.
 `FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
 decoder distilled with quantization-aware training and exported by
 `scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py`. At load the
-INT8 overlay is skipped, the VAE is depth-cut to the decoder's block count
-(the 26-layer light VAE hosts an 8-block decoder; a 36-block decoder needs
-the full `MiniMaxAI/MiniMax-H3` `vae/` in the stack's `vae/` folder), and
-only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
+INT8 overlay is skipped, the VAE uses the exported decoder's block count
+(a complete export can also replace a shallower light decoder when its
+head/width geometry matches), and only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
 2.3 GiB). The decode stage runs bf16 autocast for these decoders, the
 precision they were trained in. The decoder GEMMs use the cuDNN backend on
 GB10; outputs match CUTLASS bit for bit.
@@ -405,6 +404,16 @@ master weights, or pre-packed NVFP4 weights from
 read straight onto the GPU and never materializes the full-precision weights
 of the quantized linears; it decodes bit-identically to packing the bf16 file
 at load.
+
+To quantize the original decoder without replacing it with a distilled export,
+set `generator.pipeline.experimental.h3_vae_nvfp4_quantize_dense: true` and
+`generator.engine.compile.vae_enabled: false`. This experimental option keeps
+every decoder block, quantizes its block linears to NVFP4 with unit activation
+scale during loading, and uses the existing fused BF16 decoder path. It leaves
+the checkpoint files unchanged and skips the INT8 overlay. Clear
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` and `h3_vae_nvfp4_decoder`: exported and runtime
+quantization selections are mutually exclusive. The output is lossy and needs
+quality validation for the selected checkpoint. Blackwell FP4 hardware is required.
 
 V2 at 832x480, 124 frames, seed 1234, one Spark, warm calls:
 

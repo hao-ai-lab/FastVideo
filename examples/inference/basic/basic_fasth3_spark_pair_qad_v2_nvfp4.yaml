@@ -1,5 +1,6 @@
 # Start Ray on both Sparks and source spark_pair_env.sh first; see spark_pair.md.
 # FastH3-QAD-v2 eight-forward video+audio on two DGX Sparks over QSFP RoCE.
+# Uses the published fast-8L NVFP4 decoder on both workers (FASTVIDEO_H3_VAE_NVFP4_DECODER) with parallel temporal chunks.
 # Download the complete release checkpoint as described in
 # docs/getting_started/installation/spark_performance.md.
 #
@@ -9,8 +10,8 @@
 # settings below are an inference choice, not its linears-only QAD recipe.
 # The NVFP4 encoder and lightweight VAE ship in the same repository.
 #
-# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
-# FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
+# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_qad_v2_nvfp4.yaml
@@ -36,7 +37,7 @@ generator:
       lazy_module_load: false
     compile:
       enabled: false
-      vae_enabled: false
+      vae_enabled: false  # Published NVFP4 decoder uses its fused eager inference path.
   pipeline:
     workload_type: t2v
     vae_tiling: true
@@ -47,6 +48,10 @@ generator:
         prefix_precision: fp8
         two_level_p: true
         smooth_k: true
+        sp_head_chunks: 7
+        sp_pooled_key_mean: true
+        sp_direct_keys: true
+        sp_projection_overlap: true
       VSA_sparsity: 0.8
       VSA_tile_size: 64
       h3_sequential_load: false

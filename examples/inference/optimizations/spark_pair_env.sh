@@ -19,3 +19,7 @@ export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-0}"
 # runaway and SIGTERMs the worker around shard 11/14.
 export RAY_memory_monitor_refresh_ms="${RAY_memory_monitor_refresh_ms:-0}"
 export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-1.0}"
+# Measured on a two-Spark QSFP pair: eight NCCL channels per peer and high-priority
+# NCCL streams let the sequence-parallel exchanges overlap the projection GEMMs.
+export NCCL_NCHANNELS_PER_NET_PEER="${NCCL_NCHANNELS_PER_NET_PEER:-8}"
+export TORCH_NCCL_HIGH_PRIORITY="${TORCH_NCCL_HIGH_PRIORITY:-1}"
