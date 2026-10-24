@@ -422,3 +422,55 @@ def test_encoder_split_decodes_in_the_denoise_group_on_its_first_rank(monkeypatc
                         lambda: SimpleNamespace(is_first_rank=True, world_size=1, rank_in_group=0, ranks=[0]))
     result = MiniMaxH3VideoDecodingStage(EncoderRankVAE()).forward(ForwardBatch(data_type="video"), args)
     assert result.output.shape == (0, 3, 0, 0, 0)
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+@pytest.mark.parametrize("use_idle_slot", [True, False])
+def test_idle_audio_preserves_request_and_output_ownership(monkeypatch, rank, use_idle_slot) -> None:
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_decoding import MiniMaxH3AudioDecodingStage
+
+    calls = []
+    waveform = torch.arange(16, dtype=torch.float32).reshape(8, 2)
+    audio = MiniMaxH3AudioDecodingStage(SimpleNamespace(sampling_rate=32000))
+
+    def decode_audio(batch, args):
+        assert not torch.is_autocast_enabled("cpu")
+        assert batch.latents is not None and batch.audio_latents is not None
+        calls.append(batch)
+        return waveform.clone(), 32000
+
+    audio.decode_audio = decode_audio
+    group = SimpleNamespace(world_size=2, rank_in_group=rank)
+
+    def broadcast(value, src):
+        assert src == 1
+        if rank == 1 and use_idle_slot:
+            torch.testing.assert_close(value[0], waveform, atol=0, rtol=0)
+        return (waveform.clone(), 32000) if use_idle_slot else None
+
+    group.broadcast_object = broadcast
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group", lambda: group)
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "h3_is_output_worker", lambda args: rank == 0)
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    saved = []
+    for _ in range(2):
+        batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4),
+                             latents=torch.ones(2, 4), audio_latents=torch.ones(2, 4))
+        callback = video._idle_audio_callback(batch, SimpleNamespace(), group, torch.device("cpu"))
+        assert (callback is not None) == (rank == 1)
+        if callback is not None and use_idle_slot:
+            # Video's autocast must not change audio's arithmetic.
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                callback()
+        assert batch.latents is not None and batch.audio_latents is not None
+        result = audio.forward(batch, SimpleNamespace())
+        saved.append(result.extra["audio"])
+        assert result.latents is None and result.audio_latents is None
+        assert not any(key.startswith("minimax_h3_") for key in result.extra)
+        assert result.extra["audio_sample_rate"] == 32000
+        assert result.extra["audio"].shape == ((8, 2) if rank == 0 else (0, 2))
+    assert len(calls) == (2 if (rank == 1 and use_idle_slot) or (rank == 0 and not use_idle_slot) else 0)
+    if rank == 0:
+        assert saved[0].data_ptr() != saved[1].data_ptr()
+        torch.testing.assert_close(saved[0], waveform, atol=0, rtol=0)

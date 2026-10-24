@@ -234,6 +234,9 @@ class FastVideoArgs:
     # Exported NVFP4 MiniMax-H3 decoder file (decoder-nvfp4.safetensors or decoder.safetensors) that replaces
     # the VAE decoder at load. Overrides FASTVIDEO_H3_VAE_NVFP4_DECODER. Needs Blackwell FP4 hardware.
     h3_vae_nvfp4_decoder: str | None = None
+    # Quantize the loaded dense decoder in memory, preserving its full depth and original weights file.
+    # Mutually exclusive with an exported NVFP4 decoder; skips the INT8 overlay and uses BF16 decode autocast.
+    h3_vae_nvfp4_quantize_dense: bool = False
 
     # Load each heavy component on first use and free it once the last stage
     # that holds it has run, instead of keeping every component resident from
@@ -443,12 +446,19 @@ class FastVideoArgs:
             env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
-        allowed_fp4 = {"enabled", "prefix_precision", "two_level_p", "smooth_k"}
+        allowed_fp4 = {
+            "enabled", "prefix_precision", "two_level_p", "smooth_k", "sp_head_chunks", "sp_pooled_key_mean",
+            "sp_projection_overlap", "sp_direct_keys", "sp_input_gather"
+        }
         if not isinstance(self.h3_vsa_fp4, dict) or self.h3_vsa_fp4.keys() - allowed_fp4:
             raise ValueError(f"h3_vsa_fp4 must be a mapping with keys from {sorted(allowed_fp4)}")
-        for key in ("enabled", "two_level_p", "smooth_k"):
+        for key in ("enabled", "two_level_p", "smooth_k", "sp_pooled_key_mean", "sp_projection_overlap",
+                    "sp_direct_keys", "sp_input_gather"):
             if key in self.h3_vsa_fp4 and not isinstance(self.h3_vsa_fp4[key], bool):
                 raise ValueError(f"h3_vsa_fp4.{key} must be a boolean")
+        head_chunks = self.h3_vsa_fp4.get("sp_head_chunks", 1)
+        if type(head_chunks) is not int or head_chunks < 1:
+            raise ValueError("h3_vsa_fp4.sp_head_chunks must be a positive integer")
         if self.h3_vsa_fp4.get("prefix_precision", "") not in ("", "fp8", "bf16"):
             raise ValueError("h3_vsa_fp4.prefix_precision must be empty, fp8 or bf16")
         if self.h3_vsa_fp4.get("enabled") and (self.inference_torch_compile or self.enable_torch_compile):

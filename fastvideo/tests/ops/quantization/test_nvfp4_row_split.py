@@ -9,8 +9,8 @@ from fastvideo.layers.quantization import nvfp4_config
 from fastvideo.layers.quantization.nvfp4_config import _mm_fp4_row_chunks
 
 
-@pytest.mark.parametrize("rows", [35328, 35000, 16384, 20481])
-@pytest.mark.parametrize("parts", [1, 2, 4])
+@pytest.mark.parametrize("rows", [35328, 35000, 16384, 20481, 14859])
+@pytest.mark.parametrize("parts", [1, 2, 4, 8])
 def test_row_chunks_cover_rows_in_order(rows: int, parts: int) -> None:
     a = torch.arange(rows * 2, dtype=torch.float32).view(rows, 2)
     scale = torch.arange(rows + (-rows) % 128, dtype=torch.float32).view(-1, 1)
@@ -55,3 +55,39 @@ def test_large_cudnn_call_splits_only_when_opted_in(monkeypatch, policy, expecte
         nvfp4_config._mm_fp4(torch.empty(16384, 32), torch.empty(16, 64), torch.empty(16384, 1),
                               torch.empty(16, 1), None, torch.bfloat16, None, backend="cudnn")
     assert calls == [expected]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="NVFP4 direct-row parity requires CUDA")
+def test_compact_h3_direct_rows_match_whole_cudnn(monkeypatch):
+    """Real GB10 GEMMs, including non-aligned final rows and the public dispatch."""
+    if torch.cuda.get_device_capability() != (12, 1):
+        pytest.skip("This measured dispatch is specific to GB10")
+    import flashinfer
+    from fastvideo import envs
+
+    torch.manual_seed(7331)
+    with torch.inference_mode():
+        a = torch.randn((14859, 5376), device="cuda", dtype=torch.bfloat16)
+        weight = torch.randn((28672, 5376), device="cuda", dtype=torch.bfloat16)
+        sf = torch.ones((), device="cuda", dtype=torch.float32)
+        qa, sa = flashinfer.nvfp4_quantize(a, sf)
+        qw, sw = flashinfer.nvfp4_quantize(weight, sf)
+        qa, qw = qa.view(torch.uint8), qw.view(torch.uint8)
+        expected = flashinfer.mm_fp4(qa, qw.T, sa, sw.T, sf, torch.bfloat16, backend="cudnn")
+        calls = []
+        direct = nvfp4_config._mm_fp4_direct_rows
+
+        def recorded(*args):
+            calls.append(args[-1])
+            return direct(*args)
+
+        monkeypatch.setattr(nvfp4_config, "_mm_fp4_direct_rows", recorded)
+        with envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.override("table"):
+            actual = nvfp4_config._mm_fp4(qa, qw.T, sa, sw.T, sf, torch.bfloat16, None, backend="cudnn")
+        assert calls == [8]
+        assert torch.equal(actual, expected)
+        calls.clear()
+        with envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.override("off"):
+            whole = nvfp4_config._mm_fp4(qa, qw.T, sa, sw.T, sf, torch.bfloat16, None, backend="cudnn")
+        assert not calls
+        assert torch.equal(whole, expected)

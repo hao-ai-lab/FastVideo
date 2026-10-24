@@ -487,7 +487,7 @@ def _write_deploy_checkpoint(path, student_layers: int, base_layers: int, heads:
     return decoder
 
 
-def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None):
+def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None, quantize_dense: bool = False):
     from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
     from fastvideo.configs.pipelines import PipelineConfig
     from fastvideo.fastvideo_args import FastVideoArgs
@@ -495,7 +495,8 @@ def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None):
 
     args = FastVideoArgs(model_path=str(vae_dir),
                          pipeline_config=PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
-                         h3_vae_nvfp4_decoder=decoder)
+                         h3_vae_nvfp4_decoder=decoder,
+                         h3_vae_nvfp4_quantize_dense=quantize_dense)
     args.vae_cpu_offload = cpu  # load on CPU
     return VAELoader().load(str(vae_dir), args)
 
@@ -666,12 +667,13 @@ def _fake_packed_checkpoint(vae, act_scale="unit"):
     }
 
 
-def test_loader_applies_packed_safetensors_without_master_weights(tmp_path):
+@pytest.mark.parametrize("loaded_layers", [5, 2])
+def test_loader_applies_packed_safetensors_without_master_weights(tmp_path, loaded_layers):
     import fastvideo.envs as envs
     from fastvideo.models.vaes.minimax_h3_nvfp4_checkpoint import write_nvfp4_decoder_safetensors
     from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import keep_evenly_spaced_blocks, nvfp4_linears
 
-    _write_vae_dir(tmp_path / "vae", decoder_layers=5)
+    _write_vae_dir(tmp_path / "vae", decoder_layers=loaded_layers)
     student = _tiny_h3_vae(_tiny_vae_arch(5))
     keep_evenly_spaced_blocks(student.decoder, 3)
     checkpoint = _fake_packed_checkpoint(student)
@@ -796,3 +798,34 @@ def test_packed_export_round_trip_is_bit_identical(tmp_path, fused, act_scale):
     latents = torch.randn(2, 24, 3, 8, 8, device="cuda")
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
         assert torch.equal(loaded.decoder(latents), reference(latents))
+
+
+@pytest.mark.parametrize("outer_inference", [False, True])
+def test_loader_quantizes_original_dense_decoder_without_depth_change(tmp_path, outer_inference):
+    import fastvideo.envs as envs
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import nvfp4_linears
+
+    _write_vae_dir(tmp_path / "vae", decoder_layers=5)
+    with envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.override(None), envs.FASTVIDEO_H3_VAE_INT8_OVERLAY.override(False):
+        dense = _load_h3_vae(tmp_path / "vae")
+        with torch.inference_mode(outer_inference):
+            quantized = _load_h3_vae(tmp_path / "vae", quantize_dense=True)
+    assert len(quantized.decoder.transformer_blocks) == 5
+    assert quantized.decode_autocast_dtype == torch.bfloat16
+    layers = nvfp4_linears(quantized.decoder)
+    assert len(layers) == 30 and all(layer.act_scale == "unit" for layer in layers)
+    assert all(layer.input_amax._version >= 0 for layer in layers)
+    assert not any(parameter.requires_grad for parameter in quantized.parameters())
+    original = dense.state_dict()
+    converted = quantized.state_dict()
+    for name, value in original.items():
+        assert torch.equal(value, converted[name]), name
+
+
+def test_loader_rejects_dense_quantization_with_exported_decoder(tmp_path):
+    import fastvideo.envs as envs
+
+    _write_vae_dir(tmp_path / "vae", decoder_layers=5)
+    with envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.override(None):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            _load_h3_vae(tmp_path / "vae", decoder=str(tmp_path / "unused.pt"), quantize_dense=True)
