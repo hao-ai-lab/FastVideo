@@ -448,12 +448,12 @@ class FastVideoArgs:
                 self.attention_backend = env_backend
         allowed_fp4 = {
             "enabled", "prefix_precision", "two_level_p", "smooth_k", "sp_head_chunks", "sp_pooled_key_mean",
-            "sp_projection_overlap", "sp_direct_keys"
+            "sp_projection_overlap", "sp_direct_keys", "sp_input_gather"
         }
         if not isinstance(self.h3_vsa_fp4, dict) or self.h3_vsa_fp4.keys() - allowed_fp4:
             raise ValueError(f"h3_vsa_fp4 must be a mapping with keys from {sorted(allowed_fp4)}")
         for key in ("enabled", "two_level_p", "smooth_k", "sp_pooled_key_mean", "sp_projection_overlap",
-                    "sp_direct_keys"):
+                    "sp_direct_keys", "sp_input_gather"):
             if key in self.h3_vsa_fp4 and not isinstance(self.h3_vsa_fp4[key], bool):
                 raise ValueError(f"h3_vsa_fp4.{key} must be a boolean")
         head_chunks = self.h3_vsa_fp4.get("sp_head_chunks", 1)

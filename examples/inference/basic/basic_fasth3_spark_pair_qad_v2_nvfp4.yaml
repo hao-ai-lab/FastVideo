@@ -52,6 +52,7 @@ generator:
         sp_pooled_key_mean: true
         sp_direct_keys: true
         sp_projection_overlap: true
+        sp_input_gather: true
       VSA_sparsity: 0.8
       VSA_tile_size: 64
       h3_sequential_load: false

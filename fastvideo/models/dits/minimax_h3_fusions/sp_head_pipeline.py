@@ -113,7 +113,15 @@ def attention_pipelined(attn, hidden_states, rotary_emb, meta, sp_group, chunks,
                    and hidden_states.is_cuda and hidden_states.dtype == torch.bfloat16
                    and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
                    and base._shared_qkv_gate_scale(attn, hidden_states) is not None)
-    if early_sends:
+    input_gather = False
+    if early_sends and options.get('sp_input_gather', False):
+        from .sp_input_gather import supports_input_gather
+        input_gather = supports_input_gather(attn, hidden_states)
+    if input_gather:
+        from .sp_input_gather import project_gathered_inputs
+        with base.STAGES.span('pipe_project_pack'):
+            packets, gate = project_gathered_inputs(attn, hidden_states, rotary_emb, sp_group, chunks, pre_quantized)
+    elif early_sends:
         from .sp_projection import project_and_exchange
         with base.STAGES.span('pipe_project_pack'):
             packets, gate_pre = project_and_exchange(attn, hidden_states, rotary_emb, sp_group.device_group,
@@ -142,12 +150,13 @@ def attention_pipelined(attn, hidden_states, rotary_emb, meta, sp_group, chunks,
                 chunks,
             )
         packets = [_start_exchange(payload[chunk], scale[chunk], sp_group.device_group) for chunk in range(chunks)]
-    with base.STAGES.span('gate_proj'):
-        if gate_pre is None:
-            gate, _ = attn.to_gate_compress(hidden_states)
-        else:
-            linear = attn.to_gate_compress
-            gate = linear.quant_method.apply(linear, hidden_states, linear.bias, pre_quantized=gate_pre)
+    if not input_gather:
+        with base.STAGES.span('gate_proj'):
+            if gate_pre is None:
+                gate, _ = attn.to_gate_compress(hidden_states)
+            else:
+                linear = attn.to_gate_compress
+                gate = linear.quant_method.apply(linear, hidden_states, linear.bias, pre_quantized=gate_pre)
     vbs = meta.variable_block_sizes
     api = base._api()
     pending = []

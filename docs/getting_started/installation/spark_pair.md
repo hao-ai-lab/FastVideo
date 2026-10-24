@@ -162,6 +162,14 @@ projection is packed, overlapping traffic with the remaining projection GEMMs. I
 QKV/gate projections with shared input quantization. Other configurations use the ordinary
 head-group exchange. Packing arithmetic and FP8 transport precision are unchanged.
 
+The optional `h3_vsa_fp4.sp_input_gather: true` gathers the existing packed FP4 inputs and
+rotary tables before computing each rank's assigned Q/K/V heads. The gate projection overlaps
+that smaller input transfer. It defaults to `false`, requires `sp_projection_overlap: true`,
+and currently supports the measured GB10/cuDNN shape: 7430 local rows, 5376 input channels,
+56 heads and bias-free NVFP4 QKV projections. Other shapes use the existing exchange path.
+All projections, normalization, rotary operations and FP8 packet rounding remain present;
+no steps or tokens are omitted. Validate generated output when changing this GEMM shape.
+
 The optional `h3_vsa_fp4.sp_pooled_key_mean: true` reuses tile statistics for key smoothing
 on the grouped tile-64 path with FP8 prefix attention and `smooth_k: true`. It defaults to
 `false`. All key rows still contribute, including zero padding in the normalization length,

@@ -99,3 +99,22 @@ class ProjectionExchange:
         return [(PendingInput(self.payload[c], self.remote[c], self.rank,
                               self.completion), PendingScale(self.scale[c], self.received_scale[c], self.completion))
                 for c in range(self.payload.shape[0])]
+
+
+def completed_projection_packets(payload: torch.Tensor, scale: torch.Tensor,
+                                 rank: int) -> list[tuple[PendingInput, PendingScale]]:
+    """Expose already source-ordered QKV packets through the usual consumers.
+
+    Input is [head groups, source ranks, QKV, rows, heads, 128]. An event orders
+    consumers on other CUDA streams after production; handles retain both
+    source slices and scales throughout their consumption.
+    """
+    if (payload.ndim != 6 or payload.shape[1:3] != (2, 3) or payload.shape[-1] != 128 or rank not in (0, 1)
+            or not payload.is_cuda or not payload.is_contiguous() or payload.dtype != torch.float8_e4m3fn
+            or scale.shape != payload.shape[:-1] or scale.device != payload.device or scale.dtype != torch.float32
+            or not scale.is_contiguous()):
+        raise ValueError("Completed projection packets require two contiguous source-rank slices")
+    completion = Completion(payload.device)
+    completion.ready.record()
+    return [(PendingInput(payload[c], payload[c, 1 - rank].view(torch.uint8), rank,
+                          completion), PendingScale(scale[c], scale[c], completion)) for c in range(payload.shape[0])]
