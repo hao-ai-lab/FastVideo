@@ -1,15 +1,15 @@
 ---
 name: ci-runner
-description: Work on FastVideo's Slurm-only, change-aware GPU CI lanes, static Buildkite graph, trusted ci-runner policy, lane scripts, and GB200 validation.
+description: Work on FastVideo's Spark 4 and Slinky Slurm GPU CI lanes, static Buildkite graph, trusted ci-runner policy, lane scripts, and hardware validation.
 ---
 
-# Slinky Slurm CI lanes
+# GPU CI lanes
 
 FastVideo's `ci-runner` Buildkite queue is the control plane for all active
-GPU CI. A private host-owned dispatcher leases GPUs from the Slinky Slurm tray
-and runs the immutable PR SHA inside an isolated Enroot container. Buildkite
-pipeline upload and Slurm submission occur on the login plane; every test
-payload executes on Slurm compute.
+GPU CI. The trusted uploader runs on the Slinky login plane. Slinky agents
+dispatch cluster lanes through Slurm into isolated Enroot containers. The
+Spark 4 agent dispatches eligible single-GPU lanes through local Slurm into
+isolated Docker containers. Both execute the immutable PR SHA.
 
 The files under `fastvideo/tests/modal/` and `.buildkite/scripts/pr_test.sh`
 are dormant rollback code. Never add an active Buildkite or slash-command
@@ -34,10 +34,13 @@ and the coordination contract with that bundle.
   that flag, never on memory heuristics. Keep
   `SPARK_CAPABLE_LANES` in `test_ci_test_collection.py` in sync.
 - The trusted uploader fills `FV_SPARK_BACKEND`: `spark4` for `fastcheck`,
-  `merge` and `direct` builds while an agent tagged
-  `queue=ci-runner,backend=spark4` is connected and not paused, `slurm`
-  otherwise. It rejects any other `backend` value. The upload step in each
-  entry pipeline requires `backend=slurm` so it never lands on the Spark runner.
+  `merge` and `direct` builds, including unset scope treated as Fastcheck,
+  while an agent tagged `queue=ci-runner,backend=spark4` is connected and
+  not paused, `slurm`
+  otherwise. Selection happens at upload time. Legacy graphs without backend
+  tags need explicit normalization; setting the variable alone does not pin
+  those jobs to Slurm. It rejects any other `backend` value. The upload step
+  in each entry pipeline requires `backend=slurm` so it never lands on the Spark runner.
 - Active CI contains no `pr_test.sh` command, Modal invocation, default queue,
   Buildkite plugin, `soft_fail`, or job-controlled artifact glob.
 - The six Fastcheck lanes use `:microscope:` labels. Full-Suite-only lanes use
@@ -69,7 +72,7 @@ and the coordination contract with that bundle.
 - Tests must preserve an inherited `MASTER_PORT`. Packed containers share the
   tray network namespace, so the private runner assigns a distinct port range
   per GPU lease and the SSIM scheduler assigns task offsets within its range.
-- The ARM64 runner image includes the pinned FA4 CuTe overlay validated on
+- The Slinky ARM64 runner image includes the pinned FA4 CuTe overlay validated on
   GB200. Keep SSIM at `FASTVIDEO_FA4=1` because its references were seeded with
   FA4; keep lanes with FA2 baselines at `FASTVIDEO_FA4=0`. A runner image change
   must revalidate both the FA4 import and an actual GB200 forward kernel.

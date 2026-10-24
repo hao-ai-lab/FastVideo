@@ -100,7 +100,7 @@ debugging a hook implementation.
 | Attribute | Value |
 |---|---|
 | Triggered by | Buildkite PR builds with `TEST_SCOPE=fastcheck` or unset |
-| Compute | The spark4 GB10 runner while it is online, otherwise Slinky Slurm; both on the `ci-runner` queue |
+| Compute | Spark 4 when connected and unpaused at upload time; otherwise Slinky Slurm. Both use `ci-runner`. |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | Trusted host driver -> `.buildkite/scripts/unit_test.sh` or `.buildkite/scripts/lanes/*.sh` |
 
@@ -132,11 +132,14 @@ It sets `FV_SPARK_BACKEND=spark4` only when both hold:
 - the Buildkite agents API reports an agent tagged
   `queue=ci-runner,backend=spark4` that is connected and not paused.
 
-Otherwise it sets `slurm`. `/test full`, the weekly Full Suite, a paused or
-disconnected Spark agent, and any failure to read the agents API all keep every
-lane on Slurm. The uploader rejects any `backend` value other than the two
-forms in the table, so a pull request cannot pin a lane to the Spark runner
-directly. The upload step in each entry pipeline requires `backend=slurm`, so
+Otherwise it sets `slurm`. For pipelines with the backend tags above,
+`/test full`, the weekly Full Suite, a paused or disconnected Spark agent, and
+any failure to read the agents API select Slurm for every lane. This choice
+happens at upload time; it does not move jobs already queued for Spark.
+Older graphs without backend tags need the normalization described below.
+
+The uploader rejects any `backend` value other than the two forms in the
+table, so a pull request cannot pin a lane to the Spark runner directly. The upload step in each entry pipeline requires `backend=slurm`, so
 the Spark runner never takes it and this policy always runs on the login plane.
 
 The regular GB10 inference image intentionally omits FlashAttention to match
