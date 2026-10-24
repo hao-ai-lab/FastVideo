@@ -17,7 +17,7 @@ PR opened or updated
   |     style, lint, type, spelling, Markdown, workflow syntax, filenames
   |
   |-- Tier 2: Fastcheck
-  |     Buildkite schedules six lanes on the Slinky Slurm cluster
+  |     Buildkite schedules six lanes across Spark 4 and Slinky Slurm
   |     encoder, VAE, transformer, kernel, unit, DreamVerse
   |
   |-- /merge or ready label
@@ -25,7 +25,7 @@ PR opened or updated
         `-- Tier 3: Change-aware merge gate
               trusted base-branch planner classifies the complete PR diff
               Buildkite adds only relevant integration, quality, training,
-              API, or performance lanes on Slinky Slurm
+              API, or performance lanes on Spark 4 or Slinky Slurm
               |
               pass -> Mergify squash-merges when all merge conditions pass
               fail -> fix, push, and re-run
@@ -43,11 +43,12 @@ CI is not one monolithic job:
   updates, docs deployment, image builds, package publishing, and community
   automations.
 - Buildkite owns the GPU test graph, statuses, and trusted dispatch control
-  plane. Its agent runs on the Slurm login plane; it does not execute test
-  payloads.
-- Slinky Slurm is the only active CI compute backend. A host-owned dispatcher
-  leases GPUs from a persistent four-GPU allocation and runs each lane in an
-  isolated Enroot container at the immutable PR SHA.
+  plane. Slinky agents dispatch tests from the login plane; the Spark 4 agent
+  dispatches local Slurm jobs.
+- Slinky Slurm runs cluster lanes in isolated Enroot containers using a
+  persistent four-GPU allocation. Spark 4 runs eligible single-GPU lanes in
+  isolated Docker containers through its own Slurm queue. Both test the
+  immutable PR SHA.
 - Mergify owns merge protection, labeling, and the final squash merge.
 
 The old files under `fastvideo/tests/modal/` are retained as dormant manual
@@ -125,12 +126,42 @@ test, which needs more than 128 GB). GB10 golden references are keyed by
 `NVIDIA_GB10`; see `fastvideo/tests/golden_gate`. The private uploader policy
 must allow the `backend` agent key before this routing is active.
 
+The regular GB10 inference image intentionally omits FlashAttention to match
+native Spark output. CI uses `docker/Dockerfile.spark-ci` to add the pinned
+FA2 wheel required by VMoBA and Wan causal tests. This image keeps the base
+Torch, FlashInfer, and CUTLASS packages and removes the wheel's unsupported
+FA4 CuTe implementation. Build it separately from the inference image:
+
+```bash
+docker build -f docker/Dockerfile.spark-ci \
+  --build-arg SPARK_BASE_IMAGE=<validated-GB10-image> \
+  -t fastvideo-ci-gb10:<version> .
+```
+
+Golden references must match this CI image, including its FA2 version. Seed
+only from unchanged upstream main, verify in separate processes, and review
+before publishing new `golden_gates/NVIDIA_GB10/` files. Preserve existing
+references for other GPUs. A successful import alone is insufficient; validate
+an actual FA2 forward, the VMoBA tests, and each lane's complete payload before
+selecting the new image in the host-owned runner configuration.
+
+The host runner must allowlist Spark-capable lane types before allocating the
+GPU. Label each Docker container with its job token and remove it from the
+outer runner on completion or cancellation. Slurm killing the Docker client
+does not stop a container owned by the Docker daemon.
+
+The trusted uploader must preserve each literal `backend: "slurm"` even when
+it selects `FV_SPARK_BACKEND=spark4`. Older PR revisions without backend tags
+must be normalized to `backend: "slurm"` before upload; `queue: "ci-runner"`
+alone also matches the Spark agent. Update the private uploader's lane policy
+with routing changes and verify the resolved agent queries on a canary build.
+
 ### Tier 3: Change-Aware Merge Gate
 
 | Attribute | Value |
 |---|---|
 | Triggered by | `/merge`, adding `ready`, or a new push to a PR that already has `ready` |
-| Compute | Slinky Slurm only (`ci-runner` queue) |
+| Compute | Spark 4 or Slinky Slurm, selected per lane (`ci-runner` queue) |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `/opt/fastvideo-ci-runner/run-ci` (`run-unit` is a compatibility wrapper) |
 
@@ -396,7 +427,7 @@ Valid direct test names:
 | `/test eval` | `eval` |
 
 The temporary `<name>-ci` spellings remain accepted as compatibility aliases;
-they select the same Slurm lane and do not identify a second backend.
+they select the same test lane and do not identify a second backend.
 
 When a direct test completes successfully, Buildkite posts
 `direct-test-completed`. `.github/workflows/ci-aggregate-status.yml` then reads
@@ -476,7 +507,7 @@ Every active test selection lives in `.buildkite/scripts/unit_test.sh` or a
 focused `.buildkite/scripts/lanes/<lane>.sh`. The private, agent-owned lane
 table binds each internal `*_ci` type to that script, its GPU count, wall-clock
 limit, dependency extras, kernel-build policy, secrets, and artifacts. The
-internal suffix is an implementation detail; there is only one active backend.
+internal suffix is an implementation detail; backend tags select the compute host.
 
 SSIM uses `fastvideo/tests/ssim/ci_runner.py` inside a single four-GPU lease.
 It discovers `REQUIRED_GPUS` and `*_MODEL_TO_PARAMS` with AST parsing, then
