@@ -152,6 +152,12 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      video_scheduler_shift:
+        sources:
+          - fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig
+      audio_scheduler_shift:
+        sources:
+          - fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig

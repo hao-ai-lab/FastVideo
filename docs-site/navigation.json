@@ -50,6 +50,10 @@
         "href": "/inference/support_matrix"
       },
       {
+        "label": "Bernini-R video editing",
+        "href": "/inference/bernini_r"
+      },
+      {
         "label": "Memory and offloading",
         "href": "/inference/offloading"
       },
