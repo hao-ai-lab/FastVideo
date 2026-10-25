@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(37);
+  await expect(cards).toHaveCount(38);
   await expect(cards.first()).toContainText("FastH3 OmniRef");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -277,7 +277,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(37);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -440,6 +440,21 @@ test("source-backed serving pages expose their actual server settings", async ({
   await page.getByRole("tab", { name: "config.yaml", exact: true }).click();
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("port: 9005");
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("Wan2.2-T2V-A14B");
+  await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
+});
+
+test("PAN 2 has a family card with the IFM logo and a source-backed serving page", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/pan2");
+  const pan2 = page.locator(".recipe-card").filter({ hasText: "PAN 2" });
+  await expect(pan2.locator("img")).toHaveAttribute("src", /\/ifm\.webp$/);
+  await expect(pan2.locator(".recipe-card-kicker")).toHaveText("IFM");
+  await pan2.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("PAN 2");
+  await chip(page, "Run mode", "Serving");
+  await page.getByRole("tab", { name: "config.yaml", exact: true }).click();
+  const config = page.getByLabel("Source example", { exact: true });
+  await expect(config).toContainText("model_path: IFM/PAN2");
+  await expect(config).toContainText("served_model_name: pan2");
   await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
 });
 

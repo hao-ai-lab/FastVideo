@@ -1,5 +1,5 @@
 {
-  "version": 19,
+  "version": 20,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -380,6 +380,33 @@
       "evidence": "Source-backed",
       "expected_artifact": "Upscaled MP4 under outputs_video/kandinsky6_sr/",
       "related": ["kandinsky6-vsr", "kandinsky6-ti2va-piflow"]
+    },
+    {
+      "id": "pan2-ti2v",
+      "family": "pan2",
+      "stage": "inference",
+      "task": "Text or image to video",
+      "label": "PAN 2",
+      "summary": "Generate a 13-second, 704 × 1248 video at 24 fps from text, or set IMAGE_PATH in the maintained example to condition on a first frame.",
+      "model": "IFM/PAN2",
+      "source": "examples/inference/basic/basic_pan2.py",
+      "serving": {
+        "source": "examples/serving/openai_pan2.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "task": "Text to video",
+        "limitations": [
+          "This server walkthrough sends a text prompt only. The server API also accepts an image reference (image_reference or input_reference) and then runs image-to-video from that first frame, but the checked-in clients do not upload one."
+        ]
+      },
+      "command": "python examples/inference/basic/basic_pan2.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video under video_samples_pan2/",
+      "limitations": [
+        "The full IFM/PAN2 checkpoint is not public yet; numerical parity is checked with a public random-weight checkpoint.",
+        "The example keeps the 29B DiT resident in bf16 and offloads only the text encoder. GPU memory requirements have not been established for this recipe; set PAN2_NUM_GPUS to shard video tokens with sequence parallelism, which does not shard the DiT weights."
+      ]
     },
     {
       "id": "flux2-klein-t2i",

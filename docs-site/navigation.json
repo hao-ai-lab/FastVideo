@@ -254,8 +254,19 @@
         ]
       },
       {
-        "label": "PAN2",
-        "href": "/inference/pan2"
+        "label": "PAN 2",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/pan2"
+          },
+          {
+            "label": "Model reference",
+            "href": "/inference/pan2"
+          }
+        ]
       },
       {
         "label": "FLUX",

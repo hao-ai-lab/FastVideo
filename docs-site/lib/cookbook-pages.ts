@@ -110,6 +110,7 @@ const familyInfo: Record<string, { title: string; path: string; logo: string; ca
   hunyuan: { title: "Hunyuan", path: "hunyuan", logo: "tencent-hunyuan", category: "Video" },
   kandinsky5: { title: "Kandinsky 5", path: "kandinsky5", logo: "kandinsky", category: "Video" },
   kandinsky6: { title: "Kandinsky 6", path: "kandinsky6", logo: "kandinsky", category: "Video" },
+  pan2: { title: "PAN 2", path: "pan2", logo: "ifm", category: "Video" },
   flux: { title: "FLUX", path: "flux", logo: "black-forest-labs", category: "Image" },
   qwen_image21: { title: "Qwen-Image-2.1", path: "qwen-image21", logo: "qwen", category: "Image" },
   sd35: { title: "Stable Diffusion", path: "stable-diffusion", logo: "stabilityai", category: "Image" },
@@ -164,6 +165,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       kandinsky: "Kandinsky Lab",
       "black-forest-labs": "Black Forest Labs",
       qwen: "Qwen",
+      ifm: "IFM",
       stabilityai: "Stability AI",
       nvidia: "NVIDIA",
     };
