@@ -67,6 +67,15 @@ export const recipePages = [
     tags: ["Image to video", "14B", "480p"],
   },
   {
+    id: "pan2",
+    family: "PAN 2",
+    title: "PAN 2",
+    mark: "PAN",
+    path: "/cookbook/pan2/pan2",
+    description: "Text-to-video and first-frame image-to-video from the 29B PAN 2 model.",
+    tags: ["Text or image to video", "29B"],
+  },
+  {
     id: "ltx2-distilled",
     family: "LTX",
     title: "LTX2 Distilled",
@@ -128,6 +137,7 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
+  "IFM/PAN2": "pan2",
 };
 const TASK_GROUPS: Array<[RegExp, string]> = [
   [/world/, "Text to world"],
