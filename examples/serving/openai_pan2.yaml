@@ -11,6 +11,7 @@ generator:
       sp_size: 1
     offload:
       dit: false
+      dit_layerwise: false
       vae: false
       text_encoder: true
       pin_cpu_memory: true

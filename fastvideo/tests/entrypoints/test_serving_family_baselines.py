@@ -118,6 +118,8 @@ def test_pan2_serving_matches_its_preset_and_runs_image_to_video_from_a_referenc
     config = _load("openai_pan2.yaml")
     sampling = config.default_request.sampling
     assert config.generator.model_path == "IFM/PAN2"
+    assert config.generator.engine.offload.dit is False
+    assert config.generator.engine.offload.dit_layerwise is False
     for field in ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale"):
         assert getattr(sampling, field) == PAN2_T2V.defaults[field], field
 
