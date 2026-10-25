@@ -1,5 +1,5 @@
 {
-  "version": 18,
+  "version": 19,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -428,6 +428,44 @@
       "evidence": "Source-backed",
       "expected_artifact": "PNG images under outputs/flux_dev/samples/",
       "limitations": ["FLUX.1 is loadable by ID but registers no model_family in fastvideo/registry.py; it is grouped under FLUX for documentation only."]
+    },
+    {
+      "id": "qwen-image21-t2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Text to image",
+      "label": "Qwen-Image-2.1",
+      "summary": "Generate a 1024 × 1024 image in 40 steps on one CUDA GPU, with the CPU offload settings recorded in the maintained YAML.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/qwen_image21_t2i.yaml",
+      "command": "fastvideo generate --config examples/inference/basic/qwen_image21_t2i.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/teapot.png",
+      "limitations": ["The source uses DiT layerwise offload, text-encoder and VAE offload, and lazy loading. GPU memory requirements have not been established for this recipe."],
+      "related": ["qwen-image21-i2i"]
+    },
+    {
+      "id": "qwen-image21-i2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Image to image",
+      "label": "Qwen-Image-2.1 references and editing",
+      "summary": "Generate or edit an image from a prompt and up to ten ordered reference images, using the maintained single-GPU Python example.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/basic_qwen_image21.py",
+      "command": "python examples/inference/basic/basic_qwen_image21.py --reference source.png --prompt 'Change the shirt to blue; retain the subject and composition.' --output outputs/qwen_image21/edit.png",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/edit.png",
+      "limitations": [
+        "Replace source.png with an existing image. Repeat --reference for additional images and describe their order in the prompt.",
+        "Mask images use the same ordered-reference path; they do not impose hard pixel-preservation constraints.",
+        "The source enables CPU offload and lazy loading. This entry does not establish a minimum GPU memory requirement."
+      ],
+      "related": ["qwen-image21-t2i"]
     },
     {
       "id": "sd35-medium-t2i",

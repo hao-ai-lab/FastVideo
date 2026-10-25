@@ -111,6 +111,7 @@ const familyInfo: Record<string, { title: string; path: string; logo: string; ca
   kandinsky5: { title: "Kandinsky 5", path: "kandinsky5", logo: "kandinsky", category: "Video" },
   kandinsky6: { title: "Kandinsky 6", path: "kandinsky6", logo: "kandinsky", category: "Video" },
   flux: { title: "FLUX", path: "flux", logo: "black-forest-labs", category: "Image" },
+  qwen_image21: { title: "Qwen-Image-2.1", path: "qwen-image21", logo: "qwen", category: "Image" },
   sd35: { title: "Stable Diffusion", path: "stable-diffusion", logo: "stabilityai", category: "Image" },
   stable_audio: { title: "Stable Audio", path: "stable-audio", logo: "stabilityai", category: "Audio" },
   mmaudio: { title: "MMAudio", path: "mmaudio", logo: "fastvideo", category: "Audio" },
@@ -132,6 +133,7 @@ const TASK_GROUPS: Array<[RegExp, string]> = [
   [/video\/text to audio|video.*to audio/, "Video to audio"],
   [/text to audio/, "Text to audio"],
   [/text to image/, "Text to image"],
+  [/image to image/, "Image to image"],
   [/reference media to video/, "Reference to video"],
   [/first\/last frame to video/, "Image to video"],
   [/text or image to video/, "Text/image to video"],
@@ -161,6 +163,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       "tencent-hunyuan": "Tencent",
       kandinsky: "Kandinsky Lab",
       "black-forest-labs": "Black Forest Labs",
+      qwen: "Qwen",
       stabilityai: "Stability AI",
       nvidia: "NVIDIA",
     };

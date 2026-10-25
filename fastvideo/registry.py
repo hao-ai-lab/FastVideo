@@ -55,6 +55,7 @@ from fastvideo.models.wan.definition import WAN_MODEL_DEFINITIONS, WanModelDefin
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
+from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
@@ -1204,6 +1205,19 @@ def _register_configs() -> None:
         ],
     )
 
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=QwenImage21PipelineConfig,
+        workload_types=(WorkloadType.T2I, WorkloadType.I2I),
+        hf_model_paths=["Qwen/Qwen-Image-2.1"],
+        model_detectors=[
+            lambda path: "qwenimage21pipeline" in path or "qwen-image-2.1" in path or "qwen_image21" in path,
+        ],
+        model_family="qwen_image21",
+        default_preset="qwen_image21",
+        pipeline_cls_name="QwenImage21Pipeline",
+    )
+
 
 # --- Part 3: Main Resolver ---
 
@@ -1337,6 +1351,8 @@ def _register_presets() -> None:
         ALL_PRESETS as STABLE_AUDIO_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.qwen_image21.presets import (
+        ALL_PRESETS as QWEN_IMAGE21_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
 
@@ -1364,6 +1380,7 @@ def _register_presets() -> None:
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         WAN_PRESETS,
+        QWEN_IMAGE21_PRESETS,
     )
     for group in all_preset_groups:
         for preset in group:
