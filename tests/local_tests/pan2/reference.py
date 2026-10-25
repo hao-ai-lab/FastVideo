@@ -45,7 +45,6 @@ def tiny_model_dir() -> Path | None:
 
 
 def _sdpa(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
-    # [B, S, H, D] -> [B, S, H*D]
     out = F.scaled_dot_product_attention(query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2))
     return out.transpose(1, 2).flatten(2)
 
@@ -205,11 +204,6 @@ class ReferencePAN2Transformer(nn.Module):
         return x.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
 
-# --------------------------------------------------------------------------------------------------------------------
-# Reference pipeline (vLLM-Omni ``PAN2Pipeline.forward``)
-# --------------------------------------------------------------------------------------------------------------------
-
-
 def reference_encode_prompt(tokenizer, text_encoder, prompt: str, device) -> torch.Tensor:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt or " "}]
     input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=True,
@@ -248,8 +242,13 @@ def reference_condition_latents(vae, latents: torch.Tensor, image: PIL.Image.Ima
 @torch.no_grad()
 def reference_generate(components: dict, *, prompt: str, negative_prompt: str, image: PIL.Image.Image | None,
                        height: int, width: int, num_frames: int, num_inference_steps: int, guidance_scale: float,
-                       seed: int, dit_dtype: torch.dtype, device="cpu") -> tuple[torch.Tensor, torch.Tensor]:
-    """Final latents and the decoded video in ``[0, 1]``, following the vLLM-Omni pipeline step by step."""
+                       seed: int, dit_dtype: torch.dtype, device="cpu",
+                       skip_first_latent_cfg: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    """Final latents and the decoded video in ``[0, 1]``, following the vLLM-Omni pipeline step by step.
+
+    ``skip_first_latent_cfg`` is the reference sampler's ``--i2v_skip_first_latent_cfg``: with an image, the first
+    latent frame takes the positive prediction instead of the guided one.
+    """
     from diffusers.utils.torch_utils import randn_tensor
 
     tokenizer, text_encoder = components["tokenizer"], components["text_encoder"]
@@ -272,7 +271,10 @@ def reference_generate(components: dict, *, prompt: str, negative_prompt: str, i
         noise_pred = transformer(model_input, timestep, prompt_embeds)
         if do_cfg:
             noise_uncond = transformer(model_input, timestep, negative_embeds)
-            noise_pred = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
+            guided = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
+            if image is not None and skip_first_latent_cfg:
+                guided[:, :, :1] = noise_pred[:, :, :1]
+            noise_pred = guided
         latents = scheduler.step(noise_pred.float(), t, latents, return_dict=False)[0]
 
     mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1).to(latents)

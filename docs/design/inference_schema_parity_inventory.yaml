@@ -292,6 +292,9 @@ surfaces:
       text_max_sequence_length:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      i2v_skip_first_latent_cfg:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig

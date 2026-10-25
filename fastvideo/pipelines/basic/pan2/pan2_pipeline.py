@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """PAN2 video generation: text-to-video, and image-to-video from a first frame."""
 
+import torch
+
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.pan2.stages import (
     PAN2ConditioningStage,
@@ -30,7 +32,8 @@ class PAN2Pipeline(ComposedPipelineBase):
                        stage=PAN2TimestepPreparationStage(scheduler=self.get_module("scheduler")))
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
-                                                    transformer=self.get_module("transformer")))
+                                                    transformer=self.get_module("transformer"),
+                                                    latent_dtype=torch.float32))
         self.add_stage(stage_name="conditioning_stage", stage=PAN2ConditioningStage(vae=self.get_module("vae")))
         self.add_stage(stage_name="denoising_stage",
                        stage=PAN2DenoisingStage(transformer=self.get_module("transformer"),

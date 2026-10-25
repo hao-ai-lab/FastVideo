@@ -36,11 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SP_WORLD_SIZES = (2, 4)
 
 
-# --------------------------------------------------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------------------------------------------------
-
-
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -142,11 +137,6 @@ def _compare(native, reference, inputs: dict[str, torch.Tensor], scope: str) -> 
     assert_close(actual, expected, atol=2e-5, rtol=2e-5)
 
 
-# --------------------------------------------------------------------------------------------------------------------
-# Tests
-# --------------------------------------------------------------------------------------------------------------------
-
-
 def test_pan2_transformer_registry_resolves_native_class():
     from fastvideo.models.dits.pan2 import PAN2Transformer3DModel
     from fastvideo.models.registry import ModelRegistry
@@ -211,6 +201,14 @@ def test_pan2_tiny_checkpoint_strict_load_and_forward_parity(single_rank_dist):
     _compare(native, reference, inputs, "tiny checkpoint")
 
 
+def test_pan2_layerwise_offload_hooks_the_main_blocks(single_rank_dist):
+    native = _build_native(_small_kwargs())
+
+    first_module_list = next(child for child in native.children() if isinstance(child, torch.nn.ModuleList))
+
+    assert first_module_list is native.transformer_blocks
+
+
 @pytest.mark.parametrize("batch_size", [1, 2])
 def test_pan2_random_weights_forward_parity(single_rank_dist, batch_size: int):
     kwargs = _small_kwargs()
@@ -222,11 +220,6 @@ def test_pan2_random_weights_forward_parity(single_rank_dist, batch_size: int):
 
     inputs = _make_inputs(kwargs["in_channels"], kwargs["text_embed_dim"], batch_size=batch_size, seed=batch_size)
     _compare(native, reference, inputs, f"random weights, batch {batch_size}")
-
-
-# --------------------------------------------------------------------------------------------------------------------
-# Sequence parallel: padded video tokens must never enter joint video/text attention.
-# --------------------------------------------------------------------------------------------------------------------
 
 
 def _run_sp_worker(sp_size: int, output_path: Path) -> None:

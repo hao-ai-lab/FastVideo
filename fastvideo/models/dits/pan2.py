@@ -298,6 +298,17 @@ class PAN2Transformer3DModel(BaseDiT):
                                              inner_dim,
                                              bias=True,
                                              prefix=f"{config.prefix}.context_proj")
+        # Layerwise offload hooks the first nn.ModuleList child, which must be the main blocks.
+        self.transformer_blocks = nn.ModuleList([
+            PAN2TransformerBlock(inner_dim,
+                                 config.num_attention_heads,
+                                 config.attention_head_dim,
+                                 config.mlp_ratio,
+                                 config.context_mlp_ratio,
+                                 supported_attention_backends=self._supported_attention_backends,
+                                 prefix=f"{config.prefix}.transformer_blocks.{i}") for i in range(config.num_layers)
+        ])
+
         self.context_refiner = nn.ModuleList([
             PAN2TokenRefinerBlock(inner_dim,
                                   config.num_attention_heads,
@@ -309,16 +320,6 @@ class PAN2Transformer3DModel(BaseDiT):
             for i in range(config.num_refiner_layers)
         ])
         self.context_type_embedding = nn.Parameter(torch.zeros(inner_dim))
-
-        self.transformer_blocks = nn.ModuleList([
-            PAN2TransformerBlock(inner_dim,
-                                 config.num_attention_heads,
-                                 config.attention_head_dim,
-                                 config.mlp_ratio,
-                                 config.context_mlp_ratio,
-                                 supported_attention_backends=self._supported_attention_backends,
-                                 prefix=f"{config.prefix}.transformer_blocks.{i}") for i in range(config.num_layers)
-        ])
 
         self.norm_out = PAN2AdaLayerNormOut(inner_dim, eps=1e-6, prefix=f"{config.prefix}.norm_out")
         self.proj_out = ReplicatedLinear(inner_dim,

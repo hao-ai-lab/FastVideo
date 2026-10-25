@@ -104,9 +104,14 @@ def _psnr(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(10 * torch.log10(1.0 / mse))
 
 
-@pytest.mark.parametrize("image", [None, CONDITION_IMAGE], ids=["t2v", "i2v"])
-def test_pan2_pipeline_matches_reference(pan2_runtime, image):
+@pytest.mark.parametrize(
+    ("image", "skip_first_latent_cfg"),
+    [(None, True), (CONDITION_IMAGE, True), (CONDITION_IMAGE, False)],
+    ids=["t2v", "i2v", "i2v-guided-first-frame"],
+)
+def test_pan2_pipeline_matches_reference(pan2_runtime, monkeypatch, image, skip_first_latent_cfg):
     pipeline, args, model_dir, device = pan2_runtime
+    monkeypatch.setattr(args.pipeline_config, "i2v_skip_first_latent_cfg", skip_first_latent_cfg)
     latents, video = _fastvideo_generate(pipeline, args, image)
 
     components = load_reference_components(model_dir, torch.bfloat16)
@@ -125,7 +130,8 @@ def test_pan2_pipeline_matches_reference(pan2_runtime, image):
                                                 guidance_scale=GUIDANCE_SCALE,
                                                 seed=SEED,
                                                 dit_dtype=torch.bfloat16,
-                                                device=device)
+                                                device=device,
+                                                skip_first_latent_cfg=skip_first_latent_cfg)
     ref_latents, ref_video = ref_latents.float().cpu(), ref_video.float().cpu()
 
     assert latents.dtype == torch.float32

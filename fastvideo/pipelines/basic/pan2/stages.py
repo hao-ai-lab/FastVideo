@@ -112,8 +112,7 @@ class PAN2TextEncodingStage(TextEncodingStage):
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = text_encoder(input_ids=input_ids.to(input_device), output_hidden_states=True)
         prompt_embeds = outputs.hidden_states[-(pipeline_config.text_encoder_skip_layers + 1)][:, crop_start:]
-        # fp32 is exact for the bf16 encoder output. The shared latent stage draws the initial noise in this dtype,
-        # and PAN2 samples on fp32 latents; the denoiser casts the embeddings to the DiT dtype.
+        # fp32 is exact for the bf16 encoder output; the denoiser casts the embeddings to the DiT dtype.
         prompt_embeds = prompt_embeds.to(device=target_device, dtype=dtype or torch.float32, copy=True)
         attention_mask = torch.ones(prompt_embeds.shape[:2], dtype=torch.long, device=target_device)
         if moved_for_forward and fastvideo_args.text_encoder_cpu_offload:

@@ -33,7 +33,6 @@ PAN2_T2V = InferencePreset(
     defaults=dict(_SHARED_DEFAULTS),
 )
 
-# The same pipeline runs image-to-video when the request carries a first frame (image_path).
 PAN2_I2V = InferencePreset(
     name="pan2_i2v",
     version=1,

@@ -464,8 +464,6 @@ class DenoisingStage(PipelineStage):
                                 noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
                                                                                            noise_pred_uncond)
 
-                        noise_pred = self.finish_guidance(noise_pred, noise_pred_text, batch, fastvideo_args)
-
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
                             # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
@@ -474,6 +472,8 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+
+                        noise_pred = self.finish_guidance(noise_pred, noise_pred_text, batch, fastvideo_args)
                 noise_pred = self.prepare_scheduler_model_output(noise_pred, state)
                 if scheduler_fp32:
                     # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
