@@ -8,6 +8,7 @@ from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+from fastvideo.configs.models.dits.pan2 import PAN2VideoConfig
 from fastvideo.configs.models.dits.mmaudio import (
     MMAUDIO_44K_TRAINING_VARIANTS,
     MMAUDIO_TRAINING_VARIANTS,
@@ -18,6 +19,7 @@ from fastvideo.configs.models.dits.mmaudio import (
 )
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.models.wan.config import WanVideoConfig
+from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, QwenImage21Config
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 from fastvideo.configs.models.dits.kandinsky6 import Kandinsky6ArchConfig, Kandinsky6VideoAudioConfig
@@ -31,7 +33,7 @@ __all__ = [
     "FluxDiTConfig", "Flux2Config", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "Kandinsky6ArchConfig",
     "Kandinsky6VideoAudioConfig", "Kandinsky6SRArchConfig", "Kandinsky6SRConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotWorldFastVideoConfig",
-    "LingBotVideoConfig", "MiniMaxH3Config", "MMAudioArchConfig", "MMAudioTransformerConfig",
+    "LingBotVideoConfig", "MiniMaxH3Config", "PAN2VideoConfig", "MMAudioArchConfig", "MMAudioTransformerConfig",
     "MMAUDIO_VARIANT_ARCHITECTURES", "MMAUDIO_TRAINING_VARIANTS", "MMAUDIO_44K_TRAINING_VARIANTS",
-    "get_mmaudio_transformer_config"
+    "get_mmaudio_transformer_config", "QwenImage21ArchConfig", "QwenImage21Config"
 ]
