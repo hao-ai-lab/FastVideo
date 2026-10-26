@@ -133,6 +133,21 @@ def test_bshd_entry_matches_bhsd() -> None:
     assert torch.equal(bhsd, bshd)
 
 
+def test_bshd_entry_accepts_video_only_queries_over_the_full_keys() -> None:
+    # The FP4 prefix split attends the prefix query tiles densely and sends only the video
+    # query blocks here, with the keys still spanning the whole sequence. The key length,
+    # not the query length, bounds the block lists and sizes delta_s.
+    q, k, v, sizes, mask, _ = _case(128, (256, 100), 6, {2: 50})
+    idx, num, kv_valid, quad = vsa_tile_mask_to_fp4_blocks(mask, 128, sizes)
+    head = 3  # prefix tiles: two full chunks of the 256-token segment and one 100-token chunk
+    bshd = tuple(x.transpose(1, 2).contiguous() for x in (q, k, v))
+    full = sageattn_blackwell_sparse_bshd(*bshd, idx, num, kv_valid, quad)
+    video = sageattn_blackwell_sparse_bshd(bshd[0][:, head * BLOCK_M:], bshd[1], bshd[2],
+                                           idx[:, :, head:].contiguous(), num[:, :, head:].contiguous(), kv_valid,
+                                           None if quad is None else quad[:, :, head:].contiguous())
+    assert torch.equal(video, full[:, :, head * BLOCK_M:])
+
+
 def test_first_visited_block_check_rejects_unanchored_rows() -> None:
     # Without the exempt prefix a query block may start from a block that masks
     # one of its 64-row halves entirely; validate=True must refuse it.

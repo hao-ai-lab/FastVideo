@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 20,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -382,6 +382,33 @@
       "related": ["kandinsky6-vsr", "kandinsky6-ti2va-piflow"]
     },
     {
+      "id": "pan2-ti2v",
+      "family": "pan2",
+      "stage": "inference",
+      "task": "Text or image to video",
+      "label": "PAN 2",
+      "summary": "Generate a 13-second, 704 × 1248 video at 24 fps from text, or set IMAGE_PATH in the maintained example to condition on a first frame.",
+      "model": "IFM/PAN2",
+      "source": "examples/inference/basic/basic_pan2.py",
+      "serving": {
+        "source": "examples/serving/openai_pan2.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "task": "Text to video",
+        "limitations": [
+          "This server walkthrough sends a text prompt only. The server API also accepts an image reference (image_reference or input_reference) and then runs image-to-video from that first frame, but the checked-in clients do not upload one."
+        ]
+      },
+      "command": "python examples/inference/basic/basic_pan2.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video under video_samples_pan2/",
+      "limitations": [
+        "The full IFM/PAN2 checkpoint is not public yet; numerical parity is checked with a public random-weight checkpoint.",
+        "The example keeps the 29B DiT resident in bf16 and offloads only the text encoder. GPU memory requirements have not been established for this recipe; set PAN2_NUM_GPUS to shard video tokens with sequence parallelism, which does not shard the DiT weights."
+      ]
+    },
+    {
       "id": "flux2-klein-t2i",
       "family": "flux",
       "stage": "inference",
@@ -428,6 +455,44 @@
       "evidence": "Source-backed",
       "expected_artifact": "PNG images under outputs/flux_dev/samples/",
       "limitations": ["FLUX.1 is loadable by ID but registers no model_family in fastvideo/registry.py; it is grouped under FLUX for documentation only."]
+    },
+    {
+      "id": "qwen-image21-t2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Text to image",
+      "label": "Qwen-Image-2.1",
+      "summary": "Generate a 1024 × 1024 image in 40 steps on one CUDA GPU, with the CPU offload settings recorded in the maintained YAML.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/qwen_image21_t2i.yaml",
+      "command": "fastvideo generate --config examples/inference/basic/qwen_image21_t2i.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/teapot.png",
+      "limitations": ["The source uses DiT layerwise offload, text-encoder and VAE offload, and lazy loading. GPU memory requirements have not been established for this recipe."],
+      "related": ["qwen-image21-i2i"]
+    },
+    {
+      "id": "qwen-image21-i2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Image to image",
+      "label": "Qwen-Image-2.1 references and editing",
+      "summary": "Generate or edit an image from a prompt and up to ten ordered reference images, using the maintained single-GPU Python example.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/basic_qwen_image21.py",
+      "command": "python examples/inference/basic/basic_qwen_image21.py --reference source.png --prompt 'Change the shirt to blue; retain the subject and composition.' --output outputs/qwen_image21/edit.png",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/edit.png",
+      "limitations": [
+        "Replace source.png with an existing image. Repeat --reference for additional images and describe their order in the prompt.",
+        "Mask images use the same ordered-reference path; they do not impose hard pixel-preservation constraints.",
+        "The source enables CPU offload and lazy loading. This entry does not establish a minimum GPU memory requirement."
+      ],
+      "related": ["qwen-image21-t2i"]
     },
     {
       "id": "sd35-medium-t2i",
@@ -858,6 +923,103 @@
         "install": "Install FastVideo following the DGX Spark installation guide.",
         "audio": true
       }
+    },
+    {
+      "id": "fasth3-omniref-rtx5090",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX 5090",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-5090 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "minimum_memory": "32 GB VRAM",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-rtx-pro6000",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX PRO 6000",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-pro-6000 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on DGX Spark",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile spark --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-mlx",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 Omni V1 on MLX",
+      "summary": "Run the FastH3 Omni BF16 release on Apple Silicon: compose it with the NVFP4 text-encoder stack, convert the DiT to INT6 with VSA, and decode with the LightVAE encoder and the FastH3 NVFP4 decoder.",
+      "model": "FastVideo/FastVideo-FastH3-Omni-8-Step-V1",
+      "source": "examples/inference/basic/mlx_fasth3_omniref.py",
+      "command": "hf download FastVideo/FastVideo-FastH3-Omni-8-Step-V1 --local-dir ./FastVideo-FastH3-Omni-8-Step-V1\nhf download FastVideo/FastH3-OmniRef-NVFP4-QAD --include 'text_encoder/*' 'tokenizer/*' 'processor/*' 'vae/config.json' 'audio_vae/*' --local-dir ./FastH3-OmniRef-NVFP4-QAD\nhf download lightx2v/LightVAE lightvae-lite-h3-encoder.safetensors --local-dir ./LightVAE\nhf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./FastH3-NVFP4-VAE-Decoder\npython examples/inference/basic/mlx_fasth3_omniref.py --compose-only --export ./FastVideo-FastH3-Omni-8-Step-V1 --base-model-path ./FastH3-OmniRef-NVFP4-QAD --composed-dir ./FastH3-OmniRef-composed\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-OmniRef-composed/transformer_ref --out ./FastH3-OmniRef-MLX --formats int6 --include-vsa --nvfp4-conditioner-root ./FastH3-OmniRef-NVFP4-QAD/text_encoder\nln -sfn \"$PWD/FastH3-OmniRef-MLX/nvfp4-encoder\" ./FastH3-OmniRef-composed/text_encoder\npython examples/inference/basic/mlx_fasth3_omniref.py --model-root ./FastH3-OmniRef-composed --mlx-checkpoint ./FastH3-OmniRef-MLX/int6 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.' --vae-encoder ./LightVAE/lightvae-lite-h3-encoder.safetensors --vae-decoder ./FastH3-NVFP4-VAE-Decoder/quality-36L/decoder-nvfp4.safetensors --vae-dtype bf16 --mlx-cache-limit-gib 8 --metal-wired-limit-gib 42 --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_omniref_mlx.mp4",
+      "gpu_types": [
+        "Apple Silicon"
+      ],
+      "hardware": {
+        "platform": "mlx",
+        "accelerator": "Apple M5 Max",
+        "system_memory": "64 GB unified memory",
+        "minimum_memory": "36 GB unified memory",
+        "peak_memory": "27-31 GB peak memory, INT6 DiT of about 17 GB",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2000"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_omniref_mlx.mp4",
+      "modes": [
+        "Ref2VA",
+        "8-step FastH3 Omni",
+        "trained VSA"
+      ],
+      "limitations": [
+        "Convert with --include-vsa. At least one image or video reference is required; pass references in the order the model should read them.",
+        "Validated on an M4 Max with 36 GB and an M5 Max with 64 GB. Set --metal-wired-limit-gib to about two thirds of the Mac's memory.",
+        "Use fast-8L/decoder-nvfp4.safetensors for the smaller, faster decoder tier. FL2VA keyframes, two-pass refinement and TAEH3 decoding are not wired for references."
+      ]
     }
   ]
 }

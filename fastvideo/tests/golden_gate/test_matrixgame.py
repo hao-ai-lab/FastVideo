@@ -27,6 +27,7 @@ single tensor; no postprocess needed. Both ssim tests use FLASH_ATTN.
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
@@ -134,6 +135,15 @@ MG2_SPEC = GateSpec(
 )
 
 
+_GB10_FLEX_XFAIL = pytest.mark.xfail(
+    torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 1),
+    reason="flex_attention: 'No valid triton configs ... Required 229888, Hardware limit 101376' "
+    "(GB10 sm_121 shared-memory limit)",
+    strict=False,
+)
+
+
+@_GB10_FLEX_XFAIL
 def test_matrixgame2_golden_gate(distributed_runtime) -> None:
     run_gate(MG2_SPEC)
 
@@ -223,5 +233,6 @@ MG3_SPEC = GateSpec(
 )
 
 
+@_GB10_FLEX_XFAIL
 def test_matrixgame3_golden_gate(distributed_runtime) -> None:
     run_gate(MG3_SPEC)

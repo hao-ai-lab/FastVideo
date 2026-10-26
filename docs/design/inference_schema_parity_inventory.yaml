@@ -82,11 +82,13 @@ surfaces:
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
+      h3_vsa_fp4: "MiniMax-H3 native FP4 attention options carried through generator.pipeline.experimental.h3_vsa_fp4 rather than a dedicated typed component setting."
       h3_encoder_split: "MiniMax-H3 Ray-only split that runs the Qwen3-VL text encoder on dedicated nodes and the DiT/VAE on the rest; model-specific optimization not yet represented in the typed public schema."
       h3_encoder_nodes: "Leading node count that h3_encoder_split reserves for the MiniMax-H3 text encoder; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
+      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
@@ -147,6 +149,7 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      output_channels: "Decoded pixel channel count fixed by the model; used to allocate the output buffer."
 
   pipeline_config_extensions:
     preset_owned:
@@ -280,6 +283,18 @@ surfaces:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
           - fastvideo.configs.pipelines.hyworld.HYWorldConfig
           - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      text_system_prompt:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_encoder_skip_layers:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_max_sequence_length:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      i2v_skip_first_latent_cfg:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
@@ -440,6 +455,15 @@ surfaces:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
       sample_fps:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      reference_resolution:
+        target: generator.pipeline.experimental.reference_resolution
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      use_kv_cache:
+        target: generator.pipeline.experimental.use_kv_cache
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      kv_cache_device:
+        target: generator.pipeline.experimental.kv_cache_device
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -458,6 +482,8 @@ surfaces:
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
       vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
+      video_scheduler_shift: "MiniMax-H3 training-time video noise clock; inference samples with the checkpoint's scheduler config."
+      audio_scheduler_shift: "MiniMax-H3 training-time audio noise clock; inference samples with the checkpoint's scheduler config."
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
@@ -619,6 +645,8 @@ surfaces:
       enable_teacache: request.runtime.enable_teacache
       max_sequence_length: request.sampling.max_sequence_length
       boundary_ratio: request.sampling.boundary_ratio
+      audio_start_in_s: request.sampling.audio_start_in_s
+      audio_end_in_s: request.sampling.audio_end_in_s
       extra_params: request.extensions
     compatibility_only:
       seconds:

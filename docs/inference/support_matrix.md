@@ -68,7 +68,9 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | matrixgame | `FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-Base-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Diffusers`<br />`mignonjia/mg_longtuning_distilled_zelda`<br />`mignonjia/mg_sf_distilled_zelda_1k_steps`<br />`mignonjia/mg_sf_distilled_zelda`<br />`mignonjia/mg_causal_zelda`<br />`mignonjia/mg_bidirectional_zelda` | I2V | [basic_matrixgame2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame2.py) |
 | matrixgame | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | I2V | [basic_matrixgame3.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame3.py) |
 | minimax_h3 | `MiniMaxAI/MiniMax-H3` | T2V, I2V | [T2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_t2v.py)<br />[FL2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_fl2va.py)<br />[Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_ref2va.py) |
+| pan2 | `IFM/PAN2` | T2V, I2V | [basic_pan2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pan2.py) |
 | sd35 | `stabilityai/stable-diffusion-3.5-medium` | T2I | [basic_sd35_t2i.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_sd35_t2i.py) |
+| qwen_image21 | `Qwen/Qwen-Image-2.1` | T2I, I2I | [basic_qwen_image21.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_qwen_image21.py) |
 | stable_audio | `FastVideo/stable-audio-open-1.0-Diffusers` | T2V | [basic_stable_audio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio.py) |
 | stable_audio | `FastVideo/stable-audio-open-small-Diffusers` | T2V | [basic_stable_audio_small.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio_small.py) |
 | wan | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | T2V | [basic.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic.py) |
@@ -205,12 +207,15 @@ optimizations: absence means **untested**, not incompatible.
 | MLX FastMetal T2V 14B | [`FastVideo/FastMetal-14B-QAD`](https://huggingface.co/FastVideo/FastMetal-14B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 36 GB+ unified memory | Released |
 | MLX FastH3 V1 T2VA | [`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2) + locally converted DiT | 480p / 720p, 124 frames, 4-step DMD2, INT8/INT6/INT4 **weight-only** DiT, native video + audio VAE; optional temporal RIFE fast mode; optional spatial fast mode; optional VSA (tile 64/256, exempt/compete) on `--include-vsa` checkpoints | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
 | MLX FastH3 V2 T2VA | [`FastVideo/FastVideo-FastH3-8-Step-V2`](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2) + locally converted DiT | 480p / 720p, 124 frames, 8-step DMD2, INT8 **weight-only** DiT with `--include-vsa`, trained VSA 0.8 / tile 64, native video + audio VAE; AdaLN cache from `fastvideo_inference.json` | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
+| MLX FastH3 OmniRef Ref2VA | [`FastVideo/FastVideo-FastH3-Omni-8-Step-V1`](https://huggingface.co/FastVideo/FastVideo-FastH3-Omni-8-Step-V1) + base MiniMax-H3 snapshot + locally converted `transformer_ref` | Ordered image/video/audio references, 124 frames at 480p / 720p, the export's fused-block PDD ladder, INT8/INT6/INT4 **weight-only** DiT with `--include-vsa`, native video + audio VAE encoders for the references | Apple M4 Max, 36 GB unified memory | Source runtime |
 
 Apple Silicon uses the native MLX runtime. FastMetal-QAD is the packaged Wan
 release. FastH3 V1 and FastH3 V2 use a source checkout and local DiT conversion.
 CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`,
 `FastVideo/FastWan-QAD-FP8-1.3B`) is the NVIDIA release. See the
-[MLX install guide](../getting_started/installation/mlx.md) and the
+[MLX install guide](../getting_started/installation/mlx.md) (and, for
+reference-conditioned OmniRef, the
+[MLX OmniRef page](fasth3_omniref_mlx.md)) and the
 [FastMetal-QAD blog](https://haoailab.com/blogs/fastmetal/).
 
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
@@ -241,6 +246,17 @@ resolve default pipeline and sampling configuration for it.
 `model.pt` checkpoint. Use a Diffusers-format repo (for example,
 `FastVideo/GEN3C-Cosmos-7B-Diffusers`) or convert locally with
 `scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py`.
+
+## FastH3 OmniRef on consumer devices
+
+OmniRef (Ref2VA) runs the same NVFP4 stack on one consumer Blackwell device -
+RTX 5090, RTX PRO 6000 and DGX Spark - with a packed NVFP4 export, FP4 sparse
+attention with the dense prefix rows split off, and the pre-packed NVFP4
+decoder. An RTX 4090 runs the closest sm_89 equivalent (FP8 linears, bf16 VSA).
+Per-device profiles, recipes and the environment are in
+[FastH3 OmniRef inference](fasth3_omniref.md).
+
+There is no MLX Ref2VA path yet: the Apple Silicon rows above are T2V/FL2VA.
 
 ## Hardware and OS
 

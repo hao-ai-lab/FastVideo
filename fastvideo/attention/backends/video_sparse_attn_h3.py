@@ -34,34 +34,28 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
   (``vsa_dense_first_n_steps``, ``vsa_dense_layers``) let mixed schedules
   run the diffuse steps/layers dense while pushing the rest harder.
 
-At tile 256 this targets sm10.x through the FA4 CuTe 256-tile path
-(``FASTVIDEO_VSA_CUTEDSL=1``); the Triton 256→64 expansion is the
-fallback and keeps identical mask semantics. At tile 64 the block map is
-already at the kernels' native 64-token granularity, so both forward and
-backward run the Triton block-sparse kernels directly (no expansion,
-``FASTVIDEO_VSA_CUTEDSL`` does not apply). A third, opt-in route exists
-for the tile-64 FORWARD only: ``FASTVIDEO_VSA_PTX_BLACKWELL=1`` sends no-grad
-forwards through the data-center Blackwell CUDA block-sparse kernel
-(``fastvideo_kernel.block_sparse_attn_ptx_blackwell``, which reads a separate
-``q2k_num`` key-tile count per query tile) when the extension is built, the device
-is sm_100 or sm_103, and the geometry qualifies. The CUDA kernel assigns
-adjacent pairs of query tiles to CTAs, so an odd logical tile count receives one
-internal, zero-valid partner tile for the no-grad call only. Score search,
-the trained mask, gate-compress, and the returned packed sequence remain on
-the original logical tiles. Grad-tracking forwards and every backward stay
-on the Triton kernels. If the env is set but a precondition fails, the route
-logs one warning and falls back.
+At tile256, FA4 CuTe or the Triton 256-to-64 expansion implements attention.
+Tile64 uses Triton by default; ``FASTVIDEO_VSA_PTX_BLACKWELL=1`` opts into
+native Blackwell forward and its registered autograd operator for training.
+Tile128 requires the native Blackwell forward and, when gradients are tracked,
+the native128 backward. Missing support fails explicitly; no64-token fallback
+can implement128-token masks. ``FASTVIDEO_VSA_TRITON=1`` keeps tile64 training
+on Triton and is incompatible with tile128 training.
 
-Tile 128 has exactly one implementation: the same ptx_blackwell
-forward, which carries a 128-token block instantiation. It needs no opt-in,
-pads an odd tile count with the same zero-valid partner tile, runs no-grad
-forwards only, and fails closed (no Triton fallback) when the extension or
-device cannot run it.
+An odd native64/128 tile count gets one internal, zero-valid partner tile.
+Selection, compression, and returned rows retain the logical geometry. Training
+uses fresh scatter buffers so later layers cannot overwrite saved activations.
+Trailing transformer-capacity rows never enter tiling, pooling or top-k;
+postprocessing restores their shape with zero output rows.
+
+Inference at tile 128 prefers the native forward; when the extension or device
+cannot run it, each 128-token tile splits into two contiguous 64-token halves
+on the Triton kernels, and the call fails closed if those are missing too.
 """
 
 import functools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -83,6 +77,13 @@ try:
     from fastvideo_kernel import block_sparse_attn_ptx_blackwell as _ptx_blackwell
 except ImportError:
     _ptx_blackwell = None
+
+try:
+    from fastvideo_kernel.block_sparse_attn import (_ptx_blackwell_backward_is_supported,
+                                                    block_sparse_attn_ptx_blackwell_op)
+except ImportError:
+    _ptx_blackwell_backward_is_supported = None
+    block_sparse_attn_ptx_blackwell_op = None
 
 import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
@@ -377,6 +378,10 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     # tokens per tile (256, 128 or 64); selects the tile geometry AND the
     # kernel route in forward() (256 -> VSA-256 CuTe/Triton, 128 ->
     # ptx_blackwell, 64 -> native Triton or opt-in ptx_blackwell)
+    block_mask_plan: torch.Tensor = field(init=False, repr=False)
+    pad_tokens: int = 0
+    ref2va_policy: str | None = None
+    reference_video_regions: int = 0
     tile_elems: int = _TILE_ELEMS
     # layers forced dense regardless of sparsity (probe-guided opt-outs)
     dense_layers: tuple[int, ...] = ()
@@ -384,6 +389,17 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     # populated the allocation so a same-shaped geometry change can clear
     # stale pad rows once while steady-state denoising reuses the buffer.
     tile_buf_holder: _MiniMaxH3VSATileBufferHolder | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.pad_tokens) is not int or self.pad_tokens < 0:
+            raise ValueError("VSA-H3 pad_tokens must be a non-negative integer")
+        # Host control data is consumed inside an opaque, non-differentiable
+        # top-k op during training compilation, avoiding per-span value guards.
+        self.block_mask_plan = torch.tensor(
+            [(self.num_prefix_tiles, lo, hi, sparsity)
+             for (lo, hi), sparsity in zip(self.video_tile_spans, self.span_sparsities, strict=True)],
+            dtype=torch.float64,
+            device="cpu").reshape(-1, 4)
 
 
 class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
@@ -405,6 +421,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         dense_layers: tuple[int, ...] = (),
         tile_size: int = _TILE_ELEMS,
         ref_keep_rate: float | None = None,
+        pad_tokens: int = 0,
         **kwargs: dict[str, Any],
     ) -> MiniMaxH3VSAMetadata:
         """Build per-step metadata for one packed H3 sequence.
@@ -417,6 +434,10 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         build with reference-video regions requires. ``exempt=False``
         (compete mode) supports only the generated-video region.
         """
+        if type(pad_tokens) is not int or pad_tokens < 0:
+            raise ValueError("VSA-H3 pad_tokens must be a non-negative integer")
+        if ref_keep_rate is not None and not 0.0 < float(ref_keep_rate) <= 1.0:
+            raise ValueError("VSA-H3 ref_keep_rate must be in (0, 1]")
         tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
         if tile_shape is None:
             raise ValueError(f"VSA-H3 tile_size must be one of {sorted(VSA_H3_TILE_SHAPES)}, got {tile_size!r}")
@@ -458,6 +479,9 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             current_timestep=current_timestep,
             VSA_sparsity=VSA_sparsity,
             total_seq_length=total_seq_length,
+            pad_tokens=pad_tokens,
+            ref2va_policy="p2_multi_region" if ref_keep_rate is not None else None,
+            reference_video_regions=num_regions - 1,
             num_prefix_tiles=num_prefix_tiles,
             num_video_tiles=num_video_tiles,
             exempt=exempt,
@@ -470,6 +494,64 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             dense_layers=dense_layers,
             tile_buf_holder=self._tile_buf_holder,
         )
+
+
+def assert_ref2va_vsa_metadata(
+    metadata: MiniMaxH3VSAMetadata,
+    *,
+    expected_reference_video_regions: int,
+    target_sparsity: float,
+    ref_keep_rate: float | None,
+) -> None:
+    """Fail closed unless metadata represents the requested Ref2VA P2 policy.
+
+    The last video span is the generated target and every preceding span is a
+    reference video. Text, reference audio/images, and target audio are dense
+    prefix tiles. Both modular training and inference validation call this
+    after building metadata so a stale single-region/P1 layout cannot silently
+    exempt reference-video conditioning from VSA.
+    """
+    expected_reference_video_regions = int(expected_reference_video_regions)
+    if expected_reference_video_regions < 0:
+        raise ValueError("expected_reference_video_regions must be non-negative")
+    expected_span_count = expected_reference_video_regions + 1
+    if len(metadata.video_tile_spans) != expected_span_count:
+        raise ValueError("Ref2VA P2 metadata must contain one sparse span per reference video plus the target; "
+                         f"expected {expected_span_count} spans ({expected_reference_video_regions} references), got "
+                         f"{metadata.video_tile_spans}. A stale single-region layout would leave reference-video "
+                         "conditioning dense.")
+    if len(metadata.span_sparsities) != expected_span_count:
+        raise ValueError("Ref2VA P2 metadata sparsity policy is not aligned with its video spans: "
+                         f"{len(metadata.span_sparsities)} values for {expected_span_count} spans.")
+    if metadata.ref2va_policy != "p2_multi_region" or metadata.reference_video_regions != expected_reference_video_regions:
+        raise ValueError(
+            "Ref2VA P2 metadata has no valid multi-region policy receipt: "
+            f"policy={metadata.ref2va_policy!r}, reference_video_regions={metadata.reference_video_regions}, "
+            f"expected {expected_reference_video_regions}.")
+
+    cursor = metadata.num_prefix_tiles
+    for index, (start, end) in enumerate(metadata.video_tile_spans):
+        if start != cursor or end <= start:
+            raise ValueError("Ref2VA P2 video tile spans must be positive and contiguous after the dense prefix; "
+                             f"span {index} is {(start, end)} after cursor {cursor}.")
+        cursor = end
+    if cursor != metadata.num_prefix_tiles + metadata.num_video_tiles:
+        raise ValueError("Ref2VA P2 video tile spans do not cover the complete sparse-video suffix: "
+                         f"ended at {cursor}, expected {metadata.num_prefix_tiles + metadata.num_video_tiles}.")
+
+    target_sparsity = float(target_sparsity)
+    if target_sparsity <= 0.0:
+        expected_sparsities = (0.0, ) * expected_span_count
+    else:
+        reference_sparsity = target_sparsity if ref_keep_rate is None else 1.0 - float(ref_keep_rate)
+        if expected_reference_video_regions and reference_sparsity <= 0.0:
+            raise ValueError("Ref2VA P2 requested sparse target attention but would leave reference-video conditioning "
+                             f"dense (ref_keep_rate={ref_keep_rate!r}). Use a keep rate below 1.")
+        expected_sparsities = ((reference_sparsity, ) * expected_reference_video_regions + (target_sparsity, ))
+    if any(not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+           for actual, expected in zip(metadata.span_sparsities, expected_sparsities, strict=True)):
+        raise ValueError("Ref2VA P2 metadata does not match the requested per-region sparsity policy: "
+                         f"got {metadata.span_sparsities}, expected {expected_sparsities}.")
 
 
 def _pool_tiles(x: torch.Tensor, variable_block_sizes: torch.Tensor, tile_elems: int = _TILE_ELEMS) -> torch.Tensor:
@@ -536,6 +618,21 @@ def _build_block_mask(
     return mask
 
 
+@torch.library.custom_op("fastvideo::h3_region_topk_mask", mutates_args=())
+def h3_region_topk_mask(scores: torch.Tensor, plan: torch.Tensor, sparsity: float, exempt: bool) -> torch.Tensor:
+    """Apply the unchanged per-region top-k without specializing on host lengths."""
+    rows = plan.tolist()
+    if not rows or any(row[0] != rows[0][0] for row in rows):
+        raise ValueError("H3 sparse selection requires one common dense prefix")
+    spans = tuple((int(row[1]), int(row[2])) for row in rows)
+    return _build_block_mask(scores, int(rows[0][0]), sparsity, exempt, spans, tuple(row[3] for row in rows))
+
+
+@h3_region_topk_mask.register_fake
+def _h3_region_topk_mask_fake(scores: torch.Tensor, plan: torch.Tensor, sparsity: float, exempt: bool) -> torch.Tensor:
+    return torch.empty_like(scores, dtype=torch.bool)
+
+
 def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.Tensor,
                                       variable_block_sizes: torch.Tensor, grad_mode: bool) -> str | None:
     """Why the opt-in data-center Blackwell route cannot run here, or None if it can.
@@ -547,12 +644,38 @@ def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.
     if ptx_blackwell_mod is None:
         return "fastvideo_kernel.block_sparse_attn_ptx_blackwell is not installed"
     if grad_mode:
-        return "inputs require grad; this backend keeps grad paths on Triton"
+        return "inputs require grad; use the registered training operator"
     if not ptx_blackwell_mod.is_supported(query_bhsd, variable_block_sizes):
         return (
             "block_sparse_attn_ptx_blackwell.is_supported returned False (needs an sm_100 or sm_103 device, a built "
             "extension, bf16, head_dim 128, an even tile count, and integer tile sizes)")
     return None
+
+
+def _is_datacenter_blackwell(device: torch.device) -> bool:
+    """sm_100/sm_103 (B200, GB200, B300), the devices the ptx_blackwell kernel targets."""
+    return device.type == "cuda" and torch.cuda.get_device_capability(device)[0] == 10
+
+
+@functools.cache
+def _fine_attention_from_name(name: str) -> Any:
+    kind, _, mode = name.partition("-")
+    modes = {"emulator": ("mix8", "mixmx", "qk", "bf16")}
+    if kind not in modes or mode not in modes[kind]:
+        accepted = ", ".join(f"{prefix}-{value}" for prefix, values in modes.items() for value in values)
+        raise ValueError(f"Invalid FASTVIDEO_H3_VSA_FINE_ATTENTION={name!r}; accepted names: {accepted}")
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics, FP4VSAFineAttention
+    if mode == "bf16":
+        return FP4VSAFineAttention(FP4AttentionNumerics(quantize=False))
+    prefix = {"mix8": "fp8", "mixmx": "mxfp8", "qk": None}[mode]
+    return FP4VSAFineAttention(
+        FP4AttentionNumerics(quantize=True, quantize_pv=False, smooth_k=True, prefix_precision=prefix))
+
+
+def fine_attention_from_env() -> Any:
+    """The ``FASTVIDEO_H3_VSA_FINE_ATTENTION`` replacement of the tile-128 fine kernel (shared), or None."""
+    name = envs.FASTVIDEO_H3_VSA_FINE_ATTENTION.get()
+    return _fine_attention_from_name(name) if name else None
 
 
 class MiniMaxH3VSAImpl(AttentionImpl):
@@ -589,10 +712,21 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # 128-token blocks, an even tile count with the partner tile, integer
         # tile sizes), which every call meets, so it is evaluated once.
         self._tile128_route: dict[tuple[torch.device, torch.dtype, int], str | None] = {}
+        # Optional replacement of the fine block-sparse kernel only (selection,
+        # mask and the gated compression branch are unchanged). Called as
+        # ``fn(query, key, value, mask, metadata) -> [B, S, H, D]`` on the
+        # logical tile-ordered rows. Quantization-aware training installs its
+        # FP4 emulator here; it is also the only grad-capable tile-128 route.
+        self.fine_attention_override: Any = fine_attention_from_env()
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
         self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
+        if self.fine_attention_override is not None:
+            # forward() cannot run the emulator inside a traced graph, and logging there
+            # would break fullgraph capture, so say it here.
+            logger.warning_once("FASTVIDEO_H3_VSA_FINE_ATTENTION is ignored inside torch.compile; compiled "
+                                "VSA-H3 layers run the native fine attention. Keep the DiT eager to use it.")
 
     def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         """Resolve the inference-only ptx_blackwell route before fullgraph capture.
@@ -650,22 +784,24 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         instead receives a fresh buffer and leaves the holder untouched, so
         the builder never retains autograd state across steps. Odd no-grad
         ptx_blackwell requests (tile 128 always, tile 64 when opted in) carry one
-        additional all-zero tile internally; metadata and all observable
-        outputs retain the logical geometry.
+        additional all-zero tile internally, including the native training
+        path; metadata and observable outputs retain the logical geometry.
         """
         compiling = torch.compiler.is_compiling()
         regional_compiling = compiling and self._regional_compile_ptx_blackwell_enabled is True
-        if not regional_compiling and x.shape[1] != attn_metadata.total_seq_length:
+        if not regional_compiling and x.shape[1] != attn_metadata.total_seq_length + attn_metadata.pad_tokens:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
                              f"got {x.shape[1]}. A non-packed sequence (e.g. the token refiner) is "
                              "routed to the VSA-H3 backend; exclude it from the supported backends.")
+        if not regional_compiling:
+            # Capacity rows never enter tile geometry, pooling or sparse budgets.
+            x = x[:, :attn_metadata.total_seq_length]
         n_tiles = attn_metadata.variable_block_sizes.numel()
         grad_mode = torch.is_grad_enabled() and x.requires_grad
         if regional_compiling:
             ptx_blackwell_requested = bool(self._regional_compile_ptx_blackwell_enabled)
         elif compiling:
-            # Training/generic compile keeps the long-standing Triton route.
-            ptx_blackwell_requested = False
+            ptx_blackwell_requested = grad_mode and envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
         else:
             ptx_blackwell_requested = envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
         # Tile 128 has no route other than the ptx_blackwell CUDA kernel.
@@ -675,7 +811,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # Pad arithmetically so odd and even tile counts share one graph.
             needs_ptx_blackwell_pair, kernel_tiles = False, n_tiles + n_tiles % 2
         else:
-            needs_ptx_blackwell_pair = n_tiles % 2 != 0 and not grad_mode and ptx_blackwell_route
+            needs_ptx_blackwell_pair = (n_tiles % 2 != 0 and ptx_blackwell_route
+                                        and (not grad_mode or block_sparse_attn_ptx_blackwell_op is not None))
             kernel_tiles = n_tiles + int(needs_ptx_blackwell_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
 
@@ -740,7 +877,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         return self.tile(qkv, attn_metadata)
 
     def postprocess_output(self, output: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
-        return output[:, attn_metadata.untile_combined_index]
+        real_output = output[:, attn_metadata.untile_combined_index]
+        return torch.nn.functional.pad(real_output, (0, 0, 0, 0, 0, attn_metadata.pad_tokens))
 
     def forward(  # type: ignore[override]
         self,
@@ -824,6 +962,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             mask = torch.ones(query.shape[0], query.shape[2], n_tiles, n_tiles, dtype=torch.bool, device=query.device)
         elif regional_compiling:
             mask = _h3_vsa_block_mask(scores)
+        elif compiling and torch.is_grad_enabled():
+            mask = h3_region_topk_mask(scores, attn_metadata.block_mask_plan, layer_sparsity, attn_metadata.exempt)
         else:
             mask = _build_block_mask(
                 scores,
@@ -838,7 +978,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # preserves the eager dense-layer contract without a Python branch.
             mask = mask | force_dense
 
-        if tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
+        if self.fine_attention_override is not None and not compiling:
+            out = self.fine_attention_override(logical_query, logical_key, logical_value, mask, attn_metadata)
+        elif tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
             # Native 64/128-token path: the block map is already at the
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose
@@ -871,15 +1013,29 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 )
 
             # ptx_blackwell forward, opt-in at tile 64 and the only route at
-            # tile 128. Forward-only: tile-64 grad-tracking calls stay on Triton
-            # so autograd keeps the Triton fwd+bwd pairing untouched. The
-            # kernel does return an LSE in Triton's M format, so a future
-            # fwd/bwd pairing is possible, but it is not built here.
+            # tile128. Training uses the registered autograd entry; inference
+            # retains the established raw forward and regional-compile routes.
             grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad)
             use_ptx_blackwell = False
-            if tile_elems == 128:
-                # The CUDA kernel's 128-token instantiation is the only tile-128
-                # implementation, so it needs no opt-in and never falls back.
+            split_tile128 = False
+            force_triton = envs.FASTVIDEO_VSA_TRITON.get() if grad_mode else False
+            if grad_mode and tile_elems == 128 and force_triton:
+                raise RuntimeError("VSA-H3 tile128 training requires native forward and backward; Triton was forced")
+            if grad_mode and (tile_elems == 128 or (envs.FASTVIDEO_VSA_PTX_BLACKWELL.get() and not force_triton)):
+                # The public kernel supplies a registered autograd operator;
+                # never call its raw forward-only entry while tracking grads.
+                supported = (_ptx_blackwell is not None and block_sparse_attn_ptx_blackwell_op is not None
+                             and _ptx_blackwell.is_supported(q_bhsd, ptx_blackwell_variable_block_sizes))
+                if tile_elems == 128:
+                    backward_supported = (_ptx_blackwell_backward_is_supported is not None
+                                          and _ptx_blackwell_backward_is_supported(q_bhsd,
+                                                                                   ptx_blackwell_variable_block_sizes))
+                    if not supported or not backward_supported:
+                        raise RuntimeError("VSA-H3 tile128 training requires the ptx_blackwell forward and backward")
+                use_ptx_blackwell = supported
+            elif tile_elems == 128:
+                # The CUDA kernel's 128-token instantiation needs no opt-in; without it,
+                # the Triton tile-64 kernels run each tile as two halves.
                 if grad_mode:
                     raise NotImplementedError("VSA-H3 tile 128 supports no-grad inference forwards only.")
                 route_key = (q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]))
@@ -888,12 +1044,20 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                                                                ptx_blackwell_variable_block_sizes, grad_mode)
                     if reason is None and map_to_index is None:
                         reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+                    if reason is not None and not compiling and _is_datacenter_blackwell(q_bhsd.device):
+                        # These GPUs should have the native kernel; a broken build
+                        # would otherwise only show up as a slow run.
+                        logger.warning_once(f"VSA-H3 tile 128 on a data-center Blackwell GPU is falling back to "
+                                            f"the slower Triton tile-64 kernels: {reason}.")
                     self._tile128_route[route_key] = reason
                 reason = self._tile128_route[route_key]
-                if reason is not None:
-                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel: "
-                                       f"{reason}. Use VSA_tile_size=64 or 256 elsewhere.")
-                use_ptx_blackwell = True
+                if reason is None:
+                    use_ptx_blackwell = True
+                elif block_sparse_attn_64_bhsd is None:
+                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel or "
+                                       f"the Triton tile-64 kernels: {reason}.")
+                else:
+                    split_tile128 = True
             elif regional_compiling:
                 if self._regional_compile_ptx_blackwell_enabled is None:
                     raise RuntimeError(
@@ -928,7 +1092,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 if not compiling:
                     logger.info_once(
                         f"MiniMax-H3 VSA tile-{tile_elems} forward: using the ptx_blackwell block-sparse kernel")
-                if regional_compiling:
+                if grad_mode:
+                    q2k_idx, q2k_num = map_to_index(ptx_blackwell_mask)
+                    out_bhsd, _ = block_sparse_attn_ptx_blackwell_op(q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num,
+                                                                     ptx_blackwell_variable_block_sizes.to(torch.int32))
+                elif regional_compiling:
                     # The compile-safe wrapper keeps both Triton mask
                     # compaction and the raw pybind launch behind one
                     # fake-backed custom-op boundary.
@@ -961,7 +1129,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     v_bhsd = v_bhsd[:, :, :logical_seq_len]
                     if not sm89_strided:
                         q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
-                if sm89_route:
+                if split_tile128:
+                    # No sm_100a kernel on this device: run each 128-token tile as two
+                    # contiguous 64-token halves on the Triton kernels. Every half inherits
+                    # its tile's mask entries, and a partial tile's valid tokens fill the
+                    # first half before the second, so the selection is unchanged.
+                    logger.info_once("MiniMax-H3 VSA tile-128 forward: Triton tile-64 kernels on split tiles")
+                    mask64 = mask.repeat_interleave(2, dim=-2).repeat_interleave(2, dim=-1)
+                    vbs = attn_metadata.variable_block_sizes
+                    vbs64 = torch.stack((vbs.clamp(max=64), (vbs - 64).clamp(min=0)), dim=-1).flatten()
+                    out_bhsd, _ = block_sparse_attn_64_bhsd(q_bhsd, k_bhsd, v_bhsd, mask64, vbs64)
+                elif sm89_route:
                     from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
                     logger.info_once(f"MiniMax-H3 VSA tile-64 forward: sm89 {self._sm89_kernel} QK / BF16 PV")
                     out_bhsd = sparse_sm89_attention(q_bhsd,

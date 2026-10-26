@@ -1,0 +1,36 @@
+# OpenAI-compatible REST server for LTX-2 distilled text-to-video with audio.
+#   fastvideo serve --config examples/serving/openai_ltx2_distilled.yaml
+# The streaming variant remains in ltx2_distilled_streaming.yaml.
+generator:
+  model_path: FastVideo/LTX2-Distilled-Diffusers
+  engine:
+    num_gpus: 4
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 4
+    offload:
+      dit: false
+      vae: true
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_ltx2_distilled
+  served_model_name: ltx2-distilled
+
+default_request:
+  sampling:
+    height: 1024
+    width: 1536
+    num_frames: 121
+    fps: 24
+    num_inference_steps: 8
+    guidance_scale: 1.0
+    seed: 10
+  output:
+    return_frames: false

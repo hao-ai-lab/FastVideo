@@ -119,10 +119,11 @@ members = ["apps/dreamverse", "apps/infinite_livestream"]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
 # GB10 (sm_121), so on ARM build from the in-tree source instead. The FastH3
 # extra also selects the in-tree source on x86_64 so a PR checkout can build
-# its matching ptx_blackwell route before that version reaches PyPI. Other x86_64
-# installs keep the published wheel. This table is uv-only: plain pip ignores
-# it. Pass --no-sources to bypass it (e.g. when the kernel is already
-# installed, as in the Spark install guide).
+# its matching ptx_blackwell route and key-length-sized sparse FP4 entry point
+# before that version reaches PyPI. Other x86_64 installs keep the published
+# wheel. This table is uv-only: plain pip ignores it. Pass --no-sources to
+# bypass it (e.g. when the kernel is already installed, as in the Spark
+# install guide).
 fastvideo-kernel = [
   { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
   { path = "fastvideo-kernel", marker = "platform_machine == 'x86_64'", extra = "fasth3" },
@@ -304,7 +305,8 @@ skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_
 # lowercase form silences all case variants.
 # "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
 # published checkpoint config; it must be spelled exactly to match.
-ignore-words-list = "tread,passt,dout,padd"
+# "nax" is the name of MLX's M5 TensorOps helper and the corresponding H3 backend.
+ignore-words-list = "tread,passt,dout,padd,nax"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

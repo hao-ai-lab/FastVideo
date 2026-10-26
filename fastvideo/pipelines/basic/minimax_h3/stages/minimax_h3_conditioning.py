@@ -108,12 +108,14 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         processor: Any,
         *,
         ref2va: bool = False,
+        manage_cpu_offload: bool = True,
     ) -> None:
         super().__init__()
         self.conditioner = conditioner
         self.tokenizer = tokenizer
         self.processor = processor
         self.ref2va = ref2va
+        self.manage_cpu_offload = manage_cpu_offload
         self._ref2va_memo = ContentMemo()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -276,8 +278,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
         first_param = next(self.conditioner.parameters(), None)
-        moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
-                             and not isinstance(first_param, DTensor)
+        moved_for_forward = (getattr(self, "manage_cpu_offload", True) and fastvideo_args.text_encoder_cpu_offload
+                             and first_param is not None and not isinstance(first_param, DTensor)
                              and getattr(self.conditioner, "_h3_encoder_layerwise_device", None) is None)
         if moved_for_forward:
             self.conditioner.to(device)

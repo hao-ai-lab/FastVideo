@@ -15,7 +15,7 @@ import torch.nn.functional as F
 
 from fastvideo import envs
 from fastvideo.attention import DistributedAttention
-from fastvideo.attention.backends.abstract import layer_idx_from_prefix
+from fastvideo.attention.backends.abstract import AttentionMetadata, layer_idx_from_prefix
 from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
@@ -206,6 +206,7 @@ class MiniMaxH3Attention(nn.Module):
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
         exact_rope: bool = False,
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -264,12 +265,17 @@ class MiniMaxH3Attention(nn.Module):
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
         self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
-        self._vsa_fp4 = use_vsa and vsa_fp4_requested()
+        self._vsa_fp4_options = dict(vsa_fp4 or {})
+        requested = self._vsa_fp4_options.get("enabled")
+        if requested and not use_vsa:
+            raise ValueError("h3_vsa_fp4 requires the VIDEO_SPARSE_ATTN_H3 attention backend")
+        self._vsa_fp4 = use_vsa and (vsa_fp4_requested() if requested is None else requested)
         self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
         self._gate_compress_active: bool | None = None
+        self._gate_compress_training = False
         if use_vsa:
             self.to_gate_compress = ReplicatedLinear(
                 hidden_size,
@@ -285,10 +291,11 @@ class MiniMaxH3Attention(nn.Module):
         The zero-initialized (not-yet-finetuned) gate makes the whole branch
         a guaranteed zero — a full GEMM plus a third more all-to-all/tile
         traffic per layer for nothing — so test the loaded weight once and
-        cache the answer. Under grad the branch always runs (gradients must
-        reach a zero gate for it to ever train).
+        cache the answer. Trainable model roles keep this branch active even
+        during no-grad rollouts: their weights can change after an update.
+        Under grad it always runs so gradients can reach an initially zero gate.
         """
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() or getattr(self, "_gate_compress_training", False):
             return True
         if self._gate_compress_active is None:
             if torch.compiler.is_compiling():
@@ -349,13 +356,15 @@ class MiniMaxH3Attention(nn.Module):
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
-        if (self._vsa_fp4 and rotary_emb is not None and not torch.is_grad_enabled()
+        fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
             meta = get_forward_context().attn_metadata
             # Exempt mode lists the first prefix tile for every query, which the
             # FP4 kernel relies on to start each row from a finite running max.
-            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt:
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt and not meta.pad_tokens:
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 if not model_parallel_is_initialized() or get_sp_world_size() == 1:
                     hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
@@ -369,7 +378,7 @@ class MiniMaxH3Attention(nn.Module):
                 and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
                 and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
             meta = get_forward_context().attn_metadata
-            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64:
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64 and not meta.pad_tokens:
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
                 with STAGES.span("out_proj"):
@@ -415,6 +424,7 @@ class MiniMaxH3Attention(nn.Module):
                 value,
                 original_seq_len=original_seq_len,
                 freqs_cis=None,
+                attn_metadata=attn_metadata,
                 **extra_attention_kwargs,
             )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
@@ -457,8 +467,18 @@ class MiniMaxH3TokenRefinerBlock(nn.Module):
             prefix=f"{prefix}.ff",
         )
 
-    def forward(self, hidden_states: torch.Tensor, original_seq_len: int) -> torch.Tensor:
-        hidden_states = hidden_states + self.attn(self.norm1(hidden_states), None, original_seq_len)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
+        hidden_states = hidden_states + self.attn(
+            self.norm1(hidden_states),
+            None,
+            original_seq_len,
+            attn_metadata=attn_metadata,
+        )
         return hidden_states + self.ff(self.norm2(hidden_states))
 
 
@@ -495,9 +515,14 @@ class MiniMaxH3TokenRefiner(nn.Module):
         ])
         self.final_norm = nn.RMSNorm(hidden_size, eps=final_norm_eps)
 
-    def forward(self, hidden_states: torch.Tensor, original_seq_len: int) -> torch.Tensor:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
         for block in self.refiner_blocks:
-            hidden_states = block(hidden_states, original_seq_len)
+            hidden_states = block(hidden_states, original_seq_len, attn_metadata=attn_metadata)
         return self.final_norm(hidden_states)
 
 
@@ -632,6 +657,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -646,6 +672,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
             exact_rope="rope" in exact_kernels,
+            vsa_fp4=vsa_fp4,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -907,6 +934,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
                 exact_kernels=self.enabled_exact_kernels,
+                vsa_fp4=config.vsa_fp4,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
@@ -954,6 +982,60 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             # report a misleading missing-attribute message.
             raise RuntimeError("This MiniMax H3 transformer has no PDD heads (arch_config.pdd_steps is None)")
         return {"video": self.proj_out, "audio": self.audio_proj_out}
+
+    _PDD_HEAD_NAMES = ("proj_out", "audio_proj_out")
+
+    def _pdd_linear_for_parameter(self, name: str) -> PDDReplicatedLinear | None:
+        if self.pdd_steps is None:
+            return None
+        head, _, _ = name.rpartition(".")
+        if head in self._PDD_HEAD_NAMES:
+            return getattr(self, head)
+        return None
+
+
+    @property
+    def _fastvideo_shard_cache_key_extra(self) -> dict[str, Any] | None:
+        """Keep widened-head shards out of the base model's shard cache entry."""
+        return self.inference_config_overrides() or None
+
+
+    def inference_config_overrides(self) -> dict[str, Any]:
+        """Extra ``config.json`` keys a deployable checkpoint of this model needs."""
+        if self.pdd_steps is None:
+            return {}
+        return {"pdd_steps": self.pdd_steps}
+
+
+    def inference_export_expected_shape(self, output_key: str, base_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Return the PDD head shape for narrow or already-widened bases.
+
+        A continued PDD run may use an earlier exported PDD checkpoint as its
+        ``init_from`` model.  In that case the exporter's base component
+        already carries the same widened heads, so applying the grid factor a
+        second time would reject the live DCP state.  Accept either the
+        released single-head width or this transformer's exact grid width and
+        fail closed for every other structural shape.
+        """
+        linear = self._pdd_linear_for_parameter(output_key)
+        if linear is None:
+            return tuple(base_shape)
+        base_rows = int(base_shape[0])
+        if base_rows == linear.output_size:
+            return tuple(base_shape)
+        if base_rows != linear.head_output_size:
+            raise ValueError(
+                f"PDD export base tensor {output_key!r} has {base_rows} output rows; expected "
+                f"{linear.head_output_size} single-head rows or {linear.output_size} Grid-{linear.grid_size} rows"
+            )
+        return (linear.output_size, *tuple(base_shape[1:]))
+
+
+    def preprocess_loaded_weight(self, name: str, tensor: torch.Tensor) -> torch.Tensor:
+        """Expand narrow teacher heads; resumed wide heads pass through unchanged."""
+        linear = self._pdd_linear_for_parameter(name)
+        return tensor if linear is None else linear.expand_loaded_tensor(name, tensor)
+
 
     @contextlib.contextmanager
     def fuse_pdd_block(
@@ -1019,6 +1101,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
         self.prepare_for_compile()
+        from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+        # Lazy policy resolution inside capture guards on each layer's unique prefix and mutates the first graph.
+        for module in self.modules():
+            method = getattr(module, "quant_method", None)
+            if isinstance(method, NVFP4QuantizeMethod):
+                method._static_activation_global_sf()
+                method._dynamic_activation_scale()
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()
         for block in self.transformer_blocks:
@@ -1130,21 +1220,26 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         torch.save({repr(k): v.detach().cpu() for k, v in first.items()}, path + ".inputs")
         logger.info("Dumped AdaLN modulation tables (%d entries) to %s", entries, path)
 
-    def _refined_text(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
+    def _refined_text(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        text_attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
         """The prompt embedding is constant across the denoising loop and the
         refiner blocks are timestep-free, so refine once per generation
         (saves two transformer blocks and four collectives per step). Skipped
         under grad (training needs the graph) and under compile."""
         cacheable = not torch.is_grad_enabled() and not torch.compiler.is_compiling()
         if (cacheable and self._text_cache is not None and self._text_cache[0] is encoder_hidden_states
-                and self._text_cache[1].device == encoder_hidden_states.device):
+                and self._text_cache[1].device == encoder_hidden_states.device
+                and self._text_cache[2] is text_attn_metadata):
             return self._text_cache[1]
         text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
             text_embeds = self._block_input(sequence_model_parallel_shard(text_embeds, dim=1)[0])
-        text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
+        text_embeds = self.token_refiner(text_embeds, text_original_seq_len, attn_metadata=text_attn_metadata)
         if sp_world_size > 1:
             text_embeds = sequence_model_parallel_all_gather_with_unpad(
                 text_embeds,
@@ -1152,7 +1247,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 dim=1,
             )
         if cacheable:
-            self._text_cache = (encoder_hidden_states, text_embeds)
+            self._text_cache = (encoder_hidden_states, text_embeds, text_attn_metadata)
         return text_embeds
 
     def forward(
@@ -1167,12 +1262,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         video_indices: torch.Tensor,
         audio_indices: torch.Tensor,
         text_indices: torch.Tensor,
+        text_attn_metadata: AttentionMetadata | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout."""
         late = self.__dict__.get("_splice_late")
         if late is not None and get_forward_context().current_timestep >= self._splice_from_step:
             return late(hidden_states, audio_hidden_states, encoder_hidden_states, timestep, timestep_indices,
-                        token_tags, position_ids, video_indices, audio_indices, text_indices)
+                        token_tags, position_ids, video_indices, audio_indices, text_indices,
+                        text_attn_metadata=text_attn_metadata)
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
@@ -1187,14 +1284,26 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
 
         video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
         audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
-        text_embeds = self._refined_text(encoder_hidden_states)
+        text_embeds = self._refined_text(encoder_hidden_states, text_attn_metadata=text_attn_metadata)
         rotary_emb = self._rotary_for(position_ids, text_embeds.dtype)
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
 
-        # text/video/audio indices partition [0, sequence_length), so the
-        # uninitialized buffer is fully overwritten; in-place index_copy_ avoids
-        # the three full-buffer clones out-of-place index_copy would make.
-        packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+        # Real text/video/audio indices partition the prefix; optional capacity
+        # rows trail it and have no input/output modality indices. Fail closed
+        # if those rows lack attention boundaries, then initialize them to zero.
+        real_tokens = text_indices.numel() + video_indices.numel() + audio_indices.numel()
+        pad_tokens = sequence_length - real_tokens
+        if pad_tokens < 0:
+            raise ValueError("Real H3 token counts exceed the packed sequence length")
+        if pad_tokens:
+            metadata = get_forward_context().attn_metadata
+            packed_sequence = getattr(metadata, "packed_sequence", None)
+            metadata_padding = getattr(packed_sequence if packed_sequence is not None else metadata, "pad_tokens", 0)
+            if metadata_padding != pad_tokens:
+                raise ValueError("H3 capacity padding requires matching masked attention metadata")
+            packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+        else:
+            packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         packed_hidden_states.index_copy_(1, text_indices, text_embeds)
         packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
         packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))

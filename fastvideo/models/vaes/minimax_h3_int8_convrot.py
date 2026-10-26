@@ -351,3 +351,13 @@ def dense_vae_safetensors(paths: list[str]) -> list[str]:
 def find_int8_convrot_vae_path(model_path: str | Path) -> Path | None:
     candidate = Path(model_path) / INT8_CONVROT_FILENAME
     return candidate if candidate.is_file() else None
+
+
+def int8_convrot_overlay_to_apply(model_path: str | Path) -> Path | None:
+    """The ConvRot overlay shipped in ``model_path``, unless ``FASTVIDEO_H3_VAE_INT8_OVERLAY=0`` skips it."""
+    path = find_int8_convrot_vae_path(model_path)
+    if path is not None and not envs.FASTVIDEO_H3_VAE_INT8_OVERLAY.get():
+        logger.info("Skipping MiniMax-H3 INT8 ConvRot VAE overlay %s (FASTVIDEO_H3_VAE_INT8_OVERLAY=0); "
+                    "decoding with the dense weights", path)
+        return None
+    return path
