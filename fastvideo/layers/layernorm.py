@@ -133,6 +133,35 @@ class FP32LayerNorm(nn.LayerNorm):
         ).to(origin_dtype)
 
 
+def norm_modulate(x: torch.Tensor,
+                  norm: nn.LayerNorm,
+                  shift: torch.Tensor,
+                  scale: torch.Tensor,
+                  *,
+                  out_dtype: torch.dtype | None,
+                  norm_input_fp32: bool,
+                  fused_norm: bool = True) -> torch.Tensor:
+    """Wan's pre-attention ``norm1 + modulate`` site, one or two launches at inference.
+
+    Eager is ``(norm(x.float()) * (1 + scale) + shift).to(out_dtype)`` with
+    ``norm_input_fp32`` (the dense block, FP32LayerNorm) or
+    ``norm(x) * (1 + scale) + shift`` without it (the causal block, LayerNorm in
+    the stream dtype); 4-D tables broadcast per frame. With
+    FASTVIDEO_ENABLE_FUSED_NORM=1 the norm and the modulation run as one Triton
+    launch in fp32 (fastvideo/layers/triton_fused_norm.py) unless the caller
+    passes ``fused_norm=False`` (the causal block, whose rollout amplifies any
+    non-bit-exact kernel); otherwise the norm stays eager and the modulation
+    runs as one bit-exact launch (fastvideo/layers/triton_exact_modulation.py),
+    falling back to the eager expression outside its support.
+    """
+    from fastvideo.layers import triton_exact_modulation as exact
+    from fastvideo.layers.triton_fused_norm import fused_norm_mod, fused_norm_mod_supported
+    if fused_norm and out_dtype in (None, x.dtype) and fused_norm_mod_supported(x, shift, scale, norm):
+        return fused_norm_mod(x, shift, scale, norm, ln_input_fp32=norm_input_fp32)
+    normed = norm(x.float()) if norm_input_fp32 else norm(x)
+    return exact.modulate_to(normed, scale, shift, out_dtype)
+
+
 class ScaleResidualLayerNormScaleShift(nn.Module):
     """
     Fused operation that combines:
@@ -153,6 +182,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         compute_dtype: torch.dtype | None = None,
         prefix: str = "",
         fuse_inference: bool = False,
+        fused_norm: bool = True,
     ):
         super().__init__()
         # Opt-in Triton kernels for the no-grad path. Off by default: they
@@ -162,8 +192,11 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # call with a cast to the stream dtype (e.g. Wan) should enable. The
         # default tier (fastvideo/layers/triton_exact_modulation.py) keeps the
         # norm eager and is bit-exact; FASTVIDEO_ENABLE_FUSED_NORM=1 selects
-        # the fused-norm kernel (fastvideo/layers/triton_fused_norm.py).
+        # the fused-norm kernel (fastvideo/layers/triton_fused_norm.py), unless
+        # the module is built with fused_norm=False (the causal Wan block, whose
+        # self-forcing rollout amplifies any non-bit-exact kernel).
         self.fuse_inference = fuse_inference
+        self.fused_norm = fused_norm
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
         elif norm_type == "layer":
@@ -203,9 +236,9 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         if self.fuse_inference and not convert_modulation_dtype:
             from fastvideo.layers import triton_exact_modulation as exact
             from fastvideo.layers.triton_fused_norm import (fused_path_supported, fused_residual_norm_mod)
-            if fused_path_supported(residual, x, gate, shift, scale, self.norm):
+            if self.fused_norm and fused_path_supported(residual, x, gate, shift, scale, self.norm):
                 return fused_residual_norm_mod(residual, x, gate, shift, scale, self.norm)
-            if isinstance(self.norm, FP32LayerNorm) and exact.supports_residual_norm(residual, x, gate, shift, scale):
+            if exact.supports_residual_norm(residual, x, gate, shift, scale, self.norm):
                 return exact.residual_norm_modulate(residual, x, gate, shift, scale, self.norm)
         # x.shape: [batch_size, seq_len, inner_dim]
         # Apply residual connection with gating

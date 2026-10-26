@@ -468,10 +468,10 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
 FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
     False,
     category="performance",
-    doc="Wan inference runs the Triton kernel that fuses residual + LayerNorm + modulation into one launch "
-    "(fastvideo/layers/triton_fused_norm.py); its LayerNorm reduction order differs from eager. Off keeps LayerNorm "
-    "eager and fuses only the elementwise chains around it, bit for bit "
-    "(fastvideo/layers/triton_exact_modulation.py).")
+    doc="Dense Wan inference fuses each LayerNorm with the residual and modulation around it into one Triton "
+    "launch (fastvideo/layers/triton_fused_norm.py); the LayerNorm reduction order differs from eager. Causal "
+    "(self-forcing) Wan ignores it: its rollout amplifies any non-bit-exact kernel. Off keeps LayerNorm eager and "
+    "fuses only the elementwise chains around it, bit for bit (fastvideo/layers/triton_exact_modulation.py).")
 
 # ================== Output encoding ==================
 

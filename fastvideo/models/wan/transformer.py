@@ -13,8 +13,7 @@ from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift)
-from fastvideo.layers.triton_exact_modulation import modulate_to
+                                        ScaleResidualLayerNormScaleShift, norm_modulate)
 from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
@@ -527,7 +526,8 @@ class WanTransformerBlock(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = modulate_to(self.norm1(hidden_states.float()), scale_msa, shift_msa, orig_dtype)
+        norm_hidden_states = norm_modulate(hidden_states, self.norm1, shift_msa, scale_msa, out_dtype=orig_dtype,
+                                           norm_input_fp32=True)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -679,7 +679,8 @@ class WanTransformerBlock_VSA(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = modulate_to(self.norm1(hidden_states.float()), scale_msa, shift_msa, orig_dtype)
+        norm_hidden_states = norm_modulate(hidden_states, self.norm1, shift_msa, scale_msa, out_dtype=orig_dtype,
+                                           norm_input_fp32=True)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
