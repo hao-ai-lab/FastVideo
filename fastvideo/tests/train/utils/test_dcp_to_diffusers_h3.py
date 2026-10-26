@@ -232,6 +232,40 @@ def test_ref2va_export_replaces_only_transformer_ref(
     assert MiniMaxH3Ref2VAModularPipeline._extra_config_module_map["transformer"] == "transformer_ref"
 
 
+def test_export_carries_its_own_inference_contract_and_never_the_base_one(tmp_path: Path, monkeypatch) -> None:
+    base = tmp_path / "base"
+    (base / "transformer_ref").mkdir(parents=True)
+    (base / "model_index.json").write_text("{}", encoding="utf-8")
+    _TinyDiffusersTransformer().save_config(base / "transformer_ref")
+    # A PDD warm start's contract describes the warm start, not a new export.
+    (base / "fastvideo_inference.json").write_text('{"pdd_steps": 99}', encoding="utf-8")
+    transformer = torch.nn.Linear(2, 2, bias=False)
+    transformer.reverse_param_names_mapping = {}
+    model = SimpleNamespace(
+        transformer=transformer,
+        transformer_module_type="transformer_ref",
+        export_diffusers_weight_layout=True,
+    )
+    monkeypatch.setattr("fastvideo.utils.maybe_download_model", lambda _path: str(base))
+    monkeypatch.setattr(
+        "torch.distributed.checkpoint.state_dict.get_model_state_dict",
+        lambda module, options: module.state_dict(),
+    )
+
+    with_contract = tmp_path / "with-contract"
+    _save_role_pretrained(role="student",
+                          base_model_path=str(base),
+                          output_dir=str(with_contract),
+                          model=model,
+                          inference_contract={"pdd_steps": 32})
+    without_contract = tmp_path / "without-contract"
+    _save_role_pretrained(role="student", base_model_path=str(base), output_dir=str(without_contract), model=model)
+
+    assert json.loads((with_contract / "fastvideo_inference.json").read_text(encoding="utf-8")) == {"pdd_steps": 32}
+    assert not (without_contract / "fastvideo_inference.json").exists()
+    assert json.loads((base / "fastvideo_inference.json").read_text(encoding="utf-8")) == {"pdd_steps": 99}
+
+
 def test_non_opted_in_model_preserves_legacy_export_filename(tmp_path: Path, monkeypatch) -> None:
     base = tmp_path / "base"
     (base / "transformer").mkdir(parents=True)

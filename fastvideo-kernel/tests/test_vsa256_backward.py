@@ -16,6 +16,7 @@ import torch
 from fastvideo_kernel import video_sparse_attn, video_sparse_attn_bshd
 
 from .test_vsa256_triton import _metrics, _torch_vsa256_reference
+from .utils import skip_cute_block_sparse_on_sm12x
 
 _BLOCK = 256
 _BLOCK_SIZE_3D = (4, 8, 8)  # prod == 256
@@ -29,6 +30,7 @@ _GRAD_TOL = (1e-3, 0.25)
 
 @pytest.fixture(autouse=True)
 def _require_cute_backend(monkeypatch):
+    skip_cute_block_sparse_on_sm12x()
     pytest.importorskip(
         "flash_attn.cute.block_sparsity",
         reason="optional FA4 CuTe build (flash_attn.cute) not installed",

@@ -34,7 +34,7 @@ _FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5
 def test_kandinsky5_model_loads_and_forwards(env_overrides):
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
-    if envs.FASTVIDEO_ATTENTION_BACKEND.get() is None:
+    if not envs.FASTVIDEO_ATTENTION_BACKEND.is_set():
         env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
 
     cfg = load_run_config(_FIXTURE)

@@ -332,56 +332,93 @@ response alone does not establish generation readiness.
 ## Memory estimates
 
 `estimateMemory()` in `docs/js/cookbook-memory.mjs` estimates one request's peak
-memory on one GPU from a resolved configuration. It is analytical: a result is
-not a measurement and never marks a recipe as verified.
+memory on one device from a resolved configuration. It is analytical: a result
+is not a measurement and never marks a recipe as verified.
 
 ```javascript
+const hardware = await api.loadCapacityHardware(index);
 const { config } = api.resolveConfig(catalog, edits);
-const result = api.estimateMemory({ config, workload: catalog.workload, model, hardware });
+const result = api.estimateMemory({
+  config,
+  workload: catalog.workload,
+  model,
+  hardware: hardware.devices.find((device) => device.id === "rtx-5090-32gb"),
+  memoryBudgetGiB: 28, // optional override; unified memory otherwise uses a labeled 75% default
+});
 ```
 
-Each phase (encoding, denoising, decoding) adds the weights resident on the GPU
-to that phase's working memory. The largest phase plus headroom (10% and 1 GiB
-by default) is compared with the device memory. `status` is `fits`, `exceeds`,
-`unsupported` when the device lacks a weight type, or `unknown` with a `reason`.
-The result also reports each phase's weights and working memory in GiB.
+Each phase (`startup`, `encoding`, `denoising`, `decoding`) adds the weights
+resident on the device to that phase's working memory. The largest phase plus
+headroom (10% and 1 GiB by default) is compared with the device budget. `status`
+is `fits`, `exceeds`, `unsupported` when the device lacks a weight type, or
+`unknown` with a `reason`. The result reports each phase's weights and working
+memory in GiB, plus `capacityGiB`, `memory`, `host`, and `hardware`.
 
 | Model field | Meaning |
 | --- | --- |
 | `memory_rules` | Working-memory rule; `wan` is the only rule |
-| `geometry` | For `wan`: `temporal_compression`, `spatial_compression`, `patch_size`, `hidden_size`, `ffn_size` and `vae_decoder_channels` |
-| `components[].role` | `text_encoder`, `transformer` or `vae` |
+| Shared transformer geometry | For `wan`: `hidden_size`, `ffn_size`, and `patch_size` |
+| Shared VAE geometry | `temporal_compression`, `spatial_compression`, and `vae_decoder_channels` |
+| `components[].role` | `text_encoder`, `transformer`, `image_encoder`, or `vae` |
 | `components[].parameter_count` | Parameters of the loaded subset |
-| `components[].dtype` | Weight precision; optional `activation_dtype` sets the compute precision |
 | `components[].block_count`, `block_parameter_count` | Repeated blocks and their total parameters, for streaming offload |
-| `components[].streams_when_offloaded` | The text encoder streams its blocks through FSDP when offloaded |
-| `components[].quantized_parameter_count` | Transformer parameters stored in the requested quantized format |
 
-A hardware entry has `name`, `type: discrete_gpu`, `memory_per_device` with a
-`value` and a `GiB` or `GB` unit, and `supported_dtypes`.
+Shared component records contain no selected dtype or offload setting; those
+come from the resolved serving configuration. A model manifest references
+shared entries instead of copying counts:
+
+```yaml
+capacity:
+  memory_rules: wan
+  components:
+    transformer: { ref: wan2.1-t2v-1.3b-dit }
+    text_encoder: { ref: umt5-xxl-encoder }
+    vae: { ref: wan2.1-vae-decoder }
+```
+
+The hardware lookup is versioned and source-backed; see the
+[capacity guide](capacity_estimation.md#hardware-catalog). Dedicated memory uses
+nominal or selected-partition capacity. Unified memory is shared with the CPU and
+OS, so the estimator uses `memoryBudgetGiB`, a catalogued `memory.usable` policy,
+or a labeled 75% default, and never treats nominal system memory as VRAM.
+`host_memory` and `hostMemoryGb` describe separate host RAM for CPU offload; the
+result reports a
+host requirement and status independently from device fit. Custom devices use
+the same fields and should set `custom: true`; they are not catalog-verified.
 
 Offload follows the native runtime:
 
 - Unset offload switches are on (`OffloadConfig` in `fastvideo/api/schema.py`).
   Layerwise DiT offload replaces whole-model DiT offload.
-- An offloaded component leaves the GPU outside its own phase and is complete
+- An offloaded component leaves the device outside its own phase and is complete
   during it. Layerwise DiT offload and FSDP text-encoder offload instead keep
   the weights outside the blocks plus two blocks.
-- Without FSDP, whole-model DiT offload leaves the transformer on the GPU.
+- Without FSDP, whole-model DiT offload leaves the transformer on the device in
+  every request phase, not only denoising.
+- `FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS` keeps that many transformer blocks on
+  the device; the estimate counts them in addition to two streamed blocks during
+  denoising and as resident outside it.
+- Unified-memory CUDA devices disable every CPU-offload flag at runtime; the
+  estimate applies that policy instead of subtracting offloaded weights.
 - Packed NVFP4 weights are buffers, so layerwise offload keeps them resident.
 - `lazy_module_load` defers only the components a pipeline lists in
   `_lazy_module_names`. Wan lists none, so the switch changes nothing.
 
-Multiple GPUs, FSDP, unified memory, image-to-video, more than one video per
-prompt, missing parameter counts, text-encoder quantization and loading peaks
-return `unknown`. With VAE tiling enabled, a note says the
-decode estimate assumes untiled decoding.
+Multiple GPUs, FSDP, VSA, compilation, quantization, lazy loading, image-to-video,
+more than one video per prompt, missing parameter counts, and unsupported
+attention backends return `unknown`. A disabled VAE feature cache also returns
+`unknown` because the full-clip decode path has no rule. Unified memory without
+an application budget uses the labeled 75% default. With VAE tiling enabled, a
+note says the decode estimate assumes untiled decoding.
 
 `WAN_RULE` holds the uncalibrated tensor counts. To calibrate them, run with
 `FASTVIDEO_STAGE_LOGGING=1`: each stage then records `peak_allocated_mb` and
 `peak_reserved_mb` and resets the peak counter. The request-level
 `peak_memory_mb` is read after those resets, so it does not cover earlier
 stages. Allocator figures exclude the CUDA context, which the headroom covers.
+Successful-run evidence and analytical fit stay separate; see
+`assessCapacity()`, `matchEvidence()`, and `recommendCapacity()` in the
+[capacity guide](capacity_estimation.md#optional-successful-run-evidence).
 
 To add a model family, write a function that returns working-memory bytes per
 phase, register it in `WORKING_MEMORY` with its required geometry fields, and

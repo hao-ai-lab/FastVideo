@@ -1,0 +1,36 @@
+# OpenAI-compatible server for HunyuanVideo 1.5 I2V 480p step-distilled.
+#   fastvideo serve --config examples/serving/openai_hunyuan15_i2v_480p.yaml
+# Send image_reference (or input_reference) with the first frame.
+generator:
+  model_path: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: true
+      vae: true
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: i2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_hunyuan15_i2v_480p
+  served_model_name: hunyuan15-i2v-480p
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    height: 720
+    width: 1280
+    num_frames: 121
+    fps: 24
+    num_inference_steps: 12
+    guidance_scale: 1.0
+  output:
+    return_frames: false

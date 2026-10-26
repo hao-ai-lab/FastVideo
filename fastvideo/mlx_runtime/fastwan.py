@@ -325,7 +325,38 @@ def dq_gemm_engaged() -> int:
     return _dq_gemm_engaged
 
 
-def affine_dq_gemm_min_m() -> int | None:
+QUANT_GEMM_MODES = ("auto", "dequant", "qmm")
+_quant_gemm_override: str | None = None
+
+
+def _validate_quant_gemm_mode(mode: str) -> str:
+    normalized = mode.strip().lower()
+    if normalized not in QUANT_GEMM_MODES:
+        raise ValueError(f"Unknown quantized GEMM mode {mode!r}; choose from {QUANT_GEMM_MODES}.")
+    return normalized
+
+
+def set_quant_gemm_mode(mode: str | None) -> str | None:
+    """Select the H3 affine-quantized GEMM path process-wide; returns the previous override.
+
+    ``auto`` keeps the measured default (``FASTVIDEO_MLX_DQ_GEMM`` decides),
+    ``dequant`` always uses dequantize + dense GEMM for wide inputs, and
+    ``qmm`` always uses ``mx.quantized_matmul``. ``None`` clears the override so
+    ``FASTVIDEO_MLX_QUANT_GEMM`` applies again.
+    """
+    global _quant_gemm_override
+    previous = _quant_gemm_override
+    _quant_gemm_override = None if mode is None else _validate_quant_gemm_mode(mode)
+    return previous
+
+
+def quant_gemm_mode() -> str:
+    if _quant_gemm_override is not None:
+        return _quant_gemm_override
+    return _validate_quant_gemm_mode(envs.FASTVIDEO_MLX_QUANT_GEMM.get())
+
+
+def _env_dq_gemm_min_m() -> int | None:
     raw = envs.FASTVIDEO_MLX_DQ_GEMM.get().strip().lower()
     if raw in {"", "0", "off", "false", "no"}:
         return None
@@ -338,6 +369,16 @@ def affine_dq_gemm_min_m() -> int | None:
     if value <= 0:
         return None
     return value
+
+
+def affine_dq_gemm_min_m() -> int | None:
+    mode = quant_gemm_mode()
+    if mode == "qmm":
+        return None
+    floor = _env_dq_gemm_min_m()
+    if mode == "dequant" and floor is None:
+        return MLX_AFFINE_DQ_GEMM_DEFAULT_MIN_M
+    return floor
 
 
 def _matmul_leading_rows(x) -> int:

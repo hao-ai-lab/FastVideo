@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseDocument, stringify } from "yaml";
 import { createValidator } from "./cookbook-validator.mjs";
 import { resolveConfig } from "./cookbook-config.mjs";
+import { WORKLOAD_IDS } from "./cookbook-workloads.mjs";
 import { validateCapacityMetadata } from "./cookbook-capacity-schema.mjs";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -348,9 +349,8 @@ export function buildCatalogs({
     validateRuntime(runtime, id, `${context}.metadata`);
     expected(
       definition.workloads,
-      (value) =>
-        Array.isArray(value) && value.length > 0 && value.every((workload) => ["t2v", "i2v"].includes(workload)),
-      "nonempty list of t2v or i2v workloads",
+      (value) => Array.isArray(value) && value.length > 0 && value.every((workload) => WORKLOAD_IDS.includes(workload)),
+      "nonempty list of supported workloads",
       `${context}.workloads`,
     );
     const options = mergeOptions(declarations.options, definition.options, context);

@@ -349,7 +349,8 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
 FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
-    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel. "
+    doc="VIDEO_SPARSE_ATTN_H3 sends tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel; "
+    "grad-tracking forwards need its autograd operator, else Triton. "
     "fastvideo-kernel reads the same variable with the same rule.",
     deprecated_names=("FASTVIDEO_VSA_SM100A", ))
 FASTVIDEO_VSA_TRITON = EnvBool(
@@ -453,6 +454,11 @@ FASTVIDEO_MLX_DQ_GEMM = EnvStr(
     category="performance",
     doc="MLX dequantized GEMM for affine-quantized weights: 0 turns it off, 1 uses the measured minimum row count, "
     "and an integer sets the minimum row count.")
+FASTVIDEO_MLX_QUANT_GEMM = EnvStr(
+    "auto",
+    category="performance",
+    doc="MLX H3 affine-quantized GEMM path: auto keeps FASTVIDEO_MLX_DQ_GEMM behaviour, dequant always uses "
+    "dequantize + dense GEMM for wide inputs, qmm always uses mx.quantized_matmul.")
 FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D = EnvBool(True,
                                               category="performance",
                                               doc="LTX-2 VAE uses the channels_last_3d memory format.")

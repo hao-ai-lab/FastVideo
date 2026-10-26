@@ -77,10 +77,10 @@ def _h3_vsa_single_region_segments(
     n_audio = int(layout.audio_indices.numel())
     n_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                (layout.latent_width // patch_size[2]))
-    if n_text + n_cond + n_audio + n_video != layout.sequence_length:
+    if n_text + n_cond + n_audio + n_video != layout.real_sequence_length:
         raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
                          f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
-                         f"sequence length {layout.sequence_length}.")
+                         f"real sequence length {layout.real_sequence_length}.")
     return n_text, n_cond, n_audio, (layout.num_video_latent_frames, layout.latent_height, layout.latent_width)
 
 
@@ -115,10 +115,10 @@ def _h3_vsa_ref2va_segments(
     segments.append((layout.num_video_latent_frames, layout.latent_height, layout.latent_width))
     n_target_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                       (layout.latent_width // patch_size[2]))
-    if cursor + n_target_video != layout.sequence_length:
+    if cursor + n_target_video != layout.real_sequence_length:
         raise ValueError(f"Ref2VA reference spans {layout.reference_segments} + target segments do not tile the "
                          f"packed sequence: reached row {cursor} + video {n_target_video} != "
-                         f"{layout.sequence_length}.")
+                         f"{layout.real_sequence_length}.")
     return tuple(segments)
 
 

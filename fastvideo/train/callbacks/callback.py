@@ -96,6 +96,19 @@ class Callback:
     ) -> None:
         pass
 
+    def on_after_optimizer_step(
+        self,
+        method: TrainingMethod,
+        iteration: int = 0,
+    ) -> None:
+        """Run after optimizer/scheduler steps and before gradients are cleared."""
+        pass
+
+    def will_run_validation(self, iteration: int = 0) -> bool:
+        """Return whether this callback will validate at ``iteration``."""
+        del iteration
+        return False
+
 
 class CallbackDict:
     """Manages a collection of named callbacks.
@@ -179,3 +192,7 @@ class CallbackDict:
                 fn(*args, **kwargs)
 
         return _dispatch
+
+    def will_run_validation(self, iteration: int = 0) -> bool:
+        """Return whether any configured callback schedules validation now."""
+        return any(cb.will_run_validation(iteration) for cb in self._callbacks.values())
