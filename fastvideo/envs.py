@@ -468,14 +468,10 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
 FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
     False,
     category="performance",
-    doc="Opt into Wan's inference-only Triton residual + LayerNorm + modulation fusion. "
-    "Its reduction order changes numerical outputs; the default keeps eager reference compatibility.")
-# Global kill switch for the opt-in, inference-only Triton fusion in
-# fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
-FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
-                                       category="performance",
-                                       doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
-                                       "path that Wan blocks opt into, and use the eager path.")
+    doc="Wan inference runs the Triton kernel that fuses residual + LayerNorm + modulation into one launch "
+    "(fastvideo/layers/triton_fused_norm.py); its LayerNorm reduction order differs from eager. Off keeps LayerNorm "
+    "eager and fuses only the elementwise chains around it, bit for bit "
+    "(fastvideo/layers/triton_exact_modulation.py).")
 
 # ================== Output encoding ==================
 
@@ -937,6 +933,8 @@ FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
 DEPRECATED_VARIABLES = {
+    "FASTVIDEO_DISABLE_FUSED_NORM": "the default Wan path is bit-exact with eager; FASTVIDEO_ENABLE_FUSED_NORM=1 "
+    "selects the fused-norm kernel",
     "FASTVIDEO_TARGET_DEVICE": "no code reads it",
     "FASTVIDEO_USE_PRECOMPILED": "no code reads it",
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL": "no code reads it",
