@@ -1,15 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The SP communication warmup must not assume the rank runs on CUDA.
-
-``warmup_sequence_parallel_communication()`` builds throwaway tensors and pushes them
-through the sequence-parallel collectives, so those tensors belong on whatever
-accelerator the rank was placed on. Hardcoding CUDA there makes the warmup fail on
-every other accelerator (Ascend NPU, MPS, ...).
-
-These tests run without an accelerator: the platform and the SP group are replaced by
-recording stand-ins, and the assertion is on the device the warmup tensors were built
-with.
-"""
 
 from __future__ import annotations
 
@@ -19,8 +8,6 @@ from fastvideo.distributed import communication_op
 
 
 class _RecordingSpGroup:
-    """Stand-in for the SP group that remembers the tensors handed to the collectives."""
-
     def __init__(self) -> None:
         self.tensors: list[torch.Tensor] = []
 
@@ -34,8 +21,6 @@ class _RecordingSpGroup:
 
 
 class _RecordingDeviceModule:
-    """torch.cuda / torch.npu stand-in: records the devices it was asked to synchronize."""
-
     def __init__(self) -> None:
         self.synchronized: list = []
 
@@ -44,8 +29,6 @@ class _RecordingDeviceModule:
 
 
 class _RecordingPlatform:
-    """Minimal stand-in for fastvideo.platforms.current_platform."""
-
     def __init__(self, device_type: str) -> None:
         self.device_type = device_type
         self.device_module = _RecordingDeviceModule()
@@ -75,7 +58,7 @@ def test_warmup_uses_the_active_platform_device(monkeypatch) -> None:
 
 
 def test_warmup_keeps_an_explicit_device(monkeypatch) -> None:
-    platform = _RecordingPlatform(device_type="cpu")
+    platform = _RecordingPlatform(device_type="cuda")
     group = _RecordingSpGroup()
     _patch_warmup_inputs(monkeypatch, platform, group)
 
