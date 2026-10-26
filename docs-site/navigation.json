@@ -128,6 +128,10 @@
         "display": "group"
       },
       {
+        "label": "PAN 2 text/image to video",
+        "href": "/inference/pan2"
+      },
+      {
         "label": "Examples",
         "href": "/inference/examples/examples_inference_index"
       }
@@ -246,6 +250,25 @@
           {
             "label": "Upscaling reference",
             "href": "/inference/kandinsky6_sr"
+          }
+        ]
+      },
+      {
+        "label": "PAN 2",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "PAN 2",
+            "href": "/cookbook/pan2/pan2"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/pan2"
+          },
+          {
+            "label": "Model reference",
+            "href": "/inference/pan2"
           }
         ]
       },

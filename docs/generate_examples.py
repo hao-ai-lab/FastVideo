@@ -35,6 +35,7 @@ COOKBOOK_FAMILIES = {
     "cosmos",
     "kandinsky5",
     "kandinsky6",
+    "pan2",
     "flux",
     "qwen_image21",
     "sd35",
