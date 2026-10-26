@@ -36,3 +36,19 @@ deployments:
       # Generic stage verification accepts nonnegative seeds, including zero.
       default_request.sampling.seed:
         minimum: 0
+
+# Optional capacity facts extend this model manifest; identity and examples come from deployments above.
+capacity:
+  memory_rules: wan
+  components:
+    transformer:
+      ref: fastwan2.1-t2v-1.3b-vsa-dit
+    text_encoder:
+      ref: umt5-xxl-encoder
+    vae:
+      ref: wan2.1-vae-decoder
+  # Existing examples are not measured GPU-memory evidence.
+  reference_runs: []
+  sources:
+    - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/tree/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef
+    - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/pipelines/basic/wan/presets.py

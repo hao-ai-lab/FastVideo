@@ -77,10 +77,10 @@ def _h3_vsa_single_region_segments(
     n_audio = int(layout.audio_indices.numel())
     n_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                (layout.latent_width // patch_size[2]))
-    if n_text + n_cond + n_audio + n_video != layout.sequence_length:
+    if n_text + n_cond + n_audio + n_video != layout.real_sequence_length:
         raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
                          f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
-                         f"sequence length {layout.sequence_length}.")
+                         f"real sequence length {layout.real_sequence_length}.")
     return n_text, n_cond, n_audio, (layout.num_video_latent_frames, layout.latent_height, layout.latent_width)
 
 
@@ -115,10 +115,10 @@ def _h3_vsa_ref2va_segments(
     segments.append((layout.num_video_latent_frames, layout.latent_height, layout.latent_width))
     n_target_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                       (layout.latent_width // patch_size[2]))
-    if cursor + n_target_video != layout.sequence_length:
+    if cursor + n_target_video != layout.real_sequence_length:
         raise ValueError(f"Ref2VA reference spans {layout.reference_segments} + target segments do not tile the "
                          f"packed sequence: reached row {cursor} + video {n_target_video} != "
-                         f"{layout.sequence_length}.")
+                         f"{layout.real_sequence_length}.")
     return tuple(segments)
 
 
@@ -270,7 +270,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
             # Run-level tile geometry (256 default, 64 = native Triton path,
-            # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
+            # 128 = ptx_blackwell), plumbed like the run-level sparsity; the
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
             if vsa_ref_keep_rate is not None:
@@ -324,11 +324,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with self._pdd_head_fusion(pdd_plan, index), trace_step(index), set_forward_context(
-                            current_timestep=index,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                    ):
+                    with self._pdd_head_fusion(
+                            pdd_plan,
+                            index), trace_step(index), nvtx_range(f"minimax_h3.step{index}"), set_forward_context(
+                                current_timestep=index,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                            ):
                         video_velocity, audio_velocity = self.transformer(
                             hidden_states=batch.latents[None],
                             audio_hidden_states=batch.audio_latents[None],

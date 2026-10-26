@@ -231,6 +231,9 @@ class FastVideoArgs:
     video_decode_backend: str = "h3-vae"
     taeh3_checkpoint: str | None = None
     taeh3_chunk_size: int = 5
+    # Exported NVFP4 MiniMax-H3 decoder file (decoder-nvfp4.safetensors or decoder.safetensors) that replaces
+    # the VAE decoder at load. Overrides FASTVIDEO_H3_VAE_NVFP4_DECODER. Needs Blackwell FP4 hardware.
+    h3_vae_nvfp4_decoder: str | None = None
 
     # Load each heavy component on first use and free it once the last stage
     # that holds it has run, instead of keeping every component resident from
@@ -283,7 +286,7 @@ class FastVideoArgs:
     # compile ported from hao-ai-lab/FastVideo#1718. Applied by the loader
     # right after the transformer loads, with fullgraph=True and inductor
     # options {emulate_precision_casts: True} injected (no user kwargs
-    # needed). MiniMax-H3 VSA is supported only by its compile-safe sm_100a
+    # needed). MiniMax-H3 VSA is supported only by its compile-safe ptx_blackwell
     # tile-64 inference route; other VSA routes degrade the transformer to
     # eager with one warning. Dense FA2/FA3/FA4 inference uses compile-visible
     # custom-op boundaries. Opt-in via FASTVIDEO_INFERENCE_TORCH_COMPILE=1 (folded in
@@ -292,12 +295,14 @@ class FastVideoArgs:
     # which keeps the pipeline-level compile semantics.
     inference_torch_compile: bool = False
 
+    h3_vsa_fp4: dict[str, Any] = field(default_factory=dict)
+
     disable_autocast: bool = False
 
     # VSA parameters. None means unset: __post_init__ fills the checkpoint's
     # trained value when the checkpoint fixes one, else 0.0 and 256.
     VSA_sparsity: float | None = None  # inference/validation sparsity
-    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = sm_100a CUDA only
+    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = ptx_blackwell only
 
     # V-MoBA parameters
     moba_config_path: str | None = None
@@ -438,6 +443,16 @@ class FastVideoArgs:
             env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
+        allowed_fp4 = {"enabled", "prefix_precision", "two_level_p", "smooth_k"}
+        if not isinstance(self.h3_vsa_fp4, dict) or self.h3_vsa_fp4.keys() - allowed_fp4:
+            raise ValueError(f"h3_vsa_fp4 must be a mapping with keys from {sorted(allowed_fp4)}")
+        for key in ("enabled", "two_level_p", "smooth_k"):
+            if key in self.h3_vsa_fp4 and not isinstance(self.h3_vsa_fp4[key], bool):
+                raise ValueError(f"h3_vsa_fp4.{key} must be a boolean")
+        if self.h3_vsa_fp4.get("prefix_precision", "") not in ("", "fp8", "bf16"):
+            raise ValueError("h3_vsa_fp4.prefix_precision must be empty, fp8 or bf16")
+        if self.h3_vsa_fp4.get("enabled") and (self.inference_torch_compile or self.enable_torch_compile):
+            raise ValueError("h3_vsa_fp4 requires eager DiT inference; disable DiT torch.compile")
         self._fold_vae_parallel_env()
         self._fold_h3_encoder_split_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
@@ -751,37 +766,6 @@ class FastVideoArgs:
             help="Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
         )
 
-        # BSA runtime control (LongCat)
-        parser.add_argument(
-            "--enable-bsa",
-            action=StoreBoolean,
-            help="Enable Block Sparse Attention (BSA) at runtime (overrides config).",
-        )
-        parser.add_argument(
-            "--bsa-sparsity",
-            type=float,
-            help="BSA sparsity (e.g., 0.9375).",
-        )
-        parser.add_argument(
-            "--bsa-cdf-threshold",
-            type=float,
-            help="BSA CDF threshold (optional).",
-        )
-        parser.add_argument(
-            "--bsa-chunk-q",
-            nargs=3,
-            type=int,
-            metavar=("T", "H", "W"),
-            help="BSA chunk_3d_shape_q as three ints, e.g., 4 4 4.",
-        )
-        parser.add_argument(
-            "--bsa-chunk-k",
-            nargs=3,
-            type=int,
-            metavar=("T", "H", "W"),
-            help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
-        )
-
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,
@@ -927,7 +911,7 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.VSA_tile_size,
             help="VSA-H3 tile size in tokens (256, 128 or 64; default: the checkpoint's trained value, else 256); "
-            "64 runs the native Triton block-sparse path, 128 requires the sm_100a/sm_103a CUDA kernel",
+            "64 runs the native Triton block-sparse path, 128 requires the ptx_blackwell kernel",
         )
 
         # Master port for distributed training/inference
@@ -1048,8 +1032,8 @@ class FastVideoArgs:
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
-        # args (e.g. enable_bsa, bsa_sparsity) live in PipelineConfig and must
-        # not be forwarded to the FastVideoArgs constructor.
+        # args live in PipelineConfig and must not be forwarded to the
+        # FastVideoArgs constructor.
         valid_fields = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in kwargs.items() if k in valid_fields})
 

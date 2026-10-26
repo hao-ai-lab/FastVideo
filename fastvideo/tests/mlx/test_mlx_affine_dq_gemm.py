@@ -16,6 +16,7 @@ from fastvideo.mlx_runtime.fastwan import (  # noqa: E402
     linear,
     quantize_matrix,
     reset_dq_gemm_telemetry,
+    set_quant_gemm_mode,
 )
 from fastvideo.mlx_runtime.minimax_h3 import linear as h3_linear  # noqa: E402
 
@@ -164,3 +165,60 @@ def test_default_floor_is_measured_768(env_overrides) -> None:
     if envs.FASTVIDEO_MLX_DQ_GEMM.is_set():
         pytest.skip("parent environment pinned FASTVIDEO_MLX_DQ_GEMM")
     assert affine_dq_gemm_min_m() == 768
+
+
+@pytest.fixture
+def quant_gemm_mode_restored():
+    previous = set_quant_gemm_mode(None)
+    yield
+    set_quant_gemm_mode(previous)
+
+
+def _h3_rows_engaged(rows: int) -> int:
+    quantized = _try_quantize(64, 64, 6, 64)
+    reset_dq_gemm_telemetry()
+    x = mx.random.normal((rows, 64)).astype(mx.bfloat16)
+    mx.eval(h3_linear(x, quantized))
+    return dq_gemm_engaged()
+
+
+def test_quant_gemm_dequant_mode_ignores_env_off(env_overrides, quant_gemm_mode_restored) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("0"))
+    set_quant_gemm_mode("auto")
+    assert affine_dq_gemm_min_m() is None
+    assert _h3_rows_engaged(1024) == 0
+    set_quant_gemm_mode("dequant")
+    assert affine_dq_gemm_min_m() == 768
+    assert _h3_rows_engaged(1024) == 1
+    assert _h3_rows_engaged(64) == 0  # small M still uses qmm
+
+
+def test_quant_gemm_qmm_mode_never_dequantizes(env_overrides, quant_gemm_mode_restored) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("8"))
+    set_quant_gemm_mode("auto")
+    assert _h3_rows_engaged(1024) == 1
+    set_quant_gemm_mode("qmm")
+    assert affine_dq_gemm_min_m() is None
+    assert _h3_rows_engaged(1024) == 0
+
+
+def test_quant_gemm_env_selector_and_validation(env_overrides, quant_gemm_mode_restored) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_QUANT_GEMM.override("qmm"))
+    assert affine_dq_gemm_min_m() is None
+    set_quant_gemm_mode("dequant")  # explicit selection beats the env var
+    assert affine_dq_gemm_min_m() is not None
+    with pytest.raises(ValueError, match="Unknown quantized GEMM mode"):
+        set_quant_gemm_mode("bogus")
+
+
+def test_unset_pipeline_quant_gemm_keeps_the_environment(env_overrides) -> None:
+    from fastvideo.mlx_runtime import fastwan
+    from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
+
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_QUANT_GEMM.override("qmm"))
+    pipeline = object.__new__(MiniMaxH3MLXPipeline)
+    pipeline._apply_quant_gemm(None)
+    try:
+        assert fastwan.quant_gemm_mode() == "qmm"
+    finally:
+        pipeline._restore_quant_gemm()

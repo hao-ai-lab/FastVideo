@@ -130,7 +130,7 @@ def _write_transformer_ref(root, *, config_pdd_steps, weight_pdd_steps=PDD_STEPS
     return path, tensors
 
 
-def _load(path):
+def _load(path, **overrides):
     args = SimpleNamespace(
         pipeline_config=MiniMaxH3PipelineConfig(),
         override_transformer_cls_name=None,
@@ -151,6 +151,8 @@ def _load(path):
         inference_mode=True,
         dit_layerwise_offload=False,
     )
+    for name, value in overrides.items():
+        setattr(args, name, value)
     return component_loader.TransformerLoader().load(str(path), args)
 
 
@@ -229,3 +231,14 @@ def test_fuse_pdd_block_weighted_mean_of_widened_heads(tmp_path, cpu_loader, sin
         expected = torch.einsum("n,brnc->brc", alpha.float(), all_heads[..., 1:3, :].float())
         assert block.shape == expected.shape
         torch.testing.assert_close(block.float(), expected, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_load_explicit_fp4_settings_reaches_main_blocks_only(tmp_path, vsa_gates, enabled):
+    path, _ = _write_transformer_ref(tmp_path, config_pdd_steps=PDD_STEPS)
+    options = {"enabled": enabled, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
+    with envs.FASTVIDEO_H3_VSA_FP4.override(not enabled):
+        model = _load(path, h3_vsa_fp4=options)
+    assert all(block.attn._vsa_fp4 is enabled for block in model.transformer_blocks)
+    assert all(block.attn._vsa_fp4_options == options for block in model.transformer_blocks)
+    assert not model.token_refiner.refiner_blocks[0].attn._vsa_fp4

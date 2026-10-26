@@ -11,7 +11,6 @@ from typing import Any
 
 import numpy as np
 import torch
-from easydict import EasyDict
 
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
@@ -41,6 +40,7 @@ class DynamicDegreeMetric(BaseMetric):
     def setup(self) -> None:
         if self._model is not None:
             return
+        from easydict import EasyDict
         from vbench.third_party.RAFT.core.raft import RAFT
 
         args = EasyDict(small=False, mixed_precision=False, alternate_corr=False, dropout=0.0)

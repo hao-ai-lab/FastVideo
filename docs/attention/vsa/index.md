@@ -20,17 +20,19 @@ the CUDA `fastvideo-kernel` package:
 - **VSA-capable checkpoints** retain those gates, quantize them on the same
   affine grid, and record `vsa.capable` in `mlx_h3_dit.json`. Preview leaves
   runtime VSA off until you pass `--vsa`. `mlx_fasth3_8step.py` turns it on.
-- **Tile sizes** 64 `(4, 4, 4)` and 256 `(4, 8, 8)`. Prefix keys can be
+- **Tile sizes** 64 `(4, 4, 4)`, 128 `(4, 4, 8)` and 256 `(4, 8, 8)`. Prefix keys can be
   `exempt` or `compete`. `--vsa-dense-first-n-steps` and `--vsa-dense-layers`
   force dense SDPA on the selected steps or blocks.
-- **`--vsa-impl auto`** uses the chunked gather+SDPA **reference** path.
-  `--vsa-impl simd` runs the SIMD-group Metal kernel (tile 64, head dim 128)
-  and falls back to reference on unsupported shapes or kernel failure. The
-  runtime executes a small kernel probe before use and remembers failures
-  for the process, so later blocks do not retry a broken backend.
-  It is not the default: 480p four-step generation is faster than reference
-  but does not yet match reference video. `--vsa-impl reference` is the same
-  as `auto`.
+- **`--vsa-impl auto`** runs the SIMD-group Metal kernel for 128-token tiles
+  (the FastH3 Omni trained tile) and the chunked gather+SDPA **reference** path
+  for other tiles. `--vsa-impl simd` also runs the kernel for tile 64 (head dim
+  128 only). The kernel reads K/V tiles in place with an fp32 online softmax and
+  falls back to reference on unsupported shapes or kernel failure. The runtime
+  executes a small kernel probe before use and remembers failures for the
+  process, so later blocks do not retry a broken backend. Per layer the kernel
+  matches reference to within bf16 noise, but generated video is not
+  bit-identical because routing and the 8-step sampler amplify rounding
+  differences. `--vsa-impl reference` forces gather+SDPA.
 
 See the [MLX install guide](../../getting_started/installation/mlx.md)
 and the [MiniMax H3 cookbook](../../cookbook/minimax-h3.md) for conversion

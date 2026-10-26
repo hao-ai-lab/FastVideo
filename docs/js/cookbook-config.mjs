@@ -3,6 +3,9 @@
  * Native baselines and manifest-selected JSON Schema controls come from the authored YAML catalog.
  */
 import { createValidator } from "./cookbook-validator.mjs";
+import { WORKLOADS } from "./cookbook-workloads.mjs";
+export { WORKLOADS };
+export { loadCapacityIndex, loadCapacityModel, loadCapacityHardware } from "./cookbook-capacity.mjs";
 
 const scope = globalThis;
 
@@ -62,6 +65,7 @@ function validateIndex(index, baseUrl) {
       for (const key of ["id", "label", "workload", "runtime", "catalog_url"]) {
         requireShape(text(deployment[key]), `${entry}.${key}`, "nonempty text");
       }
+      requireShape(Object.hasOwn(WORKLOADS, deployment.workload), `${entry}.workload`, "a supported workload ID");
       requireShape(
         !deploymentIds.has(deployment.id),
         `${entry}.id (${deployment.id})`,
@@ -128,6 +132,7 @@ function validateCatalog(catalog, deployment) {
     }
   }
   requireShape(catalog.workload === deployment.workload, `${context}.workload`, deployment.workload);
+  requireShape(Object.hasOwn(WORKLOADS, catalog.workload), `${context}.workload`, "a supported workload ID");
   const paths = new Set();
   for (const [position, control] of catalog.controls.entries()) {
     const field = `${context}.controls[${position}]`;
@@ -336,7 +341,7 @@ function toYaml(value, depth = 0) {
 }
 
 /** Build same-machine client instructions; a bind-all address is not a client destination. */
-function sampleRequest(catalog, config) {
+export function sampleRequest(catalog, config) {
   const server = { ...catalog.runtime.server_defaults, ...config.server };
   let host = server.host;
   if (host === "0.0.0.0") host = "127.0.0.1";
@@ -349,20 +354,28 @@ function sampleRequest(catalog, config) {
       websocketUrl: `ws://${host}:${server.port}/v1/stream`,
     };
   }
+  const media = Object.hasOwn(WORKLOADS, catalog.workload) ? WORKLOADS[catalog.workload] : undefined;
+  if (media === undefined) throw new CookbookValidationError(`Unsupported workload: ${catalog.workload}`);
   const components = config.generator?.pipeline?.components;
   const model = components?.lora_path ? components.lora_nickname : server.served_model_name || catalog.model.id;
-  const body = { ...(model === undefined ? {} : { model }), prompt: "A river flowing through a peaceful forest" };
-  if (catalog.workload === "i2v") body.input_reference = "/absolute/path/to/first-frame.png";
+  const body = {
+    ...(model === undefined ? {} : { model }),
+    prompt: config.default_request?.prompt ?? "A river flowing through a peaceful forest",
+  };
+  if (media.reference === "input_reference") body.input_reference = "/absolute/path/to/first-frame.png";
+  if (media.reference === "video_reference") {
+    body.video_reference = { video_url: "/absolute/path/to/input.mp4" };
+  }
   const argv = [
     "curl",
     "--fail-with-body",
-    `http://${host}:${server.port}/v1/videos/sync`,
+    `http://${host}:${server.port}${media.endpoint}`,
     "-H",
     "Content-Type: application/json",
     "--data",
     JSON.stringify(body),
   ];
-  argv.push("--output", "output.mp4");
+  argv.push("--output", `output.${media.extension}`);
   return { body, command: argv.map(shellQuote).join(" ") };
 }
 
@@ -430,3 +443,10 @@ function getOptions(catalog, config = catalog.base_config, selections = {}) {
 }
 
 export { loadIndex, loadDeployment, getOptions, resolveConfig };
+export {
+  assessCapacity,
+  estimateMemory,
+  matchEvidence,
+  recommendCapacity,
+  resolveExecution,
+} from "./cookbook-memory.mjs";

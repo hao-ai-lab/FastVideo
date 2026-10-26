@@ -97,6 +97,36 @@ runtimes:
         title: Compile transformer
         type: boolean
         default: false
+      # MiniMax-H3 only (fastvideo_args.video_decode_backend). TAEH3 fetches its own SHA-pinned weights.
+      generator.pipeline.experimental.video_decode_backend:
+        title: Video decoder
+        description: >-
+          h3-vae is the full decoder. taeh3 is the tiny preview decoder: faster and lighter, lower quality,
+          text-to-video only.
+        type: string
+        enum: [h3-vae, taeh3]
+        default: h3-vae
+      # MiniMax-H3 only (fastvideo_args.h3_vae_nvfp4_decoder). Files come from FastVideo/FastH3-NVFP4-VAE-Decoder.
+      generator.pipeline.experimental.h3_vae_nvfp4_decoder:
+        title: NVFP4 video decoder
+        description: >-
+          Replaces the video decoder with an NVFP4 decoder on Blackwell GPUs. The 36-block quality tier needs a
+          full-depth VAE; the 8-block fast tier works with any H3 VAE.
+        type: [string, "null"]
+        enum:
+          - null
+          - ./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
+          - ./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors
+        default: null
+      # A local text-encoder folder; a serialized NVFP4 encoder selects its quantization from its own config.
+      generator.pipeline.components.text_encoder_weights:
+        title: Text encoder
+        description: Loads a different text-encoder checkpoint. The NVFP4 encoder needs a Blackwell GPU.
+        type: [string, "null"]
+        enum:
+          - null
+          - ./fasth3-nvfp4-encoder/text_encoder
+        default: null
       default_request.sampling.num_frames:
         title: Frames
         type: integer

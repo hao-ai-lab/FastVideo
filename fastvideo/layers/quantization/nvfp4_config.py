@@ -96,6 +96,33 @@ H3_NVFP4_DIT_BUFFER_NAMES = (
 # Optional per-layer static activation global scale (448 * 6 / calibrated input amax).
 # Exports without it quantize activations with the unit global scale.
 H3_NVFP4_DIT_INPUT_SF_NAME = "_nvfp4_input_global_sf"
+# Safetensors metadata key of a packed export: JSON list of main blocks whose linears stay bf16
+# (they are absent from the export and load from the dense shards).
+H3_NVFP4_DIT_SKIP_BLOCKS_KEY = "skip_blocks"
+_H3_MAIN_BLOCK = re.compile(r"(?:^|\.)transformer_blocks\.(\d+)\.")
+
+
+def minimax_h3_block_index(prefix: str) -> int | None:
+    """Main transformer-block index of a MiniMax-H3 module prefix, or None outside the main blocks."""
+    match = _H3_MAIN_BLOCK.search(prefix)
+    return int(match.group(1)) if match is not None else None
+
+
+def read_minimax_h3_nvfp4_dit_skip_blocks(path: str) -> tuple[int, ...]:
+    """The bf16 main blocks a packed NVFP4H3 export declares (empty for exports that quantize every block)."""
+    import json
+
+    from safetensors import safe_open
+
+    with safe_open(path, framework="pt", device="cpu") as reader:
+        raw = (reader.metadata() or {}).get(H3_NVFP4_DIT_SKIP_BLOCKS_KEY)
+    if raw is None:
+        return ()
+    blocks = json.loads(raw)
+    if not isinstance(blocks, list) or not all(
+            isinstance(b, int) and not isinstance(b, bool) and b >= 0 for b in blocks):
+        raise ValueError(f"{path}: metadata {H3_NVFP4_DIT_SKIP_BLOCKS_KEY!r} must be a JSON list of block indices")
+    return tuple(sorted(set(blocks)))
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
@@ -203,14 +230,17 @@ def nvfp4_quantize_fenced(
                                        sfLayout=SfLayout(sf_layout),
                                        do_shuffle=do_shuffle,
                                        enable_pdl=False)
-    # With FlashInfer 0.6.18 on GB10, queued activation quantization
-    # plus GEMM can diverge. Completing quantization while its padded
-    # input is alive prevents the observed intermittent corruption.
+    # With FlashInfer 0.6.18 and 0.7.0 on GB10, queued activation
+    # quantization plus GEMM can diverge: identical seeded H3 requests
+    # produce different latents. Completing each quantization on the
+    # host prevents it, at no measurable denoise cost.
     torch.cuda.current_stream(x.device).synchronize()
     return quantized, scales
 
 
 _OPS_REGISTERED = False
+# Cleared the first time FlashInfer returns 128x4 scales without row padding.
+_FLASHINFER_PADS_128X4_SCALES = True
 
 
 def _register_ops_once() -> None:
@@ -241,10 +271,20 @@ def _register_ops_once() -> None:
         sf_layout: int,
         do_shuffle: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del global_sf, sf_layout, do_shuffle
+        del global_sf
+        SfLayout, _, _ = _require_flashinfer()
         m, k = x.shape
         quantized = torch.empty((m, (k + 1) // 2), device=x.device, dtype=torch.uint8)
-        scales = torch.empty((m, (k + 15) // 16), device=x.device, dtype=torch.uint8)
+        # Mirror FlashInfer's shapes: swizzled scale layouts pad rows to the
+        # tile (128 or 8) and scale columns to 4; linear (and shuffled 128x4)
+        # scales are unpadded. ``_nvfp4_quantize`` relies on the 128x4 padding.
+        if do_shuffle or sf_layout == SfLayout.layout_linear.value:
+            scales = torch.empty((m, (k + 15) // 16), device=x.device, dtype=torch.uint8)
+        else:
+            row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
+            scales = torch.empty((m + (-m) % row_tile, ((k + 15) // 16 + 3) // 4 * 4),
+                                 device=x.device,
+                                 dtype=torch.uint8)
         return quantized, scales
 
     @torch.library.custom_op(
@@ -329,21 +369,34 @@ def _nvfp4_quantize(
     elif global_sf.device != x.device:
         global_sf = global_sf.to(device=x.device)
     if sf_layout == SfLayout.layout_linear.value:
-        x_for_quant = x
-        logical_rows = x.shape[0]
-    else:
-        # Sequence-parallel can feed either logical rows or row-padded
-        # rows. Normalize to the kernel tile shape for swizzled layouts
-        # so both paths share a stable quantization contract.
-        row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
-        logical_rows = x.shape[0]
-        pad_rows = (-logical_rows) % row_tile
-        x_for_quant = F.pad(x, (0, 0, 0, pad_rows))
-
+        return torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
+    # Sequence-parallel can feed either logical rows or row-padded
+    # rows. Normalize to the kernel tile shape for swizzled layouts
+    # so both paths share a stable quantization contract.
+    row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
+    logical_rows = x.shape[0]
+    padded_rows = logical_rows + (-logical_rows) % row_tile
+    global _FLASHINFER_PADS_128X4_SCALES
+    if sf_layout == SfLayout.layout_128x4.value and not do_shuffle and _FLASHINFER_PADS_128X4_SCALES:
+        # FlashInfer pads 128x4 scale factors to whole row tiles itself, and
+        # quantizes the logical rows bit for bit like a zero-padded copy, so
+        # skip that copy (a full activation write per linear). The fake op
+        # reports the same padded scales, so a compiled graph takes this
+        # path unconditionally, without a guard on the row count.
+        quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
+        # Columns are padded to whole 4-wide tiles too, so compare against the
+        # fully padded size; logical rows alone can reach the unpadded column count.
+        padded_cols = ((x.shape[-1] + 15) // 16 + 3) // 4 * 4
+        if torch.compiler.is_compiling() or scales.numel() >= padded_rows * padded_cols:
+            return quantized, scales
+        # Only an unexpected FlashInfer build gets here; quantize it padded
+        # from now on rather than quantizing every activation twice.
+        logger.warning("FlashInfer returned unpadded 128x4 NVFP4 scales; "
+                       "falling back to quantizing a row-padded activation copy.")
+        _FLASHINFER_PADS_128X4_SCALES = False
+    x_for_quant = F.pad(x, (0, 0, 0, padded_rows - logical_rows))
     quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x_for_quant, global_sf, sf_layout, do_shuffle)
-    if sf_layout != SfLayout.layout_linear.value:
-        quantized = quantized.narrow(0, 0, logical_rows)
-    return quantized, scales
+    return quantized.narrow(0, 0, logical_rows), scales
 
 
 def _mm_fp4(
@@ -365,6 +418,10 @@ def _mm_fp4(
         raise TypeError(f"Unsupported kwargs for _mm_fp4: {sorted(kwargs)}")
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
+    if (out is None and backend == "cudnn" and a.shape[0] >= _SPLIT_MIN_ROWS
+            and envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() != "off" and not torch.compiler.is_compiling()):
+        return _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
+                                 use_nvfp4)
     return torch.ops.fastvideo_fp4.mm_fp4(
         a,
         b,
@@ -378,6 +435,78 @@ def _mm_fp4(
         backend,
         use_nvfp4,
     )
+
+
+_SPLIT_MIN_ROWS = 16384
+_SPLIT_CANDIDATES = (1, 2, 4)
+_SplitKey = tuple[int, int, int, str, int, bool, torch.dtype]
+_SPLIT_CHOICE: dict[_SplitKey, int] = {}
+# Measured on GB10 (cuDNN 9.20 via FlashInfer 0.6): (packed K, N) -> chunks. H3's FF down projection is the only
+# shape that falls off the plan heuristic; the others are fastest whole.
+_SPLIT_TABLE: dict[tuple[int, int], int] = {(7168, 5376): 2}
+
+
+def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Split activations and their 128x4-swizzled scales into ``parts`` row chunks on 128-row boundaries."""
+    rows = a.shape[0]
+    step = max(rows // parts // 128 * 128, 128)
+    bounds = [i * step for i in range(parts)] + [rows]
+    chunks = []
+    for lo, hi in zip(bounds[:-1], bounds[1:], strict=True):
+        if hi <= lo:
+            continue
+        # The 128x4 layout interleaves rows within a tile, so the last chunk needs
+        # the whole final scale tile even though its activation slice ends at `hi`.
+        scale_hi = min(((hi + 127) // 128) * 128, a_scale.shape[0])
+        chunks.append((a[lo:hi], a_scale[lo:scale_hi]))
+    return chunks
+
+
+def _mm_fp4_chunked(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4,
+                    parts: int) -> torch.Tensor:
+    chunks = _mm_fp4_row_chunks(a, a_scale, parts) if parts > 1 else [(a, a_scale)]
+    outs = [
+        torch.ops.fastvideo_fp4.mm_fp4(ca, b, cs, b_scale, alpha, out_dtype, None, block_size, use_8x4_sf_layout,
+                                       backend, use_nvfp4) for ca, cs in chunks
+    ]
+    return outs[0] if len(outs) == 1 else torch.cat(outs, dim=0)
+
+
+def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
+                      use_nvfp4) -> torch.Tensor:
+    """``mm_fp4`` over row chunks when that is faster.
+
+    The cuDNN FP4 plan heuristic falls off a cliff for some (rows, K, N) shapes: H3's FF
+    down projection (K=14336, N=5376, 35k rows) runs at ~110 TFLOPs whole but ~360 TFLOPs in
+    two halves (and N=14336 does the reverse). The default ``table`` mode uses fixed per-shape
+    chunk counts, so every run takes the same kernels. Chunks accumulate in a different order from
+    the whole-matrix plan, so a few elements round one bf16 step differently (about 1e-8 of outputs,
+    at massive-activation rows); ``auto`` times 1/2/4 chunks once per shape instead.
+    """
+    key = (a.shape[0], a.shape[1], b.shape[1], backend, block_size, use_8x4_sf_layout, out_dtype)
+    args = (a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4)
+    # Splitting slices the 128x4 scale rows; an 8x4 layout packs them differently.
+    if use_8x4_sf_layout or a_scale.dim() != 2 or a_scale.shape[0] < a.shape[0]:
+        return _mm_fp4_chunked(*args, 1)
+    if envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() == "table":
+        _SPLIT_CHOICE.setdefault(key, _SPLIT_TABLE.get((a.shape[1], b.shape[1]), 1))
+    if key not in _SPLIT_CHOICE:
+        import time
+        timings = {}
+        for parts in _SPLIT_CANDIDATES:
+            _mm_fp4_chunked(*args, parts)
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            for _ in range(2):
+                _mm_fp4_chunked(*args, parts)
+            torch.cuda.synchronize()
+            timings[parts] = time.perf_counter() - start
+        _SPLIT_CHOICE[key] = min(timings, key=timings.__getitem__)
+        logger.info("NVFP4 mm_fp4 row split for %s: %d chunk(s) (%s ms)", key, _SPLIT_CHOICE[key], {
+            k: round(v * 500, 1)
+            for k, v in timings.items()
+        })
+    return _mm_fp4_chunked(*args, _SPLIT_CHOICE[key])
 
 
 def _mm_fp4_backend() -> str:
@@ -602,10 +731,19 @@ class NVFP4Config(QuantizationConfig):
     checkpoints such as FastH3 V2 NVFP4).
     ``layer_profile="h3_dit_vsa"`` is ``h3_dit`` plus each block's VSA
     compression gate ``attn.to_gate_compress`` (VSA-distilled students).
+    ``skip_blocks`` keeps every linear of those MiniMax-H3 main blocks in
+    bf16 (mixed exports such as FastH3 OmniRef QAD, blocks 42-49). A packed
+    export records its own list, which the loader adopts when this is empty.
     """
 
-    def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
+    def __init__(self,
+                 layer_profile: str = "refine",
+                 retain_original_weights: bool | None = None,
+                 skip_blocks: tuple[int, ...] | list[int] = ()):
         super().__init__()
+        if any(isinstance(b, bool) or not isinstance(b, int) or b < 0 for b in skip_blocks):
+            raise ValueError(f"NVFP4Config.skip_blocks must be non-negative block indices, got {skip_blocks!r}")
+        self.skip_blocks: tuple[int, ...] = tuple(sorted(set(skip_blocks)))
         if layer_profile not in ("base", "refine", "h3_dit", "h3_dit_ffn", "h3_dit_vsa"):
             raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', 'h3_dit', "
                              f"'h3_dit_ffn', or 'h3_dit_vsa', got {layer_profile!r}")
@@ -638,12 +776,21 @@ class NVFP4Config(QuantizationConfig):
         return cls(
             layer_profile=config.get("layer_profile", "refine"),
             retain_original_weights=config.get("retain_original_weights"),
+            skip_blocks=tuple(config.get("skip_blocks", ())),
         )
+
+    def with_skip_blocks(self, skip_blocks: tuple[int, ...]) -> NVFP4Config:
+        """A copy of this config with ``skip_blocks`` replaced."""
+        return NVFP4Config(layer_profile=self.layer_profile,
+                           retain_original_weights=self.retain_original_weights,
+                           skip_blocks=skip_blocks)
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
         if not isinstance(layer, LinearBase):
+            return None
+        if self.skip_blocks and minimax_h3_block_index(prefix) in self.skip_blocks:
             return None
         if self.layer_profile == "h3_dit":
             tagged = is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
@@ -815,6 +962,7 @@ __all__ = [
     "H3_NVFP4_DIT_BUFFER_NAMES",
     "H3_NVFP4_DIT_EXPORT_FILENAME",
     "H3_NVFP4_DIT_INPUT_SF_NAME",
+    "H3_NVFP4_DIT_SKIP_BLOCKS_KEY",
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
@@ -825,5 +973,7 @@ __all__ = [
     "is_minimax_h3_nvfp4_dit_linear_prefix",
     "is_minimax_h3_nvfp4_linear_prefix",
     "load_minimax_h3_nvfp4_dit_export",
+    "minimax_h3_block_index",
     "nvfp4_linear_weight_param_names",
+    "read_minimax_h3_nvfp4_dit_skip_blocks",
 ]

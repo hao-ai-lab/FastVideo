@@ -1,0 +1,65 @@
+---
+title: Welcome to FastVideo
+description: Run, train, and accelerate video generation models with FastVideo.
+mode: frame
+---
+
+<div className="home-page">
+<header className="home-hero not-prose">
+  <h1 id="welcome-to-fastvideo" className="home-logo">
+    <img src="/assets/logos/logo.svg" alt="Welcome to FastVideo" width={252} height={105} />
+  </h1>
+  <p className="home-description">Run, train, and accelerate video generation models with FastVideo.</p>
+  <nav className="home-project-links" aria-label="About the project">
+    <GitHubStars />
+    <a className="home-lab-link" href="https://haoailab.com/">
+      <img src="/assets/hao-ai-lab.png" width={40} height={24} alt="" aria-hidden="true" />
+      Hao AI Lab
+    </a>
+    <a className="home-models-link" href="/fast-models">Fast Models <span aria-hidden="true">→</span></a>
+  </nav>
+  <div className="home-trendshift">
+    <a href="https://trendshift.io/repositories/14509?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-14509" target="_blank" rel="noopener noreferrer">
+      <img src="https://trendshift.io/api/badge/repositories/14509" alt="hao-ai-lab/FastVideo | Trendshift" width={250} height={55} />
+    </a>
+  </div>
+</header>
+
+<include>/_snippets/home-description.mdx</include>
+
+<a className="home-featured-model not-prose" href="/cookbook/minimax-h3/fasth3-8step">
+  <img src="/assets/logos/fastvideo.webp" alt="" width={40} height={40} />
+  <span>
+    <small>Start with a FastVideo model</small>
+    <strong>FastH3 8-Step V2</strong>
+  </span>
+  <span className="home-featured-action">Configure a recipe →</span>
+</a>
+
+<include>/_snippets/home-news.mdx</include>
+
+<CardGroup cols={2}>
+  <Card title="Quick start" href="/getting_started/quick_start" icon="rocket">
+    Generate your first video with the Python API.
+  </Card>
+  <Card title="Installation" href="/getting_started/installation" icon="download">
+    Set up FastVideo on NVIDIA GPUs or Apple Silicon.
+  </Card>
+  <Card title="Cookbook" href="/cookbook" icon="book-open">
+    Choose a model recipe, customize its settings, and download a serving configuration.
+  </Card>
+  <Card title="Training and distillation" href="/training/overview" icon="layers">
+    Prepare data, fine-tune models, and build faster generators.
+  </Card>
+</CardGroup>
+
+<include>/_snippets/home-details.mdx</include>
+
+<a id="documentation"></a>
+
+## Projects and research
+
+Explore work using FastVideo's code or the attention research behind it.
+
+<include>/_snippets/home-projects.mdx</include>
+</div>

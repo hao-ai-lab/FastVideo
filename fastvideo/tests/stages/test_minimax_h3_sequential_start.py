@@ -105,6 +105,7 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     assert list(pipeline._stage_name_mapping) == ["input_preparation_stage", "conditioning_stage"]
 
     condition_stage = pipeline._stage_name_mapping["conditioning_stage"]
+    assert condition_stage.manage_cpu_offload is False
     passthrough = lambda batch, _args: batch
     monkeypatch.setattr(pipeline._stage_name_mapping["input_preparation_stage"], "forward", passthrough)
     monkeypatch.setattr(condition_stage, "forward", passthrough)
@@ -146,6 +147,51 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     assert condition_stage.conditioner is not None
     assert len(encoder.moved_to) > moves_before_second
     assert encoder.moved_to[moves_before_second] == torch.device("cpu")
+
+
+@pytest.mark.parametrize("manage_cpu_offload", [True, False])
+@pytest.mark.parametrize("fail_encoding", [True, False])
+def test_conditioning_respects_pipeline_offload_ownership(monkeypatch, manage_cpu_offload, fail_encoding):
+    import fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning as conditioning
+
+    moves = []
+    encoder = SimpleNamespace(parameters=lambda: iter([torch.ones(1)]), to=lambda device: moves.append(device))
+    stage = conditioning.MiniMaxH3ConditioningStage(encoder, None, None,
+                                                  manage_cpu_offload=manage_cpu_offload)
+
+    def encode(*_args):
+        if fail_encoding:
+            raise RuntimeError("encoding failed")
+        return torch.ones(1, 2, 4), torch.zeros(2, dtype=torch.int32)
+
+    monkeypatch.setattr(conditioning, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(stage, "_encode_fl2va", encode)
+    batch = ForwardBatch(data_type="video", prompt="placement")
+    args = SimpleNamespace(text_encoder_cpu_offload=True)
+    if fail_encoding:
+        with pytest.raises(RuntimeError, match="encoding failed"):
+            stage.forward(batch, args)
+    else:
+        assert stage.forward(batch, args).prompt_embeds[0].shape == (1, 2, 4)
+    assert moves == ([torch.device("cpu"), "cpu"] if manage_cpu_offload else [])
+
+
+def test_sequential_releases_encoder_when_conditioning_fails(monkeypatch):
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    events = []
+
+    def fail(*_args):
+        raise RuntimeError("encoding failed")
+
+    pipeline._stage_name_mapping = {
+        "input_preparation_stage": lambda batch, _args: batch,
+        "conditioning_stage": fail,
+    }
+    monkeypatch.setattr(pipeline, "_release_text_encoder", lambda: events.append("release"))
+    monkeypatch.setattr(pipeline, "_load_denoise_modules", lambda *_: pytest.fail("Do not load after encode failure"))
+    with pytest.raises(RuntimeError, match="encoding failed"):
+        pipeline._run_condition_then_denoise(ForwardBatch(data_type="video"), SimpleNamespace())
+    assert events == ["release"]
 
 
 def test_sequential_skips_host_offload_for_dtensor_params(monkeypatch) -> None:

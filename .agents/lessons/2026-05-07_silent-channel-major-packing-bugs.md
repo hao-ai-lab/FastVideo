@@ -64,6 +64,5 @@ because both sides of the parity check are now correct.
    `(pT pH pW C)`) at the call site and assert the layout matches the
    downstream consumer's expectation.
 
-4. The `add-model-port-dit` skill's parity gate should require an E2E hash
-   check for any DiT that does video token packing, not just latent
-   bit-exactness.
+4. DiT parity for any model that does video token packing should include an
+   E2E hash check, not just latent bit-exactness.

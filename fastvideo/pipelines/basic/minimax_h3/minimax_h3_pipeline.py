@@ -25,6 +25,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.hooks.pinned_memory import PinnedTensorArena
 from fastvideo.logger import init_logger
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
+from fastvideo.models.loader.h3_community_lora import convert_h3_community_lora
 from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3AudioDecodingStage,
     MiniMaxH3ConditioningStage,
@@ -233,6 +234,31 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     # inspects the schedulers, which are never deferred.
     _lazy_module_names = ("text_encoder", "transformer", "vae", "audio_vae")
 
+    # An H3 adapter that reaches few of the model's layers is a layout or model mismatch, never a feature.
+    lora_strict_coverage = True
+
+    def convert_adapter_state_dict(self, state_dict: dict[str, torch.Tensor],
+                                   lora_path: str) -> dict[str, torch.Tensor]:
+        """Translate community (ComfyUI, fal, musubi-tuner) H3 adapters to FastVideo's layout."""
+        conversion = convert_h3_community_lora(state_dict)
+        if not conversion.tensors and conversion.dense_keys:
+            # Dense-only adapters (.diff/.set_weight) are applied by DenseLoRAPatch at checkpoint load; there is
+            # no low-rank part for the side-branch/merge path or the coverage check.
+            logger.info("LoRA %s: dense-only adapter (%d dense keys), no low-rank layers to attach.", lora_path,
+                        len(conversion.dense_keys))
+            return {}
+        if not conversion.tensors:
+            raise ValueError(f"{lora_path!r} holds no MiniMax-H3 LoRA layers FastVideo recognizes "
+                             f"({len(state_dict)} keys, e.g. {sorted(state_dict)[:5]}).")
+        logger.info("LoRA %s: %s layout, %d source modules -> %d FastVideo modules", lora_path,
+                    conversion.source_format, conversion.source_modules, conversion.target_modules)
+        if conversion.unrecognized:
+            logger.warning("LoRA %s: %d keys match no known MiniMax-H3 layer, e.g. %s", lora_path,
+                           len(conversion.unrecognized), list(conversion.unrecognized[:5]))
+        # Unplaced keys pass through so the loader reports them with the rest of the unmatched modules.
+        unplaced = {key: state_dict[key] for key in conversion.unrecognized}
+        return {**conversion.tensors, **unplaced}
+
     def _drop_pinned_host_copies(self) -> None:
         """Drop every module's pinned host copies so the next park re-copies the weights.
 
@@ -281,6 +307,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             shift = getattr(self.get_module(module_name), "shift", None)
             if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
+            # The pipeline-config shifts are modular-trainer clocks; sampling
+            # never applies them, so refuse a value the checkpoint contradicts.
+            requested = getattr(fastvideo_args.pipeline_config, f"{modality}_scheduler_shift", None)
+            if requested is not None and float(requested) != float(shift):
+                raise ValueError(f"MiniMax-H3 {modality}_scheduler_shift={requested} is a training setting; this "
+                                 f"checkpoint's {module_name}/scheduler_config.json samples with shift {shift}.")
         self._load_checkpoint_schedule(fastvideo_args)
         transformer = self.get_module("transformer")
         if transformer is not None:
@@ -611,9 +643,11 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             logger.info("Restored MiniMax-H3 denoise modules to %s", device)
 
     def _run_condition_then_denoise(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        for name in ("input_preparation_stage", "conditioning_stage"):
-            batch = self._stage_name_mapping[name](batch, fastvideo_args)
-        self._release_text_encoder()
+        try:
+            for name in ("input_preparation_stage", "conditioning_stage"):
+                batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        finally:
+            self._release_text_encoder()
         self._load_denoise_modules(fastvideo_args)
         if not self._unified_memory_host():
             self._restore_denoise_modules(fastvideo_args)
@@ -668,6 +702,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 tokenizer=self.get_module("tokenizer"),
                 processor=self.get_module("processor"),
                 ref2va=ref2va,
+                # Sequential placement reuses one pinned encoder copy. A stage-level
+                # .to("cpu") would bypass it and allocate new host weights every request.
+                manage_cpu_offload=(h3_encoder_split_enabled(fastvideo_args)
+                                    or not self._defer_denoise_modules(fastvideo_args)),
             ),
         )
 

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Inference fast path: VSA-H3 attention on the block-sparse FP4 kernel.
 
-Opt-in with ``FASTVIDEO_H3_VSA_FP4=1`` (no-grad, single sequence-parallel
-rank, ``fastvideo-kernel`` built with ``attn_qat_infer``). The selection is
+Opt-in with ``h3_vsa_fp4.enabled`` or ``FASTVIDEO_H3_VSA_FP4=1`` (no-grad,
+eager inference, ``fastvideo-kernel`` built with ``attn_qat_infer``). The selection is
 VSA-H3's own: tile pooling, top-k block mask and the gated compression branch
 are unchanged; only the block-sparse attention itself runs on SageAttention3's
 FP4 kernel (BF16 Triton otherwise), with 64-token tiles carried by quadrant
@@ -28,20 +28,45 @@ import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetadata, _build_block_mask, _pool_tiles)
 
 
-def _sparse_fp4_attention(api: Any, *args: Any) -> torch.Tensor:
+def _fp4_kernel_kwargs(two_level_p: bool | None = None) -> dict[str, object]:
+    """Quantization options for the FP4 video kernel.
+
+    The native route defaults to single-level P; the QAD student trained with
+    two-level P, selected here by an inference-only switch.
+    """
+    kwargs: dict[str, object] = {}
+    enabled = envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.get() if two_level_p is None else two_level_p
+    if enabled:
+        kwargs["single_level_p_quant"] = False
+    return kwargs
+
+
+def _sparse_fp4_attention(api: Any, *args: Any, two_level_p: bool | None = None,
+                          smooth_k: bool | None = None) -> torch.Tensor:
     """Run the block-sparse FP4 kernel on lists built by vsa_tile_mask_to_fp4_blocks.
 
     Those lists are in range by construction, so skip the host-sync validation where the installed
     fastvideo-kernel supports turning it off; older releases have no ``validate`` argument.
+
+    ``FASTVIDEO_H3_VSA_FP4_K_SMOOTH`` subtracts the per-head key mean before the kernel
+    quantizes K. The shift is exact under softmax, so it only changes quantization error.
     """
+    smooth = envs.FASTVIDEO_H3_VSA_FP4_K_SMOOTH.get() if smooth_k is None else smooth_k
+    if smooth:
+        args = (args[0], args[1] - args[1].mean(dim=1, keepdim=True), *args[2:])
     try:
-        return api.sageattn_blackwell_sparse_bshd(*args, validate=False)
+        return api.sageattn_blackwell_sparse_bshd(*args, validate=False, **_fp4_kernel_kwargs(two_level_p))
     except TypeError as error:
         if "validate" not in str(error):
             raise
-        return api.sageattn_blackwell_sparse_bshd(*args)
+        return api.sageattn_blackwell_sparse_bshd(*args, **_fp4_kernel_kwargs(two_level_p))
 
 _BLOCK = 128
+
+
+def _resolve_prefix_mode(mode: str, steps: int, step: int) -> str:
+    """The prefix split for one denoising step; ``steps < 0`` applies it to every step."""
+    return mode if steps < 0 or step < steps else ""
 
 
 class _StageTimer:
@@ -53,13 +78,17 @@ class _StageTimer:
 
     def __init__(self) -> None:
         self.enabled = envs.FASTVIDEO_H3_SP_PROFILE.get()
+        self.nvtx = envs.FASTVIDEO_NVTX_PROFILE.get() and torch.cuda.is_available()
         self._spans: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
 
     def span(self, name: str):
         import contextlib
-        if not self.enabled:
-            return contextlib.nullcontext()
-        return self._record(name)
+        if self.enabled:
+            return self._record(name)
+        if self.nvtx:
+            from fastvideo.profiler import nvtx_range
+            return nvtx_range(f"h3.{name}")
+        return contextlib.nullcontext()
 
     def _record(self, name: str):
         import contextlib
@@ -95,12 +124,33 @@ def vsa_fp4_requested() -> bool:
 def _api() -> Any:
     global _fp4_api
     if _fp4_api is None:
-        import attn_qat_infer.api as api
+        try:
+            import attn_qat_infer.api as api
+        except (ImportError, OSError) as error:
+            raise RuntimeError("MiniMax-H3 FP4 attention was requested but attn_qat_infer could not load. "
+                               "Build fastvideo-kernel for this GPU from the same checkout; "
+                               "disable FP4 attention explicitly to use BF16 VSA.") from error
         _fp4_api = api
     return _fp4_api
 
 
-class _TileLayout:
+class _KeyIndexCache:
+    """The prefix split's valid-key positions, computed once per step layout.
+
+    ``kv_valid`` comes from the tile sizes alone, so every block of the forward
+    gets the same index; only the first block pays the host sync.
+    """
+    tile: int
+    n_tiles: int
+    _valid_key_index: torch.Tensor | None = None
+
+    def valid_key_index(self, kv_valid: torch.Tensor, half: int) -> torch.Tensor:
+        if self._valid_key_index is None:
+            self._valid_key_index = _valid_key_index(kv_valid, half, self.n_tiles * self.tile)
+        return self._valid_key_index
+
+
+class _TileLayout(_KeyIndexCache):
     """Per-step tile-order state shared by every block of one forward."""
 
     def __init__(self, meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torch.Tensor]) -> None:
@@ -155,6 +205,93 @@ def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list
         return [linear(x)[0] for linear in linears]
     pre = methods[0].quantize_input(x)
     return [m.apply(linear, x, linear.bias, pre_quantized=pre) for m, linear in zip(methods, linears, strict=True)]
+
+
+@torch.compile(dynamic=True, fullgraph=True)
+def _fp8_per_token(x: torch.Tensor) -> torch.Tensor:
+    """``[..., D]`` BF16 -> per-(row, head) FP8 E4M3 -> BF16, the prefix Q/K precision of the QK study.
+
+    Element for element the emulator's ``fp8_per_token_fake_quant``. The zero
+    scale is spelled as a reciprocal rather than a clamp so that a row with a
+    subnormal amax rounds the same way in both.
+    """
+    xf = x.float()
+    scale = xf.abs().amax(dim=-1, keepdim=True) / _FP8_MAX
+    inv = torch.where(scale == 0, torch.zeros_like(scale), 1.0 / scale)
+    return (xf * inv).clamp(-_FP8_MAX, _FP8_MAX).to(_FP8).float().mul(scale).to(torch.bfloat16)
+
+
+def _half_row_valid(kv_valid: torch.Tensor, half: int) -> torch.Tensor:
+    """Per-half valid-key counts -> a ``[rows]`` bool over the tile-ordered, zero-padded keys."""
+    return (torch.arange(half, device=kv_valid.device).unsqueeze(0) < kv_valid.unsqueeze(1)).reshape(-1)
+
+
+def _valid_key_index(kv_valid: torch.Tensor, half: int, logical: int) -> torch.Tensor:
+    """Positions of the valid keys among the first ``logical`` tile-ordered rows (a host sync)."""
+    return _half_row_valid(kv_valid, half)[:logical].nonzero().squeeze(1)
+
+
+def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, prefix_rows: int,
+                            logical: int, valid_index: torch.Tensor, precision: str) -> torch.Tensor:
+    """Dense attention for the prefix query rows, ``[B, H, prefix_rows, D]``.
+
+    VSA gives every prefix (non-video) query tile every key column, so those rows need no
+    block lists. Running them off the FP4 kernel lets their Q/K stay at 8-bit precision,
+    which is where most of the FP4 attention error sits (the dense prefix rows carry the
+    text, reference and audio queries).
+
+    K smoothing is exact - it shifts every score row by the same constant - and runs
+    before the FP8 rounding, in the order the emulator and the QAD student use.
+    """
+    import torch.nn.functional as F
+
+    q, k, v = query[:, :prefix_rows], key[:, :logical], value[:, :logical]
+    k = k - k.mean(dim=1, keepdim=True)
+    if precision == "fp8":
+        q, k = _fp8_per_token(q), _fp8_per_token(k)
+    # Attend only the valid keys. Gathering them keeps SDPA on its unmasked (flash) kernel; a boolean
+    # mask over all rows falls back to the memory-efficient kernel, 3-4x slower at OmniRef prefix sizes.
+    k, v = k.index_select(1, valid_index), v.index_select(1, valid_index)
+    return F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+                                          scale=1.0 / math.sqrt(q.shape[-1]))
+
+
+def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                        q2k_idx: torch.Tensor, q2k_num: torch.Tensor, kv_valid: torch.Tensor,
+                        q2k_quad: torch.Tensor | None, *, logical: int, prefix_rows: int, precision: str,
+                        options: dict[str, Any], layout: _KeyIndexCache | None = None) -> torch.Tensor:
+    numerics = {"two_level_p": options.get("two_level_p"), "smooth_k": options.get("smooth_k")}
+    if not prefix_rows:
+        return _sparse_fp4_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad, **numerics)
+    if not getattr(api, "KEY_LENGTH_SIZING", False):
+        raise RuntimeError("the MiniMax-H3 FP4 prefix split needs a fastvideo-kernel build whose "
+                           "sageattn_blackwell_sparse_bshd sizes by key length; rebuild fastvideo-kernel "
+                           "from this checkout")
+    if layout is not None:
+        valid_index = layout.valid_key_index(kv_valid, api.HALF_N)
+    else:
+        valid_index = _valid_key_index(kv_valid, api.HALF_N, logical)
+    with STAGES.span("prefix_attention"):
+        prefix_out = _prefix_dense_attention(query, key, value, prefix_rows, logical, valid_index, precision)
+    # A tile-64 prefix can end halfway through a native 128-row block. Keep that whole query block and its
+    # original quadrant mask, then discard the overlapping prefix half and trailing padding from its output.
+    head = prefix_rows // _BLOCK
+    start = head * _BLOCK
+    video_out = _sparse_fp4_attention(api, query[:, start:], key, value,
+                                      q2k_idx[:, :, head:].contiguous(), q2k_num[:, :, head:].contiguous(), kv_valid,
+                                      None if q2k_quad is None else q2k_quad[:, :, head:].contiguous(), **numerics)
+    return torch.cat((prefix_out, video_out[:, :, prefix_rows - start:logical - start]), dim=2)
+
+
+def _prefix_settings(attn: Any, meta: MiniMaxH3VSAMetadata, n_tiles: int) -> tuple[str, int]:
+    options = getattr(attn, "_vsa_fp4_options", {})
+    mode = options.get("prefix_precision")
+    if mode is None:
+        mode = envs.FASTVIDEO_H3_VSA_FP4_PREFIX.get()
+    mode = _resolve_prefix_mode(mode, envs.FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS.get(), int(meta.current_timestep))
+    rows = (meta.num_prefix_tiles * int(meta.tile_elems)
+            if mode and int(meta.tile_elems) in (64, 128) and 0 < meta.num_prefix_tiles < n_tiles else 0)
+    return mode, rows
 
 
 def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
@@ -249,9 +386,11 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
                                  meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
+    prefix_mode, prefix_rows = _prefix_settings(attn, meta, layout.n_tiles)
     with STAGES.span("fp4_attention"):
-        # Lists come from vsa_tile_mask_to_fp4_blocks and are in range; skip the per-call host sync.
-        out = _sparse_fp4_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)
+        out = _fp4_fine_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad,
+                                  logical=logical, prefix_rows=prefix_rows, precision=prefix_mode,
+                                  options=getattr(attn, "_vsa_fp4_options", {}), layout=layout)
     with STAGES.span("out_untile"):
         out = out.transpose(1, 2).index_select(1, layout.untile)  # [B, L, H, D], packed order
     if sim_fp8:
@@ -262,7 +401,17 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
             gate, _ = attn.to_gate_compress(hidden_states)
             v_pooled = _pool_tiles(value[:, :logical], vbs, layout.tile)
             out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled).permute(0, 2, 1, 3).to(out.dtype)
-            out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate.unflatten(-1, (heads, dim)))
+            gate = gate.unflatten(-1, (heads, dim))
+            chunk = envs.FASTVIDEO_H3_GATE_CHUNK_ROWS.get()
+            if chunk > 0 and out.shape[1] > chunk:
+                # The full gather materializes [B, L, H, D] (1.2 GiB at 768p10) beside the 36L
+                # decoder. Chunked gathers and the same elementwise FMA are bit-identical.
+                for start in range(0, out.shape[1], chunk):
+                    stop = min(start + chunk, out.shape[1])
+                    out[:, start:stop].addcmul_(out_c.index_select(1, layout.row_tile[start:stop]),
+                                                gate[:, start:stop])
+            else:
+                out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate)
     return out.flatten(2, 3)
 
 
@@ -350,7 +499,7 @@ def _all_to_all(payload: torch.Tensor, scale: torch.Tensor, group: Any) -> tuple
     return recv, recv_scale
 
 
-class _SPTileLayout:
+class _SPTileLayout(_KeyIndexCache):
     """Per-step tile-order state for one rank's head subset."""
 
     def __init__(self, meta: MiniMaxH3VSAMetadata, rank: int, local_rows: int) -> None:
@@ -409,6 +558,7 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
 
     vbs = meta.variable_block_sizes
     logical = layout.n_tiles * layout.tile
+    prefix_mode, prefix_rows = _prefix_settings(attn, meta, layout.n_tiles)
     with STAGES.span("select_mask"):
         scores = torch.matmul(_pool_tiles(q_t[:, :logical], vbs, layout.tile),
                               _pool_tiles(k_t[:, :logical], vbs, layout.tile).transpose(-2, -1)) / (dim**0.5)
@@ -417,7 +567,9 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
                                  meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
-        out_bhsd = _sparse_fp4_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
+        out_bhsd = _fp4_fine_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad,
+                                       logical=logical, prefix_rows=prefix_rows, precision=prefix_mode,
+                                       options=getattr(attn, "_vsa_fp4_options", {}), layout=layout)
 
     with STAGES.span("out_pack"):
         payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)

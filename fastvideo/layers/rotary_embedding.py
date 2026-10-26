@@ -117,7 +117,7 @@ def _apply_rotary_emb(
             positional embeddings.
     
     The function auto-detects whether cos/sin are full or half head_size:
-    - If cos/sin have head_size: use rotate_half style (for HunyuanVideo/GameCraft)
+    - If cos/sin have head_size: use rotate_half style (for HunyuanVideo)
     - If cos/sin have head_size // 2: use Neox/GPT-J style
     """
     head_size = x.shape[-1]
@@ -125,7 +125,7 @@ def _apply_rotary_emb(
 
     # Check if cos/sin are full head_dim (rotate_half style) or half (traditional style)
     if rope_dim == head_size:
-        # Full head_dim - use rotate_half style (HunyuanVideo, GameCraft)
+        # Full head_dim - use rotate_half style (HunyuanVideo)
         # x * cos + rotate_half(x) * sin
         cos = cos.unsqueeze(-2)  # [num_tokens, 1, head_size]
         sin = sin.unsqueeze(-2)  # [num_tokens, 1, head_size]
@@ -335,7 +335,7 @@ def get_1d_rotary_pos_embed(
     freqs_sin = freqs.sin()  # [S, D/2]
 
     if use_real:
-        # For rotate_half style RoPE (used by HunyuanVideo, GameCraft),
+        # For rotate_half style RoPE (used by HunyuanVideo),
         # we need to expand cos/sin to full head_dim using repeat_interleave.
         # The rotate_half operation works on consecutive PAIRS: (x0,x1), (x2,x3)...
         # so cos/sin must be interleaved: [c0,c0,c1,c1,...] to match the pairing.

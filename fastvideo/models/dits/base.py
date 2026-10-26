@@ -55,3 +55,23 @@ class BaseDiT(nn.Module, ABC):
     @property
     def supported_attention_backends(self) -> tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends
+
+
+    def preprocess_loaded_weight(self, name: str, tensor: torch.Tensor) -> torch.Tensor:
+        """Adapt a checkpoint tensor before sharding; default models are unchanged."""
+        return tensor
+
+    @property
+    def _fastvideo_shard_cache_key_extra(self) -> Any:
+        """Extra weight-shard-cache key material for structurally different variants."""
+        return None
+
+
+    def inference_config_overrides(self) -> dict[str, Any]:
+        """Extra ``config.json`` keys a deployable checkpoint of this model needs."""
+        return {}
+
+
+    def inference_export_expected_shape(self, output_key: str, base_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """The exported shape of *output_key* given the base checkpoint's shape."""
+        return tuple(base_shape)

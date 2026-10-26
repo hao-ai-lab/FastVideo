@@ -56,11 +56,11 @@ After model loading completes, the response is `{"status":"ok"}`.
 ### NVIDIA DGX Spark
 
 Complete the [DGX Spark installation](../getting_started/installation/spark.md)
-before running these commands. GB10 has no FA4 / sm_100a VSA kernel:
+before running these commands. GB10 has no FA4 / ptx_blackwell VSA kernel:
 
 ```bash
 UV_TORCH_BACKEND=cu130 uv pip install -e .
-FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
   fastvideo serve --config examples/serving/openai_fasth3_spark.yaml --server.host 127.0.0.1
 ```
 
@@ -181,9 +181,7 @@ python -m pip install openai==3.6.0
 python examples/serving/clients/video.py
 ```
 
-```python
---8<-- "examples/serving/clients/video.py"
-```
+<include>/_snippets/clients/video.py.md</include>
 
 ### OpenAI JavaScript
 
@@ -195,9 +193,7 @@ npm ci --prefix examples/serving/clients
 node examples/serving/clients/video.mjs
 ```
 
-```javascript
---8<-- "examples/serving/clients/video.mjs"
-```
+<include>/_snippets/clients/video.mjs.md</include>
 
 ### cURL
 
@@ -207,9 +203,7 @@ Install `curl` and `jq`, then run:
 bash examples/serving/clients/video.sh
 ```
 
-```bash
---8<-- "examples/serving/clients/video.sh"
-```
+<include>/_snippets/clients/video.sh.md</include>
 
 ## Connect your app
 
