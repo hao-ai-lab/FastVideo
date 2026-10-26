@@ -226,6 +226,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "height_sr": 1072,
                 "width_sr": 1920,
                 "fps": 24,
+                "audio_start_in_s": None,
+                "audio_end_in_s": None,
                 "num_inference_steps": 50,
                 "num_inference_steps_sr": 50,
                 "guidance_scale": 1.0,

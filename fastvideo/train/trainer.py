@@ -24,6 +24,39 @@ if TYPE_CHECKING:
         TrainingConfig, )
 
 
+def _verify_master_weight_precision(method: TrainingMethod, tc: TrainingConfig) -> None:
+    """Refuse low-precision trainable masters for methods that require FP32.
+
+    Optimizer steps applied in-place to bf16/fp16 parameters round away
+    updates below ~half an ulp of each weight's magnitude; O(1)-magnitude
+    parameters (norm gains) freeze entirely at typical distillation learning
+    rates, and ``zeros_like``-allocated optimizer state inherits the same
+    starved dtype. FP32 sharded masters (``training.dit_precision: fp32``)
+    fix both; ordinary FSDP groups still compute in BF16.
+    """
+    if not getattr(method, "requires_fp32_master_weights", False):
+        return
+    if bool(getattr(tc.model, "allow_low_precision_master_weights", False)):
+        return
+    offenders: list[str] = []
+    for role, model in getattr(method, "_role_models", {}).items():
+        if not getattr(model, "_trainable", False):
+            continue
+        transformer = getattr(model, "transformer", None)
+        if transformer is None:
+            continue
+        for name, param in transformer.named_parameters():
+            if param.requires_grad and param.dtype != torch.float32:
+                offenders.append(f"{role}:{name} ({param.dtype})")
+                break
+    if offenders:
+        raise RuntimeError(f"{type(method).__name__} requires fp32 trainable master weights, got {offenders}. "
+                           "bf16/fp16 parameter storage silently rounds away optimizer updates below ~half an ulp "
+                           "per weight (norm-scale parameters freeze completely). Set training.dit_precision: fp32 "
+                           "(FP32 sharded masters; ordinary groups compute in BF16), or acknowledge the effect "
+                           "explicitly with training.model.allow_low_precision_master_weights: true.")
+
+
 def _coerce_log_scalar(
     value: Any,
     *,
@@ -78,8 +111,11 @@ class Trainer:
         )
         self.performance_monitor = TrainingPerformanceMonitor()
 
-    def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
-        data_iter = iter(dataloader)
+    def _iter_dataloader(self,
+                         dataloader: Any,
+                         *,
+                         initial_iterator: Iterator[dict[str, Any]] | None = None) -> Iterator[dict[str, Any]]:
+        data_iter = initial_iterator if initial_iterator is not None else iter(dataloader)
         while True:
             batch = next(data_iter, None)
             if batch is None:
@@ -126,6 +162,7 @@ class Trainer:
             self.performance_monitor.attach(getattr(method, "_role_models", {}), )
 
         method.set_tracker(self.tracker)
+        _verify_master_weight_precision(method, tc)
         method.on_train_start()
         self.callbacks.on_train_start(
             method,
@@ -139,6 +176,11 @@ class Trainer:
             resumed_step = (checkpoint_manager.maybe_resume(resume_from_checkpoint=(resume_from_checkpoint)))
             if resumed_step is not None:
                 start_step = int(resumed_step)
+                if tc.checkpoint.reset_lr_on_resume:
+                    method.apply_configured_lrs()
+        if checkpoint_manager is not None:
+            checkpoint_manager.maybe_save_inference(start_step,
+                                                    validation_scheduled=self.callbacks.will_run_validation(start_step))
         self.callbacks.on_validation_begin(
             method,
             iteration=start_step,
@@ -146,7 +188,8 @@ class Trainer:
         self._run_method_validation(method, start_step)
         method.optimizers_zero_grad(start_step)
 
-        data_stream = self._iter_dataloader(dataloader)
+        data_stream = self._iter_dataloader(dataloader,
+                                            initial_iterator=iter(dataloader) if resume_from_checkpoint else None)
 
         # Restore the RNG snapshot LAST — after dcp.load,
         # after iter(dataloader), after everything that may
@@ -196,7 +239,12 @@ class Trainer:
                                f".metrics[{k!r}]"),
                     )
             else:
+                use_no_sync = grad_accum > 1 and method.supports_gradient_accumulation_no_sync(step)
                 for accum_iter in range(grad_accum):
+                    if use_no_sync:
+                        method.set_requires_gradient_sync(step, accum_iter == grad_accum - 1)
+                    elif grad_accum > 1 and tc.loop.fsdp_defer_backward_finalize:
+                        method.set_is_last_backward(step, accum_iter == grad_accum - 1)
                     batch = next(data_stream)
                     loss_map, outputs, step_metrics = (method.single_train_step(
                         batch,
@@ -232,6 +280,7 @@ class Trainer:
                     iteration=step,
                 )
                 method.optimizers_schedulers_step(step)
+                self.callbacks.on_after_optimizer_step(method, iteration=step)
                 method.optimizers_zero_grad(step)
 
             # Single CPU sync point: materialise GPU tensors
@@ -271,6 +320,8 @@ class Trainer:
 
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
+                checkpoint_manager.maybe_save_inference(step,
+                                                        validation_scheduled=self.callbacks.will_run_validation(step))
 
             self.callbacks.on_validation_begin(
                 method,

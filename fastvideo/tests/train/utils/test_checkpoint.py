@@ -40,6 +40,7 @@ def _make_checkpoint_dir(
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     if with_dcp:
         (ckpt_dir / "dcp").mkdir(exist_ok=True)
+        (ckpt_dir / "dcp" / ".metadata").write_bytes(b"complete")
     return ckpt_dir
 
 

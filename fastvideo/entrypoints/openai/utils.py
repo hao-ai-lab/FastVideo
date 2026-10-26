@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 import aiofiles
-import httpx
 from fastapi import UploadFile
 
 from fastvideo.logger import init_logger
@@ -59,41 +58,37 @@ async def _maybe_url_image(img_url: str, target_path: str) -> str | None:
     if img_url.lower().startswith(("http://", "https://")):
         return await _save_url_image_to_path(img_url, target_path)
     elif img_url.startswith("data:image"):
-        return await _save_base64_image_to_path(img_url, target_path)
+        return await save_base64_image_to_path(img_url, target_path)
     else:
         raise ValueError("Unsupported image url format")
 
 
+_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"})
+
+
+def image_suffix(image_url: str) -> str:
+    """File suffix for a downloaded image; decoding inspects content, so this is only a hint."""
+    suffix = os.path.splitext(image_url.split("?")[0])[1].lower()
+    if suffix not in _IMAGE_SUFFIXES:
+        return ".jpg"
+    return ".jpg" if suffix == ".jpeg" else suffix
+
+
 async def _save_url_image_to_path(image_url: str, target_path: str) -> str:
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    # Local imports: state imports serving modules that import these helpers.
+    from fastvideo.entrypoints.openai.media_policy import fetch_media
+    from fastvideo.entrypoints.openai.state import get_media_policy, get_media_reference_max_bytes
+
+    if not os.path.splitext(target_path)[1]:
+        target_path = f"{target_path}{image_suffix(image_url)}"
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(image_url, timeout=30.0)
-            response.raise_for_status()
-
-            if not os.path.splitext(target_path)[1]:
-                content_type = response.headers.get("content-type", "").lower()
-                url_path = image_url.split("?")[0]
-                _, url_ext = os.path.splitext(url_path)
-                url_ext = url_ext.lower()
-                if url_ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
-                    ext = ".jpg" if url_ext == ".jpeg" else url_ext
-                elif "png" in content_type:
-                    ext = ".png"
-                elif "webp" in content_type:
-                    ext = ".webp"
-                else:
-                    ext = ".jpg"
-                target_path = f"{target_path}{ext}"
-
-            async with aiofiles.open(target_path, "wb") as f:
-                await f.write(response.content)
-            return target_path
+        await fetch_media(image_url, target_path, max_bytes=get_media_reference_max_bytes(), policy=get_media_policy())
     except Exception as e:
         raise RuntimeError(f"Failed to download image from URL: {e}") from e
+    return target_path
 
 
-async def _save_base64_image_to_path(base64_data: str, target_path: str) -> str:
+async def save_base64_image_to_path(base64_data: str, target_path: str) -> str:
     pattern = r"data:(.*?)(;base64)?,(.*)"
     match = re.match(pattern, base64_data)
     if not match or not match.group(2):

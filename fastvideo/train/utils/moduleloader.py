@@ -78,8 +78,10 @@ def make_inference_args(
     args = _make_training_args(tc, model_path=model_path)
     args.inference_mode = True
     args.mode = ExecutionMode.INFERENCE
-    args.dit_cpu_offload = True
+    # The live training transformer must remain on its FSDP device after validation.
+    args.dit_cpu_offload = False
     args.VSA_sparsity = tc.vsa_sparsity
+    args.VSA_tile_size = tc.vsa_tile_size
     return args
 
 

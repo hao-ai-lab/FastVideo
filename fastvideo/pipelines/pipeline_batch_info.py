@@ -375,6 +375,45 @@ class TrainingBatch:
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
+    # Ref2VA keeps immutable reference rows separate from DMD2's target-only
+    # latent tensor. Every student/teacher/critic forward prepends these rows,
+    # while losses and rollout state continue to cover only generated media.
+    minimax_h3_condition_video_rows: torch.Tensor | None = None
+
+    minimax_h3_condition_audio_rows: torch.Tensor | None = None
+
+    # DMD2 flattens video and audio into one tensor. This immutable, batch-local
+    # layout records the exact native shapes needed to split it again; keeping
+    # it on the batch avoids mutable geometry state on compiled role models.
+    minimax_h3_dmd_layout: Any | None = None
+
+    # Cross-sample H3 packing retains ragged per-document latents until the
+    # DMD adapter flattens them as doc.video | doc.audio | doc.video | ... .
+    minimax_h3_document_video_latents: tuple[torch.Tensor, ...] | None = None
+
+    minimax_h3_document_audio_latents: tuple[torch.Tensor, ...] | None = None
+
+    # The text refiner and joint DiT have different document boundaries.
+    minimax_h3_text_attn_metadata: AttentionMetadata | None = None
+
+    sequence_packing_num_documents: int = 1
+
+    sequence_packing_num_tokens: int = 0
+
+    # Fixed transformer capacity, independent of scalar latent loss columns.
+    # Zero/None retains legacy logging when token padding is disabled.
+    sequence_padded_num_tokens: int = 0
+
+    sequence_padding_ratio: float | None = None
+
+    # Precomputed by the pack scheduler to preserve document-normalized loss
+    # across variable-size packs and gradient-accumulation windows.
+    sequence_packing_loss_scale: float = 1.0
+
+    # Global effective-document fraction routed through data forcing in the
+    # current packed accumulation window. None preserves legacy 0/1 metrics.
+    sequence_packing_data_forced_ratio: float | None = None
+
 
 @dataclass
 class PreprocessBatch(ForwardBatch):

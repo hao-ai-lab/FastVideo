@@ -37,6 +37,7 @@ OpenAI Python client.
 - [Wan recipes](../../cookbook/wan.md) for FastMetal 1.3B, 5B, and 14B
 - [MiniMax H3 recipes](../../cookbook/minimax-h3.md) for FastH3 V1 and FastH3 V2
 - [H3 server guide](../../cookbook/openai-api.md) for the playground, cURL, and SDKs
+- [FastH3 OmniRef](../../inference/fasth3_omniref_mlx.md) for reference-conditioned (Ref2VA) clips from ordered image/video/audio references
 
 FastH3 is two distilled MiniMax-H3 checkpoints. V1 is the four-step launch.
 Some Hub repo names still say Preview. That name is historical. V1 is a full

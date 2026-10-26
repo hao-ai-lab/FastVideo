@@ -350,7 +350,10 @@ export async function transferDocs() {
       } else if (item.items) {
         const guide = item.items.find((child) => /Family guide|Recipes and setup/.test(child.label));
         if (guide) {
-          const extras = modelDirectory.filter((model) => !model.configurable && model.familyPath === guide.href);
+          const listed = new Set(item.items.map((child) => child.href));
+          const extras = modelDirectory.filter(
+            (model) => !model.configurable && model.familyPath === guide.href && !listed.has(model.path),
+          );
           item.items.splice(
             item.items.indexOf(guide),
             0,

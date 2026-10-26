@@ -1,0 +1,26 @@
+# OpenAI-compatible image server for FLUX.1-dev.
+#   fastvideo serve --config examples/serving/openai_flux1_dev.yaml
+#   curl http://127.0.0.1:8000/v1/images/generations -H 'Content-Type: application/json' \
+#     -d '{"model":"flux1-dev","prompt":"a photo of a cat","size":"1024x1024","response_format":"b64_json"}'
+generator:
+  model_path: black-forest-labs/FLUX.1-dev
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      text_encoder: false
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: t2i
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_flux1_dev
+  served_model_name: flux1-dev

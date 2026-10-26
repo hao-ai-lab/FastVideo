@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -42,6 +43,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -55,6 +57,7 @@ from fastvideo.models.wan.definition import WAN_MODEL_DEFINITIONS, WanModelDefin
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
+from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
@@ -220,6 +223,7 @@ def _get_config_info(
     *,
     raise_on_missing: bool = True,
     revision: str | None = None,
+    allow_remote: bool = True,
 ) -> ConfigInfo | None:
     # Normalize only the lookup key; keep the real path for manifest IO and detectors.
     lookup_path = model_path.rstrip("/") or model_path
@@ -247,8 +251,10 @@ def _get_config_info(
     # 3. Use detectors (path or model_index pipeline name).
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
-    else:
+    elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
+    else:
+        return None
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")
@@ -1174,6 +1180,22 @@ def _register_configs() -> None:
         pipeline_cls_name="MiniMaxH3ModularPipeline",
     )
 
+    # PAN2: one pipeline runs text-to-video, and image-to-video when the request carries a first frame.
+    def _is_pan2(name: str) -> bool:
+        name = name.lower()
+        return "pan2modularpipeline" in name or re.search(r"(^|[/_-])pan-?2([/_.-]|$)", name) is not None
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=PAN2PipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["IFM/PAN2"],
+        model_detectors=[_is_pan2],
+        model_family="pan2",
+        default_preset="pan2_t2v",
+        pipeline_cls_name="PAN2ModularPipeline",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -1206,6 +1228,19 @@ def _register_configs() -> None:
             lambda path: "flux.1-dev" in path or "flux_1_dev" in path,
             lambda path: "/flux/" in path or path.endswith("/flux"),
         ],
+    )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=QwenImage21PipelineConfig,
+        workload_types=(WorkloadType.T2I, WorkloadType.I2I),
+        hf_model_paths=["Qwen/Qwen-Image-2.1"],
+        model_detectors=[
+            lambda path: "qwenimage21pipeline" in path or "qwen-image-2.1" in path or "qwen_image21" in path,
+        ],
+        model_family="qwen_image21",
+        default_preset="qwen_image21",
+        pipeline_cls_name="QwenImage21Pipeline",
     )
 
 
@@ -1284,8 +1319,8 @@ def get_pipeline_config_cls_from_name(pipeline_name_or_path: str) -> type[Pipeli
     return config_info.pipeline_config_cls
 
 
-def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
-    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str, *, allow_remote: bool = True) -> Any | None:
+    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         logger.warning("No match found for pipeline %s, using default sampling param.", pipeline_name_or_path)
         return None
@@ -1335,12 +1370,16 @@ def _register_presets() -> None:
         ALL_PRESETS as MINIMAX_H3_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
+    from fastvideo.pipelines.basic.pan2.presets import (
+        ALL_PRESETS as PAN2_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
         ALL_PRESETS as STABLE_AUDIO_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.qwen_image21.presets import (
+        ALL_PRESETS as QWEN_IMAGE21_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
 
@@ -1365,9 +1404,11 @@ def _register_presets() -> None:
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
         MMAUDIO_PRESETS,
+        PAN2_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         WAN_PRESETS,
+        QWEN_IMAGE21_PRESETS,
     )
     for group in all_preset_groups:
         for preset in group:
