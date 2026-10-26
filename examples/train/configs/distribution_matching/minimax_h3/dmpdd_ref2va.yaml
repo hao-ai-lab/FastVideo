@@ -1,0 +1,116 @@
+# Reference-conditioned video/audio DMPDD. Replace model and Parquet paths.
+# See docs/training/omniref_dmpdd.md for preprocessing, topology and export.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Ref2VPDDModel
+    init_from: /path/to/MiniMax-H3-ref2va
+    pdd_steps: 32
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Ref2VDMDModel
+    init_from: /path/to/MiniMax-H3-ref2va
+    trainable: false
+    disable_custom_init_weights: true
+    attention_backend: FLASH_ATTN
+  critic:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Ref2VDMDModel
+    init_from: /path/to/MiniMax-H3-ref2va
+    trainable: true
+    disable_custom_init_weights: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: FLASH_ATTN
+method:
+  _target_: fastvideo.train.methods.distribution_matching.dmpdd.DMPDDMethod
+  rollout_mode: data_latent
+  rollout_carry: false
+  generator_update_interval: 5
+  real_score_guidance_scale: 2.0
+  fake_score_guidance_scale: 2.0
+  fake_score_cfg_dropout_rate: 0.1
+  pdd_loss_weight: 0.3
+  block_size_min: 4
+  block_size_max: 4
+  type_rk: euler
+  precision_decoding: fp32
+  teacher_guidance_scale: 2.0
+  min_timestep_ratio: 0.001
+  max_timestep_ratio: 0.999
+  score_timestep_shift: 2.4
+  score_timestep_warp_max: 0.999
+  score_timestep_continuous: true
+  fake_score_loss_space: x0
+  cfg_uncond:
+    text: zero
+  fake_score_learning_rate: 5.0e-06
+  fake_score_betas:
+  - 0.9
+  - 0.999
+  fake_score_lr_scheduler: constant
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 8
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+  data:
+    data_path: /path/to/packed-ref2va
+    preprocessed_data_type: ref2va
+    require_existing_parquet_cache: false
+    native_shape_bucketing: true
+    max_presentation_tokens: 65536
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 43
+  optimizer:
+    learning_rate: 5.0e-06
+    betas:
+    - 0.9
+    - 0.999
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 1000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/h3-dmpdd
+    resume_from_checkpoint: null
+    training_state_checkpointing_steps: 100
+    require_complete_training_checkpoint: true
+    checkpoints_total_limit: 2
+  tracker:
+    trackers: []
+    project_name: h3-ref2va-dmpdd
+    run_name: h3-dmpdd
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+    minimax_h3_student_compile: 'off'
+    minimax_h3_compile_limit_fallback: false
+    minimax_h3_accumulated_recompile_limit: 1024
+    enable_torch_compile: false
+    torch_compile_kwargs:
+      fullgraph: true
+      dynamic: true
+      recompile_limit: 128
+  dit_precision: fp32
+  vsa:
+    sparsity: 0.9
+    ref_keep_rate: 0.1
+    tile_size: 128
+    cache_tile_buf: false
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+    measure_unclipped_grad_norms: true
+    sanitize_non_finite: true
+pipeline:
+  video_scheduler_shift: 12.0
+  audio_scheduler_shift: 3.0
+  dit_config:
+    uniform_parameter_dtype: false

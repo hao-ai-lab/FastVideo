@@ -487,14 +487,15 @@ def _write_deploy_checkpoint(path, student_layers: int, base_layers: int, heads:
     return decoder
 
 
-def _load_h3_vae(vae_dir, cpu: bool = True):
+def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None):
     from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
     from fastvideo.configs.pipelines import PipelineConfig
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import VAELoader
 
     args = FastVideoArgs(model_path=str(vae_dir),
-                         pipeline_config=PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"))
+                         pipeline_config=PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
+                         h3_vae_nvfp4_decoder=decoder)
     args.vae_cpu_offload = cpu  # load on CPU
     return VAELoader().load(str(vae_dir), args)
 
@@ -516,6 +517,20 @@ def test_loader_applies_exported_nvfp4_decoder(tmp_path):
     for key, value in expected.items():
         assert torch.equal(state[key].to(value.dtype).cpu(), value), key
     assert not any(parameter.requires_grad for parameter in vae.parameters())
+
+
+def test_loader_applies_nvfp4_decoder_from_config(tmp_path):
+    import fastvideo.envs as envs
+
+    _write_vae_dir(tmp_path / "vae", decoder_layers=5)
+    _write_deploy_checkpoint(tmp_path / "d3.pt", student_layers=3, base_layers=5)
+    _write_deploy_checkpoint(tmp_path / "d4.pt", student_layers=4, base_layers=5)
+    vae = _load_h3_vae(tmp_path / "vae", decoder=str(tmp_path / "d3.pt"))
+    assert len(vae.decoder.transformer_blocks) == 3
+    # The serve-config field wins over the environment variable.
+    with envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.override(str(tmp_path / "d4.pt")):
+        vae = _load_h3_vae(tmp_path / "vae", decoder=str(tmp_path / "d3.pt"))
+    assert len(vae.decoder.transformer_blocks) == 3
 
 
 @pytest.mark.parametrize("student_layers,base_layers,heads,match", [(6, 6, 2, "needs 6 decoder blocks"),

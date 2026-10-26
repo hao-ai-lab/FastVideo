@@ -2,6 +2,9 @@ name: macOS MLX Smoke
 
 on:
   pull_request:
+    # The defaults plus ready_for_review: both jobs skip drafts, and Mergify requires them
+    # for MLX changes, so marking a draft ready must run them.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       - ".github/workflows/ci-macos-mlx.yml"
@@ -85,9 +88,19 @@ jobs:
             fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_sdpa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_nax.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_prefix_kv.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_pdd.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \
+            fastvideo/tests/mlx/test_mlx_qwen3_vl_vision.py \
+            fastvideo/tests/mlx/test_mlx_fasth3_omniref_example.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
@@ -150,9 +163,19 @@ jobs:
             fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_sdpa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_nax.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_prefix_kv.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_pdd.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \
+            fastvideo/tests/mlx/test_mlx_qwen3_vl_vision.py \
+            fastvideo/tests/mlx/test_mlx_fasth3_omniref_example.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \

@@ -57,22 +57,114 @@ function count(value, context) {
   return value;
 }
 
+const HARDWARE_VENDORS = new Set(["nvidia", "amd", "intel", "apple"]);
+const HARDWARE_KINDS = new Set(["gpu", "accelerator", "soc", "system"]);
+const HARDWARE_BACKENDS = new Set(["cuda", "rocm", "metal", "sycl", "unknown"]);
+const FORM_FACTORS = new Set(["pcie", "sxm", "oam", "desktop", "laptop", "soc", "system", "unknown"]);
+const MEMORY_TYPES = new Set(["dedicated", "unified"]);
+const MEMORY_UNITS = { GB: 1, GiB: 1.073741824 };
+
+function memoryQuantity(value, context) {
+  keys(value, ["value", "unit"], [], context);
+  requireValue(positive(value.value), `${context}: value must be positive and finite`);
+  requireValue(Object.hasOwn(MEMORY_UNITS, value.unit), `${context}: unit must be GB or GiB`);
+  return value;
+}
+
+function memorySizeGb(value, context) {
+  memoryQuantity(value, context);
+  return value.value * MEMORY_UNITS[value.unit];
+}
+
+function checkedSources(values, context) {
+  requireValue(Array.isArray(values) && values.length > 0, `${context}: provide source URLs`);
+  const seen = new Set();
+  for (const source of values) {
+    keys(source, ["url", "checked"], [], context);
+    url(source.url, `${context}.url`);
+    requireValue(!seen.has(source.url), `${context}: duplicate source ${source.url}`);
+    seen.add(source.url);
+    const date =
+      typeof source.checked === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(source.checked) &&
+      Date.parse(`${source.checked}T00:00:00Z`);
+    requireValue(
+      date !== false && Number.isFinite(date) && new Date(date).toISOString().slice(0, 10) === source.checked,
+      `${context}.checked: expected a YYYY-MM-DD date`,
+    );
+  }
+  return values;
+}
+
 function hardwareRecords(document, context) {
   keys(document, ["hardware"], [], context);
   requireValue(object(document.hardware) && Object.keys(document.hardware).length > 0, `${context}: no hardware`);
+  const names = new Set();
+  const identities = new Map();
+  const families = new Map();
+  const records = {};
   for (const [id, hardware] of Object.entries(document.hardware)) {
     const at = `${context}: hardware.${id}`;
     identifier(id, at);
     keys(
       hardware,
-      ["name", "memory_type", "memory_gb", "backend", "sources"],
-      ["ui_id", "supported_dtypes", "notes"],
+      ["name", "vendor", "kind", "memory", "backend", "sources"],
+      [
+        "aliases",
+        "family",
+        "variant",
+        "form_factor",
+        "gpu_count",
+        "host_memory",
+        "partitionable",
+        "partitions",
+        "supported_dtypes",
+        "notes",
+        "ui_id",
+      ],
       at,
     );
-    requireValue(text(hardware.name) && text(hardware.backend), `${at}: name and backend must be text`);
-    requireValue(["dedicated", "unified"].includes(hardware.memory_type), `${at}: invalid memory_type`);
-    requireValue(positive(hardware.memory_gb), `${at}: memory_gb must be positive and finite`);
-    if (hardware.ui_id !== undefined) identifier(hardware.ui_id, `${at}.ui_id`);
+    requireValue(text(hardware.name), `${at}: name must be text`);
+    const foldedName = hardware.name.toLocaleLowerCase();
+    requireValue(!names.has(foldedName), `${at}: duplicate hardware name ${hardware.name}`);
+    names.add(foldedName);
+    requireValue(HARDWARE_VENDORS.has(hardware.vendor), `${at}: unknown vendor`);
+    requireValue(HARDWARE_KINDS.has(hardware.kind), `${at}: unknown kind`);
+    requireValue(HARDWARE_BACKENDS.has(hardware.backend), `${at}: unknown backend`);
+    if (hardware.form_factor !== undefined)
+      requireValue(FORM_FACTORS.has(hardware.form_factor), `${at}: unknown form_factor`);
+    keys(hardware.memory, ["type", "nominal"], ["usable", "policy"], `${at}.memory`);
+    requireValue(MEMORY_TYPES.has(hardware.memory.type), `${at}.memory: invalid type`);
+    const nominalGb = memorySizeGb(hardware.memory.nominal, `${at}.memory.nominal`);
+    if (hardware.memory.usable !== undefined) {
+      const usableGb = memorySizeGb(hardware.memory.usable, `${at}.memory.usable`);
+      requireValue(usableGb <= nominalGb, `${at}.memory.usable: exceeds nominal capacity`);
+      requireValue(text(hardware.memory.policy), `${at}.memory.policy: explain how the usable budget is derived`);
+    } else requireValue(hardware.memory.policy === undefined, `${at}.memory.policy: needs a usable budget`);
+    if (hardware.host_memory !== undefined) memorySizeGb(hardware.host_memory, `${at}.host_memory`);
+    if (hardware.gpu_count !== undefined) requireValue(integer(hardware.gpu_count), `${at}.gpu_count: invalid`);
+    if (hardware.partitionable !== undefined)
+      requireValue(typeof hardware.partitionable === "boolean", `${at}.partitionable: expected a boolean`);
+    const partitions = [];
+    if (hardware.partitions !== undefined) {
+      requireValue(
+        Array.isArray(hardware.partitions) && hardware.partitions.length > 0,
+        `${at}.partitions: expected a list`,
+      );
+      requireValue(hardware.memory.type === "dedicated", `${at}.partitions: only dedicated devices can be partitioned`);
+      requireValue(hardware.partitionable !== false, `${at}.partitions: conflicts with partitionable: false`);
+      const ids = new Set();
+      for (const partition of hardware.partitions) {
+        keys(partition, ["id", "label", "memory"], [], `${at}.partitions`);
+        identifier(partition.id, `${at}.partitions.id`);
+        requireValue(!ids.has(partition.id), `${at}.partitions: duplicate partition ${partition.id}`);
+        ids.add(partition.id);
+        requireValue(text(partition.label), `${at}.partitions.${partition.id}.label: expected text`);
+        const partitionGb = memorySizeGb(partition.memory, `${at}.partitions.${partition.id}.memory`);
+        requireValue(partitionGb <= nominalGb, `${at}.partitions.${partition.id}: must not exceed the full device`);
+        partitions.push({ ...structuredClone(partition), memory_gb: partitionGb });
+      }
+    }
     if (hardware.notes !== undefined) requireValue(text(hardware.notes), `${at}: notes must be text`);
     if (hardware.supported_dtypes !== undefined)
       requireValue(
@@ -82,9 +174,59 @@ function hardwareRecords(document, context) {
           new Set(hardware.supported_dtypes).size === hardware.supported_dtypes.length,
         `${at}: supported_dtypes must be a nonempty unique list of ${[...WEIGHT_FORMATS].join(", ")}`,
       );
-    sources(hardware.sources, `${at}.sources`);
+    if (hardware.family !== undefined) {
+      identifier(hardware.family, `${at}.family`);
+      requireValue(text(hardware.variant), `${at}.variant: required with family`);
+      const variants = families.get(hardware.family) ?? new Set();
+      const foldedVariant = hardware.variant.toLocaleLowerCase();
+      requireValue(!variants.has(foldedVariant), `${at}: duplicate variant in family ${hardware.family}`);
+      variants.add(foldedVariant);
+      families.set(hardware.family, variants);
+    } else requireValue(hardware.variant === undefined, `${at}.variant: needs a family`);
+    requireValue(hardware.aliases === undefined || Array.isArray(hardware.aliases), `${at}.aliases: expected a list`);
+    const aliases = [...(hardware.aliases ?? [])];
+    if (hardware.ui_id !== undefined) {
+      identifier(hardware.ui_id, `${at}.ui_id`);
+      aliases.push(hardware.ui_id);
+    }
+    requireValue(
+      aliases.every((alias) => text(alias)),
+      `${at}.aliases: expected nonempty text`,
+    );
+    const record = {
+      id,
+      ...structuredClone(hardware),
+      aliases,
+      gpu_count: hardware.gpu_count ?? 1,
+      memory_gb: nominalGb,
+    };
+    delete record.ui_id;
+    if (partitions.length) record.partitions = partitions;
+    if (hardware.memory.usable !== undefined)
+      record.usable_memory_gb = memorySizeGb(hardware.memory.usable, `${at}.memory.usable`);
+    if (hardware.host_memory !== undefined)
+      record.host_memory_gb = memorySizeGb(hardware.host_memory, `${at}.host_memory`);
+    checkedSources(hardware.sources, `${at}.sources`);
+    records[id] = record;
   }
-  return document.hardware;
+  for (const [id, hardware] of Object.entries(records)) {
+    const local = new Set([id.toLocaleLowerCase()]);
+    for (const identity of [id, ...hardware.aliases]) {
+      const folded = identity.toLocaleLowerCase();
+      const owner = identities.get(folded);
+      requireValue(
+        owner === undefined || owner === id,
+        `${context}: hardware ${id} reuses identity ${identity} from ${owner}`,
+      );
+      requireValue(
+        !(identity !== id && local.has(folded) && folded !== id),
+        `${context}: hardware ${id} repeats its own identity ${identity}`,
+      );
+      local.add(folded);
+      identities.set(folded, id);
+    }
+  }
+  return records;
 }
 
 function componentRecords(root, catalogDir) {
@@ -260,7 +402,10 @@ export function exportCapacityCatalog({
     write(join(outputDir, "models", filename), model);
     index.models.push({ id: model.id, name: model.name, model_id: model.model_id, catalog_url: `models/${filename}` });
   }
-  write(join(outputDir, "hardware.json"), hardware);
+  write(join(outputDir, "hardware.json"), {
+    version: 1,
+    devices: Object.values(hardware).sort((left, right) => left.id.localeCompare(right.id)),
+  });
   write(join(outputDir, "index.json"), index);
   for (const name of readdirSync(join(outputDir, "models"))) {
     if (name.endsWith(".json") && ID.test(name.slice(0, -5)) && !expected.has(name))

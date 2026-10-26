@@ -103,7 +103,7 @@ function referenceRuns(model, hardware, examples) {
     keys(
       run,
       ["id", "date", "hardware", "gpu_count", "outcome", "execution", "evidence_url", "context"],
-      ["memory"],
+      ["memory", "hardware_partition", "hardware_allocation_gb"],
       at,
     );
     identifier(run.id, at);
@@ -120,6 +120,9 @@ function referenceRuns(model, hardware, examples) {
       hardware === undefined || Object.hasOwn(hardware, run.hardware),
       `${at}: unknown hardware ${run.hardware}`,
     );
+    if (run.hardware_partition !== undefined) identifier(run.hardware_partition, `${at}.hardware_partition`);
+    if (run.hardware_allocation_gb !== undefined)
+      requireValue(positive(run.hardware_allocation_gb), `${at}.hardware_allocation_gb must be positive`);
     requireValue(integer(run.gpu_count), `${at}: gpu_count must be a positive safe integer`);
     requireValue(run.outcome === "completed", `${at}: outcome must describe a completed generation`);
     requireValue(["first_request", "warm_request"].includes(run.execution), `${at}: unknown execution condition`);

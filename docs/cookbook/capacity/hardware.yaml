@@ -1,62 +1,980 @@
-# Initial variants corresponding to existing cookbook hardware choices.
-# memory_gb is nominal capacity per device in decimal GB (1 GB = 1e9 bytes),
-# not memory available to the application. Unified memory is shared with the CPU.
-# supported_dtypes, when listed, describes hardware format capability rather than
-# FastVideo kernel support. Omission means that formats have not been cataloged.
-# NVFP4 entries are backed by E2M1 matrix instructions with E4M3 block scales
-# for the device's documented compute capability.
+# Source-backed hardware inventory for cookbook lookup and capacity estimates.
+#
+# This is a specification catalog, not a runtime support matrix. Inclusion means
+# the device/system is searchable; kernel, dtype, and model support are separate.
+# memory.nominal is the vendor-stated capacity in its original unit. For unified
+# systems it is shared system memory, never dedicated VRAM. memory.usable is an
+# application budget derived by an explicit policy; omit it when no honest
+# budget exists. The estimator uses a labeled 75% default for unified memory and
+# lets callers override it. Sources carry the URL used and the date checked.
+#
+# Batch 1 prioritizes devices named by existing recipes, baselines, and the
+# previous picker, then common consumer, workstation, and data-center variants.
+# See hardware-coverage.md for the maintained checklist.
 hardware:
   h100-sxm-80gb:
     name: NVIDIA H100 SXM 80 GB
-    ui_id: h100
-    memory_type: dedicated
-    memory_gb: 80
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-h100
+    variant: SXM 80 GB
+    form_factor: sxm
+    memory:
+      type: dedicated
+      nominal: { value: 80, unit: GB }
+    backend: cuda
+    partitionable: true
+    partitions:
+      - id: 1g.10gb
+        label: 1g.10gb
+        memory: { value: 10, unit: GB }
+      - id: 2g.20gb
+        label: 2g.20gb
+        memory: { value: 20, unit: GB }
+      - id: 3g.40gb
+        label: 3g.40gb
+        memory: { value: 40, unit: GB }
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [h100]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/h100/
+        checked: 2026-10-19
+    notes: H100 SXM; MIG profiles must be selected explicitly and never inherit the full 80 GB.
+
+  h100-nvl-94gb:
+    name: NVIDIA H100 NVL 94 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-h100
+    variant: NVL 94 GB
+    form_factor: pcie
+    memory:
+      type: dedicated
+      nominal: { value: 94, unit: GB }
+    backend: cuda
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [h100-nvl]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/h100/
+        checked: 2026-10-19
+      - url: https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/
+        checked: 2026-10-19
+
+  h200-sxm-141gb:
+    name: NVIDIA H200 SXM 141 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-h200
+    variant: SXM 141 GB
+    form_factor: sxm
+    memory:
+      type: dedicated
+      nominal: { value: 141, unit: GB }
+    backend: cuda
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [h200]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/h200/
+        checked: 2026-10-19
+      - url: https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/
+        checked: 2026-10-19
+
+  b200-180gb:
+    name: NVIDIA B200 180 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-b200
+    variant: SXM 180 GB
+    form_factor: sxm
+    memory:
+      type: dedicated
+      nominal: { value: 180, unit: GB }
+    backend: cuda
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [b200]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/dgx-b200/
+        checked: 2026-10-19
+      - url: https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/
+        checked: 2026-10-19
+    notes: DGX B200 lists 1,440 GB HBM3e across eight GPUs; this record is per GPU.
+
+  gb200-186gb:
+    name: NVIDIA GB200 Blackwell GPU 186 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-gb200
+    variant: Grace Blackwell Superchip GPU 186 GB
+    form_factor: sxm
+    memory:
+      type: dedicated
+      nominal: { value: 186, unit: GB }
+    backend: cuda
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [gb200]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/gb200-nvl72/
+        checked: 2026-10-19
+      - url: https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/
+        checked: 2026-10-19
+    notes: >-
+      The GB200 Grace Blackwell Superchip table lists 372 GB HBM3E for its two
+      GPUs; this record is one GPU. Never pool the two.
+
+  a100-sxm-80gb:
+    name: NVIDIA A100 SXM 80 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-a100
+    variant: SXM 80 GB
+    form_factor: sxm
+    memory:
+      type: dedicated
+      nominal: { value: 80, unit: GB }
+    backend: cuda
+    partitionable: true
+    partitions:
+      - id: 1g.10gb
+        label: 1g.10gb
+        memory: { value: 10, unit: GB }
+      - id: 2g.20gb
+        label: 2g.20gb
+        memory: { value: 20, unit: GB }
+      - id: 3g.40gb
+        label: 3g.40gb
+        memory: { value: 40, unit: GB }
+      - id: 7g.80gb
+        label: 7g.80gb
+        memory: { value: 80, unit: GB }
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [a100]
+    sources:
+      - url: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/a100-80gb-datasheet-update-nvidia-us-1521051-r2-web.pdf
+        checked: 2026-10-19
+      - url: https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/supported-mig-profiles.html
+        checked: 2026-10-19
+
+  l40s-48gb:
+    name: NVIDIA L40S 48 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-l40s
+    variant: PCIe 48 GB
+    form_factor: pcie
+    memory:
+      type: dedicated
+      nominal: { value: 48, unit: GB }
     backend: cuda
     supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [l40s]
     sources:
-      - https://www.nvidia.com/en-us/data-center/h100/
-    notes: H100 SXM variant; the separate H100 NVL variant has a different capacity.
+      - url: https://www.nvidia.com/en-us/data-center/l40s/
+        checked: 2026-10-19
 
-  geforce-rtx-5090-32gb:
-    name: NVIDIA GeForce RTX 5090 32 GB (desktop)
-    ui_id: rtx5090
-    memory_type: dedicated
-    memory_gb: 32
+  l4-24gb:
+    name: NVIDIA L4 24 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-l4
+    variant: PCIe 24 GB
+    form_factor: pcie
+    memory:
+      type: dedicated
+      nominal: { value: 24, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [l4]
+    sources:
+      - url: https://www.nvidia.com/en-us/data-center/l4/
+        checked: 2026-10-19
+
+  rtx-5090-32gb:
+    name: NVIDIA GeForce RTX 5090 32 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5090
+    variant: Desktop 32 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 32, unit: GB }
     backend: cuda
     supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5090, rtx-5090, "5090"]
     sources:
-      - https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/
-      - https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
-      - https://developer.nvidia.com/cuda/gpus
-      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-5080-16gb:
+    name: NVIDIA GeForce RTX 5080 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5080
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5080, rtx-5080, "5080"]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5080/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-5070-ti-16gb:
+    name: NVIDIA GeForce RTX 5070 Ti 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5070-ti
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5070ti, rtx-5070-ti, 5070-ti]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5070-family/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-5070-12gb:
+    name: NVIDIA GeForce RTX 5070 12 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5070
+    variant: Desktop 12 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 12, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5070, rtx-5070, "5070"]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5070-family/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-5060-ti-16gb:
+    name: NVIDIA GeForce RTX 5060 Ti 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5060-ti
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5060ti-16, rtx-5060-ti-16, 5060-ti-16]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5060-family/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-5060-ti-8gb:
+    name: NVIDIA GeForce RTX 5060 Ti 8 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5060-ti
+    variant: Desktop 8 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 8, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx5060ti-8, rtx-5060-ti-8, 5060-ti-8]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5060-family/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4090-24gb:
+    name: NVIDIA GeForce RTX 4090 24 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4090
+    variant: Desktop 24 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 24, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx4090, rtx-4090, "4090"]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4080-super-16gb:
+    name: NVIDIA GeForce RTX 4080 Super 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4080
+    variant: Super Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx4080super, rtx-4080-super, 4080-super]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4080/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4070-ti-super-16gb:
+    name: NVIDIA GeForce RTX 4070 Ti Super 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4070-ti
+    variant: Super Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx4070tisuper, rtx-4070-ti-super, 4070-ti-super]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4070-family/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4060-ti-16gb:
+    name: NVIDIA GeForce RTX 4060 Ti 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4060-ti
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx4060ti-16, rtx-4060-ti-16, 4060-ti-16]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4060-ti-8gb:
+    name: NVIDIA GeForce RTX 4060 Ti 8 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4060-ti
+    variant: Desktop 8 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 8, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx4060ti-8, rtx-4060-ti-8, 4060-ti-8]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-3090-24gb:
+    name: NVIDIA GeForce RTX 3090 24 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-3090
+    variant: Desktop 24 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 24, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx3090, rtx-3090, "3090"]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090/
+        checked: 2026-10-19
+
+  rtx-3080-12gb:
+    name: NVIDIA GeForce RTX 3080 12 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-3080
+    variant: Desktop 12 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 12, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx3080-12, rtx-3080-12, 3080-12]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080/
+        checked: 2026-10-19
+
+  rtx-3080-10gb:
+    name: NVIDIA GeForce RTX 3080 10 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-3080
+    variant: Desktop 10 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 10, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx3080-10, rtx-3080-10, 3080-10]
+    sources:
+      - url: https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080/
+        checked: 2026-10-19
 
   rtx-pro-6000-blackwell-workstation-96gb:
     name: NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB
-    ui_id: rtx
-    memory_type: dedicated
-    memory_gb: 96
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-pro-6000-blackwell
+    variant: Workstation Edition 96 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 96, unit: GB }
     backend: cuda
     supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [rtx, rtx-pro-6000, rtx-pro-6000-blackwell]
     sources:
-      - https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/
-      - https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/quadro-product-literature/NVIDIA-RTX-Blackwell-PRO-GPU-Architecture-v1.0.pdf
-      - https://developer.nvidia.com/cuda/gpus
-      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
-    notes: Workstation Edition variant with dedicated GDDR7 memory.
+      - url: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
+        checked: 2026-10-19
+    notes: Workstation Edition; the Max-Q and Server Edition are separate variants.
+
+  rtx-6000-ada-48gb:
+    name: NVIDIA RTX 6000 Ada Generation 48 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-6000-ada
+    variant: Desktop 48 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 48, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx-6000-ada, rtx6000ada]
+    sources:
+      - url: https://www.nvidia.com/en-us/products/workstations/rtx-6000/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-a6000-48gb:
+    name: NVIDIA RTX A6000 48 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-a6000
+    variant: Desktop 48 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 48, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx-a6000, rtxa6000]
+    sources:
+      - url: https://www.nvidia.com/en-us/design-visualization/rtx-a6000/
+        checked: 2026-10-19
+
+  rtx-a5000-24gb:
+    name: NVIDIA RTX A5000 24 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-a5000
+    variant: Desktop 24 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 24, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx-a5000, rtxa5000]
+    sources:
+      - url: https://www.nvidia.com/en-us/design-visualization/rtx-a5000/
+        checked: 2026-10-19
+
+  rtx-a4000-16gb:
+    name: NVIDIA RTX A4000 16 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-a4000
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rtx-a4000, rtxa4000]
+    sources:
+      - url: https://www.nvidia.com/en-us/design-visualization/rtx-a4000/
+        checked: 2026-10-19
+
+  rtx-5000-ada-32gb:
+    name: NVIDIA RTX 5000 Ada Generation 32 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-5000-ada
+    variant: Desktop 32 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 32, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx-5000-ada, rtx5000ada]
+    sources:
+      - url: https://www.nvidia.com/en-us/products/workstations/rtx-5000/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  rtx-4000-ada-20gb:
+    name: NVIDIA RTX 4000 Ada Generation 20 GB
+    vendor: nvidia
+    kind: gpu
+    family: nvidia-rtx-4000-ada
+    variant: Desktop 20 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 20, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rtx-4000-ada, rtx4000ada]
+    sources:
+      - url: https://www.nvidia.com/en-us/products/workstations/rtx-4000/
+        checked: 2026-10-19
+      - url: https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+        checked: 2026-10-19
+
+  mi300x-192gb:
+    name: AMD Instinct MI300X 192 GB
+    vendor: amd
+    kind: accelerator
+    family: amd-instinct-mi300x
+    variant: OAM 192 GB
+    form_factor: oam
+    memory:
+      type: dedicated
+      nominal: { value: 192, unit: GB }
+    backend: rocm
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [mi300x]
+    sources:
+      - url: https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html
+        checked: 2026-10-19
+
+  mi325x-256gb:
+    name: AMD Instinct MI325X 256 GB
+    vendor: amd
+    kind: accelerator
+    family: amd-instinct-mi325x
+    variant: OAM 256 GB
+    form_factor: oam
+    memory:
+      type: dedicated
+      nominal: { value: 256, unit: GB }
+    backend: rocm
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [mi325x]
+    sources:
+      - url: https://www.amd.com/en/products/accelerators/instinct/mi300/mi325x.html
+        checked: 2026-10-19
+
+  mi355x-288gb:
+    name: AMD Instinct MI355X 288 GB
+    vendor: amd
+    kind: accelerator
+    family: amd-instinct-mi355x
+    variant: OAM 288 GB
+    form_factor: oam
+    memory:
+      type: dedicated
+      nominal: { value: 288, unit: GB }
+    backend: rocm
+    partitionable: true
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [mi355x]
+    sources:
+      - url: https://www.amd.com/en/products/accelerators/instinct/mi350/mi355x.html
+        checked: 2026-10-19
+
+  radeon-rx-7900-xtx-24gb:
+    name: AMD Radeon RX 7900 XTX 24 GB
+    vendor: amd
+    kind: gpu
+    family: amd-radeon-rx-7900-xtx
+    variant: Desktop 24 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 24, unit: GB }
+    backend: rocm
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [rx7900xtx, rx-7900-xtx, 7900-xtx]
+    sources:
+      - url: https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7900xtx.html
+        checked: 2026-10-19
+
+  radeon-rx-9070-xt-16gb:
+    name: AMD Radeon RX 9070 XT 16 GB
+    vendor: amd
+    kind: gpu
+    family: amd-radeon-rx-9070-xt
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: rocm
+    supported_dtypes: [fp32, fp16, bf16, fp8]
+    aliases: [rx9070xt, rx-9070-xt, 9070-xt]
+    sources:
+      - url: https://www.amd.com/en/products/graphics/desktops/radeon/9000-series/amd-radeon-rx-9070xt.html
+        checked: 2026-10-19
+
+  radeon-pro-w7900-48gb:
+    name: AMD Radeon PRO W7900 48 GB
+    vendor: amd
+    kind: gpu
+    family: amd-radeon-pro-w7900
+    variant: Workstation 48 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 48, unit: GB }
+    backend: rocm
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [w7900, radeon-pro-w7900]
+    sources:
+      - url: https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html
+        checked: 2026-10-19
+
+  intel-arc-a770-16gb:
+    name: Intel Arc A770 16 GB
+    vendor: intel
+    kind: gpu
+    family: intel-arc-a770
+    variant: Desktop 16 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 16, unit: GB }
+    backend: sycl
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [arc-a770, a770]
+    sources:
+      - url: https://www.intel.com/content/www/us/en/products/sku/227956/intel-arc-a770-graphics-16gb/specifications.html
+        checked: 2026-10-19
+
+  intel-arc-b580-12gb:
+    name: Intel Arc B580 12 GB
+    vendor: intel
+    kind: gpu
+    family: intel-arc-b580
+    variant: Desktop 12 GB
+    form_factor: desktop
+    memory:
+      type: dedicated
+      nominal: { value: 12, unit: GB }
+    backend: sycl
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [arc-b580, b580]
+    sources:
+      - url: https://www.intel.com/content/www/us/en/products/sku/241643/intel-arc-b580-graphics/specifications.html
+        checked: 2026-10-19
+
+  intel-data-center-gpu-max-1550-128gb:
+    name: Intel Data Center GPU Max 1550 128 GB
+    vendor: intel
+    kind: accelerator
+    family: intel-data-center-gpu-max-1550
+    variant: OAM 128 GB
+    form_factor: oam
+    memory:
+      type: dedicated
+      nominal: { value: 128, unit: GB }
+    backend: sycl
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [max-1550, data-center-gpu-max-1550]
+    sources:
+      - url: https://www.intel.com/content/www/us/en/products/sku/232876/intel-data-center-gpu-max-1550/specifications.html
+        checked: 2026-10-19
+
+  apple-m1-pro-16gb:
+    name: Apple M1 Pro 16 GB
+    vendor: apple
+    kind: soc
+    family: apple-m1-pro
+    variant: 16 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 16, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m1-pro-16, m1pro]
+    sources:
+      - url: https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/
+        checked: 2026-10-19
+    notes: Unified memory is shared with the CPU and OS; 16 GB is not dedicated VRAM.
+
+  apple-m2-8gb:
+    name: Apple M2 8 GB
+    vendor: apple
+    kind: soc
+    family: apple-m2
+    variant: 8 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 8, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m2-8, m2]
+    sources:
+      - url: https://www.apple.com/newsroom/2022/06/apple-unveils-m2-with-breakthrough-performance-and-capability/
+        checked: 2026-10-19
+    notes: Unified memory is shared with the CPU and OS; 8 GB is not dedicated VRAM.
+
+  apple-m4-max-36gb:
+    name: Apple M4 Max 36 GB
+    vendor: apple
+    kind: soc
+    family: apple-m4-max
+    variant: 36 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 36, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [apple, m4-max-36]
+    sources:
+      - url: https://support.apple.com/en-us/121553
+        checked: 2026-10-19
+    notes: Unified memory is shared with the CPU and OS; 36 GB is not dedicated VRAM.
+
+  apple-m4-max-48gb:
+    name: Apple M4 Max 48 GB
+    vendor: apple
+    kind: soc
+    family: apple-m4-max
+    variant: 48 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 48, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m4-max-48]
+    sources:
+      - url: https://support.apple.com/en-us/121553
+        checked: 2026-10-19
+
+  apple-m4-max-64gb:
+    name: Apple M4 Max 64 GB
+    vendor: apple
+    kind: soc
+    family: apple-m4-max
+    variant: 64 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 64, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m4-max-64]
+    sources:
+      - url: https://support.apple.com/en-us/121553
+        checked: 2026-10-19
+
+  apple-m4-max-128gb:
+    name: Apple M4 Max 128 GB
+    vendor: apple
+    kind: soc
+    family: apple-m4-max
+    variant: 128 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 128, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m4-max-128]
+    sources:
+      - url: https://support.apple.com/en-us/121553
+        checked: 2026-10-19
+
+  apple-m5-max-48gb:
+    name: Apple M5 Max 48 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-max
+    variant: 48 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 48, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-max-48]
+    sources:
+      - url: https://www.apple.com/macbook-pro/specs/
+        checked: 2026-10-19
+
+  apple-m5-max-64gb:
+    name: Apple M5 Max 64 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-max
+    variant: 64 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 64, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-max-64]
+    sources:
+      - url: https://www.apple.com/macbook-pro/specs/
+        checked: 2026-10-19
+
+  apple-m5-max-128gb:
+    name: Apple M5 Max 128 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-max
+    variant: 128 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 128, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-max-128]
+    sources:
+      - url: https://www.apple.com/macbook-pro/specs/
+        checked: 2026-10-19
+
+  apple-m5-ultra-96gb:
+    name: Apple M5 Ultra 96 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-ultra
+    variant: 96 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 96, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-ultra-96]
+    sources:
+      - url: https://www.apple.com/mac-studio/specs/
+        checked: 2026-10-19
+
+  apple-m5-ultra-256gb:
+    name: Apple M5 Ultra 256 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-ultra
+    variant: 256 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 256, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-ultra-256]
+    sources:
+      - url: https://www.apple.com/mac-studio/specs/
+        checked: 2026-10-19
+
+  apple-m5-ultra-512gb:
+    name: Apple M5 Ultra 512 GB
+    vendor: apple
+    kind: soc
+    family: apple-m5-ultra
+    variant: 512 GB unified
+    form_factor: soc
+    memory:
+      type: unified
+      nominal: { value: 512, unit: GB }
+    backend: metal
+    supported_dtypes: [fp32, fp16, bf16]
+    aliases: [m5-ultra-512]
+    sources:
+      - url: https://www.apple.com/mac-studio/specs/
+        checked: 2026-10-19
 
   dgx-spark-gb10-128gb:
     name: NVIDIA DGX Spark GB10 128 GB
-    ui_id: spark
-    memory_type: unified
-    memory_gb: 128
+    vendor: nvidia
+    kind: system
+    family: nvidia-dgx-spark-gb10
+    variant: 128 GB unified
+    form_factor: system
+    memory:
+      type: unified
+      nominal: { value: 128, unit: GB }
     backend: cuda
     supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [spark, dgx-spark]
     sources:
-      - https://www.nvidia.com/en-us/products/workstations/dgx-spark/
-      - https://developer.nvidia.com/cuda/gpus
-      - https://docs.nvidia.com/cuda/archive/13.0.2/cuda-toolkit-release-notes/index.html#cublas-release-13-0-update-2
-      - https://docs.nvidia.com/cuda/archive/13.1.1/parallel-thread-execution/index.html#warp-level-matrix-instructions-mma
-    notes: >-
-      One 128 GB system with coherent memory shared by the CPU and GPU.
-      This entry does not describe the separate 64 GB OEM configuration or
-      the aggregate memory of a multi-system deployment.
+      - url: https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+        checked: 2026-10-19
+    notes: One GB10 system with coherent unified memory shared by CPU and GPU.
+
+  dgx-spark-gb10-64gb:
+    name: NVIDIA DGX Spark GB10 64 GB
+    vendor: nvidia
+    kind: system
+    family: nvidia-dgx-spark-gb10
+    variant: 64 GB unified OEM
+    form_factor: system
+    memory:
+      type: unified
+      nominal: { value: 64, unit: GB }
+    backend: cuda
+    supported_dtypes: [fp32, fp16, bf16, fp8, nvfp4]
+    aliases: [spark-64]
+    sources:
+      - url: https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+        checked: 2026-10-19
+    notes: OEM-only 64 GB configuration; keep separate from the 128 GB system.

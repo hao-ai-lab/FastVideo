@@ -74,9 +74,10 @@ to documentation, not embedded HTML.
 
 ## Shared JavaScript API
 
-`docs/js/cookbook-config.mjs` exports the six functions below. The generated
-`assets/cookbook-config/cookbook-config.js` bundles them with Ajv and exposes
-the browser global `FastVideoConfigCookbook` and CommonJS exports:
+`docs/js/cookbook-config.mjs` exports the recipe, capacity, and assessment
+helpers below. The generated `assets/cookbook-config/cookbook-config.js` bundles
+them with Ajv and exposes the browser global `FastVideoConfigCookbook` and
+CommonJS exports:
 
 | Function | Result |
 | --- | --- |
@@ -85,12 +86,22 @@ the browser global `FastVideoConfigCookbook` and CommonJS exports:
 | `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]`, including GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
 | `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
-| `estimateMemory({config, workload, model, hardware, headroom})` | Analytical one-GPU memory estimate; see [memory estimates](../contributing/cookbook_configuration.md#memory-estimates) |
+| `WORKLOADS` | Frozen `t2v`/`i2v`/`t2i`/`t2a`/`v2a` input/output/endpoint/media metadata used by the builder and sample client |
+| `estimateMemory({config, workload, model, hardware, memoryBudgetGiB, partitionId, hostMemoryGb, headroom})` | Analytical one-device estimate with separate device and host budgets |
+| `assessCapacity({model, example, hardware, config, request, env, revisions, ...})` | `{status, basis, analytical, evidence, compatibility, notes}` combining analysis and applicable evidence |
+| `matchEvidence({model, example, config, request, env, hardware, revisions})` | `{applicable, unverified, rejected}` measured runs |
+| `recommendCapacity({models, hardware, task, request, env, revisions, limit})` | Candidates with model/example, assessment, reasons, and lower-memory alternatives; unknown remains explicit |
+| `resolveExecution({model, config, env})` | Effective topology, offload, precision, attention, and unsupported switches |
+| `loadCapacityIndex(url, options)` | Promise of the model-summary index and resolved source URL |
+| `loadCapacityModel(index, id, options)` | Promise of one expanded model, examples, and reference runs |
+| `loadCapacityHardware(index, options)` | Promise of `{version, devices, url}` for the source-backed hardware lookup |
 
 `sampleRequest()` is also used by model pages backed by a checked-in serving
 YAML rather than a full editable catalog. Its metadata supplies `model.id`,
 `workload`, and `runtime.interface`/`runtime.server_defaults`. It builds client
 instructions only; it does not validate the configuration or run a request.
+The shared workload map selects the canonical REST endpoint and output
+extension; it does not establish that a model supports that workload.
 
 For WebSocket deployments, `clientRequest` is `null` and `websocketUrl` is
 present. REST deployments return a request object and omit `websocketUrl`.
@@ -217,9 +228,12 @@ shared hardware/component facts and optional recorded runs through separate
 static loaders. Optional `capacity` sections extend existing model manifests;
 model identity and example configurations are derived from their deployments
 and native baseline YAML. `estimateMemory()` is analytical and never verifies a
-recipe. Measured-hardware UI, format versioning and HTTP cache freshness remain
-separate follow-ups. No general arithmetic validator or CLI override workflow is
-introduced here.
+recipe. `assessCapacity()` keeps analytical fit, measured device peaks, and
+applicable evidence distinct; allocator-only peaks and successful generations
+do not establish device fit or a minimum-VRAM requirement. The hardware asset is
+versioned and source-backed; the UI owns catalog search and the custom-device
+form, while the shared API owns lookup, normalization, and estimation. No general
+arithmetic validator or CLI override workflow is introduced here.
 
 ## Cookbook interface
 

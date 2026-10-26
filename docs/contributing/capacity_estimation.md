@@ -49,7 +49,7 @@ node docs/js/build-cookbook-capacity.mjs --check
 node docs/js/build-cookbook-capacity.mjs --preview fastwan21
 ```
 
-The check currently prints `Validated 1 capacity model(s) and 4 hardware variant(s).`
+The check currently prints `Validated 1 capacity model(s) and 50 hardware variant(s).`
 The preview prints the model with component references expanded and each
 example's baseline under `base_config`. Inspect its identity, counts, geometry,
 and evidence. Both commands validate deployments and capacity metadata without
@@ -68,7 +68,7 @@ Commit authored sources; generated assets are build output and must not be hand-
 | Model `capacity` | `memory_rules`, nonempty `components` | `sources`, `reference_runs` |
 | `components.<role>` | `ref` | `alternatives` (other registered refs) |
 | Shared component | `name`, `parameter_count`, `sources` | `block_count` + `block_parameter_count`, `loaded_subset`, `geometry`; VAE-only `decode_feature_multiplier` |
-| Hardware variant | `name`, `memory_type`, `memory_gb`, `backend`, `sources` | `ui_id`, `supported_dtypes`, `notes` |
+| Hardware variant | `name`, `vendor`, `kind`, `memory`, `backend`, `sources` | `aliases`, `family` + `variant`, `form_factor`, `gpu_count`, `host_memory`, `partitionable`, `partitions`, `supported_dtypes`, `notes` |
 
 Roles are `transformer`, `transformer_2`, `text_encoder`, `text_encoder_2`,
 `image_encoder`, `vae`, or `audio_vae`; refs must match the role's component type.
@@ -214,12 +214,14 @@ a fixed memory discount from `vae_tiling: true`, or assume this mode uses less
 memory than the default cached decoder. Other model families can use different
 tiling controls. This setting flow was checked in code, not by GPU generation.
 
-Hardware IDs describe variants such as H100 SXM 80 GB. `memory_gb` is nominal
-**decimal GB per device** (`1 GB = 1e9 bytes`); convert to GiB with
-`memory_gb * 1e9 / 1024**3`. Use `memory_type: dedicated` for discrete VRAM or
+Hardware IDs describe variants such as H100 SXM 80 GB. The authored
+`memory.nominal` preserves `GB` or `GiB`; the build exports normalized decimal
+`memory_gb` (`1 GB = 1e9 bytes`), converted to GiB with
+`memory_gb * 1e9 / 1024**3`. Use `memory.type: dedicated` for discrete VRAM or
 `unified` for capacity shared with the CPU. Neither means measured free memory.
 `supported_dtypes` describes hardware format capability, not FastVideo kernel
-support; omission means unknown. `ui_id` connects a variant to an existing UI choice.
+support; omission means unknown. `aliases` connect a variant to existing UI IDs
+and search names.
 
 Use checkpoint `model_index.json`/component `config.json` files, tensor headers
 or indexes, and the FastVideo loader to establish composition, counts, and geometry.
@@ -232,7 +234,104 @@ names do not establish that components can be shared. Offline scripts or agents
 may prepare candidate metadata for review; builds and browser loaders do not
 run them, import model code, or download checkpoints.
 
+## Hardware catalog
+
+[`hardware.yaml`](../cookbook/capacity/hardware.yaml) is the authored lookup
+catalog. It records device specifications, not a runtime support matrix: a
+searchable variant can still be unsupported by a model, backend, or kernel.
+Every entry requires a vendor source URL and the date it was checked. The
+[coverage checklist](../cookbook/capacity/hardware-coverage.md) tracks what is
+present, what is next, and what is deliberately excluded. The catalog is for
+discovery and reuse, not a prerequisite for running a model: a missing variant
+uses the custom-device path, and `unknown` means no estimate, not that FastVideo
+cannot attempt the recipe.
+
+```yaml
+h100-sxm-80gb:
+  name: NVIDIA H100 SXM 80 GB
+  vendor: nvidia
+  kind: gpu
+  family: nvidia-h100
+  variant: SXM 80 GB
+  form_factor: sxm
+  memory:
+    type: dedicated
+    nominal: { value: 80, unit: GB }
+  backend: cuda
+  partitionable: true
+  partitions:
+    - id: 1g.10gb
+      label: 1g.10gb
+      memory: { value: 10, unit: GB }
+  supported_dtypes: [fp32, fp16, bf16, fp8]
+  aliases: [h100]
+  sources:
+    - url: https://www.nvidia.com/en-us/data-center/h100/
+      checked: 2026-10-19
+```
+
+`memory.type` is `dedicated` or `unified`. `memory.nominal` preserves the
+vendor's value and unit (`GB` or `GiB`). Unified memory is shared system memory,
+not VRAM; do not describe it as a GPU-only allocation. Add `memory.usable` plus a
+`memory.policy` only when a documented policy derives an application budget.
+Without that policy the estimator uses a labeled 75% application default
+(`DEFAULT_UNIFIED_BUDGET_FRACTION`); `memoryBudgetGiB` overrides it. Nominal
+unified memory is never treated as available VRAM, and the assumption is
+reported in `memory.budgetSource` and the result notes.
+
+`family` groups exact `variant` records, so board, form-factor, and capacity
+differences stay separate entries. `partitions` list selectable MIG/vGPU-style
+allocations; selecting one never silently inherits full-card capacity. `gpu_count`
+describes the device record and does not authorize summing GPUs into one pool.
+`host_memory` is host RAM for CPU offload, separate from dedicated VRAM and from
+unified memory. `aliases` preserve old links and search names; canonical IDs stay
+stable.
+
+Custom devices use the same memory fields and must declare `backend` and
+`supported_dtypes`. They are not catalog-verified:
+
+```javascript
+const custom = {
+  id: "custom",
+  name: "Custom accelerator",
+  custom: true,
+  memory: { type: "dedicated", nominal: { value: 48, unit: "GB" } },
+  backend: "cuda",
+  supported_dtypes: ["fp32", "fp16", "bf16", "fp8"],
+};
+const result = estimateMemory({
+  config,
+  workload,
+  model,
+  hardware: custom,
+  memoryBudgetGiB: 40, // optional application cap, in GiB
+  partitionId: "1g.10gb", // optional catalog partition
+  allocationMemoryGb: 10, // optional provisioned allocation, in GB
+  hostMemoryGb: 64, // optional host RAM for offload
+});
+```
+
+An unknown backend or missing memory type/capacity returns `unknown`. A missing
+format list is accepted for fp32/fp16/bf16 storage and called out as an
+assumption; fp8 or NVFP4 storage still returns `unknown` because capability was
+not cataloged. The estimate
+reports `memory` (type, nominal, budget, partition) and `host` (required,
+capacity, status) separately from `capacityGiB` and `status`.
+
+The generated `hardware.json` is versioned:
+
+```json
+{ "version": 1, "devices": [{ "id": "h100-sxm-80gb", "...": "..." }] }
+```
+
+Values keep authored aliases, normalized decimal `memory_gb`, optional
+`usable_memory_gb` / `host_memory_gb`, and normalized partition capacities.
+
 ## Optional successful-run evidence
+
+HTTP/OpenAPI schema compatibility is a separate contract; see
+[serving documentation](serving_documentation_contract.md). A capacity estimate
+and a completed generation do not establish HTTP client compatibility.
 
 Add records inline under the manifest's `capacity.reference_runs`. One completed
 generation is useful; benchmarking every configuration is unnecessary. Follow the
@@ -246,6 +345,7 @@ load alone is insufficient. Record the effective request, including inherited de
 | --- | --- |
 | `id`, `date` | Unique run ID within the model; date as `YYYY-MM-DD` |
 | `hardware`, `gpu_count` | Hardware catalog ID and actual device count |
+| `hardware_partition`, `hardware_allocation_gb` | Optional MIG/vGPU partition ID and provisioned allocation in decimal GB; a full-card run does not apply to a partition |
 | `outcome`, `execution` | `completed`; `first_request` or `warm_request` |
 | `evidence_url` | Accessible HTTP(S) logs or benchmark evidence |
 | `context.runtime`, `context.deployment` | Serving runtime ID and the cookbook deployment ID used for the run; the deployment must exist and use that runtime |
@@ -313,7 +413,7 @@ also re-exported by the shared cookbook API/bundle:
 | --- | --- |
 | `loadCapacityIndex(url, options?)` | Index with model summaries, `hardware_url`, and resolved source `url` |
 | `loadCapacityModel(index, id, options?)` | Model with components mapped by role, examples, and `reference_runs` |
-| `loadCapacityHardware(index, options?)` | Hardware mapping keyed by ID |
+| `loadCapacityHardware(index, options?)` | `{version: 1, devices, url}` with stable IDs and aliases |
 
 Start with the generated index URL, then pass the returned index to the other
 loaders. Each selected component is expanded with its `ref` and geometry;
@@ -328,6 +428,8 @@ required structure/identity, or unknown model IDs. There is no module-level cach
 
 These loaders fetch static facts; the calculator must resolve execution settings
 and check rule coverage before estimating memory or recommending hardware.
-For detailed return shapes and the proposed PR #1978 adapter, see the
-[temporary API contract](../cookbook/capacity-api-contract.review.md).
-Delete that handoff and this link when integration lands, retaining stable API behavior here.
+`assessCapacity()` combines the analytical estimate with applicable measured
+evidence; `matchEvidence()` reports applicable, unverified, and rejected runs;
+`recommendCapacity()` returns measured or analytical fits and keeps unknown
+results explicit. No successful generation is treated as a minimum-VRAM
+measurement, and allocator-only peaks never establish device fit.

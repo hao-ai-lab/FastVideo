@@ -98,6 +98,10 @@
             "href": "/inference/fasth3_omniref"
           },
           {
+            "label": "FastH3 OmniRef on Apple Silicon",
+            "href": "/inference/fasth3_omniref_mlx"
+          },
+          {
             "label": "DGX Spark tuning",
             "href": "/getting_started/installation/spark_performance"
           },
@@ -124,6 +128,10 @@
         "display": "group"
       },
       {
+        "label": "PAN 2 text/image to video",
+        "href": "/inference/pan2"
+      },
+      {
         "label": "Examples",
         "href": "/inference/examples/examples_inference_index"
       }
@@ -142,10 +150,18 @@
         "href": "/cookbook/openai-api"
       },
       {
-        "label": "FastH3",
+        "label": "MiniMax H3",
         "display": "group",
         "collapsed": false,
         "items": [
+          {
+            "label": "MiniMax H3",
+            "href": "/cookbook/minimax-h3/models/minimax-h3-t2v"
+          },
+          {
+            "label": "FastH3 OmniRef",
+            "href": "/cookbook/minimax-h3/fasth3-omniref"
+          },
           {
             "label": "FastH3 8-Step V2",
             "href": "/cookbook/minimax-h3/fasth3-8step"
@@ -153,6 +169,14 @@
           {
             "label": "FastH3 Trim",
             "href": "/cookbook/minimax-h3/fasth3-trim"
+          },
+          {
+            "label": "FastH3 Preview V0.2",
+            "href": "/cookbook/minimax-h3/fasth3-preview"
+          },
+          {
+            "label": "FastH3 4-Step V1",
+            "href": "/cookbook/minimax-h3/fasth3-4step"
           },
           {
             "label": "Recipes and setup",
@@ -230,8 +254,31 @@
         ]
       },
       {
+        "label": "PAN 2",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "PAN 2",
+            "href": "/cookbook/pan2/pan2"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/pan2"
+          },
+          {
+            "label": "Model reference",
+            "href": "/inference/pan2"
+          }
+        ]
+      },
+      {
         "label": "FLUX",
         "href": "/cookbook/flux"
+      },
+      {
+        "label": "Qwen-Image-2.1",
+        "href": "/cookbook/qwen-image21"
       },
       {
         "label": "Stable Diffusion",
