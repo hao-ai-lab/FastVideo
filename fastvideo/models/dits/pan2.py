@@ -16,14 +16,24 @@ from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.pan2 import PAN2VideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.pan2_fusions import layer_norm_modulate, qk_rmsnorm_rope
 from fastvideo.platforms import AttentionBackendEnum
+
+
+def _fusable_layer_norm(x: torch.Tensor) -> bool:
+    """Whether ``layer_norm_modulate`` computes what the eager ``norm(x) * (1 + scale) + shift`` does here.
+
+    The fused op rounds once from FP32, which is the eager result under autocast (FP32 LayerNorm and modulation, cast
+    by the next linear layer) and in FP32; a low-precision tensor outside autocast rounds after every eager op instead.
+    """
+    return x.dtype == torch.float32 or torch.is_autocast_enabled(x.device.type)
 
 
 class PAN2SwiGLU(nn.Module):
@@ -102,6 +112,9 @@ class PAN2TokenRefinerBlock(nn.Module):
 class PAN2AdaLayerNormZero(nn.Module):
     """Timestep modulation of the video stream: modulated attention input plus the gate/shift/scale for the rest."""
 
+    # Set by PAN2Transformer3DModel.set_fused_kernels.
+    fused_kernels = False
+
     def __init__(self, dim: int, eps: float = 1e-6, prefix: str = ""):
         super().__init__()
         self.linear = ReplicatedLinear(dim, 6 * dim, bias=True, prefix=f"{prefix}.linear")
@@ -111,11 +124,17 @@ class PAN2AdaLayerNormZero(nn.Module):
                 temb: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         emb, _ = self.linear(F.silu(temb))
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.chunk(6, dim=-1)
-        x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        if self.fused_kernels and _fusable_layer_norm(x):
+            x = layer_norm_modulate(x, 1 + scale_msa, shift_msa, self.norm.eps)
+        else:
+            x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
 
 
 class PAN2AdaLayerNormOut(nn.Module):
+
+    # Set by PAN2Transformer3DModel.set_fused_kernels.
+    fused_kernels = False
 
     def __init__(self, dim: int, eps: float = 1e-6, prefix: str = ""):
         super().__init__()
@@ -125,6 +144,8 @@ class PAN2AdaLayerNormOut(nn.Module):
     def forward(self, x: torch.Tensor, temb: torch.Tensor) -> torch.Tensor:
         emb, _ = self.linear(F.silu(temb).to(x.dtype))
         scale, shift = emb.chunk(2, dim=-1)
+        if self.fused_kernels and _fusable_layer_norm(x):
+            return layer_norm_modulate(x, 1 + scale, shift, self.norm.eps)
         return self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
 
 
@@ -132,8 +153,12 @@ class PAN2Attention(nn.Module):
     """Joint attention over ``[video; text]`` with per-stream projections and Q/K RMSNorm.
 
     RoPE applies to the video tokens only; ``DistributedAttention`` applies it after its all-to-all, where each rank
-    holds the full (unpadded) video sequence for its heads.
+    holds the full (unpadded) video sequence for its heads. With fused kernels the Q/K RMSNorm and RoPE run as one op
+    before the all-to-all, on this rank's video shard with ``local_freqs_cis``.
     """
+
+    # Set by PAN2Transformer3DModel.set_fused_kernels.
+    fused_kernels = False
 
     def __init__(self,
                  dim: int,
@@ -172,16 +197,25 @@ class PAN2Attention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
+        local_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         query, key, value = self._project(self.to_qkv, hidden_states)
-        query = self.norm_q(query).to(value.dtype)
-        key = self.norm_k(key).to(value.dtype)
-
         encoder_query, encoder_key, encoder_value = self._project(self.add_qkv_proj, encoder_hidden_states)
-        encoder_query = self.norm_added_q(encoder_query).to(encoder_value.dtype)
-        encoder_key = self.norm_added_k(encoder_key).to(encoder_value.dtype)
+        if self.fused_kernels and local_freqs_cis is not None:
+            # RoPE is per token and per head, so it applies to this rank's shard before the all-to-all as well as to
+            # the gathered sequence after it.
+            query, key = qk_rmsnorm_rope(query, key, self.norm_q.weight, self.norm_k.weight,
+                                         self.norm_q.variance_epsilon, *local_freqs_cis)
+            encoder_query, encoder_key = qk_rmsnorm_rope(encoder_query, encoder_key, self.norm_added_q.weight,
+                                                         self.norm_added_k.weight, self.norm_added_q.variance_epsilon)
+            freqs_cis = None
+        else:
+            query = self.norm_q(query).to(value.dtype)
+            key = self.norm_k(key).to(value.dtype)
+            encoder_query = self.norm_added_q(encoder_query).to(encoder_value.dtype)
+            encoder_key = self.norm_added_k(encoder_key).to(encoder_value.dtype)
 
         hidden_states, encoder_hidden_states = self.attn(query,
                                                          key,
@@ -197,6 +231,9 @@ class PAN2Attention(nn.Module):
 
 
 class PAN2TransformerBlock(nn.Module):
+
+    # Set by PAN2Transformer3DModel.set_fused_kernels.
+    fused_kernels = False
 
     def __init__(self,
                  dim: int,
@@ -234,6 +271,7 @@ class PAN2TransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int,
+        local_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, temb)
         (
@@ -244,11 +282,28 @@ class PAN2TransformerBlock(nn.Module):
             context_scale_mlp,
             context_gate_mlp,
         ) = self.scale_shift_table_context.to(temb.dtype).chunk(6, dim=-1)
-        norm_encoder_hidden_states = (self.norm1_context(encoder_hidden_states) *
-                                      (1 + context_scale_msa) + context_shift_msa)
+        fused = self.fused_kernels and _fusable_layer_norm(encoder_hidden_states)
+        if fused:
+            norm_encoder_hidden_states = layer_norm_modulate(encoder_hidden_states, 1 + context_scale_msa,
+                                                             context_shift_msa, self.norm1_context.eps)
+        else:
+            norm_encoder_hidden_states = (self.norm1_context(encoder_hidden_states) *
+                                          (1 + context_scale_msa) + context_shift_msa)
 
         attn_output, context_attn_output = self.attn(norm_hidden_states, norm_encoder_hidden_states, freqs_cis,
-                                                     original_seq_len)
+                                                     original_seq_len, local_freqs_cis)
+        if fused:
+            # One rounding per gated residual, as PAN2's fused training kernels compute it.
+            hidden_states = torch.addcmul(hidden_states, attn_output, gate_msa.unsqueeze(1))
+            encoder_hidden_states = torch.addcmul(encoder_hidden_states, context_attn_output, context_gate_msa)
+            norm_hidden_states = layer_norm_modulate(hidden_states, 1 + scale_mlp, shift_mlp, self.norm2.eps)
+            norm_encoder_hidden_states = layer_norm_modulate(encoder_hidden_states, 1 + context_scale_mlp,
+                                                             context_shift_mlp, self.norm2_context.eps)
+            hidden_states = torch.addcmul(hidden_states, self.ff(norm_hidden_states), gate_mlp.unsqueeze(1))
+            encoder_hidden_states = torch.addcmul(encoder_hidden_states, self.ff_context(norm_encoder_hidden_states),
+                                                  context_gate_mlp)
+            return hidden_states, encoder_hidden_states
+
         hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
         encoder_hidden_states = encoder_hidden_states + context_attn_output * context_gate_msa
 
@@ -329,7 +384,33 @@ class PAN2Transformer3DModel(BaseDiT):
                                          prefix=f"{config.prefix}.proj_out")
 
         self.gradient_checkpointing = False
+        # See set_fused_kernels; the pipeline turns it on with PAN2PipelineConfig.dit_fused_kernels.
+        self.fused_kernels = False
         self.__post_init__()
+
+    def set_fused_kernels(self, enabled: bool) -> None:
+        """Run the blocks' fused Q/K RMSNorm + RoPE and LayerNorm + modulation ops (``pan2_fusions``).
+
+        The ops launch Triton kernels on CUDA and run their PyTorch reference elsewhere. The forward reproduces the
+        eager arithmetic up to FP32 summation order, except that each gated residual rounds once instead of twice.
+        """
+        enabled = bool(enabled)
+        for module in self.modules():
+            if isinstance(module, (PAN2TransformerBlock, PAN2Attention, PAN2AdaLayerNormZero, PAN2AdaLayerNormOut)):
+                module.fused_kernels = enabled
+        self.fused_kernels = enabled
+
+    @staticmethod
+    def _local_rotary_pos_embed(freqs_cis: tuple[torch.Tensor, torch.Tensor],
+                                local_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """The RoPE rows of this rank's video shard (identity rotation on the sequence-parallel padding)."""
+        cos, sin = freqs_cis
+        start = get_sp_parallel_rank() * local_len
+        pad = start + local_len - cos.shape[0]
+        if pad > 0:
+            cos = F.pad(cos, (0, 0, 0, pad), value=1.0)
+            sin = F.pad(sin, (0, 0, 0, pad), value=0.0)
+        return cos[start:start + local_len], sin[start:start + local_len]
 
     def _rotary_pos_embed(self, num_frames: int, height: int, width: int,
                           device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
@@ -366,6 +447,9 @@ class PAN2Transformer3DModel(BaseDiT):
 
         hidden_states = self.x_embedder(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
+        local_freqs_cis = None
+        if self.fused_kernels:
+            local_freqs_cis = self._local_rotary_pos_embed(freqs_cis, hidden_states.shape[1])
 
         if timestep.dim() == 0:
             timestep = timestep.expand(batch_size)
@@ -379,10 +463,10 @@ class PAN2Transformer3DModel(BaseDiT):
         for block in self.transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states, encoder_hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, encoder_hidden_states, temb, freqs_cis, original_seq_len)
+                    block, hidden_states, encoder_hidden_states, temb, freqs_cis, original_seq_len, local_freqs_cis)
             else:
                 hidden_states, encoder_hidden_states = block(hidden_states, encoder_hidden_states, temb, freqs_cis,
-                                                             original_seq_len)
+                                                             original_seq_len, local_freqs_cis)
 
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)

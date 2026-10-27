@@ -10,7 +10,8 @@ _DENOISE_STAGE = PresetStageSpec(
     allowed_overrides=frozenset({"num_inference_steps", "guidance_scale"}),
 )
 
-# 704x1248, 313 frames (13 s at 24 fps), 50 steps, CFG 3. The preset sends no negative prompt (an empty one is encoded
+# 704x1248, 313 frames (13 s at 24 fps), 50 steps, CFG 2.5 (the release launcher's default since ifm-ai/PAN2
+# 86d5023, 2026-10-23; 3 before). The preset sends no negative prompt (an empty one is encoded
 # as a single space); the reference sampler sends the release's structured negative caption, so pass it as the
 # request's ``negative_prompt`` to follow that recipe.
 _SHARED_DEFAULTS = {
@@ -19,7 +20,7 @@ _SHARED_DEFAULTS = {
     "num_frames": 313,
     "fps": 24,
     "num_inference_steps": 50,
-    "guidance_scale": 3.0,
+    "guidance_scale": 2.5,
     "negative_prompt": "",
 }
 
@@ -33,6 +34,7 @@ PAN2_T2V = InferencePreset(
     defaults=dict(_SHARED_DEFAULTS),
 )
 
+# The same pipeline runs image-to-video when the request carries a first frame (image_path).
 PAN2_I2V = InferencePreset(
     name="pan2_i2v",
     version=1,
