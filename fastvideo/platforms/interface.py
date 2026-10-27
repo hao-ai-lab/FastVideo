@@ -12,7 +12,6 @@ logger = init_logger(__name__)
 
 class AttentionBackendEnum(enum.Enum):
     FLASH_ATTN = enum.auto()
-    FLASHINFER = enum.auto()
     TORCH_SDPA = enum.auto()
     SAGE_ATTN = enum.auto()
     SAGE_ATTN_THREE = enum.auto()
@@ -26,6 +25,7 @@ class AttentionBackendEnum(enum.Enum):
     SAGE_SLA_ATTN = enum.auto()
     NABLA_ATTN = enum.auto()
     NO_ATTENTION = enum.auto()
+    FLASHINFER = enum.auto()
 
 
 class PlatformEnum(enum.Enum):

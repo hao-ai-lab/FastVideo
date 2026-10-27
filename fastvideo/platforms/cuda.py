@@ -174,7 +174,7 @@ class CudaPlatformBase(Platform):
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
         logger.info("Selected backend: %s", selected_backend)
         if selected_backend == AttentionBackendEnum.FLASHINFER:
-            if not cls.has_device_capability(80):
+            if not cls.has_device_capability(80, device_id=torch.cuda.current_device()):
                 raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
             if dtype not in (torch.float16, torch.bfloat16):
                 logger.warning("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
