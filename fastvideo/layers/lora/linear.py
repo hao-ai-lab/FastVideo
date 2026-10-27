@@ -163,8 +163,11 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
 
-        if self.side_branch and (self.lora_A is None or self._strength_is_zero):
-            # No adapter, or strength 0, is exactly the unadapted layer, down to the output dtype.
+        if self.lora_A is None or (self.side_branch and self._strength_is_zero):
+            # No adapter, or strength 0 on a side branch, is exactly the unadapted layer, down to the output dtype.
+            # A merge-mode wrapper reaches this branch while its first adapter is still loading or after a load
+            # failed: the pipeline wraps every linear before it reads the weights, so an unadapted request must
+            # not depend on an adapter that is not there.
             return self.base_layer(x)
 
         if not self.merged and not self.disable_lora:
