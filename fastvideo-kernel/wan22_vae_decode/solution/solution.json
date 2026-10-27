@@ -1,0 +1,1 @@
+{"languages":["cuda_cpp"],"entry_point":"binding.cpp::run","destination_passing_style":true,"compile_options":{"cflags":["-O3","-std=c++17"],"cuda_cflags":["-O3","-std=c++17","-lineinfo"],"ld_flags":["-lcuda"]},"dependencies":[]}
