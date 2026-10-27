@@ -79,6 +79,13 @@ class WanVAEConfig(VAEConfig):
     use_parallel_tiling: bool = False
 
     use_light_vae: bool = False
+    # Decode with fastvideo-kernel's Wan2.2 decoder (wan22_vae_decode: B200 / GB200 / B300, the Wan2.2-TI2V-5B VAE,
+    # 704 x 1248 video, batch 1) in bf16 where it applies; other inputs and devices take the decode here.
+    decode_kernel: bool = False
+    # With decode_kernel, split each decode over the sequence-parallel group (2, 4 or 8 GPUs) instead of decoding on
+    # every GPU alone. Every rank of the group must decode the same latents at the same time, as a pipeline's decoding
+    # stage does; the group's first rank assembles the video and broadcasts it, so every rank returns it as before.
+    decode_kernel_parallel: bool = False
 
     def __post_init__(self):
         self.blend_num_frames = (self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames) * 2

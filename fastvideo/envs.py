@@ -635,6 +635,12 @@ FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
     "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
     "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
+FASTVIDEO_WAN22_VAE_DECODE_DIR = EnvPath("",
+                                         category="performance",
+                                         doc="Directory of the Wan2.2 VAE decoder kernels "
+                                         "(fastvideo-kernel/wan22_vae_decode) that AutoencoderKLWan loads, and builds "
+                                         "on first use, when its config sets decode_kernel. Empty takes the copy in "
+                                         "this checkout.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -924,6 +930,10 @@ FASTVIDEO_TEST_SD35_MODEL_DIR = EnvStr("stabilityai/stable-diffusion-3.5-medium"
                                        category="test",
                                        doc="Model for the Stable Diffusion 3.5 SSIM test.",
                                        deprecated_names=("SD35_MODEL_DIR", ))
+FASTVIDEO_TEST_PAN2_MODEL_DIR = EnvPath(None,
+                                        category="test",
+                                        doc="PAN2 checkpoint root (with vae/) for the Wan2.2 VAE decode-kernel GPU "
+                                        "tests; unset skips them.")
 FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",

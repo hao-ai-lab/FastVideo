@@ -19,7 +19,7 @@ from the `pan2_t2v` and `pan2_i2v` presets:
 | Resolution | 704x1248 (height and width must be multiples of 32) |
 | Frames | 313, 13 s at 24 fps (`num_frames - 1` must be a multiple of 4) |
 | Steps | 50, uniform sigmas from 1 to 0 with the checkpoint's flow shift (9 for `IFM/PAN2-TEST`, the reference sampler's value) |
-| Guidance | 3.0, classifier-free guidance. Image-to-video keeps the first latent frame out of guidance (`i2v_skip_first_latent_cfg`, on by default, as in the reference sampler) |
+| Guidance | 2.5, classifier-free guidance, the reference launcher's default (3 before 2026-10-23). Image-to-video keeps the first latent frame out of guidance (`i2v_skip_first_latent_cfg`, on by default, as in the reference sampler) |
 | Negative prompt | None unless the request carries one. The reference sampler always sends the release's structured negative caption (`negative_prompt.json` of the PAN2 repository) with its three `time_range_sec` values set to the clip length, `0 to 20` for 481 frames at 24 fps |
 
 PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
@@ -66,6 +66,20 @@ The trimmed sequence can use either FlashAttention or Torch SDPA.
 ```bash
 PAN2_NUM_GPUS=4 python examples/inference/basic/basic_pan2.py
 ```
+
+## Performance switches
+
+PAN2 sampling turns these on by default (`PAN2PipelineConfig`); pass any of them as `False` to
+`VideoGenerator.from_pretrained` to turn it off:
+
+| Switch | What it does |
+|---|---|
+| `vae_decode_kernel` | Decodes with fastvideo-kernel's Wan2.2 decoder on B200 / GB200 / B300 (704x1248, batch 1): bf16 with fp32 accumulation, 7x faster than the fp32 decode on a B300 at PSNR 61-63 dB and SSIM 0.998 against it, at a peak of about 20 GiB for a 5 s video. It builds on first use (minutes) into `WAN22_VAE_DECODE_BUILD_DIR`, against fastvideo-kernel's CUTLASS submodule (`git submodule update --init fastvideo-kernel/include/cutlass`, or set `CUTLASS_DIR`). Other GPUs and sizes keep the fp32 decode. |
+| `vae_decode_kernel_parallel` | With 2, 4 or 8 GPUs, splits that decode over them instead of decoding the whole video on each: a 20 s video takes 3.0 s on one B300, 1.55 s on two, 0.79 s on four and 0.47 s on eight. |
+| `dit_fused_kernels` | Runs the DiT's fused Triton kernels for Q/K RMSNorm + RoPE and LayerNorm + modulation. Their rounding differs slightly from the unfused path. |
+
+On GPUs with room for every component (B200, B300), keep the text encoder resident as well:
+`text_encoder_cpu_offload=False`.
 
 ## Memory and offloading
 

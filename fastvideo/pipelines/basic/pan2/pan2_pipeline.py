@@ -39,7 +39,17 @@ class PAN2Pipeline(ComposedPipelineBase):
                        stage=PAN2DenoisingStage(transformer=self.get_module("transformer"),
                                                 scheduler=self.get_module("scheduler"),
                                                 pipeline=self))
-        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
+        # The performance switches of PAN2PipelineConfig: the DiT's fused kernels and the VAE's decode kernel.
+        pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+        transformer = self.get_module("transformer")
+        if hasattr(transformer, "set_fused_kernels"):
+            transformer.set_fused_kernels(bool(getattr(pipeline_config, "dit_fused_kernels", False)))
+        vae = self.get_module("vae")
+        vae_config = getattr(vae, "config", None)
+        if hasattr(vae_config, "decode_kernel"):
+            vae_config.decode_kernel = bool(getattr(pipeline_config, "vae_decode_kernel", False))
+            vae_config.decode_kernel_parallel = bool(getattr(pipeline_config, "vae_decode_kernel_parallel", False))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=vae, pipeline=self))
 
 
 class PAN2ModularPipeline(PAN2Pipeline):
