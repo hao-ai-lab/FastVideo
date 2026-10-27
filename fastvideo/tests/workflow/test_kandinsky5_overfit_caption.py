@@ -38,7 +38,9 @@ def test_get_caption_uses_first_list_element():
     [""],
     None,
     123,
-    {"nested": "dict"},
+    {
+        "nested": "dict"
+    },
 ])
 def test_get_caption_rejects_invalid_values(bad_cap):
     with pytest.raises(ValueError):

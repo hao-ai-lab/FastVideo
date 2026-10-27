@@ -23,7 +23,7 @@ to FastVideo model classes. Two discovery mechanisms:
    `fastvideo/models/` and parses each `.py` file's AST looking for an
    `EntryClass` variable assignment. Discovered models take priority over
    hardcoded entries. For example,
-   `fastvideo/models/dits/wanvideo.py` exports
+   `fastvideo/models/wan/transformer.py` exports
    `EntryClass = WanTransformer3DModel`.
 
 Both feed into a unified `_FAST_VIDEO_MODELS` dict, which populates the
@@ -86,7 +86,7 @@ from `model_index.json`.
 
 ```
 PipelineConfig                    (fastvideo/configs/pipelines/base.py)
-├── WanT2V480PConfig              (fastvideo/configs/pipelines/wan.py)
+├── WanT2V480PConfig              (fastvideo/models/wan/pipeline_config.py)
 │   ├── WanT2V720PConfig
 │   └── WanI2V480PConfig
 ├── HunyuanConfig                 (fastvideo/configs/pipelines/hunyuan.py)
@@ -106,6 +106,11 @@ PipelineConfig                    (fastvideo/configs/pipelines/base.py)
 Model-specific subclasses override defaults. For example,
 `WanT2V480PConfig` sets `flow_shift=3.0` and uses `WanVideoConfig` as
 its DiT config.
+
+Wan's `models/wan/definition.py` links each registered variant to its pipeline
+config and sampling preset. The shared registry consumes these definitions
+without changing detector precedence or checkpoint/override-based pipeline
+selection. `configs/pipelines/wan.py` remains a compatibility import.
 
 ### ModelConfig / ArchConfig (`fastvideo/configs/models/base.py`)
 
@@ -227,8 +232,7 @@ Dataclass carrying all pipeline state between stages. Key field groups:
 - **Scheduler**: `timesteps`, `num_inference_steps`, `guidance_scale`,
   `sigmas`.
 - **Task-specific**: `mouse_cond`/`keyboard_cond` (Matrix-Game 2.0), `pose`
-  (HYWorld), `camera_states` (GameCraft), `c2ws_plucker_emb`
-  (LingBotWorld).
+  (HYWorld), `c2ws_plucker_emb` (LingBotWorld).
 - **Output**: `output: Tensor | None`.
 - **Logging**: `logging_info: PipelineLoggingInfo`.
 
@@ -251,10 +255,19 @@ Standard stages (typical execution order):
 | `DecodingStage` | `stages/decoding.py` | Decodes latents to video via VAE |
 
 Specialized variants: `CausalDenoisingStage`, `LTX2DenoisingStage`,
-`LongCatDenoisingStage`, `GameCraftDenoisingStage`,
 `HYWorldDenoisingStage`, `MatrixGame2CausalDenoisingStage`,
 `SRDenoisingStage`, `LTX2AudioDecodingStage`, `SD35ConditioningStage`,
 `LTX2TextEncodingStage`, `LTX2LatentPreparationStage`.
+
+Wan owns its sampling recipes under `basic/wan/stages/`. `WanDenoisingStage`
+specializes input packing, expert selection, timesteps, and first-frame
+restoration around the shared dense loop. `WanFirstFrameEncodingStage`
+produces normalized `ForwardBatch.first_frame_latent` before sampling; the
+sampler no longer executes a VAE. Dense DMD and the two causal samplers have
+family-local implementations and explicit scheduler ownership. Standard and
+DMD causal sampling share cache allocation, not their sampling algorithm.
+Legacy imports from `stages/` remain compatibility aliases. Sampling invariants
+also live beside the code in `fastvideo/pipelines/basic/wan/AGENTS.md`.
 
 ### Verification System (`fastvideo/pipelines/stages/validators.py`)
 
@@ -337,8 +350,74 @@ Key APIs: `get_tp_rank()`, `get_tp_world_size()`, `get_sp_rank()`,
 `warmup_sequence_parallel_communication()` pre-warms NCCL communicators
 to avoid slow first forward passes.
 
-Usage: `torchrun --nproc-per-node=N -m fastvideo.entrypoints.cli.main
-generate --model-path ... --tp-size N --sp-size M`.
+The default `mp` executor starts all workers locally. For synchronized offline
+SPMD generation (including multi-node inference), select the
+`external_launcher` executor in the typed run config and make
+`generator.engine.num_gpus` equal the launcher's total world size. The
+[MiniMax-H3 external-launcher example](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/minimax_h3_external_launcher.yaml)
+contains a complete request:
+
+```bash
+torchrun --standalone --nproc-per-node=4 \
+  -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml
+```
+
+For two nodes with four GPUs each, launch the same command on both nodes and
+set `NODE_RANK` to `0` or `1`:
+
+```bash
+torchrun --nnodes=2 --nproc-per-node=4 \
+  --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+  -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml \
+  --generator.engine.num_gpus 8 \
+  --generator.engine.parallelism.sp_size 8
+```
+
+Native Slurm variables are also accepted: `SLURM_PROCID`, `SLURM_NTASKS`,
+and `SLURM_LOCALID` map to global rank, world size, and local rank. Slurm does
+not choose the env rendezvous endpoint, so export a reachable rank-zero host
+and a job-unique port. Preserve a scheduler/CI-provided `MASTER_PORT` when one
+already exists. This uniform `2 x 4` example exposes all four allocated GPUs
+to every task so `SLURM_LOCALID` is a valid device index:
+
+```bash
+export MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)}"
+export MASTER_PORT="${MASTER_PORT:-$((20000 + SLURM_JOB_ID % 20000))}"
+srun --nodes=2 --ntasks-per-node=4 --gpus-per-node=4 --gpu-bind=none \
+  --kill-on-bad-exit=1 \
+  python -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml \
+  --generator.engine.num_gpus 8 \
+  --generator.engine.parallelism.sp_size 8
+```
+
+Every rank must enter the same requests in the same order. The CLI config and
+model/media inputs therefore need to resolve identically on every node. Rank
+zero alone reads prompt-list files, creates output directories, saves media,
+and returns generated frames/audio/latents/trajectories; only that rank needs
+a writable output path. For MiniMax-H3 parallel VAE decode, every rank in the
+SP group containing global rank zero participates in the decoder collectives,
+but only rank zero assembles the CPU output. All ranks in every other SP group
+skip the decode uniformly, so multiple SP groups do not materialize duplicate
+outputs.
+
+Set `generator.engine.parallelism.dist_timeout` to an optional positive
+integer number of **seconds** to apply one timeout to the default process
+group (when FastVideo initializes it) and every FastVideo-created device and
+Gloo control group. Omitting the key preserves PyTorch's backend defaults. A
+local-rank error, an out-of-range rendezvous port, or a device index outside
+the process-visible accelerator set fails before model loading. The process-
+group timeout bounds a missing collective participant;
+`--kill-on-bad-exit=1` (or torchrun's worker-group supervision) remains
+necessary to terminate the rest of the worker group after a rank failure.
+
+`FASTVIDEO_EXTERNAL_LAUNCHER=1` is an equivalent offline-only opt-in for
+callers that leave `execution_backend: mp`. External-launcher mode is rejected
+by REST and streaming servers because those request loops do not provide a
+rank-zero SPMD control plane.
 
 ### torch.compile Integration
 

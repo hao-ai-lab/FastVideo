@@ -170,7 +170,11 @@ class MatrixGame2Model(WanModel):
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
         text_dict: dict[str, Any] | None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> dict[str, Any]:
+        if clean_x is not None or aug_t is not None:
+            raise NotImplementedError("Matrix-Game 2.0 does not support clean-history teacher forcing")
         if text_dict is None:
             raise ValueError("text_dict cannot be None for Matrix-Game 2.0")
         hidden_states = noise_input.permute(0, 2, 1, 3, 4)
@@ -212,6 +216,8 @@ class MatrixGame2Model(WanModel):
         conditional: bool,
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # Streaming long tuning re-anchors each score window on its first
         # image/latent, so pass window metadata through existing dict plumbing.
@@ -227,6 +233,8 @@ class MatrixGame2Model(WanModel):
                 conditional=conditional,
                 cfg_uncond=cfg_uncond,
                 attn_kind=attn_kind,
+                clean_x=clean_x,
+                aug_t=aug_t,
             )
         finally:
             for text_dict in (batch.conditional_dict, batch.unconditional_dict):

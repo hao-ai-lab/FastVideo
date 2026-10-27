@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 
-
 LATENTS_MEAN = [
     -0.7571,
     -0.7089,
@@ -150,9 +149,11 @@ def build_bundle(source_dir: Path, output_dir: Path) -> None:
             "final_sigmas_type": "zero",
         },
     )
-    _write_json(output_dir / "scheduler" / "config.json", json.loads((output_dir / "scheduler" / "scheduler_config.json").read_text()))
+    _write_json(output_dir / "scheduler" / "config.json",
+                json.loads((output_dir / "scheduler" / "scheduler_config.json").read_text()))
 
-    _symlink_or_replace(source_dir / "models_t5_umt5-xxl-enc-bf16.pth", output_dir / "text_encoder" / "pytorch_model.pt")
+    _symlink_or_replace(source_dir / "models_t5_umt5-xxl-enc-bf16.pth",
+                        output_dir / "text_encoder" / "pytorch_model.pt")
     _symlink_or_replace(source_dir / "google" / "umt5-xxl", output_dir / "tokenizer")
     for shard in sorted((source_dir / "transformers").glob("*.safetensors")):
         _symlink_or_replace(shard, output_dir / "transformer" / shard.name)

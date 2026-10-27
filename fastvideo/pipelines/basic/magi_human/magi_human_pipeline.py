@@ -29,6 +29,7 @@ from typing import Any
 
 from transformers import AutoTokenizer
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
 from fastvideo.configs.models.vaes import OobleckVAEConfig
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -51,7 +52,7 @@ from fastvideo.pipelines.stages import (
     InputValidationStage,
     TextEncodingStage,
 )
-from fastvideo.utils import maybe_download_model
+from fastvideo.utils import maybe_download_model, resolve_hf_token
 
 logger = init_logger(__name__)
 
@@ -61,21 +62,18 @@ _WAN_VAE_HF_ID = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 
 
 def _ensure_hf_token_env() -> str | None:
-    """Surface any of the three common HF token env vars as `HF_TOKEN`.
+    """Surface the resolved HF token as `HF_TOKEN`.
 
     FastVideo workers spawn child processes that inherit env; both
     `huggingface_hub` and `transformers.AutoTokenizer.from_pretrained`
-    look at `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN` by default but not
-    `HF_API_KEY`. If only the latter is set, gated downloads fail with
-    401. Aliasing at pipeline-load time is the minimum-disruption fix.
+    read `HF_TOKEN` but not the FastVideo-specific aliases that
+    `resolve_hf_token` also accepts. If only an alias is set, gated
+    downloads fail with 401, so expose the token as `HF_TOKEN`.
     """
-    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        value = os.environ.get(src)
-        if value:
-            os.environ.setdefault("HF_TOKEN", value)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", value)
-            return value
-    return None
+    token = resolve_hf_token()
+    if token:
+        envs.setdefault_external("HF_TOKEN", token)
+    return token
 
 
 class MagiHumanPipeline(ComposedPipelineBase):

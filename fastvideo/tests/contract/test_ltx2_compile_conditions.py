@@ -19,9 +19,8 @@ from fastvideo.models.dits import ltx2
 
 def test_ltx2_model_exposes_compile_conditions():
     conditions = ltx2.LTX2Transformer3DModel._compile_conditions
-    assert conditions, (
-        "LTX2Transformer3DModel._compile_conditions is empty: "
-        "torch.compile falls back to a whole-model fullgraph")
+    assert conditions, ("LTX2Transformer3DModel._compile_conditions is empty: "
+                        "torch.compile falls back to a whole-model fullgraph")
     assert is_ltx2_blocks in conditions
     assert LTX2VideoConfig()._compile_conditions == conditions
 

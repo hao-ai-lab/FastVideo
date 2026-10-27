@@ -114,7 +114,9 @@ self_forcing_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class MatrixGame2SelfForcingDistillationPipeline \
+    --pipeline-module fastvideo.training.matrixgame2_self_forcing_distillation_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

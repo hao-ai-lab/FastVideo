@@ -97,21 +97,17 @@ def server():
                 pass
             # Check if the process died.
             if proc.poll() is not None:
-                stdout = proc.stdout.read().decode(
-                    errors="replace") if proc.stdout else ""
-                pytest.fail(
-                    f"Server exited with code {proc.returncode} "
-                    f"before becoming healthy.\n--- stdout ---\n{stdout}")
+                stdout = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+                pytest.fail(f"Server exited with code {proc.returncode} "
+                            f"before becoming healthy.\n--- stdout ---\n{stdout}")
             time.sleep(2)
 
         if not healthy:
-            stdout = proc.stdout.read().decode(
-                errors="replace") if proc.stdout else ""
+            stdout = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
             proc.kill()
             proc.wait()
-            pytest.fail(
-                "Server did not become healthy within "
-                f"{SERVER_STARTUP_TIMEOUT_S}s.\n--- stdout ---\n{stdout}")
+            pytest.fail("Server did not become healthy within "
+                        f"{SERVER_STARTUP_TIMEOUT_S}s.\n--- stdout ---\n{stdout}")
 
         yield {"base_url": base_url, "output_dir": output_dir}
 
@@ -181,19 +177,16 @@ class TestVideoGeneration:
         status = job["status"]
         while status != "completed" and time.monotonic() < deadline:
             time.sleep(POLL_INTERVAL_S)
-            poll_resp = requests.get(f"{base_url}/v1/videos/{video_id}",
-                                     timeout=10)
+            poll_resp = requests.get(f"{base_url}/v1/videos/{video_id}", timeout=10)
             assert poll_resp.status_code == 200
             status = poll_resp.json()["status"]
             if status == "failed":
                 pytest.fail(f"Video generation failed: {poll_resp.json()}")
 
-        assert status == "completed", (
-            f"Video not completed within {GENERATION_TIMEOUT_S}s")
+        assert status == "completed", (f"Video not completed within {GENERATION_TIMEOUT_S}s")
 
         # 3. Verify the video file exists on the server filesystem.
-        detail = requests.get(f"{base_url}/v1/videos/{video_id}",
-                              timeout=10).json()
+        detail = requests.get(f"{base_url}/v1/videos/{video_id}", timeout=10).json()
         assert detail.get("file_path") is not None
         assert detail["file_path"].endswith(".mp4")
 

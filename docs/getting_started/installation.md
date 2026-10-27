@@ -1,11 +1,17 @@
 
 # 🔧 Installation
 
-FastVideo supports the following hardware platforms:
+Start with [Hardware and runtimes](hardware.md) to distinguish NVIDIA RTX and
+data center GPUs, DGX Spark, Apple Silicon MLX, and AMD ROCm.
+
+The installation paths below cover:
 
 - [NVIDIA CUDA](installation/gpu.md)
-- [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
-- [Apple silicon](installation/mps.md)
+- **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
+  [performance](installation/spark_performance.md),
+  [pair two Sparks](installation/spark_pair.md)
+- [Apple silicon (MLX)](installation/mlx.md)
+- [AMD / ROCm support and current limits](installation/amd.md)
 
 ## Quick Installation
 
@@ -13,7 +19,7 @@ FastVideo supports the following hardware platforms:
 
 Use uv as the default environment manager for faster and more stable installs.
 The commands below target NVIDIA CUDA 12; use `UV_TORCH_BACKEND=cu130` on
-CUDA 13. Apple silicon users should follow the [MPS guide](installation/mps.md).
+CUDA 13. Apple silicon users should follow the [MLX install guide](installation/mlx.md).
 
 ```bash
 # Create and activate a new uv environment
@@ -54,14 +60,17 @@ UV_TORCH_BACKEND=cu126 uv pip install -e .
 uv pip install flash-attn --no-build-isolation -v
 ```
 
-## Hardware Requirements
+## Requirements
 
+- **Python**: 3.10-3.12 is the tested and recommended range (the commands
+  above pin 3.12)
 - **NVIDIA GPUs**: CUDA 12.6+ with compute capability 7.0+
 - **Apple Silicon**: macOS 14.0+ with M1/M2/M3/M4 chips
 - **CPU**: x86_64 architecture (for CPU-only inference)
 
 ## Next Steps
 
-- [Quick Start Guide](quick_start.md) - Get started with your first video generation
+- [Quick Start](quick_start.md) - Generate your first video
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/examples_inference_index.md) - Explore example scripts and notebooks
+- [Examples](../inference/examples/examples_inference_index.md) - Explore scripts and notebooks

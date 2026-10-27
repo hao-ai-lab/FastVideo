@@ -5,6 +5,7 @@ Block-by-block causal inference with KV caching, using the full
 scheduler timestep schedule (40-50 steps) rather than DMD few-step.
 """
 
+from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
@@ -12,7 +13,6 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (
-    CausalDenoisingStage,
     ConditioningStage,
     DecodingStage,
     InputValidationStage,

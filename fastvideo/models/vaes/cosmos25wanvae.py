@@ -120,9 +120,7 @@ class Cosmos25WanVAEAdapter(nn.Module):
             z_mean = enc_out
         else:
             attrs = [a for a in dir(enc_out) if not a.startswith("_")]
-            raise RuntimeError(
-                f"Unsupported VAE encoder output type: {type(enc_out)}. attrs={attrs}"
-            )
+            raise RuntimeError(f"Unsupported VAE encoder output type: {type(enc_out)}. attrs={attrs}")
 
         mean, std = self._to_latent_stats(z_mean)
         z_norm = (z_mean - mean) / std
@@ -193,7 +191,7 @@ class Cosmos25RMSNorm(nn.Module):
     def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
-        shape = (dim, *broadcastable_dims) if channel_first else (dim,)
+        shape = (dim, *broadcastable_dims) if channel_first else (dim, )
 
         self.channel_first = channel_first
         self.scale = dim**0.5
@@ -254,7 +252,8 @@ class Cosmos25Resample(nn.Module):
             else:
                 cache_x = x[:, :, -CACHE_T:, :, :].clone()
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] != "Rep":
-                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                                        dim=2)
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] == "Rep":
                     cache_x = torch.cat([torch.zeros_like(cache_x).to(cache_x.device), cache_x], dim=2)
 
@@ -287,6 +286,7 @@ class Cosmos25Resample(nn.Module):
 
 
 class Cosmos25ResidualBlock(nn.Module):
+
     def __init__(self, in_dim: int, out_dim: int, dropout: float = 0.0) -> None:
         super().__init__()
         self.in_dim = in_dim
@@ -309,7 +309,8 @@ class Cosmos25ResidualBlock(nn.Module):
                 idx = feat_idx[0]
                 cache_x = x[:, :, -CACHE_T:, :, :].clone()
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                                        dim=2)
                 x = layer(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
@@ -334,13 +335,7 @@ class Cosmos25AttentionBlock(nn.Module):
         b, c, t, h, w = x.size()
         x2 = rearrange(x, "b c t h w -> (b t) c h w")
         x2 = self.norm(x2)
-        q, k, v = (
-            self.to_qkv(x2)
-            .reshape(b * t, 1, c * 3, -1)
-            .permute(0, 1, 3, 2)
-            .contiguous()
-            .chunk(3, dim=-1)
-        )
+        q, k, v = (self.to_qkv(x2).reshape(b * t, 1, c * 3, -1).permute(0, 1, 3, 2).contiguous().chunk(3, dim=-1))
         x2 = F.scaled_dot_product_attention(q, k, v)
         x2 = x2.squeeze(1).permute(0, 2, 1).reshape(b * t, c, h, w)
         x2 = self.proj(x2)
@@ -349,6 +344,7 @@ class Cosmos25AttentionBlock(nn.Module):
 
 
 class Cosmos25Encoder3d(nn.Module):
+
     def __init__(
         self,
         dim: int = 96,
@@ -417,7 +413,8 @@ class Cosmos25Encoder3d(nn.Module):
                 idx = feat_idx[0]
                 cache_x = x[:, :, -CACHE_T:, :, :].clone()
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                                        dim=2)
                 x = layer(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
@@ -427,6 +424,7 @@ class Cosmos25Encoder3d(nn.Module):
 
 
 class Cosmos25Decoder3d(nn.Module):
+
     def __init__(
         self,
         dim: int = 96,
@@ -439,7 +437,7 @@ class Cosmos25Decoder3d(nn.Module):
     ) -> None:
         super().__init__()
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
-        scale = 1.0 / 2 ** (len(dim_mult) - 2)
+        scale = 1.0 / 2**(len(dim_mult) - 2)
 
         self.conv1 = Cosmos25CausalConv3d(z_dim, dims[0], 3, padding=1)
         self.middle = nn.Sequential(
@@ -495,7 +493,8 @@ class Cosmos25Decoder3d(nn.Module):
                 idx = feat_idx[0]
                 cache_x = x[:, :, -CACHE_T:, :, :].clone()
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                    cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                                        dim=2)
                 x = layer(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
@@ -655,7 +654,7 @@ class Cosmos25WanVAE(nn.Module):
                 out = self._i0_encode(x)
             else:
                 out_ = self.encoder(
-                    x[:, :, 1 + self.temporal_window * (i - 1) : 1 + self.temporal_window * i, :, :],
+                    x[:, :, 1 + self.temporal_window * (i - 1):1 + self.temporal_window * i, :, :],
                     feat_cache=self._enc_feat_map,
                     feat_idx=self._enc_conv_idx,
                 )
@@ -664,7 +663,7 @@ class Cosmos25WanVAE(nn.Module):
         if (t - 1) % self.temporal_window:
             self._enc_conv_idx = [0]
             out_ = self.encoder(
-                x[:, :, 1 + self.temporal_window * (iters - 1) :, :, :],
+                x[:, :, 1 + self.temporal_window * (iters - 1):, :, :],
                 feat_cache=self._enc_feat_map,
                 feat_idx=self._enc_conv_idx,
             )
@@ -691,7 +690,7 @@ class Cosmos25WanVAE(nn.Module):
             if i == 0:
                 out = self._i0_decode(x)
             else:
-                out_ = self.decoder(x[:, :, i : i + 1, :, :], feat_cache=self._feat_map, feat_idx=self._conv_idx)
+                out_ = self.decoder(x[:, :, i:i + 1, :, :], feat_cache=self._feat_map, feat_idx=self._conv_idx)
                 out = torch.cat([out, out_], 2)
 
         self.clear_cache()
@@ -715,12 +714,3 @@ class Cosmos25WanVAE(nn.Module):
     @property
     def latent_ch(self) -> int:
         return 16
-
-
-
-
-
-
-
-
-

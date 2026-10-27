@@ -151,12 +151,16 @@ class HunyuanModel(WanModel):
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
         text_dict: dict[str, torch.Tensor] | None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         """Build transformer forward kwargs for Hunyuan.
 
         Unlike Wan, Hunyuan does not use encoder_attention_mask
         or return_dict in its forward signature.
         """
+        if clean_x is not None or aug_t is not None:
+            raise NotImplementedError("HunyuanModel does not support clean-history teacher forcing")
         if text_dict is None:
             raise ValueError("text_dict cannot be None for "
                              "Hunyuan forward pass")

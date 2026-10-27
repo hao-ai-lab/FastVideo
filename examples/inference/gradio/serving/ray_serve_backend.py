@@ -24,7 +24,7 @@ NUM_GPUS = 16
 DEFAULT_FPS = 16
 SEED_RANGE_MAX = 1_000_000
 SUPPORTED_MODELS = [
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
     "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
 ]
@@ -86,15 +86,15 @@ class VideoGenerationResponse(BaseModel):
 def encode_video_to_base64(frames: List[np.ndarray], fps: int = DEFAULT_FPS) -> str:
     if not frames:
         return ""
-    
+
     try:
         buffer = io.BytesIO()
         imageio.mimsave(buffer, frames, fps=fps, format="mp4")
         buffer.seek(0)
-        
+
         video_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
         return f"data:video/mp4;base64,{video_base64}"
-        
+
     except Exception as e:
         print(f"Warning: Failed to encode video: {e}")
         return ""
@@ -104,23 +104,23 @@ def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
     """Save base64 image data to a temporary file and return the path."""
     if not image_data:
         return None
-    
+
     try:
         # Remove data URL prefix if present
         if image_data.startswith('data:image/'):
             image_data = image_data.split(',')[1]
-        
+
         image_bytes = base64.b64decode(image_data)
-        
+
         # Save to temporary file
         os.makedirs(output_dir, exist_ok=True)
         temp_image_path = os.path.join(output_dir, f"temp_input_{int(time.time() * 1000)}.png")
-        
+
         with open(temp_image_path, 'wb') as f:
             f.write(image_bytes)
-        
+
         return temp_image_path
-        
+
     except Exception as e:
         print(f"Warning: Failed to save image: {e}")
         return None
@@ -138,30 +138,29 @@ def setup_model_environment(model_path: str) -> None:
 def process_generation_result(result: Any) -> tuple[List[np.ndarray], float, List[str], List[float]]:
     frames = result if isinstance(result, list) else result.get("frames", [])
     generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-    
+
     logging_info = result.get("logging_info", None)
     if logging_info:
         stage_names = logging_info.get_execution_order()
         stage_execution_times = [
-            logging_info.get_stage_info(stage_name).get("execution_time", 0.0) 
-            for stage_name in stage_names
+            logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names
         ]
     else:
         stage_names = []
         stage_execution_times = []
-    
+
     return frames, generation_time, stage_names, stage_execution_times
 
 
 def prepare_sampling_params(video_request: VideoGenerationRequest, default_params: Any) -> Any:
     params = deepcopy(default_params)
     params.prompt = video_request.prompt
-    
+
     if video_request.use_negative_prompt:
         params.negative_prompt = video_request.negative_prompt
 
-    params.seed = (video_request.seed if not video_request.randomize_seed 
-                  else torch.randint(0, SEED_RANGE_MAX, (1,)).item())
+    params.seed = (video_request.seed if not video_request.randomize_seed else torch.randint(0, SEED_RANGE_MAX,
+                                                                                             (1, )).item())
     params.randomize_seed = video_request.randomize_seed
     params.guidance_scale = video_request.guidance_scale
     params.num_frames = video_request.num_frames
@@ -169,11 +168,12 @@ def prepare_sampling_params(video_request: VideoGenerationRequest, default_param
     params.width = video_request.width
     params.save_video = False
     params.return_frames = True
-    
+
     return params
 
 
 class BaseModelDeployment:
+
     def __init__(self, model_path: str, output_path: str = "outputs"):
         self.model_path = model_path
         self.output_path = output_path
@@ -193,7 +193,7 @@ class BaseModelDeployment:
             num_gpus=1,
             use_fsdp_inference=True,
             text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125], # TODO: hardocde for I2V
+            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],  # TODO: hardocde for I2V
             dit_precision="fp32",  # TODO: hardocde for I2V
             dit_cpu_offload=config["dit_cpu_offload"],
             vae_cpu_offload=config["vae_cpu_offload"],
@@ -208,7 +208,7 @@ class BaseModelDeployment:
 
     def generate_video(self, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         total_start_time = time.time()
-        
+
         params = prepare_sampling_params(video_request, self.default_params)
 
         # Save image if provided (for I2V)
@@ -238,9 +238,9 @@ class BaseModelDeployment:
         encoding_start_time = time.time()
         video_data = encode_video_to_base64(frames, fps=DEFAULT_FPS)
         encoding_time = time.time() - encoding_start_time
-        
+
         total_time = time.time() - total_start_time
-        
+
         # Clean up temporary image file
         if image_path and os.path.exists(image_path):
             try:
@@ -261,20 +261,18 @@ class BaseModelDeployment:
         )
 
 
-@serve.deployment(
-    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
-)
+@serve.deployment(ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}}, )
 class T2VModelDeployment(BaseModelDeployment):
+
     def __init__(self, t2v_model_path: str, output_path: str = "outputs"):
         super().__init__(t2v_model_path, output_path)
         self._initialize_generator(MODEL_CONFIGS["1.3B"])
         print("✅ T2V model initialized successfully")
 
 
-@serve.deployment(
-    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
-)
+@serve.deployment(ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}}, )
 class T2V14BModelDeployment(BaseModelDeployment):
+
     def __init__(self, t2v_14b_model_path: str, output_path: str = "outputs"):
         super().__init__(t2v_14b_model_path, output_path)
         # Override environment for 14B model
@@ -283,10 +281,9 @@ class T2V14BModelDeployment(BaseModelDeployment):
         print("✅ T2V 14B model initialized successfully")
 
 
-@serve.deployment(
-    ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
-)
+@serve.deployment(ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}}, )
 class I2VModelDeployment(BaseModelDeployment):
+
     def __init__(self, i2v_model_path: str, output_path: str = "outputs"):
         super().__init__(i2v_model_path, output_path)
         # Override environment for I2V model
@@ -305,46 +302,54 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @serve.ingress(app)
 class FastVideoAPI:
 
-    def __init__(self, t2v_deployments: Dict[str, DeploymentHandle], i2v_deployments: Dict[str, DeploymentHandle] = None):
+    def __init__(self,
+                 t2v_deployments: Dict[str, DeploymentHandle],
+                 i2v_deployments: Dict[str, DeploymentHandle] = None):
         self.t2v_deployments = t2v_deployments
         self.i2v_deployments = i2v_deployments or {}
         self.all_deployments = {**self.t2v_deployments, **self.i2v_deployments}
-        
+
         # Initialize Prometheus metrics
         self.request_count = Counter('fastvideo_requests_total', 'Total FastVideo requests', ['model_type', 'status'])
-        self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration', ['model_type'])
-        self.video_generation_time = Histogram('fastvideo_video_generation_seconds', 'Video generation time', ['model_type'])
-    
+        self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration',
+                                          ['model_type'])
+        self.video_generation_time = Histogram('fastvideo_video_generation_seconds', 'Video generation time',
+                                               ['model_type'])
+
     def _get_model_name(self, model_path: Optional[str]) -> str:
         return model_path.split('/')[-1] if model_path else "unknown"
-    
-    def _record_metrics(self, model_name: str, status: str, duration: float, response: Optional[VideoGenerationResponse] = None) -> None:
+
+    def _record_metrics(self,
+                        model_name: str,
+                        status: str,
+                        duration: float,
+                        response: Optional[VideoGenerationResponse] = None) -> None:
         self.request_count.labels(model_type=model_name, status=status).inc()
         self.request_duration.labels(model_type=model_name).observe(duration)
-        
+
         if response and hasattr(response, 'generation_time') and response.generation_time:
             self.video_generation_time.labels(model_type=model_name).observe(response.generation_time)
-    
+
     @app.post("/generate_video", response_model=VideoGenerationResponse)
     @limiter.limit("10/minute")
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         """Route the request to the appropriate model deployment based on model_path."""
         start_time = time.time()
         model_name = self._get_model_name(video_request.model_path)
-        
+
         try:
             if video_request.model_path not in self.all_deployments:
                 raise ValueError(f"Model {video_request.model_path} not found")
-            
+
             response_ref = self.all_deployments[video_request.model_path].generate_video.remote(video_request)
             response = await response_ref
-            
+
             self._record_metrics(model_name, "success", time.time() - start_time, response)
             return response
 
         except Exception as e:
             self._record_metrics(model_name, "error", time.time() - start_time)
-            
+
             return VideoGenerationResponse(
                 video_data=None,
                 seed=video_request.seed,
@@ -355,12 +360,12 @@ class FastVideoAPI:
                 encoding_time=0,
                 total_time=0,
             )
-    
+
     @app.get("/health")
     @limiter.limit("10/minute")
     async def health_check(self, request: Request) -> Dict[str, str]:
         return {"status": "healthy"}
-    
+
     @app.get("/metrics")
     async def metrics(self) -> Response:
         return Response(generate_latest(), media_type="text/plain")
@@ -370,7 +375,7 @@ def validate_configuration(model_paths: List[str], replicas: List[int]) -> None:
     assert len(model_paths) > 0, "At least one model must be specified"
     assert len(model_paths) == len(replicas), "Number of models and replicas must match"
     assert sum(replicas) <= NUM_GPUS, f"Total replicas ({sum(replicas)}) must be <= {NUM_GPUS}"
-    
+
     for model, replica_count in zip(model_paths, replicas):
         assert model in SUPPORTED_MODELS, f"Model {model} not supported. Supported models: {SUPPORTED_MODELS}"
         assert replica_count > 0, f"Replicas must be greater than 0"
@@ -392,11 +397,11 @@ def start_ray_serve(
     # Parse T2V models
     t2v_paths = [p.strip() for p in t2v_model_paths.split(",") if p.strip()]
     t2v_reps = [int(r.strip()) for r in t2v_model_replicas.split(",") if r.strip()] if t2v_model_replicas else []
-    
+
     # Parse I2V models
     i2v_paths = [p.strip() for p in i2v_model_paths.split(",") if p.strip()]
     i2v_reps = [int(r.strip()) for r in i2v_model_replicas.split(",") if r.strip()] if i2v_model_replicas else []
-    
+
     # Validate configurations
     all_paths = t2v_paths + i2v_paths
     all_replicas = t2v_reps + i2v_reps
@@ -433,7 +438,7 @@ def setup_signal_handlers() -> None:
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="FastVideo Ray Serve Backend")
     parser.add_argument("--t2v_model_paths",
                         type=str,
@@ -451,31 +456,24 @@ if __name__ == "__main__":
                         type=str,
                         default="1",
                         help="Comma separated list of number of replicas for the I2V model(s)")
-    parser.add_argument("--output_path",
-                        type=str,
-                        default="outputs",
-                        help="Path to save generated videos")
-    parser.add_argument("--host",
-                        type=str,
-                        default="0.0.0.0",
-                        help="Host to bind to")
-    parser.add_argument("--port",
-                        type=int,
-                        default=8000,
-                        help="Port to bind to")
-    
+    parser.add_argument("--output_path", type=str, default="outputs", help="Path to save generated videos")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+
     args = parser.parse_args()
 
     # Parse and validate all models
     t2v_paths = [p.strip() for p in args.t2v_model_paths.split(",") if p.strip()]
-    t2v_reps = [int(r.strip()) for r in args.t2v_model_replicas.split(",") if r.strip()] if args.t2v_model_replicas else []
+    t2v_reps = [int(r.strip()) for r in args.t2v_model_replicas.split(",")
+                if r.strip()] if args.t2v_model_replicas else []
     i2v_paths = [p.strip() for p in args.i2v_model_paths.split(",") if p.strip()]
-    i2v_reps = [int(r.strip()) for r in args.i2v_model_replicas.split(",") if r.strip()] if args.i2v_model_replicas else []
-    
+    i2v_reps = [int(r.strip()) for r in args.i2v_model_replicas.split(",")
+                if r.strip()] if args.i2v_model_replicas else []
+
     all_paths = t2v_paths + i2v_paths
     all_replicas = t2v_reps + i2v_reps
     validate_configuration(all_paths, all_replicas)
-    
+
     start_ray_serve(
         t2v_model_paths=args.t2v_model_paths,
         t2v_model_replicas=args.t2v_model_replicas,
@@ -489,4 +487,4 @@ if __name__ == "__main__":
     setup_signal_handlers()
     print("✅ FastVideo backend is running. Press Ctrl-C to stop.")
     while True:
-        time.sleep(3600) 
+        time.sleep(3600)

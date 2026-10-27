@@ -7,10 +7,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from logging import Logger
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.tests.ssim.bootstrap_references import (
-    xfail_missing_reference_in_bootstrap_mode,
-)
+    xfail_missing_reference_in_bootstrap_mode, )
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
     build_reference_folder_path,
@@ -19,35 +19,30 @@ from fastvideo.tests.ssim.reference_utils import (
     select_ssim_params,
 )
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 DEVICE_MAPPINGS = (
     ("A40", "A40"),
     ("L40S", "L40S"),
     ("H100", "H100"),
     ("H200", "H200"),
+    # GB200 must precede B200: the lookup is a substring scan and
+    # "B200" matches "NVIDIA GB200", so the coarser pattern would
+    # otherwise claim every Grace-Blackwell host.
+    ("GB200", "GB200"),
     ("B200", "B200"),
 )
 
 
 @contextmanager
 def attention_backend(backend: str) -> Iterator[None]:
-    previous = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = backend
-    try:
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(backend):
         yield
-    finally:
-        if previous is None:
-            os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
-        else:
-            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = previous
 
 
 def shutdown_executor(generator: VideoGenerator | None) -> None:
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def resolve_inference_device_reference_folder(logger: Logger) -> str:
@@ -115,11 +110,9 @@ def _assert_similarity(
             reference_folder=reference_folder,
             artifact_kind=artifact_kind,
         )
-        error_msg = (
-            f"Reference video folder does not exist: {reference_folder}\n"
-            f"To download reference videos, run:\n"
-            f"  python fastvideo/tests/ssim/reference_videos_cli.py download"
-        )
+        error_msg = (f"Reference video folder does not exist: {reference_folder}\n"
+                     f"To download reference videos, run:\n"
+                     f"  python fastvideo/tests/ssim/reference_videos_cli.py download")
         raise FileNotFoundError(error_msg)
 
     try:
@@ -167,15 +160,11 @@ def _assert_similarity(
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {attention_backend_name}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {attention_backend_name}")
 
 
-def build_init_kwargs(
-    base_params: dict[str, object],
-) -> dict[str, object]:
+def build_init_kwargs(base_params: dict[str, object], ) -> dict[str, object]:
     init_kwargs: dict[str, object] = {
         "num_gpus": base_params["num_gpus"],
         "sp_size": base_params.get("sp_size", 1),
@@ -193,18 +182,14 @@ def build_init_kwargs(
         init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
     if base_params.get("ltx2_vae_tiling"):
         init_kwargs["ltx2_vae_tiling"] = True
-        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get(
-            "ltx2_vae_spatial_tile_size_in_pixels", 512
-        )
+        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get("ltx2_vae_spatial_tile_size_in_pixels",
+                                                                              512)
         init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = base_params.get(
-            "ltx2_vae_spatial_tile_overlap_in_pixels", 64
-        )
-        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get(
-            "ltx2_vae_temporal_tile_size_in_frames", 64
-        )
+            "ltx2_vae_spatial_tile_overlap_in_pixels", 64)
+        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get("ltx2_vae_temporal_tile_size_in_frames",
+                                                                               64)
         init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = base_params.get(
-            "ltx2_vae_temporal_tile_overlap_in_frames", 24
-        )
+            "ltx2_vae_temporal_tile_overlap_in_frames", 24)
     return init_kwargs
 
 

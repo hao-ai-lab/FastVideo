@@ -33,10 +33,8 @@ def _chunked_feed_forward(
     chunk_size: int,
 ) -> torch.Tensor:
     if hidden_states.shape[chunk_dim] % chunk_size != 0:
-        raise ValueError(
-            f"hidden_states.shape[{chunk_dim}] ({hidden_states.shape[chunk_dim]})"
-            f" must be divisible by chunk_size ({chunk_size})"
-        )
+        raise ValueError(f"hidden_states.shape[{chunk_dim}] ({hidden_states.shape[chunk_dim]})"
+                         f" must be divisible by chunk_size ({chunk_size})")
     num_chunks = hidden_states.shape[chunk_dim] // chunk_size
     return torch.cat(
         [ff(h) for h in hidden_states.chunk(num_chunks, dim=chunk_dim)],
@@ -89,16 +87,10 @@ def _get_2d_sincos_pos_embed(
     if isinstance(grid_size, int):
         grid_size = (grid_size, grid_size)
 
-    grid_h = (
-        torch.arange(grid_size[0], device=device, dtype=torch.float32)
-        / (grid_size[0] / base_size)
-        / interpolation_scale
-    )
-    grid_w = (
-        torch.arange(grid_size[1], device=device, dtype=torch.float32)
-        / (grid_size[1] / base_size)
-        / interpolation_scale
-    )
+    grid_h = (torch.arange(grid_size[0], device=device, dtype=torch.float32) / (grid_size[0] / base_size) /
+              interpolation_scale)
+    grid_w = (torch.arange(grid_size[1], device=device, dtype=torch.float32) / (grid_size[1] / base_size) /
+              interpolation_scale)
     grid = torch.meshgrid(grid_w, grid_h, indexing="xy")
     grid = torch.stack(grid, dim=0)
     grid = grid.reshape([2, 1, grid_size[1], grid_size[0]])
@@ -137,8 +129,7 @@ class SD3PatchEmbed(nn.Module):
             bias=bias,
         )
         if layer_norm:
-            self.norm = nn.LayerNorm(embed_dim, elementwise_affine=False,
-                                     eps=1e-6)
+            self.norm = nn.LayerNorm(embed_dim, elementwise_affine=False, eps=1e-6)
         else:
             self.norm = None
 
@@ -148,7 +139,7 @@ class SD3PatchEmbed(nn.Module):
         self.base_size = height // patch_size
         self.interpolation_scale = interpolation_scale
 
-        grid_size = pos_embed_max_size or int(num_patches ** 0.5)
+        grid_size = pos_embed_max_size or int(num_patches**0.5)
 
         if pos_embed_type is None:
             self.pos_embed = None
@@ -176,15 +167,11 @@ class SD3PatchEmbed(nn.Module):
         width = width // self.patch_size
 
         if height > self.pos_embed_max_size:
-            raise ValueError(
-                f"Height ({height}) cannot be greater than pos_embed_max_size "
-                f"({self.pos_embed_max_size})"
-            )
+            raise ValueError(f"Height ({height}) cannot be greater than pos_embed_max_size "
+                             f"({self.pos_embed_max_size})")
         if width > self.pos_embed_max_size:
-            raise ValueError(
-                f"Width ({width}) cannot be greater than pos_embed_max_size "
-                f"({self.pos_embed_max_size})"
-            )
+            raise ValueError(f"Width ({width}) cannot be greater than pos_embed_max_size "
+                             f"({self.pos_embed_max_size})")
 
         top = (self.pos_embed_max_size - height) // 2
         left = (self.pos_embed_max_size - width) // 2
@@ -243,11 +230,9 @@ class SD3TimestepEmbedding(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.linear_1 = ReplicatedLinear(in_channels, time_embed_dim,
-                                         bias=True)
+        self.linear_1 = ReplicatedLinear(in_channels, time_embed_dim, bias=True)
         self.act = get_act_fn(act_fn)
-        self.linear_2 = ReplicatedLinear(time_embed_dim, time_embed_dim,
-                                         bias=True)
+        self.linear_2 = ReplicatedLinear(time_embed_dim, time_embed_dim, bias=True)
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
         sample, _ = self.linear_1(sample)
@@ -308,8 +293,7 @@ class CombinedTimestepTextProjEmbeddings(nn.Module):
         pooled_projection: torch.Tensor,
     ) -> torch.Tensor:
         timesteps_proj = self.time_proj(timestep)
-        timesteps_emb = self.timestep_embedder(
-            timesteps_proj.to(dtype=pooled_projection.dtype))
+        timesteps_emb = self.timestep_embedder(timesteps_proj.to(dtype=pooled_projection.dtype))
         pooled_projections = self.text_embedder(pooled_projection)
         return timesteps_emb + pooled_projections
 
@@ -325,16 +309,11 @@ class SD35AdaLayerNormZeroX(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(embedding_dim, 9 * embedding_dim,
-                                       bias=bias)
+        self.linear = ReplicatedLinear(embedding_dim, 9 * embedding_dim, bias=bias)
 
         if norm_type != "layer_norm":
-            raise ValueError(
-                f"Unsupported norm_type ({norm_type}); expected layer_norm"
-            )
-        self.norm = nn.LayerNorm(embedding_dim,
-                                 elementwise_affine=False,
-                                 eps=1e-6)
+            raise ValueError(f"Unsupported norm_type ({norm_type}); expected layer_norm")
+        self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
 
     def forward(
         self,
@@ -342,15 +321,12 @@ class SD35AdaLayerNormZeroX(nn.Module):
         emb: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         emb, _ = self.linear(self.silu(emb))
-        (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp,
-         shift_msa2, scale_msa2,
+        (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp, shift_msa2, scale_msa2,
          gate_msa2) = emb.chunk(9, dim=1)
 
         norm_hidden_states = self.norm(hidden_states)
-        hidden_states = norm_hidden_states * (
-            1 + scale_msa[:, None]) + shift_msa[:, None]
-        norm_hidden_states2 = norm_hidden_states * (
-            1 + scale_msa2[:, None]) + shift_msa2[:, None]
+        hidden_states = norm_hidden_states * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        norm_hidden_states2 = norm_hidden_states * (1 + scale_msa2[:, None]) + shift_msa2[:, None]
         return (
             hidden_states,
             gate_msa,
@@ -373,26 +349,19 @@ class SD3AdaLayerNormZero(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim,
-                                       bias=bias)
+        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim, bias=bias)
 
         if norm_type != "layer_norm":
-            raise ValueError(
-                f"Unsupported norm_type ({norm_type}); expected layer_norm"
-            )
-        self.norm = nn.LayerNorm(embedding_dim,
-                                 elementwise_affine=False,
-                                 eps=1e-6)
+            raise ValueError(f"Unsupported norm_type ({norm_type}); expected layer_norm")
+        self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
 
     def forward(
         self,
         x: torch.Tensor,
         emb: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-               torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         emb, _ = self.linear(self.silu(emb))
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            emb.chunk(6, dim=1))
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (emb.chunk(6, dim=1))
         x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
 
@@ -536,8 +505,7 @@ class SD3Attention(nn.Module):
         context_pre_only: bool | None = None,
         qk_norm: str | None = None,
         eps: float = 1e-6,
-        supported_attention_backends: tuple[AttentionBackendEnum,
-                                            ...] | None = None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     ) -> None:
         super().__init__()
 
@@ -585,8 +553,7 @@ class SD3Attention(nn.Module):
         ])
 
         if context_pre_only is not None and not context_pre_only:
-            self.to_add_out = ReplicatedLinear(self.inner_dim, out_dim,
-                                               bias=True)
+            self.to_add_out = ReplicatedLinear(self.inner_dim, out_dim, bias=True)
         else:
             self.to_add_out = None
 
@@ -619,12 +586,9 @@ class SD3Attention(nn.Module):
             key = self.norm_k(key)
 
         if encoder_hidden_states is not None:
-            if (self.add_q_proj is None or self.add_k_proj is None
-                    or self.add_v_proj is None):
-                raise RuntimeError(
-                    "encoder_hidden_states provided but attention does not have"
-                    " added projections"
-                )
+            if (self.add_q_proj is None or self.add_k_proj is None or self.add_v_proj is None):
+                raise RuntimeError("encoder_hidden_states provided but attention does not have"
+                                   " added projections")
 
             encoder_query, _ = self.add_q_proj(encoder_hidden_states)
             encoder_key, _ = self.add_k_proj(encoder_hidden_states)
@@ -659,8 +623,7 @@ class SD3Attention(nn.Module):
             value = torch.cat([value, encoder_value], dim=1)
 
         attn_output, _ = self.attn(query, key, value)
-        attn_output = attn_output.reshape(batch_size, -1,
-                                          self.heads * self.head_dim)
+        attn_output = attn_output.reshape(batch_size, -1, self.heads * self.head_dim)
 
         if encoder_hidden_states is not None:
             hidden_out = attn_output[:, :residual_seq_len]
@@ -689,8 +652,7 @@ class SD3JointTransformerBlock(nn.Module):
         context_pre_only: bool = False,
         qk_norm: str | None = None,
         use_dual_attention: bool = False,
-        supported_attention_backends: tuple[AttentionBackendEnum,
-                                            ...] | None = None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     ) -> None:
         super().__init__()
 
@@ -749,9 +711,7 @@ class SD3JointTransformerBlock(nn.Module):
         )
 
         if not context_pre_only:
-            self.norm2_context = nn.LayerNorm(dim,
-                                              elementwise_affine=False,
-                                              eps=1e-6)
+            self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
             self.ff_context = SD3FeedForward(
                 dim=dim,
                 dim_out=dim,
@@ -823,8 +783,7 @@ class SD3JointTransformerBlock(nn.Module):
             hidden_states = hidden_states + gate_msa2.unsqueeze(1) * attn_output2
 
         norm_hidden_states = self.norm2(hidden_states)
-        norm_hidden_states = norm_hidden_states * (
-            1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
 
         if self._chunk_size is not None:
             ff_output = _chunked_feed_forward(
@@ -849,8 +808,7 @@ class SD3JointTransformerBlock(nn.Module):
             encoder_hidden_states = encoder_hidden_states + context_attn_output
 
             norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
-            norm_encoder_hidden_states = norm_encoder_hidden_states * (
-                1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
+            norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
 
             if self._chunk_size is not None:
                 context_ff_output = _chunked_feed_forward(
@@ -862,8 +820,7 @@ class SD3JointTransformerBlock(nn.Module):
             else:
                 context_ff_output = self.ff_context(norm_encoder_hidden_states)
 
-            encoder_hidden_states = encoder_hidden_states + (
-                c_gate_mlp.unsqueeze(1) * context_ff_output)
+            encoder_hidden_states = encoder_hidden_states + (c_gate_mlp.unsqueeze(1) * context_ff_output)
 
         return encoder_hidden_states, hidden_states
 
@@ -913,12 +870,10 @@ class SD3Transformer2DModel(BaseDiT):
             embedding_dim=self.inner_dim,
             pooled_projection_dim=arch.pooled_projection_dim,
         )
-        self.context_embedder = ReplicatedLinear(arch.joint_attention_dim,
-                                                 arch.caption_projection_dim)
+        self.context_embedder = ReplicatedLinear(arch.joint_attention_dim, arch.caption_projection_dim)
 
         dual_layers = getattr(arch, "dual_attention_layers", ())
-        dual_layers = tuple(dual_layers) if isinstance(dual_layers,
-                                                       list) else dual_layers
+        dual_layers = tuple(dual_layers) if isinstance(dual_layers, list) else dual_layers
 
         self.transformer_blocks = nn.ModuleList([
             SD3JointTransformerBlock(
@@ -959,8 +914,7 @@ class SD3Transformer2DModel(BaseDiT):
 
         chunk_size = chunk_size or 1
 
-        def fn_recursive_feed_forward(module: torch.nn.Module, chunk: int,
-                                      chunk_dim: int):
+        def fn_recursive_feed_forward(module: torch.nn.Module, chunk: int, chunk_dim: int):
             if hasattr(module, "set_chunk_feed_forward"):
                 module.set_chunk_feed_forward(chunk_size=chunk, dim=chunk_dim)
             for child in module.children():
@@ -1023,12 +977,10 @@ class SD3Transformer2DModel(BaseDiT):
 
             hidden_states = self.pos_embed(hidden_states)
             temb = self.time_text_embed(timestep, pooled_projections)
-            encoder_hidden_states, _ = self.context_embedder(
-                encoder_hidden_states)
+            encoder_hidden_states, _ = self.context_embedder(encoder_hidden_states)
 
             for index_block, block in enumerate(self.transformer_blocks):
-                is_skip = bool(
-                    skip_layers is not None and index_block in skip_layers)
+                is_skip = bool(skip_layers is not None and index_block in skip_layers)
                 if is_skip:
                     continue
 
@@ -1039,12 +991,9 @@ class SD3Transformer2DModel(BaseDiT):
                     joint_attention_kwargs=joint_attention_kwargs,
                 )
 
-                if (block_controlnet_hidden_states is not None
-                        and not block.context_pre_only):
-                    interval_control = len(self.transformer_blocks) / len(
-                        block_controlnet_hidden_states)
-                    hidden_states = hidden_states + block_controlnet_hidden_states[
-                        int(index_block / interval_control)]
+                if (block_controlnet_hidden_states is not None and not block.context_pre_only):
+                    interval_control = len(self.transformer_blocks) / len(block_controlnet_hidden_states)
+                    hidden_states = hidden_states + block_controlnet_hidden_states[int(index_block / interval_control)]
 
             hidden_states = self.norm_out(hidden_states, temb)
             hidden_states, _ = self.proj_out(hidden_states)

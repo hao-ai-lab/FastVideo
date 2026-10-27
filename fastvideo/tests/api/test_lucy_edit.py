@@ -2,7 +2,7 @@
 
 from fastvideo.api.presets import get_preset
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.configs.pipelines.wan import LucyEditDevConfig
+from fastvideo.models.wan.pipeline_config import LucyEditDevConfig
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.pipelines.basic.wan.lucy_edit_pipeline import LucyEditPipeline
 from fastvideo.pipelines.pipeline_registry import PipelineType, get_pipeline_registry

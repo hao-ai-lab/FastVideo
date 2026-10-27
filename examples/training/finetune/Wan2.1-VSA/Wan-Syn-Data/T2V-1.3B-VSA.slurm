@@ -127,7 +127,9 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

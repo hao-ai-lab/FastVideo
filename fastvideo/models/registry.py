@@ -23,22 +23,15 @@ logger = init_logger(__name__)
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
-    "HunyuanVideoTransformer3DModel":
-    ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
-    "HunyuanGameCraftTransformer3DModel":
-    ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
-    "HunyuanVideo15Transformer3DModel":
-    ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
-    "HYWorldTransformer3DModel":
-    ("dits", "hyworld", "HYWorldTransformer3DModel"),
-    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
-    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
-    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "MMAudioTransformer": ("dits", "mmaudio", "MMAudioTransformer"),
+    "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanVideo15Transformer3DModel": ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
+    "HYWorldTransformer3DModel": ("dits", "hyworld", "HYWorldTransformer3DModel"),
+    "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
+    "WanModel_S2V": ("dits", "wan_s2v", "WanS2VTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
-    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
-    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
     "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
@@ -49,16 +42,24 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "Kandinsky6Transformer3DModel": ("dits", "kandinsky6", "Kandinsky6Transformer3DModel"),
     "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
+    "PAN2Transformer3DModel": ("dits", "pan2", "PAN2Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
-    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
-    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
-    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
+    "WanModel_S2V": ("dits", "wan_s2v", "WanS2VTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "LingBotWorld2CausalFastTransformer3DModel": (
+        "dits",
+        "lingbotworld2",
+        "LingBotWorld2CausalFastTransformer3DModel",
+    ),
+    # LingBot-World-Fast ships this class name; its tensor layout is identical
+    # to the LingBot World 2 causal-fast DiT.
+    "CausalLingBotWorldTransformer3DModel": (
         "dits",
         "lingbotworld2",
         "LingBotWorld2CausalFastTransformer3DModel",
@@ -71,16 +72,15 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
-# Text-to-image DiT models (2D image generation)
 _TEXT_TO_IMAGE_DIT_MODELS = {
-    "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
-    "ZImageTransformer2DModel": ("dits", "zimage", "ZImageTransformer2DModel"),
+    "QwenImage21Transformer2DModel": ("dits", "qwen_image21", "QwenImage21Transformer2DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
+    "QwenImage21Qwen3VLConditioner": ("encoders", "qwen_image21", "QwenImage21Qwen3VLConditioner"),
+    "MMAudioDFNCLIPTextEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPTextEncoder"),
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
-    "CLIPTextModelWithProjection":
-    ("encoders", "clip", "CLIPTextModelWithProjection"),
+    "CLIPTextModelWithProjection": ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
     "LingBotWorld2T5EncoderModel": ("encoders", "lingbotworld2_t5", "LingBotWorld2T5EncoderModel"),
@@ -88,18 +88,20 @@ _TEXT_ENCODER_MODELS = {
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
-    "Qwen2_5_VLForConditionalGeneration":
-    ("encoders", "reason1", "Reason1TextEncoder"),
-    # Z-Image-Turbo's text_encoder/config.json declares architecture
-    # "Qwen3Model"; route it to the shared Qwen3 encoder (added for Flux2 Klein).
-    "Qwen3Model": ("encoders", "qwen3", "Qwen3ForCausalLM"),
+    "Qwen2_5_VLForConditionalGeneration": ("encoders", "reason1", "Reason1TextEncoder"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
-    "Mistral3ForConditionalGeneration":
-    ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
+    "Mistral3ForConditionalGeneration": ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
+    "Qwen3_5TextModel": ("encoders", "qwen3_5", "Qwen3_5TextModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
+    "MMAudioDFNCLIPVisionEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPVisionEncoder"),
+    "MMAudioSynchformerVisualEncoder": (
+        "encoders",
+        "mmaudio_synchformer",
+        "MMAudioSynchformerVisualEncoder",
+    ),
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
     "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
@@ -107,17 +109,14 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 }
 
 _VAE_MODELS = {
-    "AutoencoderKLHunyuanVideo":
-    ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
-    "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
+    "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
-    "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
+    "AutoencoderKLWan": ("wan", "vae", "AutoencoderKLWan"),
     "LingBotWorld2WanVAE": ("vaes", "lingbotworld2_wanvae", "LingBotWorld2WanVAE"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
-    "AutoencoderKLGen3CTokenizer":
-    ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "AutoencoderKLQwenImage21": ("vaes", "qwen_image21", "AutoencoderKLQwenImage21"),
+    "AutoencoderKLGen3CTokenizer": ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
     "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
     # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
@@ -126,6 +125,9 @@ _VAE_MODELS = {
 }
 
 _AUDIO_MODELS = {
+    "MMAudioVAE": ("audio", "mmaudio_vae", "MMAudioVAE"),
+    "BigVGANV2": ("audio", "bigvgan", "BigVGANV2"),
+    "Kandinsky6AudioVAE": ("audio", "kandinsky6_audio_vae", "Kandinsky6AudioVAE"),
     "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
     "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
     "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
@@ -133,17 +135,22 @@ _AUDIO_MODELS = {
 
 _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
-    ("schedulers", "scheduling_flow_match_euler_discrete",
-     "FlowMatchEulerDiscreteScheduler"),
-    "UniPCMultistepScheduler":
-    ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
-    "FlowUniPCMultistepScheduler":
-    ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
+    ("schedulers", "scheduling_flow_match_euler_discrete", "FlowMatchEulerDiscreteScheduler"),
+    "UniPCMultistepScheduler": ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
+    "FlowUniPCMultistepScheduler": ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
     "SelfForcingFlowMatchScheduler":
-    ("schedulers", "scheduling_self_forcing_flow_match",
-     "SelfForcingFlowMatchScheduler"),
-    "RCMScheduler":
-    ("schedulers", "scheduling_rcm", "RCMScheduler"),
+    ("schedulers", "scheduling_self_forcing_flow_match", "SelfForcingFlowMatchScheduler"),
+    "HeliosDMDScheduler": ("schedulers", "scheduling_helios_dmd", "HeliosDMDScheduler"),
+    "Cosmos25DistilledScheduler": (
+        "schedulers",
+        "scheduling_cosmos25_distilled",
+        "Cosmos25DistilledScheduler",
+    ),
+    "Cosmos25DFDScheduler": (
+        "schedulers",
+        "scheduling_cosmos25_dfd",
+        "Cosmos25DFDScheduler",
+    ),
 }
 
 _UPSAMPLERS = {
@@ -171,10 +178,7 @@ MODELS_PATH = os.path.dirname(__file__)
 def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
     discovered_models: dict[str, tuple[str, str, str]] = {}
     for root, dirs, files in os.walk(MODELS_PATH):
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith(".") and d != "__pycache__"
-        ]
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
 
         for filename in files:
             if not filename.endswith(".py"):
@@ -208,8 +212,7 @@ def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
                     model_cls_name_list.append(value_node.id)
                 elif isinstance(value_node, (ast.List, ast.Tuple)):
                     for elt in value_node.elts:
-                        if isinstance(elt, ast.Constant) and isinstance(
-                                elt.value, str):
+                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                             model_cls_name_list.append(elt.value)
                         elif isinstance(elt, ast.Name):
                             model_cls_name_list.append(elt.id)
@@ -229,14 +232,11 @@ def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
                     mod_relname = ".".join(sub_parts)
                 else:
                     mod_base = filename[:-3]
-                    mod_relname = ".".join(sub_parts +
-                                           [mod_base]) if sub_parts else mod_base
+                    mod_relname = ".".join(sub_parts + [mod_base]) if sub_parts else mod_base
 
                 for model_cls_str in model_cls_name_list:
                     if model_cls_str in discovered_models:
-                        logger.warning(
-                            "Duplicate architecture found: %s. Overwriting.",
-                            model_cls_str)
+                        logger.warning("Duplicate architecture found: %s. Overwriting.", model_cls_str)
                     discovered_models[model_cls_str] = (
                         component_name,
                         mod_relname,
@@ -244,8 +244,7 @@ def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
                     )
 
             except Exception as e:
-                logger.warning("Could not parse %s to find models: %s",
-                               filepath, e)
+                logger.warning("Could not parse %s to find models: %s", filepath, e)
 
     return discovered_models
 
@@ -316,9 +315,7 @@ def _run_in_subprocess(fn: Callable[[], _T]) -> _T:
 
         # cannot use `sys.executable __file__` here because the script
         # contains relative imports
-        returned = subprocess.run(_SUBPROCESS_COMMAND,
-                                  input=input_bytes,
-                                  capture_output=True)
+        returned = subprocess.run(_SUBPROCESS_COMMAND, input=input_bytes, capture_output=True)
 
         # check if the subprocess is successful
         try:
@@ -343,8 +340,7 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
 
     # Performed in another process to avoid initializing CUDA
     def inspect_model_cls(self) -> _ModelInfo:
-        return _run_in_subprocess(
-            lambda: _ModelInfo.from_model_cls(self.load_model_cls()))
+        return _run_in_subprocess(lambda: _ModelInfo.from_model_cls(self.load_model_cls()))
 
     def load_model_cls(self) -> type[nn.Module]:
         mod = importlib.import_module(self.module_name)
@@ -373,8 +369,7 @@ def _try_inspect_model_cls(
     try:
         return model.inspect_model_cls()
     except Exception:
-        logger.exception("Error in inspecting model architecture '%s'",
-                         model_arch)
+        logger.exception("Error in inspecting model architecture '%s'", model_arch)
         return None
 
 
@@ -422,13 +417,11 @@ class _ModelRegistry:
     def _raise_for_unsupported(self, architectures: list[str]) -> NoReturn:
         all_supported_archs = self.get_supported_archs()
         if any(arch in all_supported_archs for arch in architectures):
-            raise ValueError(
-                f"Model architectures {architectures} failed "
-                "to be inspected. Please check the logs for more details.")
+            raise ValueError(f"Model architectures {architectures} failed "
+                             "to be inspected. Please check the logs for more details.")
 
-        raise ValueError(
-            f"Model architectures {architectures} are not supported for now. "
-            f"Supported architectures: {all_supported_archs}")
+        raise ValueError(f"Model architectures {architectures} are not supported for now. "
+                         f"Supported architectures: {all_supported_archs}")
 
     def _try_load_model_cls(self, model_arch: str) -> type[nn.Module] | None:
         if model_arch not in self.models:
@@ -493,6 +486,5 @@ ModelRegistry = _ModelRegistry({
         component_name=component_name,
         class_name=cls_name,
     )
-    for model_arch, (component_name, mod_relname,
-                     cls_name) in _FAST_VIDEO_MODELS.items()
+    for model_arch, (component_name, mod_relname, cls_name) in _FAST_VIDEO_MODELS.items()
 })

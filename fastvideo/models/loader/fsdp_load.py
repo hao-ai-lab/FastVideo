@@ -5,10 +5,12 @@
 # Copyright 2025 The FastVideo Authors.
 
 from __future__ import annotations
-import os
 import contextlib
+import copy
+import re
 from collections.abc import Callable, Generator
 from itertools import chain
+from types import FunctionType, MethodType
 from typing import Any
 
 import torch
@@ -18,7 +20,9 @@ from torch.distributed._tensor import distribute_tensor
 from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.lora_patch import DenseLoRAPatch
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
@@ -26,20 +30,141 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
-def _maybe_quantize_model(model: nn.Module) -> None:
-    """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
+def _mixed_precision_module_groups(
+    model: nn.Module,
+    default_param_dtype: torch.dtype | None,
+) -> tuple[list[tuple[str, nn.Module]], set[nn.Parameter]]:
+    """Resolve declared FP32 FSDP groups and uncovered mixed parameters."""
+    dtype_selector = getattr(model, "_get_parameter_dtype", None)
+    if not callable(dtype_selector) or default_param_dtype is None:
+        return [], set()
 
-    Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`NVFP4QuantizeMethod` or :class:`FP8QuantizeMethod` (attached
-    at construction time by the respective ``get_quant_method``). When at least
+    # All selector lookups and declared-group matches use canonical
+    # (checkpoint-key) names: activation-checkpoint wrapping inserts
+    # ``_checkpoint_wrapped_module`` segments into named_parameters()/
+    # named_modules() FQNs while dtype selectors are written against the
+    # clean architecture names.
+    mixed_params = {
+        parameter
+        for name, parameter in model.named_parameters()
+        if dtype_selector(_strip_checkpoint_wrapper_prefix(name), default_param_dtype) != default_param_dtype
+    }
+    declared = set(getattr(model, "_keep_in_fp32_modules", ()))
+    groups: list[tuple[str, nn.Module]] = []
+    covered: set[nn.Parameter] = set()
+    for name, module in model.named_modules():
+        clean_name = _strip_checkpoint_wrapper_prefix(name)
+        if clean_name not in declared or any(clean_name.startswith(f"{parent}.") for parent, _ in groups):
+            continue
+        parameters = list(module.named_parameters())
+        if not parameters:
+            continue
+        if not all(
+                dtype_selector(_strip_checkpoint_wrapper_prefix(f"{clean_name}.{child_name}"),
+                               default_param_dtype) == torch.float32 for child_name, _ in parameters):
+            continue
+        groups.append((clean_name, module))
+        covered.update(parameter for _, parameter in parameters)
+    return groups, mixed_params - covered
+
+
+def _summarize_param_names(names: set[str]) -> str:
+    """Collapse per-layer parameter names into one ``blocks.*.suffix xN`` entry each."""
+    families: dict[str, int] = {}
+    for name in names:
+        families[re.sub(r"\.\d+\.", ".*.", name)] = families.get(re.sub(r"\.\d+\.", ".*.", name), 0) + 1
+    return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
+
+
+def _should_stage_transformer_weights_on_cpu(*, cpu_offload: bool, fsdp_inference: bool,
+                                             has_unified_memory: bool) -> bool:
+    """Keep full FSDP-inference source tensors off discrete GPUs while shards materialize.
+
+    FSDP training keeps its historical ``cpu_offload``-only staging, so this
+    change stays scoped to the inference path.
+    """
+    return cpu_offload or (fsdp_inference and not has_unified_memory)
+
+
+def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
+    """Checkpoint prefixes stored as FP8 W8A8: float8_e4m3fn ``weight`` plus per-channel float32 ``weight_scale``."""
+    from safetensors import safe_open
+
+    fp8_weights: set[str] = set()
+    scales: set[str] = set()
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in reader.keys():  # noqa: SIM118
+                if key.endswith(".weight") and reader.get_slice(key).get_dtype() == "F8_E4M3":
+                    fp8_weights.add(key[:-len(".weight")])
+                elif key.endswith(".weight_scale") and reader.get_slice(key).get_dtype() == "F32":
+                    scales.add(key[:-len(".weight_scale")])
+    if fp8_weights - scales:
+        raise ValueError(f"FP8 checkpoint weights without a weight_scale: {sorted(fp8_weights - scales)[:4]}")
+    return sorted(fp8_weights)
+
+
+def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: dict[str, str],
+                           device: torch.device) -> None:
+    """Load packed FP8 linears and preserve the checkpoint's dense linear weights."""
+    from safetensors import safe_open
+
+    from fastvideo.layers.linear import UnquantizedLinearMethod
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+
+    modules = dict(model.named_modules())
+    wanted = {f"{prefix}.{suffix}" for prefix in targets for suffix in ("weight", "weight_scale")}
+    tensors: dict[str, torch.Tensor] = {}
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in wanted.intersection(reader.keys()):
+                tensors[key] = reader.get_tensor(key)
+    for prefix, target in targets.items():
+        module = modules.get(target[:-len(".weight")])
+        quant_method = getattr(module, "quant_method", None)
+        if not isinstance(quant_method, FP8QuantizeMethod):
+            raise RuntimeError(f"Pre-quantized FP8 weight {prefix!r} maps to {target!r}, which is not an FP8 linear; "
+                               "load the checkpoint with an FP8 quant_config covering it.")
+        # The checkpoint scales are per output channel; activations then use per-token scales.
+        quant_method.granularity = "channel"
+        module.register_buffer("_fp8_weight", tensors[f"{prefix}.weight"].to(device).contiguous(), persistent=False)
+        module.register_buffer("_fp8_weight_scale",
+                               tensors[f"{prefix}.weight_scale"].reshape(-1).to(device=device, dtype=torch.float32),
+                               persistent=False)
+        module._parameters.pop("weight", None)
+    # The packed entries define the export's FP8 scope. A broad FP8Config can
+    # also tag intentionally dense layers, such as H3's text refiner. Reset
+    # their method before post-load conversion also quantizes those layers.
+    packed_modules = {target[:-len(".weight")] for target in targets.values()}
+    dense_linears = 0
+    for name, module in modules.items():
+        if (name not in packed_modules and isinstance(getattr(module, "quant_method", None), FP8QuantizeMethod)
+                and getattr(module, "weight", None) is not None):
+            module.quant_method = UnquantizedLinearMethod()
+            dense_linears += 1
+    logger.info("Loaded %d pre-quantized FP8 linears; preserved %d dense linears", len(targets), dense_linears)
+
+
+def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
+    """Quantize inference linear weights after checkpoint loading.
+
+    Walks the module tree once, looking for layers whose ``quant_method`` is an
+    inference quantization method attached at construction time. When at least
     one such layer exists, calls the matching conversion function to register
-    quantized weight buffers on each targeted layer.
+    quantized weight buffers on each targeted layer. NVFP4 and MXFP8 conversion
+    can be deferred until a configured inference LoRA is merged.
 
     The walk returns on the first quantized layer found so unquantized callers
     pay only an ``isinstance`` check per module. Both imports are deferred so
     this is a no-op on hosts without the relevant backends.
+
+    QAT-*train* linears (``nvfp4_qat_train``) need no weight conversion — the
+    master weight stays full precision — but their attachment is otherwise
+    silent, so the same walk emits a one-line receipt with the count of
+    linears that actually carry the QAT method.
     """
     # Defer imports: these modules pull in heavy symbols at module-load time.
+    from fastvideo.layers.linear import LinearBase
     from fastvideo.layers.quantization.nvfp4_config import (
         NVFP4QuantizeMethod,
         convert_model_to_nvfp4,
@@ -48,17 +173,39 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         NVFP4QATQuantizeMethod,
         convert_model_to_fp4,
     )
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainQuantizeMethod, )
     from fastvideo.layers.quantization.fp8_config import (
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
+    from fastvideo.layers.quantization.mxfp8_config import (
+        MXFP8QuantizeMethod,
+        convert_model_to_mxfp8,
+    )
 
-    for mod in model.modules():
-        qm = getattr(mod, "quant_method", None)
-        if isinstance(qm, NVFP4QuantizeMethod):
+    # NVFP4 may share a model with FP8 linears (e.g. NVFP4 FFN + FP8 attention); handle that pair before the
+    # per-module walk so the result does not depend on which quantized module comes first.
+    nvfp4_modules = [m for m in model.modules() if isinstance(getattr(m, "quant_method", None), NVFP4QuantizeMethod)]
+    if nvfp4_modules:
+        mixed_fp8 = any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules())
+        if any(getattr(module, "_nvfp4_weight", None) is not None for module in nvfp4_modules):
+            logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
+        elif defer_weight_conversion_until_lora_merge:
+            logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
+            return
+        else:
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
-            return
+        if mixed_fp8:
+            logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
+            convert_model_to_fp8(model)
+        return
+
+    qat_train_attached = 0
+    qat_train_skipped = 0
+    for mod in model.modules():
+        qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QATQuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
             convert_model_to_fp4(model)
@@ -67,6 +214,23 @@ def _maybe_quantize_model(model: nn.Module) -> None:
             logger.info("Converting loaded model weights for FP8 linear layers")
             convert_model_to_fp8(model)
             return
+        if isinstance(qm, MXFP8QuantizeMethod):
+            if defer_weight_conversion_until_lora_merge:
+                logger.info("Deferring MXFP8 weight conversion until the inference LoRA merge completes")
+                return
+            logger.info("Converting loaded model weights for MXFP8 linear layers")
+            convert_model_to_mxfp8(model)
+            return
+        # QAT-train configs are mutually exclusive with the inference schemes
+        # above (one quant_config per model), so when they're active the loop
+        # always runs to completion and the counts below are model-wide.
+        if isinstance(qm, NVFP4QATTrainQuantizeMethod):
+            qat_train_attached += 1
+        elif isinstance(mod, LinearBase):
+            qat_train_skipped += 1
+    if qat_train_attached:
+        logger.info("NVFP4 QAT: attached %d linears (%d skipped by prefix filter)", qat_train_attached,
+                    qat_train_skipped)
 
 
 # TODO(PY): move this to utils elsewhere
@@ -97,6 +261,69 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
+def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | None:
+    """Run a model compile hook, preferring its regional specialization."""
+    prepare = None
+    hook_name = "prepare_for_compile"
+    if regional:
+        prepare = getattr(model, "prepare_for_regional_compile", None)
+        hook_name = "prepare_for_regional_compile"
+    if not callable(prepare):
+        prepare = getattr(model, "prepare_for_compile", None)
+        hook_name = "prepare_for_compile"
+    if not callable(prepare):
+        return None
+    logger.info("Running %s for %s", hook_name, type(model).__name__)
+    unsupported = prepare()
+    return unsupported if isinstance(unsupported, str) and unsupported else None
+
+
+def _adopt_nvfp4_export_skip_blocks(init_params: dict[str, Any], quant_config: Any,
+                                    export_path: str) -> dict[str, Any]:
+    """Match the NVFP4 config's bf16 blocks to the ones the packed export declares.
+
+    A mixed export (e.g. FastH3 OmniRef QAD keeps blocks 42-49 in bf16) leaves
+    those blocks' linears out of the packed file; they must not be tagged NVFP4,
+    or the loader would expect packed buffers for them. An empty
+    ``skip_blocks`` adopts the export's list; a different explicit list is an
+    error rather than a silent precision change.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import read_minimax_h3_nvfp4_dit_skip_blocks
+
+    export_blocks = read_minimax_h3_nvfp4_dit_skip_blocks(export_path)
+    config_blocks = tuple(getattr(quant_config, "skip_blocks", ()) or ())
+    if export_blocks == config_blocks:
+        return init_params
+    if config_blocks:
+        raise ValueError(f"NVFP4Config.skip_blocks={list(config_blocks)} but the packed export {export_path} keeps "
+                         f"blocks {list(export_blocks)} in bf16; drop skip_blocks to follow the export.")
+    logger.info("Packed NVFP4 DiT export keeps blocks %s in bf16; leaving their linears unquantized",
+                list(export_blocks))
+    transformer_config = copy.copy(init_params["config"])
+    transformer_config.quant_config = quant_config.with_skip_blocks(export_blocks)
+    return {**init_params, "config": transformer_config}
+
+
+def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_inference: bool) -> None:
+    """Enforce the transformer-quantization allowlist for FSDP inference."""
+    transformer_config = init_params.get("config")
+    quant_config = getattr(transformer_config, "quant_config", None)
+    if not fsdp_inference or quant_config is None:
+        return
+
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainConfig, )
+
+    if isinstance(quant_config, NVFP4QATTrainConfig):
+        return
+
+    # TODO: (David) Currently reject every FSDP inference quantization config except NVFP4QATTrainConfig.
+    # Support FSDP inference with precomputed quantized weights.
+    raise NotImplementedError(
+        "FSDP inference supports unquantized transformers and NVFP4QATTrainConfig only; "
+        f"got {type(quant_config).__name__}.")
+
+
 # Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
@@ -111,15 +338,67 @@ def maybe_load_fsdp_model(
     strict: bool = True,
     cpu_offload: bool = False,
     fsdp_inference: bool = False,
+    device_mesh: DeviceMesh | None = None,
     output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    inference_regional_compile: bool = False,
+    inference_vsa_tile_size: int | None = None,
+    lora_path: str | None = None,
+    lora_strength: float = 1.0,
+    pre_fsdp_model_transform: Callable[[nn.Module], None] | None = None,
+    pre_fsdp_transform: Callable[[nn.Module], nn.Module] | None = None,
+    regional_compile: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
+
+    ``lora_path`` is consulted only for the part of an adapter that addresses whole
+    parameters (``.diff`` / ``.set_weight``); see
+    :mod:`fastvideo.models.loader.lora_patch`. The low-rank half is merged later by
+    ``LoRAPipeline``. Passing it here is what lets an adapter contribute a parameter the
+    base checkpoint does not contain, which has to happen while the tensor is still
+    unsharded.
+
+    ``device_mesh`` overrides the mesh FSDP shards over. The MiniMax-H3 encoder
+    split passes one that covers the denoise ranks only, because the DiT is loaded
+    on no other rank.
+
+    ``pre_fsdp_model_transform`` runs on the meta model before its sharding topology
+    is established and before checkpoint weights are loaded. Training uses it to
+    install adapter parameters that must participate in FSDP from the outset.
+
+    ``pre_fsdp_transform`` runs after it and returns the module to shard (training
+    uses it for activation-checkpoint wrapping). The order matters: the in-place
+    transform records live module names, such as LoRA checkpoint-key aliases, that
+    a wrapping transform would prefix.
     """
+    _validate_fsdp_inference_quantization(init_params, fsdp_inference)
+
+    from fastvideo.layers.quantization.nvfp4_config import (
+        dense_transformer_safetensors,
+        find_minimax_h3_nvfp4_dit_export,
+        load_minimax_h3_nvfp4_dit_export,
+        nvfp4_linear_weight_param_names,
+    )
+    packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
+    weight_dir_list = dense_transformer_safetensors(weight_dir_list)
+    quant_config = getattr(init_params.get("config"), "quant_config", None)
+    packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+    packed_layer_profile = getattr(quant_config, "layer_profile", None)
+    packed_nvfp4_export = packed_candidate if packed_layer_profile in packed_profiles else None
+    if packed_candidate is not None and packed_nvfp4_export is None:
+        # A packed export leaves its quantized linears out of the dense shards, so
+        # loading it with any other profile misses those weights.
+        raise ValueError(
+            f"{packed_candidate} is a packed MiniMax-H3 NVFP4 export, which keeps the quantized linears out of "
+            f"the dense shards, but the quantization profile is {packed_layer_profile!r}. Load it with an NVFP4 "
+            f"config (layer_profile one of {', '.join(packed_profiles)}), or point the run at a dense export.")
+    if packed_nvfp4_export is not None:
+        init_params = _adopt_nvfp4_export_skip_blocks(init_params, quant_config, packed_nvfp4_export)
+
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
@@ -135,12 +414,19 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    dtype_selector = getattr(model, "_get_parameter_dtype", None)
-    has_mixed_parameter_dtypes = callable(dtype_selector) and any(
-        dtype_selector(name, param_dtype) != param_dtype for name, _ in model.named_parameters())
-    if training_mode and has_mixed_parameter_dtypes:
+    if pre_fsdp_model_transform is not None:
+        logger.info("Applying pre-FSDP model transform to %s", type(model).__name__)
+        pre_fsdp_model_transform(model)
+    # Must run after pre_fsdp_model_transform (see docstring); its return
+    # value is authoritative.
+    if pre_fsdp_transform is not None:
+        model = pre_fsdp_transform(model)
+
+    _, ungrouped_mixed_params = _mixed_precision_module_groups(model, param_dtype)
+    if training_mode and ungrouped_mixed_params:
         raise NotImplementedError("FSDP training with model-selected mixed parameter dtypes requires "
-                                  "separate gradient synchronization for replicated parameters.")
+                                  "separate gradient synchronization for replicated parameters or "
+                                  "declared FP32 module groups.")
 
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
@@ -158,7 +444,7 @@ def maybe_load_fsdp_model(
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
 
-        if current_platform.is_npu():
+        if device_mesh is None and current_platform.is_npu():
             with torch.device("cpu"):
                 device_mesh = init_device_mesh(
                     "npu",
@@ -166,7 +452,7 @@ def maybe_load_fsdp_model(
                     mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
                     mesh_dim_names=("replicate", "shard"),
                 )
-        else:
+        elif device_mesh is None:
             device_mesh = init_device_mesh(
                 "cuda",
                 # (Replicate(), Shard(dim=0))
@@ -181,8 +467,85 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
+    nvfp4_skip_param_names: set[str] = set()
+    if packed_nvfp4_export is not None:
+        nvfp4_skip_param_names = nvfp4_linear_weight_param_names(model)
+        if not nvfp4_skip_param_names:
+            logger.warning(
+                "Found %s next to the transformer shards but no NVFP4 linears; "
+                "ignoring the packed export. Set NVFP4Config(layer_profile='h3_dit').",
+                packed_nvfp4_export,
+            )
+            packed_nvfp4_export = None
+    has_unified_memory = False
+    if fsdp_inference and not cpu_offload:
+        device_index = device.index if device.index is not None else 0
+        has_unified_memory = current_platform.has_unified_memory(device_index)
+    # GPU-direct avoids duplicating the host working set on unified-memory
+    # devices. Discrete FSDP inference must stage the full source tensors on CPU
+    # while each rank materializes its shard, or the full checkpoint and shards
+    # peak together on the accelerator. Training keeps GPU-direct loading.
+    # A packed NVFP4 export is always staged on CPU.
+    # Layerwise offload passes device=cpu but disables dit_cpu_offload, so the
+    # device itself must select CPU staging or the iterator would fill the GPU.
+    load_weights_to_cpu = (device.type == "cpu" or _should_stage_transformer_weights_on_cpu(
+        cpu_offload=cpu_offload,
+        fsdp_inference=fsdp_inference,
+        has_unified_memory=has_unified_memory,
+    ) or packed_nvfp4_export is not None)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
+    logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+    dense_lora_patch = None
+    if lora_path:
+        # LoRA-specific mappings are optional and must not become a dependency of ordinary model loading.
+        lora_mapping = getattr(model, "lora_param_names_mapping", None)
+        lora_param_names_mapping_fn = get_param_names_mapping(lora_mapping) if lora_mapping else None
+        dense_lora_patch = DenseLoRAPatch.from_adapter(
+            lora_path,
+            param_names_mapping_fn,
+            lora_param_names_mapping=lora_param_names_mapping_fn,
+            strength=lora_strength,
+        )
+    if dense_lora_patch is not None and packed_nvfp4_export is not None:
+        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot take an adapter with dense "
+                         "(.diff/.set_weight) payloads: they would have to be merged into the packed weights. "
+                         "Merge the adapter before exporting, or load without the packed file.")
+    if dense_lora_patch is not None:
+        # H3's compression gate is created only by the VSA attention backend. Loading a
+        # VSA student under dense attention would otherwise warn about 50 unmatched
+        # replacements and continue with a silently incomplete model.
+        model_parameter_names = {
+            _strip_checkpoint_wrapper_prefix(name)
+            for name, _ in model.named_parameters()
+        }
+        missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
+                                   if "gate_compress" in name and name not in model_parameter_names)
+        if missing_vsa_gates:
+            raise ValueError(
+                "This LoRA adapter provides MiniMax H3 VSA compression gates, but the selected attention backend "
+                "did not construct them. Use attention_backend='VIDEO_SPARSE_ATTN_H3'. Missing parameters: "
+                + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
+    skip_param_names = set(nvfp4_skip_param_names)
+    fp8_targets: dict[str, str] = {}
+    # Pre-quantized FP8 checkpoints are an H3 release format; other models load as on main.
+    fp8_prefixes = (_prequantized_fp8_prefixes(weight_dir_list)
+                    if type(model).__name__.startswith("MiniMaxH3") else [])
+    if fp8_prefixes:
+        fp8_targets = {prefix: param_names_mapping_fn(f"{prefix}.weight")[0] for prefix in fp8_prefixes}
+        skip_param_names |= set(fp8_targets.values())
+        fp8_keys = {f"{prefix}.{suffix}" for prefix in fp8_prefixes for suffix in ("weight", "weight_scale")}
+        weight_iterator = ((name, tensor) for name, tensor in weight_iterator if name not in fp8_keys)
+    if envs.FASTVIDEO_H3_ADALN_TABLE.get():
+        # Precomputed AdaLN modulation replaces the per-block projections; never read their weights.
+        skip_param_names |= {
+            _strip_checkpoint_wrapper_prefix(name)
+            for name, _ in model.named_parameters()
+            if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)",
+                            _strip_checkpoint_wrapper_prefix(name))
+        }
+        logger.info("Skipping %d AdaLN projection tensors (precomputed modulation tables)",
+                    sum("adaln_proj" in n for n in skip_param_names))
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -191,7 +554,14 @@ def maybe_load_fsdp_model(
         strict=strict,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
+        training_mode=training_mode,
+        dense_lora_patch=dense_lora_patch,
+        skip_param_names=skip_param_names or None,
     )
+    if packed_nvfp4_export is not None:
+        load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
+    if fp8_targets:
+        _load_prequantized_fp8(model, weight_dir_list, fp8_targets, device=device)
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
@@ -207,15 +577,301 @@ def maybe_load_fsdp_model(
     # responsibility is just to materialize the quantized weight buffers
     # from the freshly-loaded bf16 weights. No-op when no quantized layers
     # are present (lazy imports inside the helper).
-    _maybe_quantize_model(model)
+    _maybe_quantize_model(model, defer_weight_conversion_until_lora_merge=lora_path is not None)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-        model = torch.compile(model, **compile_kwargs)
-        logger.info("torch.compile enabled for %s", type(model).__name__)
+    if enable_torch_compile and training_mode:
+        if not regional_compile:
+            # Legacy training stack (--enable-torch-compile): preserve the
+            # whole-model compile behavior and pass kwargs through unchanged.
+            unsupported = _prepare_model_for_compile(model, regional=False)
+            if unsupported is not None:
+                logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+            else:
+                compile_kwargs = torch_compile_kwargs or {}
+                logger.info("Enabling whole-model torch.compile with kwargs=%s", compile_kwargs)
+                model = torch.compile(model, **compile_kwargs)
+        else:
+            unsupported = _regional_compile_unsupported_reason(
+                init_params,
+                model=model,
+                training=True,
+                vsa_tile_size=inference_vsa_tile_size,
+            )
+            if unsupported is None:
+                unsupported = _prepare_model_for_compile(model, regional=False)
+            if unsupported is not None:
+                model._fastvideo_regional_compile_count = 0
+                model._fastvideo_regional_compile_skip_reason = unsupported
+                logger.warning(
+                    "enable_torch_compile requested but disabled: %s. "
+                    "Training continues in eager mode.", unsupported)
+            else:
+                attention_count = _enable_regional_attention_compile(model)
+                logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
+                model._fastvideo_regional_compile_count = _compile_model_regions(model, torch_compile_kwargs or {})
+                model._fastvideo_regional_compile_skip_reason = None
+    elif inference_regional_compile and not training_mode:
+        # Inference-side counterpart of the #1718 training regional compile:
+        # per-block fullgraph compile right after the transformer loads, no
+        # user kwargs needed (fullgraph + emulate_precision_casts injected).
+        unsupported = _regional_compile_unsupported_reason(
+            init_params,
+            model=model,
+            vsa_tile_size=inference_vsa_tile_size,
+        )
+        if unsupported is None:
+            unsupported = _prepare_model_for_compile(model, regional=True)
+        if unsupported is not None:
+            logger.warning(
+                "inference_torch_compile requested but disabled: %s. "
+                "Inference continues in eager mode.", unsupported)
+        else:
+            attention_count = _enable_regional_attention_compile(model)
+            logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
+            _compile_model_regions(model, torch_compile_kwargs or {}, isolate_regions=lora_path is not None)
     return model
+
+
+def _strip_checkpoint_wrapper_prefix(name: str) -> str:
+    """Canonicalize an FQN produced after activation-checkpoint wrapping.
+
+    ``checkpoint_wrapper`` strips its ``_checkpoint_wrapped_module.`` prefix
+    from ``state_dict()`` keys via hooks, but plain ``named_parameters()`` /
+    ``named_buffers()`` recursion still yields prefixed names. Checkpoint
+    keys are always clean, so every name-keyed lookup against loaded weights
+    must compare clean names.
+    """
+    return name.replace("._checkpoint_wrapped_module.", ".").removeprefix("_checkpoint_wrapped_module.")
+
+
+def build_fsdp_model_from_scratch(
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    device: torch.device,
+    hsdp_replicate_dim: int,
+    hsdp_shard_dim: int,
+    default_dtype: torch.dtype,
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    *,
+    seed: int,
+    cpu_offload: bool = False,
+    output_dtype: torch.dtype | None = None,
+    pin_cpu_memory: bool = True,
+) -> torch.nn.Module:
+    """Deterministically initialize and FSDP-shard a model without weights."""
+
+    mp_policy = MixedPrecisionPolicy(
+        param_dtype,
+        reduce_dtype,
+        output_dtype,
+        cast_forward_inputs=False,
+    )
+    set_mixed_precision_policy(
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+        mp_policy=mp_policy,
+    )
+
+    fork_devices: list[int] = []
+    if device.type == "cuda":
+        fork_devices = [
+            device.index if device.index is not None else torch.cuda.current_device()
+        ]
+    with torch.random.fork_rng(devices=fork_devices):
+        torch.manual_seed(int(seed))
+        with set_default_dtype(default_dtype), torch.device(device):
+            model = model_cls(**init_params)
+
+    from fastvideo.platforms import current_platform
+
+    if not current_platform.is_mps():
+        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+        if current_platform.is_npu():
+            device_mesh = init_device_mesh(
+                "npu",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        else:
+            device_mesh = init_device_mesh(
+                "cuda",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        shard_model(
+            model,
+            cpu_offload=cpu_offload,
+            reshard_after_forward=True,
+            mp_policy=mp_policy,
+            mesh=device_mesh,
+            fsdp_shard_conditions=model._fsdp_shard_conditions,
+            pin_cpu_memory=pin_cpu_memory,
+        )
+
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    return model
+
+
+def _regional_compile_unsupported_reason(
+    init_params: dict[str, Any],
+    *,
+    model: nn.Module | None = None,
+    training: bool = False,
+    vsa_tile_size: int | None = None,
+) -> str | None:
+    """Return why regional fullgraph compile cannot run, or None if it can.
+
+    Dense FA2 and FA4 route through compile-visible custom-op boundaries.
+    FA3 is safe for inference but its grad-enabled path graph-breaks, so it is
+    rejected for regional training compile.
+
+    The legacy VSA backend remains outside the fullgraph support envelope.
+    MiniMax H3's VSA backend is supported only through the inference-only
+    ptx_blackwell tile-64 route; its regional hook resolves loaded compression
+    gates and probes the kernel before block capture.
+    """
+    try:
+        from fastvideo.attention.layer import _attention_compile_explicitly_disabled
+    except Exception:  # pragma: no cover - attention stack not importable
+        pass
+    else:
+        if _attention_compile_explicitly_disabled():
+            # The escape hatch wraps attention forwards in
+            # torch.compiler.disable, which is a hard dynamo error inside a
+            # fullgraph region ("Skip inlining `torch.compiler.disable()`d
+            # function"). Degrade to eager instead, matching the hatch's
+            # debugging intent.
+            return ("FASTVIDEO_DISABLE_ATTENTION_COMPILE=1 keeps attention "
+                    "forwards out of compiled graphs via torch.compiler."
+                    "disable, which fullgraph regional compile cannot trace; "
+                    "this model stays eager")
+    backend_names: set[str] = set()
+    if model is not None:
+        from fastvideo.attention.layer import DistributedAttention, LocalAttention
+
+        for submodule in model.modules():
+            if not isinstance(submodule, (DistributedAttention, LocalAttention)):
+                continue
+            backend = getattr(submodule, "backend", None)
+            backend_name = getattr(backend, "name", "")
+            if backend_name:
+                backend_names.add(backend_name)
+
+    # The component config stores the requested backend. ``None`` means
+    # platform automatic selection, so once a constructed model is available
+    # its attention instances are the source of truth. Keep the config fallback
+    # for callers that validate policy before or without model construction.
+    if not backend_names:
+        config = init_params.get("config")
+        resolved = getattr(config, "_resolved_attention_backend", None)
+        resolved_name = getattr(resolved, "name", "")
+        if resolved_name:
+            backend_names.add(resolved_name)
+
+    if training and "FLASH_ATTN" in backend_names:
+        try:
+            from fastvideo.attention.utils.flash_attn_default import fa_version
+        except Exception:  # pragma: no cover - flash-attn stack not importable
+            pass
+        else:
+            if fa_version == "3":
+                return ("model uses FLASH_ATTN with flash-attn 3, "
+                        "whose grad-enabled path graph-breaks (incompatible with "
+                        "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
+                        "or TORCH_SDPA for compiled training")
+    if "VIDEO_SPARSE_ATTN_H3" in backend_names:
+        if training:
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile is supported only for inference; "
+                    "compiled training stays eager")
+        if envs.FASTVIDEO_H3_VSA_PROBE.get():
+            return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
+                    "regional fullgraph compile cannot capture; this model stays eager")
+        if not envs.FASTVIDEO_VSA_PTX_BLACKWELL.get():
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe ptx_blackwell route "
+                    "(FASTVIDEO_VSA_PTX_BLACKWELL=1); Triton/CuTe VSA stays eager")
+        if vsa_tile_size != 64:
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
+                    f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
+    if "VIDEO_SPARSE_ATTN" in backend_names:
+        return ("attention backend resolved to VIDEO_SPARSE_ATTN, whose Triton "
+                "kernels, sequence-parallel collectives, and sync metadata "
+                "guard graph-break (incompatible with fullgraph regional "
+                "compile); this model stays eager")
+    return None
+
+
+def _enable_regional_attention_compile(model: nn.Module) -> int:
+    """Opt in distributed-attention instances owned by ``model`` only."""
+    from fastvideo.attention.layer import DistributedAttention
+
+    enabled_count = 0
+    for submodule in model.modules():
+        if isinstance(submodule, DistributedAttention):
+            submodule._set_compile_forward_enabled(True)
+            enabled_count += 1
+    return enabled_count
+
+
+def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any], *, isolate_regions: bool = False) -> int:
+    """Compile repeated mathematical regions after FSDP setup.
+
+    Only the selected module ``forward`` is replaced. This keeps activation
+    checkpoint wrappers structurally transparent while FSDP pre/post hooks
+    execute outside the compiled region.
+    """
+    compile_conditions = getattr(model, "_compile_conditions", None)
+    if not compile_conditions:
+        raise ValueError(f"{type(model).__name__} does not declare _compile_conditions")
+
+    if compile_kwargs.get("fullgraph", True) is not True:
+        raise ValueError("Regional compile requires fullgraph=True")
+    if "mode" in compile_kwargs:
+        # torch.compile forbids passing both `mode` and `options`, and
+        # regional compile always injects options (emulate_precision_casts)
+        # for bf16 numerics parity. Fail here with an actionable message
+        # instead of letting torch raise a mode/options conflict about an
+        # `options` key the user never wrote.
+        raise ValueError("Regional compile sets inductor options "
+                         "(emulate_precision_casts) and cannot be combined "
+                         "with torch_compile_kwargs['mode']. Remove 'mode' or "
+                         "express its effect via torch_compile_kwargs['options'].")
+    kwargs = {**compile_kwargs, "fullgraph": True}
+    options = {"emulate_precision_casts": True}
+    options.update(kwargs.get("options") or {})
+    kwargs["options"] = options
+    compiled_count = 0
+    for name, submodule in list(model.named_modules()):
+        if not name:
+            continue
+        if any(condition(name, submodule) for condition in compile_conditions):
+            # Activation checkpoint wrappers are control-flow boundaries, not
+            # mathematical regions. Keep their saved-tensor/recompute logic
+            # eager and compile only the repeated block they own.
+            compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
+            forward = compile_target.forward
+            if isolate_regions:
+                # Variable LoRA ranks otherwise exhaust the cache shared by all instances of this code object.
+                function = forward.__func__
+                isolated = FunctionType(function.__code__.replace(co_name=f"{function.__name__}_{name}"),
+                                        function.__globals__, function.__name__, function.__defaults__,
+                                        function.__closure__)
+                isolated.__kwdefaults__ = function.__kwdefaults__
+                forward = MethodType(isolated, forward.__self__)
+            compile_target.forward = torch.compile(forward, **kwargs)
+            compiled_count += 1
+
+    if compiled_count == 0:
+        raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
+    logger.info(
+        "Enabled regional torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
+        compiled_count,
+        type(model).__name__,
+        kwargs,
+    )
+    return compiled_count
 
 
 def shard_model(
@@ -255,22 +911,19 @@ def shard_model(
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
     # Check if we should use size-based filtering
-    use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
+    use_size_filtering = envs.FASTVIDEO_FSDP2_AUTOWRAP.get()
 
     if not fsdp_shard_conditions:
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
         return
 
     default_param_dtype = getattr(mp_policy, "param_dtype", None)
-    dtype_selector = getattr(model, "_get_parameter_dtype", None)
-    ignored_params: set[nn.Parameter] = set()
-    if callable(dtype_selector) and default_param_dtype is not None:
-        ignored_params = {
-            parameter
-            for name, parameter in model.named_parameters()
-            if dtype_selector(name, default_param_dtype) != default_param_dtype
-        }
+    fp32_groups, ignored_params = _mixed_precision_module_groups(model, default_param_dtype)
     named_modules = list(model.named_modules())
+    fp32_group_ids = {id(module) for _, module in fp32_groups}
+    fp32_group_params = {
+        parameter for _, module in fp32_groups for parameter in module.parameters()
+    }
     ignored_params_by_module = {
         id(module): ignored_params.intersection(set(module.parameters()))
         for _, module in named_modules
@@ -290,11 +943,15 @@ def shard_model(
 
     if use_size_filtering:
         # Size-based filtering mode
-        min_params = int(os.environ.get("FASTVIDEO_FSDP2_MIN_PARAMS", "10000000"))
+        min_params = envs.FASTVIDEO_FSDP2_MIN_PARAMS.get()
         logger.info("Using size-based filtering with threshold: %.2fM", min_params / 1e6)
 
         for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
+                if id(m) in fp32_group_ids:
+                    continue
+                if fp32_group_params.intersection(set(m.parameters())):
+                    raise ValueError(f"FSDP shard condition for {n!r} contains a declared FP32 compute group")
                 # Count all parameters
                 param_count = sum(p.numel() for p in m.parameters(recurse=True))
 
@@ -316,6 +973,10 @@ def shard_model(
         # Shard all modules matching conditions
         for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
+                if id(m) in fp32_group_ids:
+                    continue
+                if fp32_group_params.intersection(set(m.parameters())):
+                    raise ValueError(f"FSDP shard condition for {n!r} contains a declared FP32 compute group")
                 module_kwargs = fsdp_kwargs
                 local_ignored_params = ignored_params_by_module[id(m)]
                 if local_ignored_params:
@@ -326,11 +987,31 @@ def shard_model(
         if num_layers_sharded == 0:
             raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
 
+    if fp32_groups:
+        fp32_kwargs = {
+            **fsdp_kwargs,
+            "mp_policy": MixedPrecisionPolicy(
+                param_dtype=torch.float32,
+                reduce_dtype=mp_policy.reduce_dtype,
+                output_dtype=mp_policy.output_dtype,
+                cast_forward_inputs=mp_policy.cast_forward_inputs,
+            ),
+        }
+        for _, module in fp32_groups:
+            fully_shard(module, **fp32_kwargs)
+        logger.info("Sharded FP32 compute modules: %s", [name for name, _ in fp32_groups])
+
     # Finally shard the entire model to account for any stragglers
     root_kwargs = fsdp_kwargs
     if ignored_params:
         root_kwargs = {**fsdp_kwargs, "ignored_params": ignored_params}
     fully_shard(model, **root_kwargs)
+
+
+def _drop_state_dict_parameter(model: nn.Module, param_name: str) -> None:
+    module_name, _, attr_name = param_name.rpartition(".")
+    module = model.get_submodule(module_name) if module_name else model
+    module.register_parameter(attr_name, None)
 
 
 # TODO(PY): device mesh for cfg parallel
@@ -343,6 +1024,8 @@ def load_model_from_full_model_state_dict(
     cpu_offload: bool = False,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
+    dense_lora_patch: DenseLoRAPatch | None = None,
+    skip_param_names: set[str] | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -356,6 +1039,9 @@ def load_model_from_full_model_state_dict(
         cpu_offload (bool): flag to check if FSDP offload is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
         training_mode (bool): apply FSDP only for training
+        dense_lora_patch (Optional[DenseLoRAPatch]): whole-parameter adapter payload,
+            folded into each full tensor before it is sharded so that FSDP/TP placement
+            is inherited from this function rather than reimplemented downstream
     Returns:
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys
@@ -365,12 +1051,44 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
-    named_parameters = dict(model.named_parameters())
-    named_buffers = dict(model.named_buffers())
+    # state_dict() keys are clean (checkpoint-wrapper hooks strip the AC
+    # prefix) but named_parameters()/named_buffers() are not; checkpoint keys
+    # are clean, so canonicalize before any name-keyed lookup. Without this,
+    # a loaded buffer inside an AC-wrapped block misses the named_buffers
+    # membership test below and is silently converted into a trainable
+    # nn.Parameter by load_state_dict(assign=True).
+    named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
+    named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
-                                                                           param_names_mapping)  # type: ignore
-    for target_param_name, full_tensor in custom_param_sd.items():
+    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
+        full_sd_iterator, param_names_mapping, skip_names=skip_param_names)  # type: ignore
+    preprocess_weight = getattr(model, "preprocess_loaded_weight", None)
+    if training_mode and callable(preprocess_weight):
+        custom_param_sd = {name: preprocess_weight(name, value) for name, value in custom_param_sd.items()}
+
+    checkpoint_key_aliases = getattr(model, "_fastvideo_checkpoint_key_aliases", {})
+    if checkpoint_key_aliases:
+        for original_name, transformed_name in checkpoint_key_aliases.items():
+            if original_name not in custom_param_sd:
+                continue
+            if transformed_name in custom_param_sd:
+                raise ValueError(f"Checkpoint transform maps multiple tensors to {transformed_name!r}")
+            custom_param_sd[transformed_name] = custom_param_sd.pop(original_name)
+            reverse_param_names_mapping[transformed_name] = reverse_param_names_mapping.pop(original_name)
+
+    # Drain rather than iterate. Production safetensors values may retain
+    # memory-mapped shard storage, while mapped or merged parameters can own
+    # ordinary allocations. Keeping the dict retains all of that source
+    # storage until loading finishes; popping releases each reference as soon
+    # as its conversion completes and lowers the host/unified-memory working
+    # set.
+    for target_param_name in list(custom_param_sd):
+        full_tensor = custom_param_sd.pop(target_param_name)
+        if skip_param_names and target_param_name in skip_param_names:
+            continue
+        if "::" in target_param_name:
+            logger.warning("Skipping packed NVFP4 export key mixed into dense shards: %s", target_param_name)
+            continue
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             # Some checkpoints include extra entries that are not part of the
@@ -399,6 +1117,10 @@ def load_model_from_full_model_state_dict(
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(target_param_name, param_dtype)
+        if dense_lora_patch is not None:
+            # Returns float32 when a delta was added, so the cast below is what lands
+            # the parameter in its storage dtype.
+            full_tensor = dense_lora_patch.apply_to(target_param_name, full_tensor)
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             target_param = named_parameters.get(target_param_name)
@@ -434,28 +1156,65 @@ def load_model_from_full_model_state_dict(
 
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
-    if unused_keys:
-        logger.warning("Found unloaded parameters in meta state dict: %s", unused_keys)
+    skipped_unused = unused_keys & skip_param_names if skip_param_names else set()
+    for skipped_name in skipped_unused:
+        _drop_state_dict_parameter(model, skipped_name)
+    unused_keys -= skipped_unused
+    if skipped_unused:
+        logger.info("Deferred %d NVFP4 linear weights to the packed DiT export (%s)",
+                    len(skipped_unused), _summarize_param_names(skipped_unused))
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
-    for new_param_name in unused_keys:
-        if not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
-            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
-                         ALLOWED_NEW_PARAM_PATTERNS)
-            raise ValueError(f"New parameter '{new_param_name}' is not supported. "
-                             f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed.")
+    missing_parameter_initializer = getattr(model, "_fastvideo_missing_parameter_initializer", None)
+    initialized_from_adapter: set[str] = set()
+    initialized_from_model: set[str] = set()
+    zero_initialized: set[str] = set()
+    for new_param_name in sorted(unused_keys):
+        # An adapter that ships the parameter outright both supplies the value and
+        # authorizes it: the allowlist exists to catch a checkpoint silently missing a
+        # weight, which is not the case when something deliberately provides one.
+        adapter_value = (dense_lora_patch.replacement_for(new_param_name) if dense_lora_patch is not None else None)
         meta_sharded_param = meta_sd.get(new_param_name)
+        if meta_sharded_param is None:
+            raise RuntimeError(f"Missing meta state for unloaded parameter {new_param_name!r}")
         target_dtype = param_dtype
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(new_param_name, param_dtype)
-        if not hasattr(meta_sharded_param, "device_mesh"):
-            # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=target_dtype)
+
+        initialized_tensor = adapter_value
+        if initialized_tensor is not None:
+            initialized_from_adapter.add(new_param_name)
+        elif callable(missing_parameter_initializer):
+            initialized_tensor = missing_parameter_initializer(
+                new_param_name,
+                meta_sharded_param.shape,
+                target_dtype,
+            )
+            if initialized_tensor is not None:
+                initialized_from_model.add(new_param_name)
+
+        if initialized_tensor is None and not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
+                         ALLOWED_NEW_PARAM_PATTERNS)
+            raise ValueError(f"New parameter '{new_param_name}' is not supported. "
+                             f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed.")
+        if initialized_tensor is None:
+            initialized_tensor = torch.zeros(tuple(meta_sharded_param.shape), device="cpu", dtype=target_dtype)
+            zero_initialized.add(new_param_name)
         else:
-            # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=target_dtype)
+            if tuple(initialized_tensor.shape) != tuple(meta_sharded_param.shape):
+                if adapter_value is not None:
+                    raise ValueError(f"LoRA replacement for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
+                                     f"but the parameter is {tuple(meta_sharded_param.shape)}")
+                raise ValueError(f"Initializer returned shape {tuple(initialized_tensor.shape)} for {new_param_name!r}; "
+                                 f"expected {tuple(meta_sharded_param.shape)}")
+            initialized_tensor = initialized_tensor.to(dtype=target_dtype)
+        if not hasattr(meta_sharded_param, "device_mesh"):
+            sharded_tensor = initialized_tensor.to(device=device)
+        else:
+            full_tensor = initialized_tensor.to(device=device)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
@@ -464,6 +1223,19 @@ def load_model_from_full_model_state_dict(
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
+
+    if initialized_from_adapter:
+        logger.info("Parameters absent from the checkpoint and supplied by the LoRA adapter: %d (%s)",
+                    len(initialized_from_adapter), _summarize_param_names(initialized_from_adapter))
+    if initialized_from_model:
+        logger.info("Parameters absent from the checkpoint and supplied by the model initializer: %d (%s)",
+                    len(initialized_from_model), _summarize_param_names(initialized_from_model))
+    if zero_initialized:
+        logger.warning("Found unloaded parameters in meta state dict, zero-initializing: %d (%s)",
+                       len(zero_initialized), _summarize_param_names(zero_initialized))
+
+    if dense_lora_patch is not None:
+        dense_lora_patch.report_unapplied()
 
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)

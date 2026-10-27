@@ -90,12 +90,8 @@ class MatrixGame3ActionModule(nn.Module):
     ):
         super().__init__()
         patch_size = patch_size if patch_size is not None else [1, 2, 2]
-        rope_dim_list = (
-            rope_dim_list if rope_dim_list is not None else [8, 28, 28]
-        )
-        mouse_qk_dim_list = (
-            mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28]
-        )
+        rope_dim_list = (rope_dim_list if rope_dim_list is not None else [8, 28, 28])
+        mouse_qk_dim_list = (mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28])
         blocks = blocks if blocks is not None else []
         self.enable_mouse = enable_mouse
         self.enable_keyboard = enable_keyboard
@@ -115,8 +111,7 @@ class MatrixGame3ActionModule(nn.Module):
             c = mouse_hidden_dim
             self.mouse_mlp = nn.Sequential(
                 nn.Linear(
-                    mouse_dim_in * vae_time_compression_ratio * windows_size
-                    + img_hidden_size,
+                    mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size,
                     c,
                     bias=True,
                 ),
@@ -127,64 +122,42 @@ class MatrixGame3ActionModule(nn.Module):
 
             head_dim = c // heads_num
             self.t_qkv = ReplicatedLinear(c, c * 3, bias=qkv_bias)
-            self.img_attn_q_norm = (
-                WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.img_attn_k_norm = (
-                WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.proj_mouse = ReplicatedLinear(
-                c, img_hidden_size, bias=qkv_bias
-            )
+            self.img_attn_q_norm = (WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity())
+            self.img_attn_k_norm = (WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity())
+            self.proj_mouse = ReplicatedLinear(c, img_hidden_size, bias=qkv_bias)
 
         if self.enable_keyboard:
             head_dim_key = keyboard_hidden_dim // heads_num
-            self.key_attn_q_norm = (
-                WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.key_attn_k_norm = (
-                WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
-            )
+            self.key_attn_q_norm = (WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity())
+            self.key_attn_k_norm = (WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity())
 
-            self.mouse_attn_q = ReplicatedLinear(
-                img_hidden_size, keyboard_hidden_dim, bias=qkv_bias
-            )
+            self.mouse_attn_q = ReplicatedLinear(img_hidden_size, keyboard_hidden_dim, bias=qkv_bias)
             self.keyboard_attn_kv = ReplicatedLinear(
                 hidden_size * windows_size * vae_time_compression_ratio,
                 keyboard_hidden_dim * 2,
                 bias=qkv_bias,
             )
-            self.proj_keyboard = ReplicatedLinear(
-                keyboard_hidden_dim, img_hidden_size, bias=qkv_bias
-            )
+            self.proj_keyboard = ReplicatedLinear(keyboard_hidden_dim, img_hidden_size, bias=qkv_bias)
 
-        self.mouse_attn_layer = (
-            LocalAttention(
-                num_heads=heads_num,
-                head_size=mouse_hidden_dim // heads_num,
-                causal=False,
-                supported_attention_backends=(
-                    AttentionBackendEnum.FLASH_ATTN,
-                    AttentionBackendEnum.TORCH_SDPA,
-                ),
-            )
-            if self.enable_mouse
-            else None
-        )
+        self.mouse_attn_layer = (LocalAttention(
+            num_heads=heads_num,
+            head_size=mouse_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            ),
+        ) if self.enable_mouse else None)
 
-        self.keyboard_attn_layer = (
-            LocalAttention(
-                num_heads=heads_num,
-                head_size=keyboard_hidden_dim // heads_num,
-                causal=False,
-                supported_attention_backends=(
-                    AttentionBackendEnum.FLASH_ATTN,
-                    AttentionBackendEnum.TORCH_SDPA,
-                ),
-            )
-            if self.enable_keyboard
-            else None
-        )
+        self.keyboard_attn_layer = (LocalAttention(
+            num_heads=heads_num,
+            head_size=keyboard_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            ),
+        ) if self.enable_keyboard else None)
 
         self.vae_time_compression_ratio = vae_time_compression_ratio
         self.windows_size = windows_size
@@ -236,33 +209,20 @@ class MatrixGame3ActionModule(nn.Module):
         if isinstance(self.patch_size, int):
             assert all(s % self.patch_size == 0 for s in latents_size), (
                 f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.patch_size}), "
-                f"but got {latents_size}."
-            )
+                f"but got {latents_size}.")
             rope_sizes = [s // self.patch_size for s in latents_size]
         elif isinstance(self.patch_size, list):
-            assert all(
-                s % self.patch_size[idx] == 0
-                for idx, s in enumerate(latents_size)
-            ), (
+            assert all(s % self.patch_size[idx] == 0 for idx, s in enumerate(latents_size)), (
                 f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.patch_size}), "
-                f"but got {latents_size}."
-            )
-            rope_sizes = [
-                s // self.patch_size[idx] for idx, s in enumerate(latents_size)
-            ]
+                f"but got {latents_size}.")
+            rope_sizes = [s // self.patch_size[idx] for idx, s in enumerate(latents_size)]
 
         if len(rope_sizes) != target_ndim:
-            rope_sizes = [1] * (
-                target_ndim - len(rope_sizes)
-            ) + rope_sizes  # time axis
+            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
 
         if rope_dim_list is None:
-            rope_dim_list = [
-                head_dim // target_ndim for _ in range(target_ndim)
-            ]
-        assert sum(rope_dim_list) == head_dim, (
-            "sum(rope_dim_list) should equal to head_dim of attention layer"
-        )
+            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+        assert sum(rope_dim_list) == head_dim, ("sum(rope_dim_list) should equal to head_dim of attention layer")
         # Use Matrix-Game wrapper for FastVideo's function
         freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame(
             rope_dim_list,
@@ -270,17 +230,9 @@ class MatrixGame3ActionModule(nn.Module):
             theta=self.rope_theta,
             theta_rescale_factor=1,
         )
-        return freqs_cos[
-            -video_length
-            * rope_sizes[1]
-            * rope_sizes[2]
-            // self.patch_size[0] :
-        ], freqs_sin[
-            -video_length
-            * rope_sizes[1]
-            * rope_sizes[2]
-            // self.patch_size[0] :
-        ]
+        return freqs_cos[-video_length * rope_sizes[1] * rope_sizes[2] //
+                         self.patch_size[0]:], freqs_sin[-video_length * rope_sizes[1] * rope_sizes[2] //
+                                                         self.patch_size[0]:]
 
     def _forward_mouse(
         self,
@@ -301,11 +253,10 @@ class MatrixGame3ActionModule(nn.Module):
         group_mouse = [
             mouse_condition[
                 :,
-                self.vae_time_compression_ratio * (i - self.windows_size)
-                + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                self.vae_time_compression_ratio * (i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio +
+                pad_t,
                 :,
-            ]
-            for i in range(N_feats)
+            ] for i in range(N_feats)
         ]
         group_mouse = torch.stack(group_mouse, dim=1)
         mem_len = 0
@@ -317,19 +268,13 @@ class MatrixGame3ActionModule(nn.Module):
         actual_num_frames = group_mouse.shape[1]
 
         S = th * tw
-        group_mouse = group_mouse.unsqueeze(-1).expand(
-            B, actual_num_frames, pad_t, C, S
-        )
-        group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(
-            B * S, actual_num_frames, pad_t * C
-        )
+        group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)
+        group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, actual_num_frames, pad_t * C)
 
         group_mouse = torch.cat([hidden_states, group_mouse], dim=-1)
         group_mouse = self.mouse_mlp(group_mouse)
         mouse_qkv, _ = self.t_qkv(group_mouse)
-        q, k, v = rearrange(
-            mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
-        )
+        q, k, v = rearrange(mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
         q = self.img_attn_q_norm(q).to(v)
         k = self.img_attn_k_norm(k).to(v)
         if mem_len > 0:
@@ -364,25 +309,20 @@ class MatrixGame3ActionModule(nn.Module):
         group_keyboard = [
             keyboard_condition[
                 :,
-                self.vae_time_compression_ratio * (i - self.windows_size)
-                + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                self.vae_time_compression_ratio * (i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio +
+                pad_t,
                 :,
-            ]
-            for i in range(N_feats)
+            ] for i in range(N_feats)
         ]
         group_keyboard = torch.stack(group_keyboard, dim=1)
         mem_len = 0
         if keyboard_cond_memory is not None:
             mem_len = keyboard_cond_memory.shape[1]
-            k_mem = keyboard_cond_memory.to(
-                device=group_keyboard.device, dtype=group_keyboard.dtype
-            )
+            k_mem = keyboard_cond_memory.to(device=group_keyboard.device, dtype=group_keyboard.dtype)
             k_mem = self.keyboard_embed(k_mem)
             k_mem = k_mem.unsqueeze(2).expand(-1, -1, pad_t, -1)
             group_keyboard = torch.cat([k_mem, group_keyboard], dim=1)
-        group_keyboard = group_keyboard.reshape(
-            shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1)
-        )
+        group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1))
 
         mouse_q, _ = self.mouse_attn_q(hidden_states)
         keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
@@ -392,9 +332,7 @@ class MatrixGame3ActionModule(nn.Module):
         q = mouse_q.view(B, L, self.heads_num, D)
 
         B, L, KHD = keyboard_kv.shape
-        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
-            2, 0, 1, 3, 4
-        )
+        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(2, 0, 1, 3, 4)
 
         q = self.key_attn_q_norm(q).to(v)
         k = self.key_attn_k_norm(k).to(v)
@@ -438,30 +376,23 @@ class MatrixGame3ActionModule(nn.Module):
         target_device = x.device
         target_dtype = x.dtype
         if mouse_condition is not None:
-            mouse_condition = mouse_condition.to(
-                device=target_device, dtype=target_dtype
-            )
+            mouse_condition = mouse_condition.to(device=target_device, dtype=target_dtype)
         if keyboard_condition is not None:
-            keyboard_condition = keyboard_condition.to(
-                device=target_device, dtype=target_dtype
-            )
+            keyboard_condition = keyboard_condition.to(device=target_device, dtype=target_dtype)
         else:
             return x
 
         B, N_frames, C = keyboard_condition.shape
         assert tt * th * tw == x.shape[1]
-        assert (
-            ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
-            or (N_frames % self.vae_time_compression_ratio == 0)
-        )
+        assert (((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
+                or (N_frames % self.vae_time_compression_ratio == 0))
         if ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0:
             N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
         else:
             N_feats = N_frames // self.vae_time_compression_ratio
 
         # Lazy initialization of freqs
-        if (self._freqs_cos is None or self._freqs_sin is None
-                or self._freqs_cos.device != x.device):
+        if (self._freqs_cos is None or self._freqs_sin is None or self._freqs_cos.device != x.device):
             fc, fs = self.get_rotary_pos_embed(
                 7500,
                 self.patch_size[1],
@@ -475,9 +406,7 @@ class MatrixGame3ActionModule(nn.Module):
         freqs_cis = (self._freqs_cos, self._freqs_sin)
 
         if self.enable_mouse and mouse_condition is not None:
-            hidden_states = rearrange(
-                x, "B (T S) C -> (B S) T C", T=tt, S=th * tw
-            )
+            hidden_states = rearrange(x, "B (T S) C -> (B S) T C", T=tt, S=th * tw)
             B, N_frames, C = mouse_condition.shape
         else:
             hidden_states = x

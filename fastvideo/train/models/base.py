@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 
@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.pipelines import TrainingBatch
 
+# Video models return one flow tensor. Joint video/audio models return an
+# ordered pair so training methods can apply each modality's scheduler target.
+NoisePrediction: TypeAlias = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
+
 
 class ModelBase(TrainRoleBase, ABC):
     """Per-role model instance.
@@ -33,6 +37,9 @@ class ModelBase(TrainRoleBase, ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+    _transformer_module_type = "transformer"
+    # Full-weight plugins cannot retain all unsharded accumulation gradients.
+    supports_gradient_accumulation_no_sync = False
 
     def __init__(
         self,
@@ -54,6 +61,11 @@ class ModelBase(TrainRoleBase, ABC):
         if self.attention_backend is None:
             return None
         return self.attention_backend.name
+
+    @property
+    def transformer_module_type(self) -> str:
+        """Physical checkpoint component that owns this role's transformer."""
+        return str(self._transformer_module_type)
 
     @property
     def device(self) -> torch.device:
@@ -81,6 +93,9 @@ class ModelBase(TrainRoleBase, ABC):
     def _enable_lora_if_configured(
         self,
         transformer: torch.nn.Module,
+        *,
+        prepare_for_fsdp: bool = False,
+        initialization_seed: int = 0,
     ) -> bool:
         """Enable LoRA training for model plugins that request it.
 
@@ -101,6 +116,8 @@ class ModelBase(TrainRoleBase, ABC):
             lora_rank=cfg.rank,
             lora_alpha=cfg.alpha,
             lora_target_modules=cfg.target_modules,
+            prepare_for_fsdp=prepare_for_fsdp,
+            initialization_seed=initialization_seed,
         )
         return True
 
@@ -120,6 +137,15 @@ class ModelBase(TrainRoleBase, ABC):
 
     def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
+
+    def eager_optimizer_state_parameters(self, ) -> tuple[torch.nn.Parameter, ...]:
+        """Parameters whose optimizer state must exist before their first grad.
+
+        Most models return an empty tuple. Models with intermittently used
+        trainable parameters can override this so strict distributed
+        checkpoints retain a stable optimizer-state schema across steps.
+        """
+        return ()
 
     def decode_latents(
         self,
@@ -168,6 +194,22 @@ class ModelBase(TrainRoleBase, ABC):
     ) -> torch.Tensor:
         """Apply forward-process noise at *timestep*."""
 
+    def add_noise_for_batch(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+    ) -> torch.Tensor:
+        """Apply noise with optional immutable geometry carried by ``batch``.
+
+        Video-only and fixed-shape models keep their existing behavior. Joint
+        packed models override this hook when splitting the tensor requires
+        batch-local shape context.
+        """
+        del batch
+        return self.add_noise(clean_latents, noise, timestep)
+
     @abstractmethod
     def predict_noise(
         self,
@@ -178,8 +220,8 @@ class ModelBase(TrainRoleBase, ABC):
         conditional: bool,
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        """Predict noise/flow for the given noisy latents."""
+    ) -> NoisePrediction:
+        """Predict video flow or an ordered ``(video, audio)`` flow pair."""
 
     def predict_x0(
         self,
@@ -191,7 +233,12 @@ class ModelBase(TrainRoleBase, ABC):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        """Predict x0 via ``predict_noise`` + conversion."""
+        """Convert a video-only flow prediction to clean video latents.
+
+        This helper owns one noisy video tensor and one video scheduler. Joint
+        video/audio callers apply their modality-specific conversions where
+        both noisy tensors and both schedulers are available.
+        """
         pred_noise = self.predict_noise(
             noisy_latents,
             timestep,
@@ -200,6 +247,8 @@ class ModelBase(TrainRoleBase, ABC):
             cfg_uncond=cfg_uncond,
             attn_kind=attn_kind,
         )
+        if isinstance(pred_noise, tuple):
+            raise TypeError("predict_x0 requires one video prediction tensor")
         return pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_latents.flatten(0, 1),

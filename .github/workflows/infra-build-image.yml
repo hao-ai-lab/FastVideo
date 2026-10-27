@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      build_ci_runner_image:
+        description: 'Build the ARM64 CUDA 13 CI runner image (sm_100)'
+        required: false
+        default: false
+        type: boolean
   # Auto-rebuild the CUDA images when a repository-controlled image input
   # changes on main. This includes the trusted SM89 kernel artifact's source,
   # metadata/key helper, ABI dependency metadata, and build orchestration.
@@ -51,7 +56,9 @@ jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
   # builds natively and pushes only by digest; publish-cuda-manifests is the sole
   # owner of the shared tags. CUDA 12.6 arm64 targets Hopper (sm_90a / GH200 class),
-  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 (sm_121).
+  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 as 12.1a
+  # (sm_121a), as a native Spark build does: the plain 12.1 target drops the
+  # arch-specific attn_qat_infer FP4 kernels.
   # 12.6.3/cu126 owns the default `py3.12`/`latest` tags and keeps its versioned
   # aliases; 13.0.0/cu130 is published under explicit versioned tags. Flash-attn
   # 2.8.3 comes from the architecture-specific prebuilt releases.
@@ -73,6 +80,12 @@ jobs:
             torch_cuda_arch_list:
               amd64: '9.0a'
               arm64: '9.0a'
+            install_flash_attn:
+              amd64: '1'
+              arm64: '1'
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '1'
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
             torch_backend: 'cu130'
@@ -80,7 +93,17 @@ jobs:
             cmake_build_parallel_level: '1'
             torch_cuda_arch_list:
               amd64: '9.0a'
-              arm64: '12.1'
+              arm64: '12.1a'
+            # FA4 cute does not run on GB10 (sm_12x), and its cutlass-dsl pin
+            # breaks flashinfer there; GB10 FP4 attention uses fastvideo-kernel.
+            # FA2 gives no measured GB10 speedup and changes the output relative
+            # to a native Spark install, so the GB10 image matches that install.
+            install_flash_attn:
+              amd64: '1'
+              arm64: '0'
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '0'
         architecture:
           - name: amd64
             runner: ubuntu-latest
@@ -100,6 +123,8 @@ jobs:
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
         TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.torch_cuda_arch_list[matrix.architecture.name] }}
+        INSTALL_FLASH_ATTN=${{ matrix.cuda.install_flash_attn[matrix.architecture.name] }}
+        INSTALL_FA4_CUTE=${{ matrix.cuda.install_fa4_cute[matrix.architecture.name] }}
         CMAKE_BUILD_PARALLEL_LEVEL=${{ matrix.cuda.cmake_build_parallel_level }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
         FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
@@ -197,6 +222,28 @@ jobs:
 
           docker buildx imagetools create "${TAG_ARGS[@]}" "${IMAGE_REFS[@]}"
           docker buildx imagetools inspect "${TAGS[0]}"
+
+  # The CI runner is ARM64 like DGX Spark, but targets sm_100 rather than sm_121.
+  # Publish a single-architecture variant so the self-hosted CI runner can reuse
+  # the exact prebuilt kernel instead of compiling it in every job.
+  build-ci-runner-image:
+    if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_ci_runner_image == 'true' }}
+    uses: ./.github/workflows/_template-build-image.yml
+    with:
+      python_version: '3.12'
+      dockerfile_path: docker/Dockerfile
+      tag_suffix: py3.12-cuda13.0.0-sm100
+      runner: ubuntu-24.04-arm
+      architecture: arm64
+      build_args: |
+        PYTHON_VERSION=3.12
+        CUDA_VERSION=13.0.0
+        UV_TORCH_BACKEND=cu130
+        TORCH_CUDA_ARCH_LIST=10.0
+        CMAKE_BUILD_PARALLEL_LEVEL=1
+        FLASH_ATTN_WHEEL_TAG=cu130torch2.12
+        FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
+    secrets: inherit
 
   # Dreamverse matrix: {backend, UI} x {12.6.3, 13.0.0}, Python 3.12. Torch backend
   # matches the base CUDA (cu126 / cu130). Keep these images amd64-only until the

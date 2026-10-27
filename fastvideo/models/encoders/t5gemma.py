@@ -14,13 +14,13 @@ on top — the pipeline prompt-preprocessing stage handles pad-or-trim to
 """
 from __future__ import annotations
 
-import os
 from typing import Iterable
 
 import torch
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -61,18 +61,16 @@ class T5GemmaEncoderModel(TextEncoder):
 
         path = self.t5gemma_model_path
         if not path:
-            raise ValueError(
-                "t5gemma_model_path must be set. Expected "
-                "`google/t5gemma-9b-9b-ul2` or a local path to an "
-                "equivalent T5-Gemma encoder."
-            )
+            raise ValueError("t5gemma_model_path must be set. Expected "
+                             "`google/t5gemma-9b-9b-ul2` or a local path to an "
+                             "equivalent T5-Gemma encoder.")
         dtype = getattr(torch, self.t5gemma_dtype, torch.bfloat16)
         model = HFEncoder.from_pretrained(
             path,
             is_encoder_decoder=False,
             dtype=dtype,
         )
-        if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
+        if effective_attention_backend(self.config) == AttentionBackendEnum.TORCH_SDPA:
             if hasattr(model.config, "attn_implementation"):
                 model.config.attn_implementation = "sdpa"
             if hasattr(model.config, "_attn_implementation"):
@@ -124,9 +122,7 @@ class T5GemmaEncoderModel(TextEncoder):
             attention_mask=attention_mask,
         )
 
-    def load_weights(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         # The HF T5-Gemma encoder is lazy-loaded from `t5gemma_model_path`
         # (see `_build_t5gemma_model`), so this wrapper owns zero
         # FastVideo-native parameters and `named_parameters()` is filtered

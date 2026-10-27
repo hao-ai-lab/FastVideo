@@ -1,5 +1,4 @@
 # Some functions from HY-WorldPlay/hyvideo/generate.py
-
 """
 Pose processing utilities for HYWorld video generation.
 
@@ -16,7 +15,6 @@ from scipy.spatial.transform import Rotation as R
 from typing import Union, Optional
 
 from .trajectory import generate_camera_trajectory_local
-
 
 # Mapping from one-hot action encoding to single label
 mapping = {
@@ -87,9 +85,7 @@ def parse_pose_string(
 
         parts = cmd.split("-")
         if len(parts) != 2:
-            raise ValueError(
-                f"Invalid pose command: {cmd}. Expected format: 'action-duration'"
-            )
+            raise ValueError(f"Invalid pose command: {cmd}. Expected format: 'action-duration'")
 
         action = parts[0].strip()
         try:
@@ -133,12 +129,11 @@ def parse_pose_string(
             for _ in range(num_frames):
                 motions.append({"yaw": yaw_speed})
         else:
-            raise ValueError(
-                f"Unknown action: {action}. "
-                f"Supported actions: w, s, a, d, up, down, left, right"
-            )
+            raise ValueError(f"Unknown action: {action}. "
+                             f"Supported actions: w, s, a, d, up, down, left, right")
 
     return motions
+
 
 def pose_string_to_json(
     pose_string: str,
@@ -156,7 +151,7 @@ def pose_string_to_json(
     """
     if intrinsic is None:
         intrinsic = DEFAULT_INTRINSIC
-    
+
     motions = parse_pose_string(pose_string)
     poses = generate_camera_trajectory_local(motions)
 
@@ -165,6 +160,7 @@ def pose_string_to_json(
         pose_json[str(i)] = {"extrinsic": p.tolist(), "K": intrinsic}
 
     return pose_json
+
 
 def pose_to_input(
     pose_data: Union[str, dict],
@@ -200,16 +196,13 @@ def pose_to_input(
     elif isinstance(pose_data, dict):
         pose_json = pose_data
     else:
-        raise ValueError(
-            f"Invalid pose_data type: {type(pose_data)}. Expected str or dict."
-        )
+        raise ValueError(f"Invalid pose_data type: {type(pose_data)}. Expected str or dict.")
 
     pose_keys = list(pose_json.keys())
     latent_num_from_pose = len(pose_keys)
     assert latent_num_from_pose == latent_num, (
         f"pose corresponds to {latent_num_from_pose * 4 - 3} frames, num_frames "
-        f"must be set to {latent_num_from_pose * 4 - 3} to ensure alignment."
-    )
+        f"must be set to {latent_num_from_pose * 4 - 3} to ensure alignment.")
 
     intrinsic_list = []
     w2c_list = []
@@ -218,7 +211,7 @@ def pose_to_input(
         c2w = np.array(pose_json[t_key]["extrinsic"])
         w2c = np.linalg.inv(c2w)
         w2c_list.append(w2c)
-        
+
         # Normalize intrinsics
         intrinsic = np.array(pose_json[t_key]["K"])
         intrinsic[0, 0] /= intrinsic[0, 2] * 2
@@ -236,7 +229,7 @@ def pose_to_input(
     relative_c2w = np.zeros_like(c2ws)
     relative_c2w[0, ...] = c2ws[0, ...]
     relative_c2w[1:, ...] = C_inv @ c2ws[1:, ...]
-    
+
     # Initialize one-hot action encodings
     trans_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
     rotate_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
@@ -245,7 +238,7 @@ def pose_to_input(
     for i in range(1, relative_c2w.shape[0]):
         move_dirs = relative_c2w[i, :3, 3]  # direction vector
         move_norms = np.linalg.norm(move_dirs)
-        
+
         if move_norms > move_norm_valid:  # threshold for movement
             move_norm_dirs = move_dirs / move_norms
             angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
@@ -259,9 +252,7 @@ def pose_to_input(
 
         # Determine movement and rotation actions
         if move_norms > move_norm_valid:  # threshold for movement
-            if (not tps) or (
-                tps and abs(rot_angles_deg[1]) < 5e-2 and abs(rot_angles_deg[0]) < 5e-2
-            ):
+            if (not tps) or (tps and abs(rot_angles_deg[1]) < 5e-2 and abs(rot_angles_deg[0]) < 5e-2):
                 if trans_angles_deg[2] < 60:
                     trans_one_hot[i, 0] = 1  # forward
                 elif trans_angles_deg[2] > 120:
@@ -305,7 +296,6 @@ def camera_center_normalization(w2c: np.ndarray) -> np.ndarray:
     return np.linalg.inv(c2w_aligned)
 
 
-
 def parse_pose_string_to_actions(pose_string: str, fps: int = 24) -> list[dict]:
     """
     Parse pose string to frame-level action timeline.
@@ -335,9 +325,7 @@ def parse_pose_string_to_actions(pose_string: str, fps: int = 24) -> list[dict]:
 
         parts = cmd.split("-")
         if len(parts) != 2:
-            raise ValueError(
-                f"Invalid pose command: {cmd}. Expected format: 'action-duration'"
-            )
+            raise ValueError(f"Invalid pose command: {cmd}. Expected format: 'action-duration'")
 
         action = parts[0].strip()
         try:

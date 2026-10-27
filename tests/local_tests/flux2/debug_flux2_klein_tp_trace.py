@@ -24,7 +24,6 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
-
 TRACE_DIR = Path("/tmp/opencode")
 REF_LOG = TRACE_DIR / "flux2_klein_tp2_ref_layers.log"
 FV_LOG = TRACE_DIR / "flux2_klein_tp2_fv_layers.log"
@@ -64,6 +63,7 @@ def _load_tensor_from_safetensors(paths: Iterable[str], key: str) -> torch.Tenso
 
 
 class _DenseLinearTuple(torch.nn.Module):
+
     def __init__(self, weight: torch.Tensor, bias: torch.Tensor | None = None):
         super().__init__()
         self.weight = torch.nn.Parameter(weight, requires_grad=False)
@@ -167,36 +167,33 @@ def _trace_names(num_double: int, num_single: int) -> list[str]:
     drill_double = os.getenv("FLUX2_KLEIN_TP_TRACE_DRILL_DOUBLE_BLOCK", "")
     if drill_double:
         base = f"transformer_blocks.{int(drill_double)}"
-        names.extend(
-            f"{base}.{suffix}"
-            for suffix in (
-                "norm1",
-                "norm1_context",
-                "attn.to_q",
-                "attn.to_k",
-                "attn.to_v",
-                "attn.add_q_proj",
-                "attn.add_k_proj",
-                "attn.add_v_proj",
-                "attn.norm_q",
-                "attn.norm_k",
-                "attn.norm_added_q",
-                "attn.norm_added_k",
-                "attn.to_add_out",
-                "attn.to_out.0",
-                "attn",
-                "norm2",
-                "ff.linear_in",
-                "ff.act_fn",
-                "ff.linear_out",
-                "ff",
-                "norm2_context",
-                "ff_context.linear_in",
-                "ff_context.act_fn",
-                "ff_context.linear_out",
-                "ff_context",
-            )
-        )
+        names.extend(f"{base}.{suffix}" for suffix in (
+            "norm1",
+            "norm1_context",
+            "attn.to_q",
+            "attn.to_k",
+            "attn.to_v",
+            "attn.add_q_proj",
+            "attn.add_k_proj",
+            "attn.add_v_proj",
+            "attn.norm_q",
+            "attn.norm_k",
+            "attn.norm_added_q",
+            "attn.norm_added_k",
+            "attn.to_add_out",
+            "attn.to_out.0",
+            "attn",
+            "norm2",
+            "ff.linear_in",
+            "ff.act_fn",
+            "ff.linear_out",
+            "ff",
+            "norm2_context",
+            "ff_context.linear_in",
+            "ff_context.act_fn",
+            "ff_context.linear_out",
+            "ff_context",
+        ))
     return names
 
 
@@ -204,11 +201,9 @@ def _write_trace(path: Path, trace: dict[str, torch.Tensor]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for name, tensor in trace.items():
             t = tensor.float()
-            f.write(
-                f"{name} {tuple(t.shape)} "
-                f"{t.abs().mean().item():.8f} {t.sum().item():.8f} "
-                f"{t.min().item():.8f} {t.max().item():.8f}\n"
-            )
+            f.write(f"{name} {tuple(t.shape)} "
+                    f"{t.abs().mean().item():.8f} {t.sum().item():.8f} "
+                    f"{t.min().item():.8f} {t.max().item():.8f}\n")
 
 
 def _compare_traces(
@@ -233,11 +228,9 @@ def _compare_traces(
             max_diff = diff.max().item()
             mean_diff = diff.mean().item()
             median_diff = diff.median().item()
-            f.write(
-                f"{name} max={max_diff:.8f} mean={mean_diff:.8f} "
-                f"median={median_diff:.8f} ref_abs={ref_tensor.abs().mean().item():.8f} "
-                f"fv_abs={fv_tensor.abs().mean().item():.8f}\n"
-            )
+            f.write(f"{name} max={max_diff:.8f} mean={mean_diff:.8f} "
+                    f"median={median_diff:.8f} ref_abs={ref_tensor.abs().mean().item():.8f} "
+                    f"fv_abs={fv_tensor.abs().mean().item():.8f}\n")
             if first is None and max_diff > 0:
                 first = (name, f"max={max_diff:.8f} mean={mean_diff:.8f}")
     if first is None:
@@ -300,6 +293,7 @@ def _run_reference(
     ).eval().to(device)
 
     class _ZeroGuidance(torch.nn.Module):
+
         def __init__(self, embedding_dim: int):
             super().__init__()
             self.embedding_dim = embedding_dim
@@ -312,7 +306,8 @@ def _run_reference(
                 dtype=guidance_proj.dtype,
             )
 
-    ref.time_guidance_embed.guidance_embedder = _ZeroGuidance(int(cfg["num_attention_heads"]) * int(cfg["attention_head_dim"]))
+    ref.time_guidance_embed.guidance_embedder = _ZeroGuidance(
+        int(cfg["num_attention_heads"]) * int(cfg["attention_head_dim"]))
     handles = _attach_hooks(ref, names, trace)
     hidden, encoder, timestep, guidance, txt_ids, img_ids = inputs
     try:
@@ -362,7 +357,10 @@ def _run_fastvideo_tp(
 
     fv = maybe_load_fsdp_model(
         model_cls=fv_cls,
-        init_params={"config": dit_cfg, "hf_config": dict(cfg)},
+        init_params={
+            "config": dit_cfg,
+            "hf_config": dict(cfg)
+        },
         weight_dir_list=weight_paths,
         device=device,
         hsdp_replicate_dim=1,
@@ -383,11 +381,8 @@ def _run_fastvideo_tp(
         dense_modules.append("context_embedder")
     if os.getenv("FLUX2_KLEIN_TP_TRACE_PATCH_BLOCK0_FF_CONTEXT_OUT_DENSE", "0") == "1":
         dense_modules.append("transformer_blocks.0.ff_context.linear_out")
-    dense_modules.extend(
-        name.strip()
-        for name in os.getenv("FLUX2_KLEIN_TP_TRACE_DENSE_LINEAR_MODULES", "").split(",")
-        if name.strip()
-    )
+    dense_modules.extend(name.strip() for name in os.getenv("FLUX2_KLEIN_TP_TRACE_DENSE_LINEAR_MODULES", "").split(",")
+                         if name.strip())
     for module_name in dict.fromkeys(dense_modules):
         _patch_dense_linear_tuple(fv, weight_paths, weight_keys, module_name, device, dtype)
 

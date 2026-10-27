@@ -6,7 +6,7 @@ results/
 wandb/
 *.ipynb
 *.jpg
-!examples/dataset/lingbotworld2/image.jpg
+!examples/datasets/lingbotworld2/image.jpg
 *.safetensors
 *.mp4
 *.png
@@ -23,6 +23,7 @@ Miniconda3-latest-Linux-x86_64.sh
 *validation/
 data/
 outputs/
+outputs_audio/
 outputs_video
 checkpoints/
 sbatch.sh
@@ -35,7 +36,6 @@ env
 *.log
 weights/
 logs/
-/Z-Image/
 official_weights/
 converted_weights/
 
@@ -52,14 +52,16 @@ dist/
 eggs/
 .eggs/
 
-# MkDocs documentation
+# Generated documentation
 site/
+docs/assets/cookbook-config/
+examples/serving/clients/node_modules/
+docs/node_modules/
 docs/getting_started/examples/
 docs/examples/
 docs/inference/examples/
 docs/training/examples/
 docs/distillation/examples/
-!requirements-mkdocs.txt
 
 # VSCode
 .vscode/
@@ -131,8 +133,16 @@ openspec/
 fastvideo/tests/ssim/reference_videos/**
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 !fastvideo/tests/ssim/reference_videos/**/*.png
+fastvideo/tests/ssim/.reference_videos_download.lock
+
+# Local H3 MLX kernel / exactness benches (JSON, logs, frames, videos)
+.kernel_bench/
 
 # Editor logs and local Python version pins (accidentally committed)
 *.nvimlog
 .nvimlog
 .python-version
+/LTX-2-Reference/
+/DFDReference/
+scripts/benchmarks/minimax_h3_pro6000/headline_results/
+fastvideo/tests/ssim/.reference_videos_download.lock

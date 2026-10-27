@@ -23,7 +23,6 @@ from fastvideo.entrypoints.openai.protocol import (
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import FlexibleArgumentParser
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _INVENTORY_PATH = _REPO_ROOT / "docs" / "design" / "inference_schema_parity_inventory.yaml"
 
@@ -69,19 +68,14 @@ def _get_extra_dataclass_fields(
         package = importlib.import_module(package_name)
         if not hasattr(package, "__path__"):
             continue
-        for _, modname, is_pkg in pkgutil.walk_packages(
-                package.__path__, prefix=f"{package_name}."):
+        for _, modname, is_pkg in pkgutil.walk_packages(package.__path__, prefix=f"{package_name}."):
             if modname.endswith(".__pycache__"):
                 continue
             module = importlib.import_module(modname)
             for obj in vars(module).values():
-                if (isinstance(obj, type)
-                        and dataclasses.is_dataclass(obj)
-                        and issubclass(obj, base_cls)
+                if (isinstance(obj, type) and dataclasses.is_dataclass(obj) and issubclass(obj, base_cls)
                         and obj is not base_cls):
-                    extras.update(
-                        f.name for f in dataclasses.fields(obj)
-                        if f.name not in base_fields)
+                    extras.update(f.name for f in dataclasses.fields(obj) if f.name not in base_fields)
     return extras
 
 
@@ -90,11 +84,7 @@ def _get_cli_dests(cmd_cls: type) -> set[str]:
     subparsers = parser.add_subparsers(dest="subparser")
     command = cmd_cls()
     subparser = command.subparser_init(subparsers)
-    return {
-        action.dest
-        for action in subparser._actions
-        if action.option_strings and action.dest != "help"
-    }
+    return {action.dest for action in subparser._actions if action.option_strings and action.dest != "help"}
 
 
 def _iter_inventory_targets(value: object) -> list[str]:
@@ -137,8 +127,7 @@ def _walk_schema_target(root_type: type, target: str) -> None:
             return
         assert dataclasses.is_dataclass(current_annotation), (
             f"{target!r} diverges at {'.'.join(target.split('.')[:depth - 1]) or '<root>'}: "
-            f"{current_annotation!r} is not a dataclass or open dict boundary"
-        )
+            f"{current_annotation!r} is not a dataclass or open dict boundary")
         hints = get_type_hints(current_annotation)
         assert segment in hints, f"{target!r} missing segment {segment!r}"
         current_annotation = hints[segment]
@@ -316,8 +305,6 @@ def test_openai_seconds_mapping_preserves_duration_semantics(
     assert kwargs["fps"] == 24
     assert kwargs["num_frames"] == 96
 
-    seconds_entry = inventory["surfaces"]["openai_video_request"][
-        "compatibility_only"
-    ]["seconds"]
+    seconds_entry = inventory["surfaces"]["openai_video_request"]["compatibility_only"]["seconds"]
     assert seconds_entry["target"] == "request.sampling.num_frames"
     assert "fps * seconds" in seconds_entry["note"]

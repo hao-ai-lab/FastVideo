@@ -57,7 +57,6 @@ except ImportError:
     save_torch_state_dict = None
     snapshot_download = None
 
-
 DEFAULT_REPO_ID = "black-forest-labs/FLUX.2-klein-4B"
 RAW_TRANSFORMER_FILENAME = "flux-2-klein-4b.safetensors"
 DIFFUSION_WEIGHTS_BASENAME = "diffusion_pytorch_model"
@@ -165,8 +164,7 @@ def _resolve_src(src: str, revision: str | None, cache_dir: str | None, transfor
             cache_dir=cache_dir,
             token=_resolve_hf_token(),
             allow_patterns=_snapshot_allow_patterns(transformer_source),
-        )
-    )
+        ))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -312,9 +310,8 @@ def convert_raw_transformer(raw_state: OrderedDict[str, torch.Tensor]) -> Ordere
             unexpected.append(key)
 
     if unexpected:
-        raise ConversionError(
-            "Unmapped raw Flux2 Klein transformer keys:\n" + "\n".join(f"  - {key}" for key in unexpected)
-        )
+        raise ConversionError("Unmapped raw Flux2 Klein transformer keys:\n" + "\n".join(f"  - {key}"
+                                                                                         for key in unexpected))
     return converted
 
 
@@ -356,10 +353,7 @@ def _validate_transformer(state: OrderedDict[str, torch.Tensor]) -> None:
     keys = set(state)
     double_blocks = _infer_block_count(keys, "transformer_blocks.")
     single_blocks = _infer_block_count(keys, "single_transformer_blocks.")
-    print(
-        "  transformer keys: " +
-        f"{len(state)} total, {double_blocks} double blocks, {single_blocks} single blocks"
-    )
+    print("  transformer keys: " + f"{len(state)} total, {double_blocks} double blocks, {single_blocks} single blocks")
 
 
 def _validate_vae(state: OrderedDict[str, torch.Tensor]) -> None:
@@ -403,18 +397,16 @@ def _build_model_index(src_dir: Path, source_label: str) -> dict[str, Any]:
         index = _read_json(index_path)
     else:
         index = dict(DEFAULT_MODEL_INDEX)
-    index.update(
-        {
-            "_class_name": "Flux2KleinPipeline",
-            "is_distilled": True,
-            "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
-            "text_encoder": ["transformers", "Qwen3ForCausalLM"],
-            "tokenizer": ["transformers", "Qwen2TokenizerFast"],
-            "transformer": ["diffusers", "Flux2Transformer2DModel"],
-            "vae": ["diffusers", "AutoencoderKLFlux2"],
-            "_fastvideo_converted_from": source_label,
-        }
-    )
+    index.update({
+        "_class_name": "Flux2KleinPipeline",
+        "is_distilled": True,
+        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+        "text_encoder": ["transformers", "Qwen3ForCausalLM"],
+        "tokenizer": ["transformers", "Qwen2TokenizerFast"],
+        "transformer": ["diffusers", "Flux2Transformer2DModel"],
+        "vae": ["diffusers", "AutoencoderKLFlux2"],
+        "_fastvideo_converted_from": source_label,
+    })
     return index
 
 

@@ -1,0 +1,86 @@
+# MiniMax H3 T2VA 400-step overfit experiment on one Crush-Smol record.
+#
+# Submit eight H200 nodes through the fixed launch script:
+#   bash examples/train/launch_minimax_h3_t2va_crush_smol_validation.sh
+
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: data/models/MiniMax-H3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: TORCH_SDPA
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 64
+    sp_size: 8
+    tp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 8
+    pin_cpu_memory: true
+
+  data:
+    data_path:
+      data/crush-smol_h3_t2va_single_sample_preprocessed: 8
+    preprocessed_data_type: t2va
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 400
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: runs/minimax_h3_t2va_crush_smol_single_sample_overfit/checkpoints
+    training_state_checkpointing_steps: 20
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: ""
+
+  tracker:
+    trackers: [wandb]
+    project_name: fastvideo_minimax_h3
+    run_name: minimax_h3_t2va_crush_smol_single_sample_overfit
+
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+  dit_precision: bf16
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline
+    dataset_file: examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json
+    every_steps: 20
+    run_at_start: true
+    sampling_steps: [50]
+    guidance_scale: 1.0
+    num_frames: 124
+    num_videos_per_prompt: 1
+    use_validation_media_conditioning: false
+    offload_training_state: true
+    text_encoder_cpu_offload: true
+    vae_cpu_offload: true
+
+pipeline: {}

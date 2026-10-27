@@ -16,14 +16,21 @@ import triton.language as tl
 import math  # small utility needed by the sparse wrapper
 # ──────────────────────────── SPARSE ADDITION END ─────────────────────────────
 
-# We don't run auto-tuning every time to keep the tutorial fast. Keeping
-# the code below and commenting out the equivalent parameters is convenient for
-# re-tuning.
+# BLOCK_M / BLOCK_N are fixed at 64 because they are structural, not tunable:
+# the kernel indexes the top-k list per BLOCK_M q-tile and addresses keys as
+# kv_idx * BLOCK_N, so both must match the granularity q2k_index and
+# variable_block_sizes were built at.
+#
+# num_stages / num_warps ARE free, and the previous {3, 4, 7} was inherited from
+# the upstream tutorial rather than tuned here. It skips 5 and 6; on Blackwell
+# (sm_121) the optimum is num_stages=5, so the search could not reach it. Both
+# block paths independently select 5 once it is available. Autotune still picks
+# per architecture, so other GPUs re-tune rather than inheriting this choice.
 configs = [
     triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w) \
     for BM in [64]\
     for BN in [64]\
-    for s in [3, 4, 7]\
+    for s in [2, 3, 4, 5, 6, 7]\
     for w in [4, 8]\
 ]
 
@@ -104,8 +111,7 @@ def _attn_fwd_sparse(
                                block_shape=(HEAD_DIM, BLOCK_N),
                                order=(0, 1))
 
-    v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1,
-                                                                              0)
+    v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1, 0)
     V_base = tl.make_block_ptr(base=V + v_off,
                                shape=(N_CTX_KV, HEAD_DIM),
                                strides=(stride_vk, stride_vn),
@@ -178,10 +184,8 @@ def _attn_bwd_preprocess(
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     # load
-    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM +
-                off_n[None, :])
-    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM +
-                 off_n[None, :]).to(tl.float32)
+    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
+    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
@@ -235,13 +239,17 @@ def _attn_bwd_dkdv(
     block_size = tl.load(variable_block_sizes + kv_blk)
 
     for blk_idx in range(q_blocks * 2):
-        block_sparse_offset = (tl.load(q_ptr + blk_idx // 2).to(tl.int32) * 2 +
-                               blk_idx % 2) * step_m
+        block_sparse_offset = (tl.load(q_ptr + blk_idx // 2).to(tl.int32) * 2 + blk_idx % 2) * step_m
         qT = tl.load(qT_ptrs + block_sparse_offset * stride_tok)
         # Load m before computing qk to reduce pipeline stall.
         offs_m = start_m + block_sparse_offset + tl.arange(0, BLOCK_M1)
         m = tl.load(M + offs_m)
-        qkT = tl.dot(k, qT)
+        # Recompute logits exactly as the forward does: raw bf16 operands into
+        # the dot, fp32 scale after accumulation. A bf16 pre-scaled K perturbs
+        # the recomputed logits relative to the saved M by an error
+        # proportional to |logit|, which exp2 amplifies into arbitrarily wrong
+        # probabilities at large activations.
+        qkT = tl.dot(k, qT) * (sm_scale * 1.4426950408889634)
         pT = tl.math.exp2(qkT - m[None, :])
         mask = tl.arange(0, BLOCK_N1) < block_size
         pT = tl.where(mask[:, None], pT, 0.0)
@@ -272,6 +280,7 @@ def _attn_bwd_dq(
         do,
         m,
         D,
+        sm_scale,
         # shared by Q/K/V/DO.
         q2k_index,
         q2k_num,
@@ -319,7 +328,7 @@ def _attn_bwd_dq(
         block_sparse_offset = (kv_idx * 2 + half) * step_n * stride_tok
         kT = tl.load(kT_ptrs + block_sparse_offset)
         vT = tl.load(vT_ptrs + block_sparse_offset)
-        qk = tl.dot(q, kT)
+        qk = tl.dot(q, kT) * (sm_scale * 1.4426950408889634)
         p = tl.math.exp2(qk - m)
         offs_in_block = half * step_n + tl.arange(0, BLOCK_N2)
         mask = offs_in_block < block_size
@@ -328,8 +337,7 @@ def _attn_bwd_dq(
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.bfloat16)
-        # Compute dQ.
-        # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        # Compute dQ (kT is raw; the caller applies sm_scale once at the end).
         dq += tl.dot(ds, tl.trans(kT))
         # Increment pointers.
     return dq
@@ -457,6 +465,7 @@ def _attn_bwd(
         do,
         m,
         D,  #
+        sm_scale,
         q2k_index,
         q2k_num,
         max_kv_blks,
@@ -474,7 +483,7 @@ def _attn_bwd(
     )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-    dq *= LN2
+    dq *= sm_scale
     tl.store(dq_ptrs, dq)
 
 
@@ -497,7 +506,7 @@ def _attn_bwd_dkdv_kernel(
         stride_tok,
         stride_d,  #
         # batch/head strides (may differ between Q and KV)
-        stride_qz,
+    stride_qz,
         stride_qh,
         stride_kz,
         stride_kh,
@@ -595,6 +604,7 @@ def _attn_bwd_dq_kernel(
         Q,
         K,
         V,
+        sm_scale,
         DO,  #
         DQ,
         M,
@@ -607,7 +617,7 @@ def _attn_bwd_dq_kernel(
         stride_tok,
         stride_d,  #
         # batch/head strides (may differ between Q and KV)
-        stride_qz,
+    stride_qz,
         stride_qh,
         stride_kz,
         stride_kh,
@@ -667,6 +677,7 @@ def _attn_bwd_dq_kernel(
         do,
         m,
         D,
+        sm_scale,
         q2k_index,
         q2k_num,
         max_kv_blks,
@@ -684,13 +695,12 @@ def _attn_bwd_dq_kernel(
     )
 
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-    dq_acc *= LN2
+    dq_acc *= sm_scale
     tl.store(dq_ptrs, dq_acc)
 
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
-def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
-                                     variable_block_sizes):
+def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num, variable_block_sizes):
     B, H, Tq, D = q.shape
     Tkv = k.shape[2]
     sm_scale = 1.0 / math.sqrt(D)
@@ -701,8 +711,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
         -1] == Tq // 64, f"shape mismatch, Tq // 64 = {Tq // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
     assert variable_block_sizes.numel() == Tkv // 64, (
         f"shape mismatch, variable_block_sizes must have length {Tkv // 64}, "
-        f"got {variable_block_sizes.numel()}"
-    )
+        f"got {variable_block_sizes.numel()}")
     o = torch.empty_like(q)
     M = torch.empty((B, H, Tq), dtype=torch.float32, device=q.device)
 
@@ -743,8 +752,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
     return o, M
 
 
-def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
-                                      k2q_index, k2q_num, variable_block_sizes):
+def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q_index, k2q_num, variable_block_sizes):
     assert do.is_contiguous()
 
     B, H, Tq, D = q.shape
@@ -755,9 +763,11 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
     dv = torch.empty_like(v)
     BATCH, N_HEAD = q.shape[:2]
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
-    RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
+    # K stays raw: the backward kernels apply sm_scale in fp32 after the dot,
+    # matching the forward's rounding exactly. (A bf16 pre-scaled K perturbs
+    # the recomputed logits vs the saved M; exp2 turns that into unboundedly
+    # wrong probabilities at large activations.)
     arg_k = k
-    arg_k = arg_k * (sm_scale * RCP_LN2)
     PRE_BLOCK = 64
     assert Tq % PRE_BLOCK == 0
     pre_grid = (Tq // PRE_BLOCK, BATCH * N_HEAD)
@@ -820,6 +830,7 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
         q,
         arg_k,
         v,
+        sm_scale,
         do,
         dq,
         M,

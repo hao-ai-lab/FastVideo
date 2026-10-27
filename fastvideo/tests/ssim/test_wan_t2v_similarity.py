@@ -17,32 +17,43 @@ REQUIRED_GPUS = 2
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
 WAN_T2V_PARAMS = {
-    "num_gpus": 2,
-    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    "height": 480,
-    "width": 832,
-    "num_frames": 45,
-    "num_inference_steps": 4,
-    "guidance_scale": 3,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 7.0,
-    "seed": 1024,
-    "sp_size": 2,
-    "tp_size": 1,
-    "vae_sp": True,
-    "fps": 24,
-    "neg_prompt": (
-        "Bright tones, overexposed, static, blurred details, subtitles, style, "
-        "works, paintings, images, static, overall gray, worst quality, low "
-        "quality, JPEG compression residue, ugly, incomplete, extra fingers, "
-        "poorly drawn hands, poorly drawn faces, deformed, disfigured, "
-        "misshapen limbs, fused fingers, still picture, messy background, "
-        "three legs, many people in the background, walking backwards"
-    ),
-    "text-encoder-precision": ("fp32",),
+    "num_gpus":
+    2,
+    "model_path":
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "height":
+    480,
+    "width":
+    832,
+    "num_frames":
+    45,
+    "num_inference_steps":
+    4,
+    "guidance_scale":
+    3,
+    "embedded_cfg_scale":
+    6,
+    "flow_shift":
+    7.0,
+    "seed":
+    1024,
+    "sp_size":
+    2,
+    "tp_size":
+    1,
+    "vae_sp":
+    True,
+    "fps":
+    24,
+    "neg_prompt": ("Bright tones, overexposed, static, blurred details, subtitles, style, "
+                   "works, paintings, images, static, overall gray, worst quality, low "
+                   "quality, JPEG compression residue, ugly, incomplete, extra fingers, "
+                   "poorly drawn hands, poorly drawn faces, deformed, disfigured, "
+                   "misshapen limbs, fused fingers, still picture, messy background, "
+                   "three legs, many people in the background, walking backwards"),
+    "text-encoder-precision": ("fp32", ),
 }
-_WAN_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+_WAN_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 WAN_T2V_FULL_QUALITY_PARAMS = {
     "num_gpus": WAN_T2V_PARAMS["num_gpus"],
     "model_path": WAN_T2V_PARAMS["model_path"],

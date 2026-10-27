@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -17,7 +18,6 @@ from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -27,13 +27,13 @@ device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
     fallback_device_prefix="L40S",
     logger=logger,
 )
-
 
 MATRIXGAME3_PARAMS = {
     "num_gpus": 1,
@@ -45,8 +45,7 @@ MATRIXGAME3_PARAMS = {
     "guidance_scale": 5.0,
     "seed": 42,
 }
-_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    MATRIXGAME3_PARAMS["model_path"])
+_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(MATRIXGAME3_PARAMS["model_path"])
 MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME3_PARAMS["num_gpus"],
     "model_path": MATRIXGAME3_PARAMS["model_path"],
@@ -57,7 +56,6 @@ MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "guidance_scale": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.guidance_scale,
     "seed": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.seed,
 }
-
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-3.0-Diffusers-Base": MATRIXGAME3_PARAMS,
@@ -80,12 +78,13 @@ TEST_IMAGE_PATHS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs MG3 inference (action conditions auto-generated from seed)
     and compares the output to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(False))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -128,10 +127,9 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
     }
 
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    result = generator.generate_video(prompt, **generation_kwargs)
 
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
     assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 
@@ -159,13 +157,11 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error(f"Reference video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError("Reference video missing")
 
-    generated_video_name = _find_mp4(output_dir)
-    if not generated_video_name:
-        logger.error(f"Generated video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
-        raise FileNotFoundError(f"Generated video missing in {output_dir}")
+    assert isinstance(result, dict), f"Expected one MatrixGame3 generation result, got {type(result)}"
+    generated_video_path = result["video_path"]
+    assert generated_video_path and os.path.isfile(generated_video_path), "Generated MatrixGame3 video missing"
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
-    generated_video_path = os.path.join(output_dir, generated_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
     ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)

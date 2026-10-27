@@ -64,12 +64,8 @@ def main() -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    tp_size = args.tp_size if args.tp_size is not None else (
-        args.num_gpus if args.num_gpus > 1 else 1
-    )
-    sp_size = args.sp_size if args.sp_size is not None else (
-        1 if args.num_gpus > 1 else args.num_gpus
-    )
+    tp_size = args.tp_size if args.tp_size is not None else (args.num_gpus if args.num_gpus > 1 else 1)
+    sp_size = args.sp_size if args.sp_size is not None else (1 if args.num_gpus > 1 else args.num_gpus)
 
     generator_config = GeneratorConfig(
         model_path=args.model_path,

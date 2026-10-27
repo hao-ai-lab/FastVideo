@@ -16,12 +16,53 @@ if(NOT GPU_BACKEND)
     set(GPU_BACKEND "CUDA")
 endif()
 
-if(GPU_BACKEND STREQUAL "ROCM")
-    enable_language(HIP)
+# Compiled extension: AUTO/ON/OFF. On ROCm, AUTO falls back to the Python + Triton
+# package when HIP cannot be configured (#1850: pip-SDK images without hip-lang).
+if(NOT DEFINED FASTVIDEO_KERNEL_BUILD_EXTENSION AND DEFINED ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION})
+    set(FASTVIDEO_KERNEL_BUILD_EXTENSION "$ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION}")
+endif()
+set(FASTVIDEO_KERNEL_BUILD_EXTENSION "AUTO" CACHE STRING "Build the compiled extension: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_EXTENSION PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${FASTVIDEO_KERNEL_BUILD_EXTENSION}" FASTVIDEO_KERNEL_BUILD_EXTENSION)
+if(NOT FASTVIDEO_KERNEL_BUILD_EXTENSION MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR
+        "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_EXTENSION must be AUTO, ON or OFF "
+        "(got '${FASTVIDEO_KERNEL_BUILD_EXTENSION}').")
+endif()
+
+set(BUILD_CXX_KERNELS ON)
+if(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "OFF")
+    set(BUILD_CXX_KERNELS OFF)
+elseif(GPU_BACKEND STREQUAL "ROCM")
+    include(CheckLanguage)
+    check_language(HIP)
+    if(CMAKE_HIP_COMPILER)
+        enable_language(HIP)
+    elseif(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "ON")
+        message(FATAL_ERROR
+            "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_EXTENSION=ON, but CMake found no usable HIP "
+            "toolchain (it needs the hip-lang CMake package under ROCM_PATH or CMAKE_HIP_COMPILER). "
+            "Install the ROCm CMake packages, or build the Python + Triton package with "
+            "FASTVIDEO_KERNEL_BUILD_EXTENSION=OFF (build.sh --rocm --python-only).")
+    else()
+        message(STATUS
+            "fastvideo-kernel: no usable HIP toolchain; building the Python + Triton package "
+            "without the compiled extension (FASTVIDEO_KERNEL_BUILD_EXTENSION=AUTO)")
+        set(BUILD_CXX_KERNELS OFF)
+    endif()
 else()
     enable_language(CUDA)
     # Ensure CUDA toolkit targets (CUDA::cudart, CUDA::cuda_driver, etc.) are available.
     find_package(CUDAToolkit REQUIRED)
+endif()
+
+if(NOT BUILD_CXX_KERNELS)
+    message(STATUS "============== fastvideo-kernel build summary ==============")
+    message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}")
+    message(STATUS "fastvideo_kernel_ops: OFF (Python + Triton package only; FASTVIDEO_KERNEL_BUILD_EXTENSION=${FASTVIDEO_KERNEL_BUILD_EXTENSION})")
+    message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
+    message(STATUS "============================================================")
+    return()
 endif()
 
 # Import common utils if needed, but we keep it simple for now
@@ -44,6 +85,7 @@ find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 # ---------------------------------------------------------------------------
 if(NOT GPU_BACKEND STREQUAL "ROCM")
     if(DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
         message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=$ENV{TORCH_CUDA_ARCH_LIST} (from environment)")
     elseif(TORCH_CUDA_ARCH_LIST)
         set(ENV{TORCH_CUDA_ARCH_LIST} "${TORCH_CUDA_ARCH_LIST}")
@@ -52,14 +94,14 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         set(_FV_ARCH_LIST "")
         if(_FASTVIDEO_USER_CUDA_ARCH)
             # Caller pinned -DCMAKE_CUDA_ARCHITECTURES (which torch ignores); translate it
-            # to the TORCH_CUDA_ARCH_LIST spelling: "121" -> "12.1", "90a" -> "9.0a".
+            # to the TORCH_CUDA_ARCH_LIST spelling: "121a" -> "12.1a", "90a" -> "9.0a".
             # Only numeric spellings translate; keywords like "native"/"all" would
             # otherwise be mangled into nonsense ("nativ.e").
             foreach(_fv_arch IN LISTS _FASTVIDEO_USER_CUDA_ARCH)
                 if(NOT _fv_arch MATCHES "^[0-9]+[af]?$")
                     message(FATAL_ERROR
                         "fastvideo-kernel: CMAKE_CUDA_ARCHITECTURES='${_fv_arch}' is not "
-                        "supported. Use a numeric arch (e.g. 90a, 121), set "
+                        "supported. Use a numeric arch (e.g. 90a, 121a), set "
                         "TORCH_CUDA_ARCH_LIST directly (e.g. 9.0a), or unset both to "
                         "auto-detect from the visible GPU.")
                 endif()
@@ -72,7 +114,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (10, 0), (10, 3), (12, 0), (12, 1)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -93,13 +135,25 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
                 "fastvideo-kernel: could not determine the target CUDA architecture.\n"
                 "Refusing to let torch auto-detect an arch that may not run on this GPU. "
                 "Fix with one of:\n"
-                "  - set TORCH_CUDA_ARCH_LIST (e.g. 12.1, or 9.0a for Hopper), or\n"
-                "  - pass -DCMAKE_CUDA_ARCHITECTURES=<arch> (e.g. 121), or\n"
+                "  - set TORCH_CUDA_ARCH_LIST (e.g. 12.1a, or 9.0a for Hopper), or\n"
+                "  - pass -DCMAKE_CUDA_ARCHITECTURES=<arch> (e.g. 121a), or\n"
                 "  - build where the target GPU is visible to torch.\n"
                 "Note: 'pip/uv pip install' builds under build isolation, which hides the "
                 "GPU; set TORCH_CUDA_ARCH_LIST or add --no-build-isolation. "
                 "fastvideo-kernel/build.sh sets all of this for you.")
         endif()
+    endif()
+
+    string(REGEX MATCH "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
+        _FV_HAS_120A "${TORCH_CUDA_ARCH_LIST}")
+    string(REGEX MATCH "(^|[; ,])((12\\.1a)|(121a)|(sm_121a))([; ,]|$)"
+        _FV_HAS_121A "${TORCH_CUDA_ARCH_LIST}")
+    if(_FV_HAS_121A AND CUDAToolkit_VERSION VERSION_LESS 13.0)
+        message(FATAL_ERROR
+            "fastvideo-kernel: sm_121a requires CUDA Toolkit 13.0+, but found "
+            "${CUDAToolkit_VERSION}. Architecture-specific sm_120a code is not "
+            "compatible with sm_121; use CUDA 13 or remove 12.1a from "
+            "TORCH_CUDA_ARCH_LIST.")
     endif()
 endif()
 
@@ -114,7 +168,63 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 # Find Torch package (still useful for libraries)
 find_package(Torch REQUIRED)
 
-# Include directories
+# The Ulysses kernel needs NCCL's 2.29 device API. Keep it optional so ROCm,
+# older NCCL installs, and minimal CUDA builders still produce a usable wheel.
+set(FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A "AUTO" CACHE STRING
+    "Build the NCCL-device-API Ulysses all-to-all: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A PROPERTY STRINGS AUTO ON OFF)
+set(ENABLE_ULYSSES_A2A OFF)
+
+if(NOT GPU_BACKEND STREQUAL "ROCM" AND NOT FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A STREQUAL "OFF")
+    # nvidia.nccl is a namespace package, so find_spec rather than __file__.
+    execute_process(COMMAND "${Python_EXECUTABLE}" -c
+        "import importlib.util as u;s=u.find_spec('nvidia.nccl');print(list(s.submodule_search_locations)[0] if s else '')"
+        OUTPUT_VARIABLE NCCL_PIP_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    find_path(NCCL_INCLUDE_DIR nccl_device/coop.h
+        HINTS $ENV{NCCL_HOME}/include ${NCCL_PIP_ROOT}/include)
+    find_library(NCCL_LIBRARY NAMES nccl
+        HINTS $ENV{NCCL_HOME}/lib $ENV{NCCL_HOME}/lib64 ${NCCL_PIP_ROOT}/lib)
+    # PyPI's nvidia-nccl-cu* wheels ship the SONAME but not the development
+    # symlink (libnccl.so.2, no libnccl.so). Accept that exact versioned name;
+    # target_link_libraries can link an absolute SONAME path directly.
+    if(NOT NCCL_LIBRARY)
+        find_file(NCCL_VERSIONED_LIBRARY NAMES libnccl.so.2
+            HINTS $ENV{NCCL_HOME}/lib $ENV{NCCL_HOME}/lib64 ${NCCL_PIP_ROOT}/lib)
+        if(NCCL_VERSIONED_LIBRARY)
+            set(NCCL_LIBRARY "${NCCL_VERSIONED_LIBRARY}")
+        endif()
+    endif()
+
+    if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+        include(CheckCXXSourceCompiles)
+        set(_FASTVIDEO_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
+        # nccl.h includes cuda_runtime.h, so a host-compiler feature probe
+        # needs the toolkit includes explicitly even though CUDA is enabled.
+        set(CMAKE_REQUIRED_INCLUDES "${NCCL_INCLUDE_DIR};${CUDAToolkit_INCLUDE_DIRS}")
+        unset(NCCL_HAS_REQUIRED_DEVICE_API CACHE)
+        check_cxx_source_compiles("\
+#define NCCL_HOSTLIB_ONLY
+#include <cstddef>
+#include <nccl_device.h>
+int main() {
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  ncclCommProperties props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  return (reqs.size == 0 || props.size == 0);
+}"
+            NCCL_HAS_REQUIRED_DEVICE_API)
+        set(CMAKE_REQUIRED_INCLUDES "${_FASTVIDEO_REQUIRED_INCLUDES}")
+    endif()
+
+    if(NCCL_HAS_REQUIRED_DEVICE_API)
+        set(ENABLE_ULYSSES_A2A ON)
+    elseif(FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A STREQUAL "ON")
+        message(FATAL_ERROR
+            "FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A=ON requires NCCL device headers/library "
+            "with NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER (NCCL 2.29+). "
+            "Resolved include='${NCCL_INCLUDE_DIR}', library='${NCCL_LIBRARY}'.")
+    endif()
+endif()
+
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/cutlass/include
@@ -124,6 +234,9 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/csrc/turbodiffusion
     ${TORCH_INCLUDE_DIRS}
 )
+if(ENABLE_ULYSSES_A2A)
+    include_directories(${NCCL_INCLUDE_DIR})
+endif()
 
 # ---------------------------
 # ThunderKittens (TK) toggles
@@ -157,6 +270,7 @@ endif()
 message(STATUS "TORCH_CUDA_ARCH_LIST (cmake/env): ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "FASTVIDEO_KERNEL_BUILD_TK: ${FASTVIDEO_KERNEL_BUILD_TK}")
 message(STATUS "FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER: ${FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER}")
+message(STATUS "FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A: ${FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A}")
 
 set(ENABLE_TK_KERNELS OFF)
 if(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "ON")
@@ -208,10 +322,7 @@ else()
         set(_WANTS_ATTN_QAT_INFER ON)
     elseif(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "AUTO")
         if(TORCH_CUDA_ARCH_LIST)
-            string(REGEX MATCH
-                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
-                _HAS_120A "${TORCH_CUDA_ARCH_LIST}")
-            if(_HAS_120A)
+            if(_FV_HAS_120A OR _FV_HAS_121A)
                 set(_WANTS_ATTN_QAT_INFER ON)
             endif()
         else()
@@ -239,26 +350,35 @@ else()
     endif()
 
     if(ENABLE_ATTN_QAT_INFER)
+        set(FASTVIDEO_FP4_CUDA_ARCHS "")
+        if(_FV_HAS_120A)
+            list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "120a")
+        endif()
+        if(_FV_HAS_121A)
+            list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "121a")
+        endif()
+        if(NOT FASTVIDEO_FP4_CUDA_ARCHS)
+            message(FATAL_ERROR
+                "FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON requires 12.0a or "
+                "12.1a in TORCH_CUDA_ARCH_LIST; got '${TORCH_CUDA_ARCH_LIST}'.")
+        endif()
         message(STATUS "attn_qat_infer kernels: ENABLED")
     else()
         message(STATUS
             "attn_qat_infer kernels: DISABLED "
-            "(requires CUDA 12.8+ and Blackwell sm_120a)")
+            "(requires CUDA 12.8+ and Blackwell sm_120a/sm_121a)")
     endif()
 endif()
-
-# Always try to build the extension if CUDA is available, but conditionally add sources/flags
-set(BUILD_CXX_KERNELS ON)
 
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build
 # ---------------------------------------------------------------------------
-# The FP4 kernels are sm_120a-only (they emit `cvt.e2m1x2` etc.), while the main
+# The FP4 kernels are Blackwell-only (sm_120a/sm_121a; they emit `cvt.e2m1x2` etc.), while the main
 # extension (Hopper-only TK + generic turbodiffusion) targets the full arch list.
 # find_package(Torch) injects ONE global -gencode list into CMAKE_CUDA_FLAGS that
 # forces every target onto every arch, so the FP4 sources also get the sm_90a pass
 # and ptxas rejects their Blackwell instructions. Strip that global list and drive
-# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin 120a below;
+# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin the Blackwell archs below;
 # the main extension gets the full list). Only do this for the FP4 build with an
 # explicit arch list, so the cu126 / local autodetect paths stay untouched.
 if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
@@ -270,7 +390,7 @@ if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
     string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
     string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=120a")
+    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs set per-target below")
 endif()
 
 # Compiler flags
@@ -307,6 +427,9 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
     )
+    if(ENABLE_ULYSSES_A2A)
+        list(APPEND EXTENSION_SOURCES csrc/comm/ulysses_all_to_all.cu)
+    endif()
     
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
@@ -318,6 +441,60 @@ if(BUILD_CXX_KERNELS)
 
     # Combined FastVideo Extension
     # Using name 'fastvideo_kernel_ops' to distinguish from the python package namespace
+    # ---------------------------------------------------------------------------
+    # VSA block-sparse attention forward, data-center Blackwell (sm_100a/sm_103a).
+    #
+    # NOTE the "a" suffix: these kernels use architecture-conditional tcgen05 / setmaxnreg
+    # instructions. Explicit gencode entries are required for both the GB200 (sm_100a) and
+    # B300/GB300 (sm_103a) images. The source body is shared; ptxas specializes each image.
+    #
+    # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
+    # tile-size change and no top-k granularity change is needed. VSA_BHSD
+    # selects [B, H, S, D]. Both are compile-time; the Python is_supported() checks incoming
+    # tensors against them so callers fall back to Triton rather than getting a wrong answer.
+    # Read the ENVIRONMENT as well as the cache variable. When TORCH_CUDA_ARCH_LIST is
+    # exported (build.sh, and `pip install` with it set) the branch above only prints it --
+    # the cmake variable stays empty, so testing that alone silently skips the kernel and
+    # leaves a build that succeeds with the op missing.
+    set(ENABLE_VSA_SM100A OFF)
+    set(ENABLE_VSA_SM103A OFF)
+    set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
+    if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
+    endif()
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
+        set(ENABLE_VSA_SM100A ON)
+    endif()
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.3a|103a|sm_103a)([; ,]|$)")
+        set(ENABLE_VSA_SM103A ON)
+    endif()
+    set(_VSA_FWD_GENCODE "")
+    set(_VSA_FWD_ARCHS "")
+    if(ENABLE_VSA_SM100A)
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_100a,code=sm_100a")
+        list(APPEND _VSA_FWD_ARCHS "sm_100a")
+    endif()
+    if(ENABLE_VSA_SM103A)
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_103a,code=sm_103a")
+        list(APPEND _VSA_FWD_ARCHS "sm_103a")
+    endif()
+    if(_VSA_FWD_GENCODE)
+        message(STATUS "fastvideo-kernel: building block_sparse_ptx_blackwell (${_VSA_FWD_ARCHS}; 64- and 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_blackwell.cu
+                                      csrc/attention/block_sparse_blk128_blackwell.cu)
+        set_source_files_properties(csrc/attention/block_sparse_blackwell.cu
+                                    csrc/attention/block_sparse_blk128_blackwell.cu PROPERTIES
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
+    endif()
+    # VSA block-sparse attention BACKWARD, 64- and 128-token blocks: the same images as the forward.
+    if(_VSA_FWD_GENCODE)
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_blackwell.cu
+                                      csrc/attention/block_sparse_bwd_blk128_blackwell.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_blackwell.cu
+                                    csrc/attention/block_sparse_bwd_blk128_blackwell.cu PROPERTIES
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
+    endif()
+
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
@@ -333,9 +510,16 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
+    if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_PTX_BLACKWELL)
+    endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
     endif()
+    if(ENABLE_ULYSSES_A2A)
+        list(APPEND COMPILE_DEFS FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A)
+    endif()
+
 
     target_compile_definitions(fastvideo_kernel_ops PRIVATE ${COMPILE_DEFS})
 
@@ -346,6 +530,9 @@ if(BUILD_CXX_KERNELS)
     # Link against Torch libraries to avoid undefined symbols at import time
     # (e.g., torch::autograd vtables) when loading the extension module.
     target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
+    if(ENABLE_ULYSSES_A2A)
+        target_link_libraries(fastvideo_kernel_ops PRIVATE "${NCCL_LIBRARY}")
+    endif()
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.
@@ -410,8 +597,11 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -std=c++17>
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
+    # Compile only the FP4 architectures requested by the caller. The large
+    # template translation units use 8-12 GiB each, so an extra target matters.
+    message(STATUS "fp4* CUDA architectures: ${FASTVIDEO_FP4_CUDA_ARCHS}")
     set_target_properties(fp4attn_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${FASTVIDEO_FP4_CUDA_ARCHS}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
@@ -427,7 +617,7 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
     set_target_properties(fp4quant_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${FASTVIDEO_FP4_CUDA_ARCHS}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
@@ -449,6 +639,7 @@ message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}
 message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
-message(STATUS "fp4attn/fp4quant (sm_120a only, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
+message(STATUS "  + Ulysses NCCL-device all-to-all:             ${ENABLE_ULYSSES_A2A}")
+message(STATUS "fp4attn/fp4quant (sm_120a CUDA >= 12.8; sm_121a CUDA >= 13):  ${ENABLE_ATTN_QAT_INFER}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")

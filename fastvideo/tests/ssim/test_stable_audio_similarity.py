@@ -31,8 +31,7 @@ import pytest
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    resolve_inference_device_reference_folder,
-)
+    resolve_inference_device_reference_folder, )
 from fastvideo.tests.ssim.latent_similarity_utils import (
     AUDIO_FIRST_8_TIMESTEPS_SPEC,
     run_text_to_latent_similarity_test,
@@ -107,5 +106,8 @@ def test_stable_audio_inference_similarity(
         # FSDP + @torch.inference_mode in StableAudioDenoisingStage hits
         # "Inference tensors do not track version counter" on single-GPU
         # unshard. SA-1.0 fits on one B200 anyway.
-        init_kwargs_override={"use_fsdp_inference": False},
+        init_kwargs_override={
+            "use_fsdp_inference": False,
+            "revision": "26609645c363fc81829282fcfe6356340346c1d4",
+        },
     )

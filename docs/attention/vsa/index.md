@@ -6,6 +6,74 @@ Sparse attention mechanism selecting top-k blocks.
 
 VSA is included in the `fastvideo-kernel` package. See the [main Attention page](../index.md) for build instructions.
 
+## Apple Silicon (MiniMax H3 / FastH3)
+
+The native MLX runtime has an inference-only H3 VSA path that is separate from
+the CUDA `fastvideo-kernel` package:
+
+- **INT8 / INT6 / INT4** are **weight-only**. They cover linear matrices,
+  including `attn.to_gate_compress` when you convert with `--include-vsa`.
+  Attention Q/K/V stay BF16 (or the selected activation dtype). There is no
+  INT6 Q/K/V attention kernel.
+- **Dense-only checkpoints** (the default converter) drop the 50 gate
+  matrices and keep fused SDPA. They remain valid for dense inference.
+- **VSA-capable checkpoints** retain those gates, quantize them on the same
+  affine grid, and record `vsa.capable` in `mlx_h3_dit.json`. Preview leaves
+  runtime VSA off until you pass `--vsa`. `mlx_fasth3_8step.py` turns it on.
+- **Tile sizes** 64 `(4, 4, 4)`, 128 `(4, 4, 8)` and 256 `(4, 8, 8)`. Prefix keys can be
+  `exempt` or `compete`. `--vsa-dense-first-n-steps` and `--vsa-dense-layers`
+  force dense SDPA on the selected steps or blocks.
+- **`--vsa-impl auto`** runs the SIMD-group Metal kernel for 128-token tiles
+  (the FastH3 Omni trained tile) and the chunked gather+SDPA **reference** path
+  for other tiles. `--vsa-impl simd` also runs the kernel for tile 64 (head dim
+  128 only). The kernel reads K/V tiles in place with an fp32 online softmax and
+  falls back to reference on unsupported shapes or kernel failure. The runtime
+  executes a small kernel probe before use and remembers failures for the
+  process, so later blocks do not retry a broken backend. Per layer the kernel
+  matches reference to within bf16 noise, but generated video is not
+  bit-identical because routing and the 8-step sampler amplify rounding
+  differences. `--vsa-impl reference` forces gather+SDPA.
+
+See the [MLX install guide](../../getting_started/installation/mlx.md)
+and the [MiniMax H3 cookbook](../../cookbook/minimax-h3.md) for conversion
+and `mlx_fasth3.py` / `mlx_fasth3_8step.py` flags. Do not enable
+VSA on a dense-only checkpoint; reconvert with `--include-vsa` first. V1
+VSA is opt-in. FastH3 V2 converts with `--include-vsa` and turns VSA on
+by default.
+
+H3 uses fused MLX RMSNorm by default, including dense inference. This can
+change BF16 rounding relative to the older explicit normalization path.
+`FASTVIDEO_MLX_FAST_NORM` controls Wan normalization only.
+
+The generation report aggregates VSA statistics across all blocks and steps.
+`impl_counts` and `fallback_reasons` show mixed execution and fallback.
+`video_keep` is the mean number of selected video-key tiles per video query
+tile and head, including dense overrides. `achieved_sparsity` is the matching
+mean video-tile sparsity; in `compete` mode it measures actual selections,
+not the requested top-k budget. These are tile counts, not token-level FLOPs.
+
+## SM100 fused 64-token layout (Wan inference)
+
+On SM100 (B200) with 64-token tiles, BF16, and head dimension 128, Wan VSA
+inference fuses tile scatter and the four BSHD→BHSD transposes into one Triton
+kernel in `fastvideo-kernel`. Set `FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT=1` to
+force the legacy scatter/transpose path. Training, other tile sizes, and non-SM100
+hardware always use the original route. The gate matches compute capability
+10.0 exactly; other SM10x parts (e.g. SM103) are not yet validated and use the
+original route.
+
+The kernel ships in the first `fastvideo-kernel` release after 0.3.5. Standard
+installs pin `fastvideo-kernel==0.3.5`, which does not include it, so they
+silently use the original route. Until that release, build `fastvideo-kernel`
+from source (`cd fastvideo-kernel && ./build.sh`) to get the fused layout.
+
+To compare the two routes on a Wan 480p token grid (add `--include_attn` to
+also time the sparse attention call):
+
+```bash
+python fastvideo-kernel/benchmarks/bench_vsa_tile_layout.py
+```
+
 ## Usage
 
 ```python

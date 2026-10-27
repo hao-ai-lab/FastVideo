@@ -1,6 +1,7 @@
 import json
 import os
 
+
 def load_example_prompts():
     examples: list[str] = []
     example_labels: list[str] = []
@@ -23,9 +24,7 @@ def load_example_prompts():
                 if not prompt:
                     continue
                 examples.append(prompt)
-                example_labels.append(
-                    prompt[:100] + "..." if len(prompt) > 100 else prompt
-                )
+                example_labels.append(prompt[:100] + "..." if len(prompt) > 100 else prompt)
     except Exception as e:
         print(f"Warning: Could not read {prompts_path}: {e}")
 
@@ -52,9 +51,7 @@ def load_example_prompts():
                 if not caption:
                     continue
                 examples.append(caption)
-                example_labels.append(
-                    caption[:100] + "..." if len(caption) > 100 else caption
-                )
+                example_labels.append(caption[:100] + "..." if len(caption) > 100 else caption)
         except Exception as e:
             print(f"Warning: Could not read {validation_path}: {e}")
 

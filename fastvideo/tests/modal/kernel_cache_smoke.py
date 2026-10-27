@@ -50,24 +50,22 @@ print(f"Using kernel cache volume: {KERNEL_CACHE_VOLUME_NAME}")
 kernel_cache_vol = modal.Volume.from_name(KERNEL_CACHE_VOLUME_NAME, create_if_missing=True)
 uv_torch_backend_override = resolve_uv_torch_backend(IMAGE_TAG)
 
-image = (
-    modal.Image.from_registry(IMAGE_REF, add_python="3.12")
-    .apt_install(
-        "cmake",
-        "pkg-config",
-        "build-essential",
-        "curl",
-        "git",
-        "libssl-dev",
-        "ffmpeg",
-    )
-    .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
-    .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
-    .env({
-        "PATH": "/root/.cargo/bin:$PATH",
-        **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
-    })
-)
+image = (modal.Image.from_registry(IMAGE_REF, add_python="3.12").apt_install(
+    "cmake",
+    "pkg-config",
+    "build-essential",
+    "curl",
+    "git",
+    "libssl-dev",
+    "ffmpeg",
+).run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable").
+         run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
+             "PATH":
+             "/root/.cargo/bin:$PATH",
+             **({
+                 "UV_TORCH_BACKEND": uv_torch_backend_override
+             } if uv_torch_backend_override else {}),
+         }))
 
 PRODUCER_KWARGS = dict(
     gpu="L40S:1",

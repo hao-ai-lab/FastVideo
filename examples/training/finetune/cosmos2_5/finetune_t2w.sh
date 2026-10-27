@@ -93,7 +93,9 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/cosmos2_5_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class Cosmos25TrainingPipeline \
+    --pipeline-module fastvideo.training.cosmos2_5_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

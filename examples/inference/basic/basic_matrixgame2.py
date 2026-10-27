@@ -13,24 +13,34 @@ MODEL_VARIANT = "base_distilled_model"
 # Variant-specific settings
 VARIANT_CONFIG = {
     "base_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
-        "keyboard_dim": 4,
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
+        "keyboard_dim":
+        4,
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "gta_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
-        "keyboard_dim": 2,
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
+        "keyboard_dim":
+        2,
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "templerun_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
-        "keyboard_dim": 7,
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
+        "keyboard_dim":
+        7,
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
     },
 }
 
-
 OUTPUT_PATH = "video_samples_matrixgame2"
+
+
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -42,8 +52,8 @@ def main():
         config["model_path"],
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=False, # set to True if GPU is out of memory
-        dit_cpu_offload=True, # DiT need to be offloaded for MoE
+        use_fsdp_inference=False,  # set to True if GPU is out of memory
+        dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer

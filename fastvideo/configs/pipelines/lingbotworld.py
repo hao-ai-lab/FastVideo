@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models import DiTConfig
-from fastvideo.configs.pipelines.wan import Wan2_2_I2V_A14B_Config
+from fastvideo.models.wan.pipeline_config import Wan2_2_I2V_A14B_Config
 from fastvideo.configs.models.dits.lingbotworld import LingBotWorldVideoConfig
 
 

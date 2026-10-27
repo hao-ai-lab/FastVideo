@@ -9,6 +9,7 @@ write back into a result list in input order.
 
 Pool sizing: ``max_size = prefetch_factor * num_workers``.
 """
+
 from __future__ import annotations
 
 import queue
@@ -144,11 +145,16 @@ class VideoPool:
         :func:`fastvideo.eval.io.as_video` / :func:`samples_from`) to
         make them decode-eligible.
         """
-        from fastvideo.eval.io.video import load_video
+        from fastvideo.eval.io.video import load_video, probe_video_fps
 
         out = dict(sample)
         for key, val in sample.items():
             if isinstance(val, Video) and val.frames is None and val.source is not None:
+                if key == "video" and "fps" not in out:
+                    if val.fps is None:
+                        val.fps = probe_video_fps(val.source)
+                    if val.fps is not None:
+                        out["fps"] = float(val.fps)
                 val.frames = load_video(val.source)
                 out[key] = val
         return out

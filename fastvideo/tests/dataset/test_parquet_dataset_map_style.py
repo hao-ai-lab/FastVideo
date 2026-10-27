@@ -40,7 +40,11 @@ def test_parse_data_path_specs_accepts_path_list() -> None:
 
 
 def test_parse_data_path_specs_drops_non_positive_repeats() -> None:
-    assert _parse_data_path_specs({"data/a": 0, "data/b": -1, "data/c": 2}) == [
+    assert _parse_data_path_specs({
+        "data/a": 0,
+        "data/b": -1,
+        "data/c": 2
+    }) == [
         ("data/c", 2),
     ]
     assert _parse_data_path_specs("data/a:0,data/b:2") == [("data/b", 2)]
@@ -69,7 +73,7 @@ def _write_root_cache(dataset_root, filename: str, length: int) -> str:
     parquet_file = dataset_root / filename
     parquet_file.touch()
     with (cache_dir / "file_info.pkl").open("wb") as f:
-        pickle.dump(((str(parquet_file),), (length,)), f)
+        pickle.dump(((str(parquet_file), ), (length, )), f)
     return str(parquet_file)
 
 

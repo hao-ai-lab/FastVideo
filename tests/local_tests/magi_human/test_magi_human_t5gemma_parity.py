@@ -22,7 +22,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 _T5GEMMA_ID = "google/t5gemma-9b-9b-ul2"
 
 
@@ -41,7 +40,9 @@ def _can_access_t5gemma() -> bool:
     try:
         from huggingface_hub import hf_hub_download
         hf_hub_download(
-            repo_id=_T5GEMMA_ID, filename="config.json", token=token,
+            repo_id=_T5GEMMA_ID,
+            filename="config.json",
+            token=token,
         )
         return True
     except Exception:
@@ -77,7 +78,9 @@ def test_magi_human_t5gemma_wrapper_parity():
 
     tokenizer = AutoTokenizer.from_pretrained(_T5GEMMA_ID)
     ref_model = HFEncoder.from_pretrained(
-        _T5GEMMA_ID, is_encoder_decoder=False, dtype=torch.bfloat16,
+        _T5GEMMA_ID,
+        is_encoder_decoder=False,
+        dtype=torch.bfloat16,
     ).to(device).eval()
 
     # --- FastVideo wrapper path ---
@@ -97,19 +100,18 @@ def test_magi_human_t5gemma_wrapper_parity():
         "Sunrise over a quiet harbor.",
     ]
     inputs = tokenizer(
-        prompts, return_tensors="pt", padding=True, truncation=False,
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=False,
     ).to(device)
-    assert (inputs["attention_mask"] == 0).any(), (
-        "Expected at least one padding token across the batch."
-    )
+    assert (inputs["attention_mask"] == 0).any(), ("Expected at least one padding token across the batch.")
 
     # Build explicit position_ids (shifted, non-default) to assert that the
     # wrapper actually forwards position_ids — silently dropping them would
     # match the bf16 tolerance on the default 0..L-1 path.
     seq_len = inputs["input_ids"].shape[1]
-    position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(
-        inputs["input_ids"].shape[0], -1
-    )
+    position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(inputs["input_ids"].shape[0], -1)
 
     with torch.inference_mode():
         ref_out = ref_model(
@@ -130,19 +132,13 @@ def test_magi_human_t5gemma_wrapper_parity():
         fv_hidden = fv_out.last_hidden_state.detach().float().cpu()
         fv_all_hiddens = fv_out.hidden_states
 
-    print(
-        f"ref_hidden shape={tuple(ref_hidden.shape)} "
-        f"abs_mean={ref_hidden.abs().mean().item():.6f}"
-    )
-    print(
-        f"fv_hidden  shape={tuple(fv_hidden.shape)} "
-        f"abs_mean={fv_hidden.abs().mean().item():.6f}"
-    )
+    print(f"ref_hidden shape={tuple(ref_hidden.shape)} "
+          f"abs_mean={ref_hidden.abs().mean().item():.6f}")
+    print(f"fv_hidden  shape={tuple(fv_hidden.shape)} "
+          f"abs_mean={fv_hidden.abs().mean().item():.6f}")
     diff = (ref_hidden - fv_hidden).abs()
-    print(
-        f"diff max={diff.max().item():.6e} "
-        f"mean={diff.mean().item():.6e}"
-    )
+    print(f"diff max={diff.max().item():.6e} "
+          f"mean={diff.mean().item():.6e}")
 
     assert ref_hidden.shape == fv_hidden.shape
     # Both sides run the exact same HF model on the exact same inputs;
@@ -154,19 +150,14 @@ def test_magi_human_t5gemma_wrapper_parity():
     # `last_hidden_state`; MagiHuman's downstream `.half()` cast is the
     # pipeline's job, not the wrapper's.
     assert fv_out.last_hidden_state.dtype == torch.bfloat16, (
-        f"Expected bf16 last_hidden_state, got {fv_out.last_hidden_state.dtype}"
-    )
+        f"Expected bf16 last_hidden_state, got {fv_out.last_hidden_state.dtype}")
 
     # `output_hidden_states=True` must produce a tuple matching the
     # reference's hidden-state tuple length (42 layers + 1 embedding).
     assert fv_all_hiddens is not None, "output_hidden_states=True produced None"
-    assert len(fv_all_hiddens) == len(ref_all_hiddens), (
-        f"hidden_states tuple length mismatch: "
-        f"fv={len(fv_all_hiddens)} ref={len(ref_all_hiddens)}"
-    )
+    assert len(fv_all_hiddens) == len(ref_all_hiddens), (f"hidden_states tuple length mismatch: "
+                                                         f"fv={len(fv_all_hiddens)} ref={len(ref_all_hiddens)}")
 
     # The wrapper must propagate the input attention_mask back out on
     # BaseEncoderOutput — downstream stages key off it for pad_or_trim.
-    assert fv_out.attention_mask is inputs["attention_mask"], (
-        "Wrapper must echo the input attention_mask unchanged."
-    )
+    assert fv_out.attention_mask is inputs["attention_mask"], ("Wrapper must echo the input attention_mask unchanged.")

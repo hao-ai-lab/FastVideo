@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Gate the expensive Buildkite full suite on the cheap GitHub checks.
+# Gate the path-aware Buildkite merge plan on the cheap GitHub checks.
 #
 # Polls the workflow runs for the PR head commit and only exits 0 once the
 # watched cheap workflows (pre-commit, docs build) have succeeded, so the
-# 'ready' label cannot burn ~20 GPU lanes on a head that a cheap check has
-# already doomed.
+# 'ready' label cannot burn path-selected GPU lanes on a head that a cheap
+# check has already doomed.
 #
 # Semantics:
 #   - watched run completed with a bad conclusion  -> exit 1 (fail CLOSED:
-#     no full suite; the next push re-arms via the 'synchronize' trigger)
+#     no merge gate; the next push re-arms via the 'synchronize' trigger)
 #   - watched run cancelled                         -> still pending: the docs
 #     workflow's repo-global 'pages' concurrency group cancels runs superseded
 #     by unrelated pushes, so 'cancelled' is not a verdict on this PR
@@ -29,7 +29,7 @@ set -euo pipefail
 : "${PR_NUMBER:?PR_NUMBER (pull request number) is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
-# Workflow-level `name:` values that must be green before the full suite
+# Workflow-level `name:` values that must be green before the merge gate
 # may start. "Deploy Documentation" is path-filtered on PRs, so its run may
 # legitimately never exist; pre-commit always runs, so it must appear.
 WATCHED_NAMES='["pre-commit", "Deploy Documentation"]'
@@ -56,7 +56,7 @@ recheck_ready_label() {
   if pr_json=$(gh_api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" 2>/dev/null); then
     if ! jq -e '[.labels[]?.name] | index("ready")' <<<"$pr_json" >/dev/null 2>&1; then
       echo "::error::PR #${PR_NUMBER} no longer has the 'ready' label —" \
-        "NOT triggering the Buildkite full suite. Re-add the label to re-arm."
+        "NOT triggering the Buildkite merge gate. Re-add the label to re-arm."
       exit 1
     fi
   else
@@ -84,7 +84,7 @@ while true; do
         | map(.name) | join(", ")' <<<"$state")
     if [ -n "$failed" ]; then
       echo "::error::Cheap check(s) failed on ${PR_SHA}: ${failed}." \
-        "NOT triggering the Buildkite full suite. Push a fix (the 'ready'" \
+        "NOT triggering the Buildkite merge gate. Push a fix (the 'ready'" \
         "label re-arms on every push), or re-run the failed check and then" \
         "re-run this workflow."
       exit 1
@@ -97,7 +97,7 @@ while true; do
     if [ "$pending" -eq 0 ]; then
       if [ -z "$missing" ]; then
         recheck_ready_label
-        echo "All watched cheap checks are green — full suite may proceed."
+        echo "All watched cheap checks are green — merge gate may proceed."
         exit 0
       fi
       case "$missing" in
@@ -119,14 +119,14 @@ while true; do
     echo "::warning::GitHub API error querying workflow runs for ${PR_SHA} (attempt ${api_fails}/3)."
     if [ "$api_fails" -ge 3 ]; then
       recheck_ready_label
-      echo "::warning::FAILING OPEN: cannot query GitHub check status — triggering the full suite WITHOUT the cheap-check gate."
+      echo "::warning::FAILING OPEN: cannot query GitHub check status — triggering the merge gate WITHOUT the cheap-check gate."
       exit 0
     fi
   fi
 
   if [ "$elapsed" -ge "$MAX_WAIT_SECS" ]; then
     recheck_ready_label
-    echo "::warning::FAILING OPEN: watched checks still pending after $(( MAX_WAIT_SECS / 60 )) min${missing:+ (never appeared: ${missing})} — triggering the full suite anyway."
+    echo "::warning::FAILING OPEN: watched checks still pending after $(( MAX_WAIT_SECS / 60 )) min${missing:+ (never appeared: ${missing})} — triggering the merge gate anyway."
     exit 0
   fi
   sleep "$POLL_SECS"

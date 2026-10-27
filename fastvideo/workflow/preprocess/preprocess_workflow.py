@@ -43,7 +43,7 @@ class PreprocessWorkflow(WorkflowBase):
             training_dataset = build_dataset(preprocess_config, split="train", validator=raw_data_validator)
         except FileNotFoundError as e:
             raise FileNotFoundError(
-                f"Training dataset not found, please use download_dataset.sh to download the dataset first. Error: {e}"
+                f"Training dataset not found, please use the matching download script under examples/datasets/ to download the dataset first. Error: {e}"
             ) from e
 
         # we do not use collate_fn here because we use iterable-style Dataset
@@ -117,6 +117,9 @@ class PreprocessWorkflow(WorkflowBase):
         elif fastvideo_args.workload_type == WorkloadType.I2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_i2v import (PreprocessWorkflowI2V)
             return cast(PreprocessWorkflow, PreprocessWorkflowI2V)
+        elif fastvideo_args.workload_type == WorkloadType.V2A:
+            from fastvideo.workflow.preprocess.preprocess_workflow_v2a import (PreprocessWorkflowV2A)
+            return cast(PreprocessWorkflow, PreprocessWorkflowV2A)
         else:
             raise ValueError(
                 f"Workload type: {fastvideo_args.workload_type} is not supported in preprocessing workflow.")

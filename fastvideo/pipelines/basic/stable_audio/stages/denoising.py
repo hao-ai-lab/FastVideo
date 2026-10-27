@@ -132,6 +132,17 @@ class StableAudioDenoisingStage(PipelineStage):
         else:
             callback = None
 
+        # The k-diffusion sampler owns the step loop, so the per-step callback
+        # is the only cancellation hook: raise from it to stop the remaining
+        # steps (the executor surfaces the run as cancelled).
+        base_callback = callback
+
+        def _step_callback(info: dict) -> None:
+            if getattr(self, "interrupt", False):
+                raise RuntimeError("generation cancelled by interrupt()")
+            if base_callback is not None:
+                base_callback(info)
+
         # `LocalAttention` (in `StableAudioDiT`) reads `get_forward_context()`
         # for `attn_metadata`; wrap the whole loop.
         with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -140,7 +151,7 @@ class StableAudioDenoisingStage(PipelineStage):
                                                      sigmas,
                                                      disable=False,
                                                      extra_args={},
-                                                     callback=callback)
+                                                     callback=_step_callback)
 
         # Final blend so the kept region of the inpaint reference is exact.
         if inpaint_mask is not None and inpaint_ref is not None:

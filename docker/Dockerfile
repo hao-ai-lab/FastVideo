@@ -20,10 +20,12 @@
 #       --build-arg FLASH_ATTN_WHEEL_TAG=cu130torch2.12 \
 #       -t fastvideo-dev:py3.12-cuda13.0.0 .
 #
-#   # DGX Spark / GB10 (aarch64, Blackwell sm_121): the matching arm64
+#   # DGX Spark / GB10 (aarch64, Blackwell sm_121a): the matching arm64
 #   # prebuilt flash-attn wheel is selected automatically from TARGETARCH.
 #   docker build --platform linux/arm64 -f docker/Dockerfile \
-#       --build-arg TORCH_CUDA_ARCH_LIST=12.1 -t fastvideo-dev:spark .
+#       --build-arg TORCH_CUDA_ARCH_LIST=12.1a \
+#       --build-arg INSTALL_FLASH_ATTN=0 --build-arg INSTALL_FA4_CUTE=0 \
+#       -t fastvideo-dev:spark .
 #
 # The ARG defaults below are the source of truth for the default image.
 # ROCm builds use docker/rocm7_1.Dockerfile (different base + flow).
@@ -45,7 +47,7 @@ ARG PYTHON_VERSION=3.12
 
 # CUDA arch fastvideo-kernel is compiled for. Build machines have no GPU, so
 # build.sh uses this instead of probing a live device. Default Hopper (sm_90a),
-# matching the released kernel wheel; override e.g. TORCH_CUDA_ARCH_LIST=12.1
+# matching the released kernel wheel; override e.g. TORCH_CUDA_ARCH_LIST=12.1a
 # for GB10/Blackwell (DGX Spark).
 ARG TORCH_CUDA_ARCH_LIST=9.0a
 
@@ -60,6 +62,9 @@ ARG CMAKE_BUILD_PARALLEL_LEVEL=1
 # cuXXXtorchY.Y tag must match UV_TORCH_BACKEND (below): cu130torch2.12 for the
 # default 13.0 base, cu126torch2.12 for 12.6 (both backends are on torch 2.12).
 ARG FLASH_ATTN_VERSION=2.8.3
+# INSTALL_FLASH_ATTN=0 leaves FA2 out (the DGX Spark image): on GB10 it gives no
+# measured speedup and changes the output relative to a native Spark install.
+ARG INSTALL_FLASH_ATTN=1
 ARG FLASH_ATTN_WHEEL_TAG=cu130torch2.12
 ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
 ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
@@ -68,7 +73,12 @@ ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-p
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
 # flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
-ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
+ARG FA4_CUTE_REF=14c377950125c70b7a9dabf9c561fca53715ac7d
+# FA4 cute supports SM 9/10/11 only; GB10 (sm_121) runs FP4 attention through
+# fastvideo-kernel instead. INSTALL_FA4_CUTE=0 skips the overlay so the image
+# keeps the cutlass-dsl that flashinfer resolves: this revision pins
+# nvidia-cutlass-dsl==4.6.0.dev0, which flashinfer 0.7.2 cannot import against.
+ARG INSTALL_FA4_CUTE=1
 
 # Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
 # select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
@@ -89,10 +99,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     vim \
     curl \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libx11-dev \
     gcc-11 \
     g++-11 \
     clang-11 \
+    cmake \
+    pkg-config \
+    build-essential \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain: some dependencies only ship sdists on aarch64 and need cargo
+# to build. The dormant legacy Modal image layers the identical apt set +
+# rustup on top of this image (fastvideo/tests/modal/pr_test.py); baking both
+# here keeps its manual rollback path reproducible without changing the Slurm
+# runner's package surface.
+RUN set -o pipefail && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && \
+    /root/.cargo/bin/cargo --version && /root/.cargo/bin/rustc --version
+ENV PATH=/root/.cargo/bin:${PATH}
 
 # Set up C++20 compilers for ThunderKittens
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
@@ -138,6 +166,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     source /opt/venv/bin/activate && \
     uv pip install --upgrade pip && \
     uv pip install --excludes docker/uv-excludes ".[dev]" && \
+    python -c "import cv2; print('OpenCV', cv2.__version__)" && \
     PYTAG=cp$(echo "${PYTHON_VERSION}" | tr -d .) && \
     case "${TARGETARCH:-amd64}" in \
         amd64) \
@@ -153,7 +182,9 @@ RUN --mount=type=cache,target=/opt/uv/cache \
             exit 1 \
             ;; \
     esac && \
-    if [ -n "${FLASH_ATTN_WHEEL_TAG}" ]; then \
+    if [ "${INSTALL_FLASH_ATTN}" != "1" ]; then \
+        echo "Skipping flash-attn (INSTALL_FLASH_ATTN=${INSTALL_FLASH_ATTN})"; \
+    elif [ -n "${FLASH_ATTN_WHEEL_TAG}" ]; then \
         echo "Installing prebuilt flash-attn wheel (${FLASH_ATTN_WHEEL_TAG}, ${PYTAG}, ${FLASH_ATTN_WHEEL_PLATFORM})" && \
         uv pip install "${FLASH_ATTN_TARGET_RELEASE}/flash_attn-${FLASH_ATTN_VERSION}+${FLASH_ATTN_WHEEL_TAG}-${PYTAG}-${PYTAG}-${FLASH_ATTN_WHEEL_PLATFORM}.whl"; \
     else \
@@ -169,26 +200,33 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # flash_attn/__init__.py), so FA2/varlen/bert_padding stay from the install above;
 # rmtree clears the wheel's stale cute files first to avoid an install conflict.
 # Then verify both survive so a broken overlay fails the build instead of shipping
-# an FA2-less image. x86 only: the FA4 stack (quack-kernels etc.) is unvalidated on
-# arm64 / GB10 (sm_121), so there we skip the overlay; FA4 is opt-in
-# (FASTVIDEO_FA4=1) and errors if set without the overlay, so leave it unset on
-# arm64 and the image runs FA3/FA2 as usual.
+# an FA2-less image. The pinned stack is validated on ARM64 GB200 (sm_100) as well
+# as x86; FA4 remains opt-in through FASTVIDEO_FA4=1 so lanes with FA2 baselines
+# keep their existing numerics.
+# With INSTALL_FA4_CUTE=0 any wheel's stale cute is still removed, so
+# `import flash_attn.cute` fails cleanly and FastVideo's guarded import falls back.
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "Skipping FA4 cute overlay on arm64 (FA4 stack unvalidated there; do not set FASTVIDEO_FA4)"; \
-    else \
-        python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
+    python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
+    if [ "${INSTALL_FA4_CUTE}" = "1" ] && [ "${INSTALL_FLASH_ATTN}" != "1" ]; then \
+        echo "INSTALL_FA4_CUTE=1 overlays the FA2 install; it requires INSTALL_FLASH_ATTN=1" >&2; \
+        exit 1; \
+    elif [ "${INSTALL_FA4_CUTE}" = "1" ]; then \
         uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
         python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'), 'FA2 was clobbered by the cute overlay'; import flash_attn.cute; print('FA2 + FA4 cute OK')"; \
+    else \
+        python -c "import flashinfer; print('flashinfer', flashinfer.__version__, 'OK; FA4 cute skipped')" && \
+        if [ "${INSTALL_FLASH_ATTN}" = "1" ]; then \
+            python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'); print('FA2 OK')"; \
+        fi; \
     fi
 
 COPY . .
 
 # Build immutable FastVideo kernel wheels for the published image. The requested
 # architecture remains installed for normal image users; amd64 images also carry
-# an SM89 artifact so the predominant L40S Modal lanes can reuse it exactly.
+# an SM89 artifact for L40S users and the dormant legacy rollback path.
 ARG FASTVIDEO_KERNEL_PREBUILT_DIR=/opt/fastvideo-kernel-prebuilt
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \

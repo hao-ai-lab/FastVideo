@@ -32,8 +32,7 @@ class _LearnedPositionalEmbedding(nn.Module):
 
 
 def _time_positional_embedding(dim: int, out_features: int) -> nn.Sequential:
-    return nn.Sequential(_LearnedPositionalEmbedding(dim),
-                         nn.Linear(in_features=dim + 1, out_features=out_features))
+    return nn.Sequential(_LearnedPositionalEmbedding(dim), nn.Linear(in_features=dim + 1, out_features=out_features))
 
 
 class NumberEmbedder(nn.Module):
@@ -59,8 +58,7 @@ class _Conditioner(nn.Module):
         super().__init__()
         self.dim = dim
         self.output_dim = output_dim
-        self.proj_out = (nn.Linear(dim, output_dim) if dim != output_dim or project_out
-                         else nn.Identity())
+        self.proj_out = (nn.Linear(dim, output_dim) if dim != output_dim or project_out else nn.Identity())
 
 
 class T5Conditioner(_Conditioner):
@@ -71,8 +69,11 @@ class T5Conditioner(_Conditioner):
 
     T5_MODEL_DIMS = {"t5-base": 768}
 
-    def __init__(self, output_dim: int, t5_model_name: str = "t5-base",
-                 max_length: int = 128, dtype: str = "float16") -> None:
+    def __init__(self,
+                 output_dim: int,
+                 t5_model_name: str = "t5-base",
+                 max_length: int = 128,
+                 dtype: str = "float16") -> None:
         super().__init__(self.T5_MODEL_DIMS[t5_model_name], output_dim, project_out=False)
         from transformers import AutoTokenizer, T5EncoderModel
         self.max_length = max_length
@@ -92,14 +93,16 @@ class T5Conditioner(_Conditioner):
         self.model = (T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False).to(torch_dtype))
 
     def forward(self, texts: list[str], device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
-        encoded = self.tokenizer(texts, truncation=True, max_length=self.max_length,
-                                 padding="max_length", return_tensors="pt")
+        encoded = self.tokenizer(texts,
+                                 truncation=True,
+                                 max_length=self.max_length,
+                                 padding="max_length",
+                                 return_tensors="pt")
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device).to(torch.bool)
         # Mirror official's `autocast(fp16)` wrap on T5 forward.
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=self._t5_dtype):
-            embeddings = self.model(input_ids=input_ids,
-                                    attention_mask=attention_mask)["last_hidden_state"]
+            embeddings = self.model(input_ids=input_ids, attention_mask=attention_mask)["last_hidden_state"]
         embeddings = self.proj_out(embeddings) * attention_mask.unsqueeze(-1).float()
         return embeddings, attention_mask
 
@@ -149,8 +152,7 @@ class StableAudioMultiConditioner(nn.Module):
                                          max_length=scfg["max_length"],
                                          dtype=arch.t5_dtype)
             elif stype == "number":
-                sub[sid] = NumberConditioner(output_dim=arch.cond_dim,
-                                             min_val=scfg["min_val"], max_val=scfg["max_val"])
+                sub[sid] = NumberConditioner(output_dim=arch.cond_dim, min_val=scfg["min_val"], max_val=scfg["max_val"])
             else:
                 raise ValueError(f"Unknown sub-conditioner type {stype!r} for id {sid!r}.")
         self.conditioners = nn.ModuleDict(sub)
@@ -166,8 +168,8 @@ class StableAudioMultiConditioner(nn.Module):
         return out
 
     def get_conditioning_inputs(
-        self, cond: dict[str, tuple[torch.Tensor, torch.Tensor]]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            self, cond: dict[str, tuple[torch.Tensor,
+                                        torch.Tensor]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Pack conditioner outputs into the (cross_attn_cond,
         cross_attn_mask, global_embed) triple the DiT consumes. Order
         is driven by `cross_attention_cond_ids` / `global_cond_ids`
@@ -183,7 +185,8 @@ class StableAudioMultiConditioner(nn.Module):
         return cross_attn_cond, cross_attn_mask, global_embed
 
     @classmethod
-    def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
+    def from_official_state_dict(cls,
+                                 state_dict: dict[str, torch.Tensor],
                                  prefix: str = "conditioner.") -> "StableAudioMultiConditioner":
         """Load NumberConditioner weights from a raw `stable_audio_tools`
         monolithic state dict. Kept for tests / older checkpoints;
@@ -200,13 +203,11 @@ class StableAudioMultiConditioner(nn.Module):
             if stripped in own_state:
                 loaded[stripped] = v
         # T5 keys are intentionally absent from the checkpoint.
-        missing = [k for k in own_state.keys() if k not in loaded
-                   and not k.startswith("conditioners.prompt.")]
+        missing = [k for k in own_state.keys() if k not in loaded and not k.startswith("conditioners.prompt.")]
         unexpected = [k for k in loaded.keys() if k not in own_state]
         if missing or unexpected:
             raise RuntimeError(
-                f"StableAudioMultiConditioner load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}"
-            )
+                f"StableAudioMultiConditioner load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
         mc.load_state_dict(loaded, strict=False)
         return mc
 

@@ -4,6 +4,7 @@ import os
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -19,16 +20,17 @@ from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of Matrix Game 2.0 support.")
 
 device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
@@ -47,8 +49,7 @@ MATRIXGAME_PARAMS = {
     "seed": 1024,
     "keyboard_dim": 4,
 }
-_MATRIXGAME_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    MATRIXGAME_PARAMS["model_path"])
+_MATRIXGAME_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(MATRIXGAME_PARAMS["model_path"])
 MATRIXGAME_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME_PARAMS["num_gpus"],
     "model_path": MATRIXGAME_PARAMS["model_path"],
@@ -60,7 +61,6 @@ MATRIXGAME_FULL_QUALITY_PARAMS = {
     "seed": _MATRIXGAME_FULL_QUALITY_DEFAULTS.seed,
     "keyboard_dim": MATRIXGAME_PARAMS["keyboard_dim"],
 }
-
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-2.0-Diffusers-Base": MATRIXGAME_PARAMS,
@@ -83,12 +83,12 @@ TEST_IMAGE_PATHS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -110,9 +110,9 @@ def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id):
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
     # Create action conditions for Matrix-Game 2.0
-    actions = create_action_presets(
-        BASE_PARAMS["num_frames"], keyboard_dim=BASE_PARAMS["keyboard_dim"], seed=BASE_PARAMS["seed"]
-    )
+    actions = create_action_presets(BASE_PARAMS["num_frames"],
+                                    keyboard_dim=BASE_PARAMS["keyboard_dim"],
+                                    seed=BASE_PARAMS["seed"])
     latent_frames = (BASE_PARAMS["num_frames"] - 1) // 4 + 1
     grid_sizes = torch.tensor([latent_frames, 44, 80])
 
@@ -143,8 +143,7 @@ def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id):
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
     assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 

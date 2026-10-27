@@ -122,9 +122,13 @@ def _fused_block_mean_bwd(
     grid = (num_blocks, B * H)
 
     _fused_block_mean_bwd_kernel[grid](
-        go_flat, gx_flat, variable_block_sizes,
-        go_flat.stride(0), go_flat.stride(1),
-        gx_flat.stride(0), gx_flat.stride(1),
+        go_flat,
+        gx_flat,
+        variable_block_sizes,
+        go_flat.stride(0),
+        go_flat.stride(1),
+        gx_flat.stride(0),
+        gx_flat.stride(1),
         num_blocks,
         BLOCK_ELEMENTS=block_elements,
         HEAD_DIM=D,
@@ -152,9 +156,13 @@ def _fused_block_mean_fwd(
     grid = (num_blocks, B * H)
 
     _fused_block_mean_kernel[grid](
-        x_flat, out_flat, variable_block_sizes,
-        x_flat.stride(0), x_flat.stride(1),
-        out_flat.stride(0), out_flat.stride(1),
+        x_flat,
+        out_flat,
+        variable_block_sizes,
+        x_flat.stride(0),
+        x_flat.stride(1),
+        out_flat.stride(0),
+        out_flat.stride(1),
         num_blocks,
         BLOCK_ELEMENTS=block_elements,
         HEAD_DIM=D,
@@ -311,7 +319,8 @@ def fused_topk_mask(
         logger.debug(
             "fused_topk_mask: kv_blocks=%d exceeds Triton limit %d, "
             "falling back to PyTorch topk (slower)",
-            kv_blocks, MAX_KV_BLOCK_SIZE,
+            kv_blocks,
+            MAX_KV_BLOCK_SIZE,
         )
         return _pytorch_topk_mask_fallback(scores, topk)
 
@@ -323,9 +332,14 @@ def fused_topk_mask(
     grid = (q_blocks, B * H)
 
     _fused_topk_mask_kernel[grid](
-        scores_flat, mask_flat,
-        scores_flat.stride(0), scores_flat.stride(1), scores_flat.stride(2),
-        mask_flat.stride(0), mask_flat.stride(1), mask_flat.stride(2),
+        scores_flat,
+        mask_flat,
+        scores_flat.stride(0),
+        scores_flat.stride(1),
+        scores_flat.stride(2),
+        mask_flat.stride(0),
+        mask_flat.stride(1),
+        mask_flat.stride(2),
         kv_blocks=kv_blocks,
         topk=topk,
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,

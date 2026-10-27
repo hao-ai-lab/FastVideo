@@ -76,6 +76,8 @@ class VideoTransformStage(PipelineStage):
 
         video_pixel_values = video_pixel_values.float() / 255.0
         batch.latents = video_pixel_values
+        # The frames were resampled to train_fps, so describe the clip rather than the source video.
+        batch.fps = [self.train_fps] * len(batch.video_loader)
         batch.num_frames = [video_pixel_values.shape[2]] * len(batch.video_loader)
         batch.height = [video_pixel_values.shape[3]] * len(batch.video_loader)
         batch.width = [video_pixel_values.shape[4]] * len(batch.video_loader)

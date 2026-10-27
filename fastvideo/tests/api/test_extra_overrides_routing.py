@@ -24,8 +24,7 @@ import torch
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import (
-    _BATCH_EXTRA_PASSTHROUGH_KEYS,
-)
+    _BATCH_EXTRA_PASSTHROUGH_KEYS, )
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import shallow_asdict
 
@@ -37,6 +36,22 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "ltx2_audio_denoise_mask",
         "audio_num_frames",
         "video_position_offset_sec",
+        # MiniMax-H3 VSA per-request knobs (consumed by MiniMaxH3DenoisingStage)
+        "vsa_mode",
+        "vsa_dense_first_n_steps",
+        "vsa_dense_layers",
+        # Kandinsky6 SR request options and inputs (Kandinsky6SROptions, read by the stages in
+        # fastvideo/pipelines/stages/kandinsky6_sr.py). validate_request_batch_extra rejects them for every other
+        # model. The raw-latent input and audio override are SR-prefixed so a bare "audio"/"audio_sample_rate"
+        # request kwarg stays a no-op for every other pipeline.
+        "sr_resolution_scale",
+        "sr_tiles_batch_size",
+        "sr_tile_min_overlap",
+        "sr_target_resolution",
+        "sr_target_resize_mode",
+        "sr_lr_latent",
+        "sr_audio",
+        "sr_audio_sample_rate",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 
@@ -48,9 +63,8 @@ def test_passthrough_keys_are_not_sampling_param_fields() -> None:
     import dataclasses
     sp_fields = {f.name for f in dataclasses.fields(SamplingParam())}
     leaked = sp_fields & set(_BATCH_EXTRA_PASSTHROUGH_KEYS)
-    assert not leaked, (
-        f"Passthrough keys collide with SamplingParam fields: {leaked}. "
-        "Remove from _BATCH_EXTRA_PASSTHROUGH_KEYS or rename the field.")
+    assert not leaked, (f"Passthrough keys collide with SamplingParam fields: {leaked}. "
+                        "Remove from _BATCH_EXTRA_PASSTHROUGH_KEYS or rename the field.")
 
 
 def test_sampling_param_update_rejects_unknown_keys() -> None:

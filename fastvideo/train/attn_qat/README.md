@@ -43,7 +43,7 @@ Parquet dataset, then run the modular workflow from the repository root:
 
 ```bash
 # Prepare precomputed VAE latents and text embeddings.
-bash examples/training/finetune/wan_t2v_1.3B/mixkit/download_mixkit_data.sh
+bash examples/datasets/mixkit/download_dataset.sh
 
 # Stage 1: Attn-QAT supervised finetune.
 NUM_GPUS=4 bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh

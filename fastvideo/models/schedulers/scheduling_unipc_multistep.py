@@ -63,7 +63,7 @@ def betas_for_alpha_bar(
     if alpha_transform_type == "cosine":
 
         def alpha_bar_fn(t):
-            return math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2
+            return math.cos((t + 0.008) / 1.008 * math.pi / 2)**2
 
     elif alpha_transform_type == "exp":
 
@@ -235,7 +235,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             self.betas = torch.linspace(beta_start, beta_end, num_train_timesteps, dtype=torch.float32)
         elif beta_schedule == "scaled_linear":
             # this schedule is very specific to the latent diffusion model.
-            self.betas = torch.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=torch.float32) ** 2
+            self.betas = torch.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=torch.float32)**2
         elif beta_schedule == "squaredcos_cap_v2":
             # Glide cosine schedule
             self.betas = betas_for_alpha_bar(num_train_timesteps)
@@ -257,7 +257,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self.alpha_t = torch.sqrt(self.alphas_cumprod)
         self.sigma_t = torch.sqrt(1 - self.alphas_cumprod)
         self.lambda_t = torch.log(self.alpha_t) - torch.log(self.sigma_t)
-        self.sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod) ** 0.5
+        self.sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod)**0.5
 
         # standard deviation of the initial noise distribution
         self.init_noise_sigma = 1.0
@@ -314,9 +314,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         self._begin_index = begin_index
 
-    def set_timesteps(
-        self, num_inference_steps: int, device: Union[str, torch.device] = None, mu: Optional[float] = None
-    ):
+    def set_timesteps(self,
+                      num_inference_steps: int,
+                      device: Union[str, torch.device] = None,
+                      mu: Optional[float] = None):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
 
@@ -331,12 +332,8 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             assert self.config.use_dynamic_shifting and self.config.time_shift_type == "exponential"
             self.config.flow_shift = np.exp(mu)
         if self.config.timestep_spacing == "linspace":
-            timesteps = (
-                np.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps + 1)
-                .round()[::-1][:-1]
-                .copy()
-                .astype(np.int64)
-            )
+            timesteps = (np.linspace(0, self.config.num_train_timesteps - 1,
+                                     num_inference_steps + 1).round()[::-1][:-1].copy().astype(np.int64))
         elif self.config.timestep_spacing == "leading":
             step_ratio = self.config.num_train_timesteps // (num_inference_steps + 1)
             # creates integer timesteps by multiplying by ratio
@@ -354,7 +351,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
                 f"{self.config.timestep_spacing} is not supported. Please make sure to choose one of 'linspace', 'leading' or 'trailing'."
             )
 
-        sigmas = np.array(((1 - self.alphas_cumprod) / self.alphas_cumprod) ** 0.5)
+        sigmas = np.array(((1 - self.alphas_cumprod) / self.alphas_cumprod)**0.5)
         if self.config.use_karras_sigmas:
             log_sigmas = np.log(sigmas)
             sigmas = np.flip(sigmas).copy()
@@ -414,7 +411,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         else:
             sigmas = np.interp(timesteps, np.arange(0, len(sigmas)), sigmas)
             if self.config.final_sigmas_type == "sigma_min":
-                sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]) ** 0.5
+                sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0])**0.5
             elif self.config.final_sigmas_type == "zero":
                 sigma_last = 0
             else:
@@ -465,8 +462,8 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         s = torch.quantile(abs_sample, self.config.dynamic_thresholding_ratio, dim=1)
         s = torch.clamp(
-            s, min=1, max=self.config.sample_max_value
-        )  # When clamped to min=1, equivalent to standard clipping to [-1, 1]
+            s, min=1,
+            max=self.config.sample_max_value)  # When clamped to min=1, equivalent to standard clipping to [-1, 1]
         s = s.unsqueeze(1)  # (batch_size, 1) because clamp will broadcast along dim=0
         sample = torch.clamp(sample, -s, s) / s  # "we threshold xt0 to the range [-s, s] and then divide by s"
 
@@ -505,7 +502,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             alpha_t = 1 - sigma
             sigma_t = sigma
         else:
-            alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
+            alpha_t = 1 / ((sigma**2 + 1)**0.5)
             sigma_t = sigma * alpha_t
 
         return alpha_t, sigma_t
@@ -525,9 +522,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         rho = 7.0  # 7.0 is the value used in the paper
         ramp = np.linspace(0, 1, num_inference_steps)
-        min_inv_rho = sigma_min ** (1 / rho)
-        max_inv_rho = sigma_max ** (1 / rho)
-        sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho
+        min_inv_rho = sigma_min**(1 / rho)
+        max_inv_rho = sigma_max**(1 / rho)
+        sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho))**rho
         return sigmas
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
@@ -547,9 +544,11 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         return sigmas
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
-    def _convert_to_beta(
-        self, in_sigmas: torch.Tensor, num_inference_steps: int, alpha: float = 0.6, beta: float = 0.6
-    ) -> torch.Tensor:
+    def _convert_to_beta(self,
+                         in_sigmas: torch.Tensor,
+                         num_inference_steps: int,
+                         alpha: float = 0.6,
+                         beta: float = 0.6) -> torch.Tensor:
         """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
 
         # Hack to make sure that other schedulers which copy this function don't break
@@ -561,15 +560,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
         sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
 
-        sigmas = np.array(
-            [
-                sigma_min + (ppf * (sigma_max - sigma_min))
-                for ppf in [
-                    scipy.stats.beta.ppf(timestep, alpha, beta)
-                    for timestep in 1 - np.linspace(0, 1, num_inference_steps)
-                ]
-            ]
-        )
+        sigmas = np.array([
+            sigma_min + (ppf * (sigma_max - sigma_min)) for ppf in
+            [scipy.stats.beta.ppf(timestep, alpha, beta) for timestep in 1 - np.linspace(0, 1, num_inference_steps)]
+        ])
         return sigmas
 
     def convert_model_output(
@@ -623,8 +617,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             else:
                 raise ValueError(
                     f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, "
-                    "`v_prediction`, or `flow_prediction` for the UniPCMultistepScheduler."
-                )
+                    "`v_prediction`, or `flow_prediction` for the UniPCMultistepScheduler.")
 
             if self.config.thresholding:
                 x0_pred = self._threshold_sample(x0_pred)
@@ -642,8 +635,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             else:
                 raise ValueError(
                     f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, or"
-                    " `v_prediction` for the UniPCMultistepScheduler."
-                )
+                    " `v_prediction` for the UniPCMultistepScheduler.")
 
     def multistep_uni_p_bh_update(
         self,
@@ -958,15 +950,13 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         if self.num_inference_steps is None:
             raise ValueError(
-                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
-            )
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler")
 
         if self.step_index is None:
             self._init_step_index(timestep)
 
-        use_corrector = (
-            self.step_index > 0 and self.step_index - 1 not in self.disable_corrector and self.last_sample is not None
-        )
+        use_corrector = (self.step_index > 0 and self.step_index - 1 not in self.disable_corrector
+                         and self.last_sample is not None)
 
         model_output_convert = self.convert_model_output(model_output, sample=sample)
         if use_corrector:
@@ -1006,7 +996,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self._step_index += 1
 
         if not return_dict:
-            return (prev_sample,)
+            return (prev_sample, )
 
         return SchedulerOutput(prev_sample=prev_sample)
 
@@ -1062,6 +1052,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def __len__(self):
         return self.config.num_train_timesteps
+
 
 # Entry point for model registry
 EntryClass = UniPCMultistepScheduler

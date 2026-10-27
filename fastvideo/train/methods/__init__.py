@@ -5,7 +5,10 @@ from fastvideo.train.methods.base import TrainingMethod
 __all__ = [
     "TrainingMethod",
     "DMD2Method",
+    "DMPDDMethod",
+    "PDDMethod",
     "FineTuneMethod",
+    "FlowMatchingFineTuneMethod",
     "KDMethod",
     "SelfForcingMethod",
     "DiffusionForcingSFTMethod",
@@ -15,12 +18,22 @@ __all__ = [
 
 
 def __getattr__(name: str) -> object:
+    if name == "DMPDDMethod":
+        from fastvideo.train.methods.distribution_matching.dmpdd import DMPDDMethod
+        return DMPDDMethod
+    if name == "PDDMethod":
+        from fastvideo.train.methods.trajectory_matching.pdd import PDDMethod
+        return PDDMethod
     if name == "DMD2Method":
         from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
         return DMD2Method
     if name == "FineTuneMethod":
         from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
         return FineTuneMethod
+    if name == "FlowMatchingFineTuneMethod":
+        from fastvideo.train.methods.fine_tuning.flow_matching import (
+            FlowMatchingFineTuneMethod, )
+        return FlowMatchingFineTuneMethod
     if name == "KDMethod":
         from fastvideo.train.methods.knowledge_distillation.kd import KDMethod
         return KDMethod

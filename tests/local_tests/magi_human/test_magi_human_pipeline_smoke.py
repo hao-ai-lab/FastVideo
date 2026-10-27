@@ -42,10 +42,7 @@ def test_magi_human_typed_surface_preflight() -> None:
     )
     from fastvideo.models.dits.magi_human import MagiHumanDiT
     from fastvideo.pipelines.basic.magi_human.magi_human_pipeline import (  # noqa: F401
-        MagiHumanI2VPipeline,
-        MagiHumanPipeline,
-        MagiHumanSRI2VPipeline,
-        MagiHumanSRPipeline,
+        MagiHumanI2VPipeline, MagiHumanPipeline, MagiHumanSRI2VPipeline, MagiHumanSRPipeline,
     )
     from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
         MagiHumanBaseConfig,
@@ -55,11 +52,8 @@ def test_magi_human_typed_surface_preflight() -> None:
         MagiHumanSR540pI2VConfig,
     )
     from fastvideo.pipelines.basic.magi_human.stages import (  # noqa: F401
-        MagiHumanDenoisingStage,
-        MagiHumanLatentPreparationStage,
-        MagiHumanReferenceImageStage,
-        MagiHumanSRDenoisingStage,
-        MagiHumanSRLatentPreparationStage,
+        MagiHumanDenoisingStage, MagiHumanLatentPreparationStage, MagiHumanReferenceImageStage,
+        MagiHumanSRDenoisingStage, MagiHumanSRLatentPreparationStage,
     )
 
     # Presets are registered under the expected family.
@@ -197,11 +191,9 @@ def test_magi_human_pipeline_smoke() -> None:
         "converted_weights/magi_human_base",
     )
     if not os.path.isdir(diffusers_path):
-        pytest.skip(
-            f"Missing converted MagiHuman repo at {diffusers_path}. "
-            f"Run scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py "
-            f"first."
-        )
+        pytest.skip(f"Missing converted MagiHuman repo at {diffusers_path}. "
+                    f"Run scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py "
+                    f"first.")
     if not os.path.isfile(os.path.join(diffusers_path, "model_index.json")):
         pytest.skip(f"Missing model_index.json in {diffusers_path}")
 
@@ -214,7 +206,7 @@ def test_magi_human_pipeline_smoke() -> None:
     seed = 42
     height = 256
     width = 448
-    num_frames = 13   # seconds=1, 12fps for smoke; the pipeline derives it
+    num_frames = 13  # seconds=1, 12fps for smoke; the pipeline derives it
     fps = 12.0
     steps = 2
 

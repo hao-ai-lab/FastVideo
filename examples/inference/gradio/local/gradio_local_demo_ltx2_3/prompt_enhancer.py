@@ -14,9 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency
     Cerebras = None  # type: ignore[assignment]
 
 LOCAL_DEMO_DIR = Path(__file__).resolve().parent
-DEFAULT_SYSTEM_PROMPT_PATH = (
-    LOCAL_DEMO_DIR / "prompts" / "prompt_extension_system_prompt.md"
-)
+DEFAULT_SYSTEM_PROMPT_PATH = (LOCAL_DEMO_DIR / "prompts" / "prompt_extension_system_prompt.md")
 DEFAULT_PROVIDER = "cerebras"
 DEFAULT_MODEL = "gpt-oss-120b"
 DEFAULT_TEMPERATURE = 1.0
@@ -83,19 +81,13 @@ def _load_prompt_required(path: str, prompt_name: str) -> str:
         try:
             text = candidate.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise RuntimeError(
-                f"Failed to read {prompt_name} system prompt: {candidate}"
-            ) from exc
+            raise RuntimeError(f"Failed to read {prompt_name} system prompt: {candidate}") from exc
         if not text:
-            raise RuntimeError(
-                f"{prompt_name} system prompt file is empty: {candidate}"
-            )
+            raise RuntimeError(f"{prompt_name} system prompt file is empty: {candidate}")
         return text
 
     tried = ", ".join(str(candidate) for candidate in candidate_paths)
-    raise RuntimeError(
-        f"{prompt_name} system prompt file not found. Tried: {tried}"
-    )
+    raise RuntimeError(f"{prompt_name} system prompt file not found. Tried: {tried}")
 
 
 def _extract_assistant_content(response_json: dict[str, Any]) -> str:
@@ -129,10 +121,8 @@ def _extract_assistant_content(response_json: dict[str, Any]) -> str:
 
     finish_reason = choices[0].get("finish_reason")
     refusal = message.get("refusal")
-    raise ValueError(
-        "Missing assistant content in chat completion response. "
-        f"finish_reason={finish_reason!r}, refusal={refusal!r}"
-    )
+    raise ValueError("Missing assistant content in chat completion response. "
+                     f"finish_reason={finish_reason!r}, refusal={refusal!r}")
 
 
 def _dump_response_json(response: Any) -> dict[str, Any]:
@@ -143,15 +133,11 @@ def _dump_response_json(response: Any) -> dict[str, Any]:
     elif hasattr(response, "dict"):
         payload = response.dict()
     else:
-        raise TypeError(
-            "Unsupported chat completion response type. "
-            f"type={type(response)!r}"
-        )
+        raise TypeError("Unsupported chat completion response type. "
+                        f"type={type(response)!r}")
 
     if not isinstance(payload, dict):
-        raise TypeError(
-            "Chat completion response did not serialize to a JSON object."
-        )
+        raise TypeError("Chat completion response did not serialize to a JSON object.")
     return payload
 
 
@@ -203,6 +189,7 @@ def _normalize_prompt(value: Any) -> str:
 
 
 class PromptEnhancer:
+
     def __init__(self) -> None:
         self.provider = DEFAULT_PROVIDER
         self.provider_label = DEFAULT_PROVIDER
@@ -215,9 +202,8 @@ class PromptEnhancer:
             "LTX2_PROMPT_TEMPERATURE",
             DEFAULT_TEMPERATURE,
         )
-        self.system_prompt_path = _env_value(
-            "LTX2_PROMPT_EXTENSION_SYSTEM_PROMPT_PATH"
-        ) or str(DEFAULT_SYSTEM_PROMPT_PATH)
+        self.system_prompt_path = _env_value("LTX2_PROMPT_EXTENSION_SYSTEM_PROMPT_PATH") or str(
+            DEFAULT_SYSTEM_PROMPT_PATH)
         self.client: Any | None = None
         self.system_prompt: str | None = None
         self.unavailable_reason: str | None = None
@@ -237,14 +223,10 @@ class PromptEnhancer:
 
     def _build_client(self) -> Any:
         if Cerebras is None:
-            raise RuntimeError(
-                "Cerebras SDK is not installed. Install "
-                "'cerebras-cloud-sdk' to use prompt enhancement."
-            )
+            raise RuntimeError("Cerebras SDK is not installed. Install "
+                               "'cerebras-cloud-sdk' to use prompt enhancement.")
         if not self.api_key:
-            raise RuntimeError(
-                "Missing FASTVIDEO_PROMPT_API_KEY or CEREBRAS_API_KEY."
-            )
+            raise RuntimeError("Missing FASTVIDEO_PROMPT_API_KEY or CEREBRAS_API_KEY.")
         return Cerebras(api_key=self.api_key)
 
     def _build_body(
@@ -260,11 +242,14 @@ class PromptEnhancer:
                 "single 5-second LTX-2.3 video. Respond with valid JSON "
                 'only as {"prompt": "..."}.'  # noqa: E501
             ),
-            "user_prompt": user_prompt,
+            "user_prompt":
+            user_prompt,
         }
         return {
-            "model": model or self.model,
-            "temperature": self.temperature,
+            "model":
+            model or self.model,
+            "temperature":
+            self.temperature,
             "messages": [
                 {
                     "role": "system",
@@ -285,10 +270,7 @@ class PromptEnhancer:
         model: str | None = None,
     ) -> tuple[dict[str, Any], str]:
         if self.client is None:
-            raise RuntimeError(
-                self.unavailable_reason
-                or "Prompt enhancement client is not initialized."
-            )
+            raise RuntimeError(self.unavailable_reason or "Prompt enhancement client is not initialized.")
 
         body = self._build_body(
             system_prompt=system_prompt,
@@ -332,10 +314,7 @@ class PromptEnhancer:
             return EnhanceResult(
                 prompt="",
                 fallback_used=True,
-                error=(
-                    self.unavailable_reason
-                    or "Prompt enhancement system prompt is unavailable."
-                ),
+                error=(self.unavailable_reason or "Prompt enhancement system prompt is unavailable."),
                 provider=self.provider_label,
                 model=self.model,
                 latency_ms=0.0,
@@ -363,10 +342,8 @@ class PromptEnhancer:
         except Exception as exc:
             error_detail = str(exc)
             if isinstance(response_content, str) and response_content.strip():
-                error_detail = (
-                    f"{error_detail} | assistant_response="
-                    f"{_preview_text(response_content, limit=240)}"
-                )
+                error_detail = (f"{error_detail} | assistant_response="
+                                f"{_preview_text(response_content, limit=240)}")
             latency_ms = (time.perf_counter() - t0) * 1000.0
             return EnhanceResult(
                 prompt="",

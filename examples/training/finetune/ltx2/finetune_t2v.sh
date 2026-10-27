@@ -83,7 +83,9 @@ torchrun \
   --nnodes 1 \
   --master_port 29501 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/ltx2_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class LTX2TrainingPipeline \
+    --pipeline-module fastvideo.training.ltx2_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

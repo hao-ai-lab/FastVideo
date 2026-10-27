@@ -204,8 +204,17 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split
     }));
 }
 
-std::vector<at::Tensor>
-mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size // 2)
+struct SparseKvLists {
+    int const *q2k_idx = nullptr;
+    int const *q2k_num = nullptr;
+    int q2k_max = 0;
+    int num_m_blocks = 0;
+    int const *kv_valid = nullptr;
+    uint8_t const *q2k_quad = nullptr;
+};
+
+static std::vector<at::Tensor>
+mha_fwd_impl(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size // 2)
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x (head_size // 2)
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x (head_size // 2)
         const at::Tensor &sfq,
@@ -218,7 +227,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
         bool is_causal, 
         bool per_block_mean,
         bool is_bf16,
-        bool single_level_p_quant=false  // If true, use only per-row scale s_P2 (no per-block s_P1)
+        bool single_level_p_quant,  // If true, use only per-row scale s_P2 (no per-block s_P1)
+        SparseKvLists const &sparse
     ) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -316,6 +326,12 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     // stack-local tensor whose data pointer would dangle after mha_fwd returns
     // while the async kernel may still be running.
     params.tile_count_semaphore = nullptr;
+    params.q2k_idx = sparse.q2k_idx;
+    params.q2k_num = sparse.q2k_num;
+    params.q2k_max = sparse.q2k_max;
+    params.num_m_blocks = sparse.num_m_blocks;
+    params.kv_valid = sparse.kv_valid;
+    params.q2k_quad = sparse.q2k_quad;
 
     if (seqlen_k > 0) {
         auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -341,7 +357,72 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
 
 
 
+std::vector<at::Tensor>
+mha_fwd(at::Tensor &q, const at::Tensor &k, const at::Tensor &v,
+        const at::Tensor &sfq, const at::Tensor &sfk, const at::Tensor &sfv,
+        const at::Tensor &delta_s, int unpadded_k, c10::optional<at::Tensor> &out_,
+        const float softmax_scale, bool is_causal, bool per_block_mean, bool is_bf16,
+        bool single_level_p_quant=false) {
+    return mha_fwd_impl(q, k, v, sfq, sfk, sfv, delta_s, unpadded_k, out_, softmax_scale,
+                        is_causal, per_block_mean, is_bf16, single_level_p_quant, SparseKvLists{});
+}
+
+// Block-sparse forward: query block m of (b, h) attends only to the KV blocks
+// listed in q2k_idx[b, h, m, :q2k_num[b, h, m]] (BLOCK_M x BLOCK_N granularity).
+// kv_valid, if given, holds the valid token count of each 64-column half of
+// every KV block ([2 * num_kv_blocks], valid tokens first within a half).
+// q2k_quad, if given (uint8, same shape as q2k_idx), restricts each listed
+// block to the 64x64 quadrants whose bit (2 * row_half + col_half) is set, so
+// 64-token VSA tiles run on 128x128 blocks. The block a list visits first
+// (its last entry) must leave every query row at least one valid key.
+// Non-causal only.
+std::vector<at::Tensor>
+mha_fwd_sparse(at::Tensor &q, const at::Tensor &k, const at::Tensor &v,
+               const at::Tensor &sfq, const at::Tensor &sfk, const at::Tensor &sfv,
+               const at::Tensor &delta_s, int unpadded_k, c10::optional<at::Tensor> &out_,
+               const float softmax_scale, bool per_block_mean, bool is_bf16,
+               bool single_level_p_quant,
+               const at::Tensor &q2k_idx, const at::Tensor &q2k_num,
+               c10::optional<at::Tensor> &kv_valid_,
+               c10::optional<at::Tensor> &q2k_quad_) {
+    const int batch_size = q.size(0);
+    const int num_heads = q.size(1);
+    const int num_m_blocks = (q.size(2) + flash::BLOCK_M - 1) / flash::BLOCK_M;
+    const int num_n_blocks = (k.size(2) + flash::BLOCK_N - 1) / flash::BLOCK_N;
+    for (auto const *t : {&q2k_idx, &q2k_num}) {
+        TORCH_CHECK(t->scalar_type() == torch::kInt32, "q2k_idx / q2k_num must be int32");
+        CHECK_DEVICE((*t)); CHECK_CONTIGUOUS((*t));
+    }
+    TORCH_CHECK(q2k_idx.dim() == 4, "q2k_idx must be [batch, heads, num_m_blocks, max_kv_blocks]");
+    TORCH_CHECK(q2k_idx.size(0) == batch_size && q2k_idx.size(1) == num_heads && q2k_idx.size(2) == num_m_blocks,
+                "q2k_idx leading dims must be [batch, heads, ceil(seqlen_q / BLOCK_M)]");
+    TORCH_CHECK(q2k_idx.size(3) >= 1 && q2k_idx.size(3) <= num_n_blocks, "q2k_idx last dim must be in [1, num_kv_blocks]");
+    CHECK_SHAPE(q2k_num, batch_size, num_heads, num_m_blocks);
+    SparseKvLists sparse;
+    sparse.q2k_idx = q2k_idx.data_ptr<int>();
+    sparse.q2k_num = q2k_num.data_ptr<int>();
+    sparse.q2k_max = q2k_idx.size(3);
+    sparse.num_m_blocks = num_m_blocks;
+    if (kv_valid_.has_value()) {
+        auto const &kv_valid = kv_valid_.value();
+        TORCH_CHECK(kv_valid.scalar_type() == torch::kInt32, "kv_valid must be int32");
+        CHECK_DEVICE(kv_valid); CHECK_CONTIGUOUS(kv_valid);
+        CHECK_SHAPE(kv_valid, 2 * num_n_blocks);
+        sparse.kv_valid = kv_valid.data_ptr<int>();
+    }
+    if (q2k_quad_.has_value()) {
+        auto const &q2k_quad = q2k_quad_.value();
+        TORCH_CHECK(q2k_quad.scalar_type() == torch::kUInt8, "q2k_quad must be uint8");
+        CHECK_DEVICE(q2k_quad); CHECK_CONTIGUOUS(q2k_quad);
+        TORCH_CHECK(q2k_quad.sizes() == q2k_idx.sizes(), "q2k_quad must match q2k_idx's shape");
+        sparse.q2k_quad = q2k_quad.data_ptr<uint8_t>();
+    }
+    return mha_fwd_impl(q, k, v, sfq, sfk, sfv, delta_s, unpadded_k, out_, softmax_scale,
+                        /*is_causal=*/false, per_block_mean, is_bf16, single_level_p_quant, sparse);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "FlashAttention";
     m.def("fwd", &mha_fwd, "Forward pass");
+    m.def("fwd_sparse", &mha_fwd_sparse, "Block-sparse forward pass (non-causal)");
 }

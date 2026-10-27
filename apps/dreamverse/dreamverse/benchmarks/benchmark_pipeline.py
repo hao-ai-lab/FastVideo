@@ -1,6 +1,6 @@
 """Benchmark the LTX-2 generation pipeline driven by the dreamverse Python SDK path.
 
-Mirrors how ``apps/dreamverse/dreamverse/video_generation.py`` constructs
+Mirrors how ``apps/dreamverse/dreamverse/ltx2_generation.py`` constructs
 ``GeneratorConfig`` and calls ``VideoGenerator.generate()``, then
 captures per-stage timings via the ``FASTVIDEO_STAGE_LOGGING=1`` log
 hooks (same mechanism as ``FastVideo-internal/examples/inference/basic/
@@ -111,7 +111,13 @@ def _build_generator_config(model_path: str, enable_compile: bool, num_gpus: int
                                   mode="max-autotune-no-cudagraphs",
                                   dynamic=False),
             use_fsdp_inference=False,
-            quantization=QuantizationConfig(transformer_quant="NVFP4"),
+            # The bundled LTX2 model enables a refinement LoRA during the
+            # first request. NVFP4 otherwise purges the dense weights that
+            # FastVideo's LoRA merge path requires.
+            quantization=QuantizationConfig(
+                transformer_quant="NVFP4",
+                transformer_retain_original_weights=True,
+            ),
         ),
         pipeline=PipelineSelection(
             components=components,

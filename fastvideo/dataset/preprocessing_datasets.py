@@ -185,24 +185,19 @@ class FrameSamplingStage(DatasetFilterStage):
         num_frames = math.ceil(batch.fps * batch.duration)
 
         # Check if video is too long
-        if (num_frames / batch.fps > self.video_length_tolerance_range *
-            (self.num_frames / self.train_fps * self.speed_factor)):
+        if (num_frames / batch.fps
+                > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor)):
             return False
 
         # Resample frame indices to check length
         frame_interval = batch.fps / self.train_fps
         start_frame_idx = 0
-        frame_indices = np.arange(start_frame_idx, num_frames,
-                                  frame_interval).astype(int)
+        frame_indices = np.arange(start_frame_idx, num_frames, frame_interval).astype(int)
 
         # Filter short videos
-        return not (len(frame_indices) < self.num_frames
-                    and self.rng.random() < self.drop_short_ratio)
+        return not (len(frame_indices) < self.num_frames and self.rng.random() < self.drop_short_ratio)
 
-    def process(self,
-                batch: PreprocessBatch,
-                temporal_sample_fn=None,
-                **kwargs) -> PreprocessBatch:
+    def process(self, batch: PreprocessBatch, temporal_sample_fn=None, **kwargs) -> PreprocessBatch:
         """
         Process frame sampling for video data items.
         
@@ -225,8 +220,7 @@ class FrameSamplingStage(DatasetFilterStage):
         # Resample frame indices
         frame_interval = batch.fps / self.train_fps
         start_frame_idx = 0
-        frame_indices = np.arange(start_frame_idx, batch.num_frames,
-                                  frame_interval).astype(int)
+        frame_indices = np.arange(start_frame_idx, batch.num_frames, frame_interval).astype(int)
 
         # Temporal crop if too long
         if len(frame_indices) > self.num_frames:
@@ -264,8 +258,7 @@ class VideoTransformStage(DatasetStage):
         assert os.path.exists(batch.path), f"file {batch.path} do not exist!"
         assert batch.sample_frame_index is not None, "Frame indices must be set before transformation"
 
-        torchvision_video, _, metadata = torchvision.io.read_video(
-            batch.path, output_format="TCHW")
+        torchvision_video, _, metadata = torchvision.io.read_video(batch.path, output_format="TCHW")
         video = torchvision_video[batch.sample_frame_index]
         if self.transform is not None:
             video = self.transform(video)
@@ -317,11 +310,7 @@ class ImageTransformStage(DatasetStage):
 class TextEncodingStage(DatasetStage):
     """Stage for text tokenization and encoding."""
 
-    def __init__(self,
-                 tokenizer,
-                 text_max_length: int,
-                 cfg_rate: float = 0.0,
-                 seed: int = 42):
+    def __init__(self, tokenizer, text_max_length: int, cfg_rate: float = 0.0, seed: int = 42):
         self.tokenizer = tokenizer
         self.text_max_length = text_max_length
         self.cfg_rate = cfg_rate
@@ -360,8 +349,7 @@ class TextEncodingStage(DatasetStage):
         return batch
 
 
-class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
-                                torch.distributed.checkpoint.stateful.Stateful):
+class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint.stateful.Stateful):
     """
     Merged dataset for video and caption data with stage-based processing.
     Assumes that data_merge_path is a txt file with the following format:
@@ -415,8 +403,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         tokenizer = None
         if os.path.exists(tokenizer_path):
             try:
-                tokenizer = AutoTokenizer.from_pretrained(
-                    tokenizer_path, cache_dir=args.cache_dir)
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=args.cache_dir)
             except (ValueError, OSError):
                 pass
 
@@ -426,26 +413,22 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Process metadata
         self.processed_batches = self._process_metadata()
 
-    def _init_stages(self, args, transform, transform_topcrop,
-                     tokenizer) -> None:
+    def _init_stages(self, args, transform, transform_topcrop, tokenizer) -> None:
         """Initialize all processing stages."""
         self.validation_stage = DataValidationStage()
-        self.frame_sampling_stage = FrameSamplingStage(
-            num_frames=args.num_frames,
-            train_fps=args.train_fps,
-            speed_factor=args.speed_factor,
-            video_length_tolerance_range=args.video_length_tolerance_range,
-            drop_short_ratio=args.drop_short_ratio,
-            seed=self.seed)
+        self.frame_sampling_stage = FrameSamplingStage(num_frames=args.num_frames,
+                                                       train_fps=args.train_fps,
+                                                       speed_factor=args.speed_factor,
+                                                       video_length_tolerance_range=args.video_length_tolerance_range,
+                                                       drop_short_ratio=args.drop_short_ratio,
+                                                       seed=self.seed)
         self.video_transform_stage = VideoTransformStage(transform)
-        self.image_transform_stage = ImageTransformStage(
-            transform, transform_topcrop)
+        self.image_transform_stage = ImageTransformStage(transform, transform_topcrop)
         if tokenizer is not None:
-            self.text_encoding_stage = TextEncodingStage(
-                tokenizer=tokenizer,
-                text_max_length=args.text_max_length,
-                cfg_rate=args.training_cfg_rate,
-                seed=self.seed)
+            self.text_encoding_stage = TextEncodingStage(tokenizer=tokenizer,
+                                                         text_max_length=args.text_max_length,
+                                                         cfg_rate=args.training_cfg_rate,
+                                                         seed=self.seed)
         else:
             self.text_encoding_stage = None
 
@@ -453,13 +436,9 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         """Load raw data from JSON files."""
         # Read folder-annotation pairs
         with open(self.data_merge_path) as f:
-            folder_anno_pairs = [
-                line.strip().split(",") for line in f if line.strip()
-            ]
-        assert len(
-            folder_anno_pairs) == 1, "Only support one folder-annotation pair"
-        assert len(folder_anno_pairs[0]
-                   ) == 2, "Folder-annotation pair should have two elements"
+            folder_anno_pairs = [line.strip().split(",") for line in f if line.strip()]
+        assert len(folder_anno_pairs) == 1, "Only support one folder-annotation pair"
+        assert len(folder_anno_pairs[0]) == 2, "Folder-annotation pair should have two elements"
         folder, annotation_file = folder_anno_pairs[0]
 
         data_items: list[dict] = []
@@ -480,10 +459,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         processed_batches = []
 
         # Initialize counters
-        filter_counts = {
-            "validation_failed": 0,
-            "frame_sampling_failed": 0
-        }
+        filter_counts = {"validation_failed": 0, "frame_sampling_failed": 0}
         sample_num_frames: list[int] = []
 
         for item in raw_data:
@@ -499,19 +475,16 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                 continue
 
             # Apply frame sampling processing
-            batch = self.frame_sampling_stage.process(
-                batch, temporal_sample_fn=self.temporal_sample)
+            batch = self.frame_sampling_stage.process(batch, temporal_sample_fn=self.temporal_sample)
 
             processed_batches.append(batch)
             assert batch.sample_num_frames is not None
             sample_num_frames.append(batch.sample_num_frames)
 
-        self._log_filtering_stats(filter_counts, sample_num_frames,
-                                  len(raw_data), len(processed_batches))
+        self._log_filtering_stats(filter_counts, sample_num_frames, len(raw_data), len(processed_batches))
         return processed_batches
 
-    def _apply_filter_stages(self, batch: PreprocessBatch,
-                             filter_counts: dict[str, int]) -> bool:
+    def _apply_filter_stages(self, batch: PreprocessBatch, filter_counts: dict[str, int]) -> bool:
         """Apply all filter stages and update counters. Returns True if batch should be kept."""
         if not self.validation_stage.should_keep(batch):
             filter_counts["validation_failed"] += 1
@@ -523,16 +496,13 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         return True
 
-    def _log_filtering_stats(self, filter_counts: dict[str, int],
-                             sample_num_frames: list[int], before_count: int,
+    def _log_filtering_stats(self, filter_counts: dict[str, int], sample_num_frames: list[int], before_count: int,
                              after_count: int):
         """Log filtering statistics."""
         logger.info(
             "validation_failed: %d, frame_sampling_failed: %d, "
-            "Counter(sample_num_frames): %s, before filter: %d, after filter: %d",
-            filter_counts['validation_failed'],
-            filter_counts['frame_sampling_failed'], Counter(sample_num_frames),
-            before_count, after_count)
+            "Counter(sample_num_frames): %s, before filter: %d, after filter: %d", filter_counts['validation_failed'],
+            filter_counts['frame_sampling_failed'], Counter(sample_num_frames), before_count, after_count)
 
     def __iter__(self):
         """Iterate through processed data items."""
@@ -566,7 +536,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})
-        
+
         # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
@@ -582,8 +552,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         self.processed_batches = state_dict["processed_batches"]
 
 
-class TextDataset(torch.utils.data.IterableDataset,
-                  torch.distributed.checkpoint.stateful.Stateful):
+class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint.stateful.Stateful):
     """
     Text-only dataset for processing prompts from a simple text file.
     
@@ -596,11 +565,7 @@ class TextDataset(torch.utils.data.IterableDataset,
     This dataset processes text data through text encoding stages only.
     """
 
-    def __init__(self,
-                 data_merge_path: str,
-                 args,
-                 start_idx: int = 0,
-                 seed: int = 42):
+    def __init__(self, data_merge_path: str, args, start_idx: int = 0, seed: int = 42):
         self.data_merge_path = data_merge_path
         self.start_idx = start_idx
         self.args = args
@@ -608,15 +573,13 @@ class TextDataset(torch.utils.data.IterableDataset,
 
         # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
-                                                  cache_dir=args.cache_dir)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=args.cache_dir)
 
         # Initialize text encoding stage
-        self.text_encoding_stage = TextEncodingStage(
-            tokenizer=tokenizer,
-            text_max_length=args.text_max_length,
-            cfg_rate=getattr(args, 'training_cfg_rate', 0.0),
-            seed=self.seed)
+        self.text_encoding_stage = TextEncodingStage(tokenizer=tokenizer,
+                                                     text_max_length=args.text_max_length,
+                                                     cfg_rate=getattr(args, 'training_cfg_rate', 0.0),
+                                                     seed=self.seed)
 
         # Process text data
         self.processed_batches = self._process_text_data()
@@ -629,7 +592,7 @@ class TextDataset(torch.utils.data.IterableDataset,
                 line = line.strip()
                 if line:  # Skip empty lines
                     prompts.append(line)
-        
+
         logger.info(f"Loaded {len(prompts)} text prompts from {self.data_merge_path}")
         return prompts
 
@@ -648,9 +611,8 @@ class TextDataset(torch.utils.data.IterableDataset,
                 duration=None,
                 num_frames=0,
                 sample_frame_index=None,
-                sample_num_frames=0
-            )
-            
+                sample_num_frames=0)
+
             processed_batches.append(batch)
 
         logger.info(f"Processed {len(processed_batches)} text batches")

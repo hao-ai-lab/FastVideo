@@ -105,6 +105,7 @@ training:
   optimizer:
     learning_rate: 2.0e-6             # default: 0.0
     betas: [0.9, 0.999]              # default: [0.9, 0.999]
+    eps: 1.0e-8                       # default: 1.0e-8
     weight_decay: 0.01                # default: 0.0
     lr_scheduler: constant            # default: "constant"
     lr_warmup_steps: 0                # default: 0
@@ -130,6 +131,13 @@ training:
     project_name: my_project          # default: "fastvideo"
     run_name: my_run                  # default: ""
 
+  # --- training.performance [TYPED] -> PerformanceConfig ---
+  performance:
+    enabled: true                     # default: true
+    # Optional dense BF16 peak for one GPU. Known NVIDIA device names are
+    # inferred automatically; set this for non-standard clocks/form factors.
+    peak_tflops_per_gpu: null         # e.g. 989.5 for H100 SXM
+
   # --- training.vsa [TYPED] -> VSAConfig ---
   vsa:
     sparsity: 0.0                     # default: 0.0 (0.0 = disabled)
@@ -147,7 +155,12 @@ training:
     mode_scale: 1.0                   # default: 1.0
     precondition_outputs: false       # default: false
     moba_config: {}                   # default: {}
-    enable_gradient_checkpointing_type: full  # default: null ("full" or null)
+    # default: null ("full", "ops", "block_skip", or null). "full" minimizes
+    # activation memory. "ops" also retains dispatcher-visible attention outputs
+    # to reduce recompute time when memory headroom exists; see
+    # docs/training/train_infra.md for the attention paths it cannot retain.
+    # "block_skip" behaves like "full" in this trainer.
+    enable_gradient_checkpointing_type: full
 
   # --- training top-level [TYPED] ---
   dit_precision: fp32                 # default: "fp32" (master weight precision)

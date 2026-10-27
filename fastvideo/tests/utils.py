@@ -132,8 +132,8 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
 
     # Process each frame individually
     for i in range(min_frames):
-        img1 = frames1[i : i + 1]
-        img2 = frames2[i : i + 1]
+        img1 = frames1[i:i + 1]
+        img2 = frames2[i:i + 1]
 
         with torch.no_grad():
             value = ms_ssim(img1, img2, data_range=1.0) if use_ms_ssim else ssim(img1, img2, data_range=1.0)
@@ -220,7 +220,10 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path, 
             "max_ssim": max_ssim,
             "reference_video": reference_path,
             "generated_video": generated_path,
-            "parameters": {"num_inference_steps": num_inference_steps, "prompt": prompt},
+            "parameters": {
+                "num_inference_steps": num_inference_steps,
+                "prompt": prompt
+            },
         }
 
         test_name = f"steps{num_inference_steps}_{prompt[:100]}"

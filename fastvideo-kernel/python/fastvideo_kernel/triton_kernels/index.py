@@ -5,6 +5,7 @@ import triton
 import triton.language as tl
 import torch
 
+
 @triton.jit
 def topk_index_to_map_kernel(
     map_ptr,
@@ -57,14 +58,10 @@ def map_to_index_kernel(
             tl.store(index_ptr_base + num * index_kv_stride, i)
             num += 1
 
-    tl.store(
-        index_num_ptr + b * index_num_bs_stride + h * index_num_h_stride +
-        q * index_num_q_stride, num)
+    tl.store(index_num_ptr + b * index_num_bs_stride + h * index_num_h_stride + q * index_num_q_stride, num)
 
 
-def topk_index_to_map(index: torch.Tensor,
-                      num_kv_blocks: int,
-                      transpose_map: bool = False):
+def topk_index_to_map(index: torch.Tensor, num_kv_blocks: int, transpose_map: bool = False):
     """
     Convert topk indices to a map.
     
@@ -83,13 +80,9 @@ def topk_index_to_map(index: torch.Tensor,
     bs, h, num_q_blocks, topk = index.shape
 
     if transpose_map is False:
-        block_map = torch.zeros((bs, h, num_q_blocks, num_kv_blocks),
-                                dtype=torch.bool,
-                                device=index.device)
+        block_map = torch.zeros((bs, h, num_q_blocks, num_kv_blocks), dtype=torch.bool, device=index.device)
     else:
-        block_map = torch.zeros((bs, h, num_kv_blocks, num_q_blocks),
-                                dtype=torch.bool,
-                                device=index.device)
+        block_map = torch.zeros((bs, h, num_kv_blocks, num_q_blocks), dtype=torch.bool, device=index.device)
         block_map = block_map.transpose(2, 3)
 
     grid = (bs, h, num_q_blocks)
@@ -126,13 +119,8 @@ def map_to_index(block_map: torch.Tensor):
     """
     bs, h, num_q_blocks, num_kv_blocks = block_map.shape
 
-    index = torch.full((block_map.shape),
-                       -1,
-                       dtype=torch.int32,
-                       device=block_map.device)
-    index_num = torch.empty((bs, h, num_q_blocks),
-                            dtype=torch.int32,
-                            device=block_map.device)
+    index = torch.full((block_map.shape), -1, dtype=torch.int32, device=block_map.device)
+    index_num = torch.empty((bs, h, num_q_blocks), dtype=torch.int32, device=block_map.device)
 
     grid = (bs, h, num_q_blocks)
     map_to_index_kernel[grid](
@@ -162,10 +150,20 @@ def _invert_indices_kernel(
     q2k_num_ptr,
     k2q_idx_ptr,
     k2q_num_ptr,
-    q2k_idx_b, q2k_idx_h, q2k_idx_q, q2k_idx_k,
-    q2k_num_b, q2k_num_h, q2k_num_q,
-    k2q_idx_b, k2q_idx_h, k2q_idx_k, k2q_idx_q,
-    k2q_num_b, k2q_num_h, k2q_num_k,
+    q2k_idx_b,
+    q2k_idx_h,
+    q2k_idx_q,
+    q2k_idx_k,
+    q2k_num_b,
+    q2k_num_h,
+    q2k_num_q,
+    k2q_idx_b,
+    k2q_idx_h,
+    k2q_idx_k,
+    k2q_idx_q,
+    k2q_num_b,
+    k2q_num_h,
+    k2q_num_k,
     MAX_KV_PER_Q: tl.constexpr,
 ):
     # One program per (b, h, q): reserve a slot in k2q via atomicAdd, write q.
@@ -173,36 +171,17 @@ def _invert_indices_kernel(
     pid_h = tl.program_id(1)
     pid_q = tl.program_id(2)
 
-    n = tl.load(
-        q2k_num_ptr
-        + pid_b * q2k_num_b
-        + pid_h * q2k_num_h
-        + pid_q * q2k_num_q
-    )
+    n = tl.load(q2k_num_ptr + pid_b * q2k_num_b + pid_h * q2k_num_h + pid_q * q2k_num_q)
 
-    q2k_row = (
-        q2k_idx_ptr
-        + pid_b * q2k_idx_b
-        + pid_h * q2k_idx_h
-        + pid_q * q2k_idx_q
-    )
+    q2k_row = (q2k_idx_ptr + pid_b * q2k_idx_b + pid_h * q2k_idx_h + pid_q * q2k_idx_q)
 
     for i in tl.range(0, MAX_KV_PER_Q):
         if i < n:
             kv = tl.load(q2k_row + i * q2k_idx_k)
-            count_ptr = (
-                k2q_num_ptr
-                + pid_b * k2q_num_b
-                + pid_h * k2q_num_h
-                + kv * k2q_num_k
-            )
+            count_ptr = (k2q_num_ptr + pid_b * k2q_num_b + pid_h * k2q_num_h + kv * k2q_num_k)
             pos = tl.atomic_add(count_ptr, 1)
             tl.store(
-                k2q_idx_ptr
-                + pid_b * k2q_idx_b
-                + pid_h * k2q_idx_h
-                + kv * k2q_idx_k
-                + pos * k2q_idx_q,
+                k2q_idx_ptr + pid_b * k2q_idx_b + pid_h * k2q_idx_h + kv * k2q_idx_k + pos * k2q_idx_q,
                 pid_q,
             )
 
@@ -214,22 +193,16 @@ def invert_indices(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Transpose a Q->KV index list into a K->Q one via atomic compaction (GPU)."""
     if q2k_idx.dim() != 4:
-        raise ValueError(
-            f"q2k_idx must be [B, H, Nq, Mk], got shape={tuple(q2k_idx.shape)}"
-        )
+        raise ValueError(f"q2k_idx must be [B, H, Nq, Mk], got shape={tuple(q2k_idx.shape)}")
     if q2k_num.dim() != 3:
-        raise ValueError(
-            f"q2k_num must be [B, H, Nq], got shape={tuple(q2k_num.shape)}"
-        )
+        raise ValueError(f"q2k_num must be [B, H, Nq], got shape={tuple(q2k_num.shape)}")
     if not q2k_idx.is_cuda or not q2k_num.is_cuda:
         raise RuntimeError("invert_indices requires CUDA tensors.")
 
     B, H, Nq, Mk = q2k_idx.shape
     if q2k_num.shape != (B, H, Nq):
-        raise ValueError(
-            f"q2k_num shape {tuple(q2k_num.shape)} does not match q2k_idx "
-            f"[B, H, Nq] = {(B, H, Nq)}"
-        )
+        raise ValueError(f"q2k_num shape {tuple(q2k_num.shape)} does not match q2k_idx "
+                         f"[B, H, Nq] = {(B, H, Nq)}")
 
     q2k_idx = q2k_idx.contiguous()
     q2k_num = q2k_num.contiguous()
@@ -257,10 +230,20 @@ def invert_indices(
         q2k_num,
         k2q_idx,
         k2q_num,
-        q2k_idx.stride(0), q2k_idx.stride(1), q2k_idx.stride(2), q2k_idx.stride(3),
-        q2k_num.stride(0), q2k_num.stride(1), q2k_num.stride(2),
-        k2q_idx.stride(0), k2q_idx.stride(1), k2q_idx.stride(2), k2q_idx.stride(3),
-        k2q_num.stride(0), k2q_num.stride(1), k2q_num.stride(2),
+        q2k_idx.stride(0),
+        q2k_idx.stride(1),
+        q2k_idx.stride(2),
+        q2k_idx.stride(3),
+        q2k_num.stride(0),
+        q2k_num.stride(1),
+        q2k_num.stride(2),
+        k2q_idx.stride(0),
+        k2q_idx.stride(1),
+        k2q_idx.stride(2),
+        k2q_idx.stride(3),
+        k2q_num.stride(0),
+        k2q_num.stride(1),
+        k2q_num.stride(2),
         MAX_KV_PER_Q=Mk,
     )
 

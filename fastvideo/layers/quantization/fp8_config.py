@@ -3,6 +3,8 @@
 
 Matches linear layers by suffix (``to_q/k/v/to_out``, ``ffn.fc_in/fc_out``).
 Supports per-tensor (default, fast) and per-channel (higher accuracy) granularity.
+On sm89 the per-channel path runs the per-tensor GEMM plus a Triton scale epilogue
+(``fp8_kernels``), since torch's rowwise-scaled kernel there is slower than bf16.
 Falls back to bf16 dequant on GPUs older than sm89.
 """
 from __future__ import annotations
@@ -18,6 +20,11 @@ from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
 )
+from fastvideo.layers.quantization.fp8_quant_kernels import (
+    quantize_rowwise_fused,
+    quantize_tensorwise_fused,
+    triton_quant_available,
+)
 from fastvideo.models.utils import set_weight_attrs
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,9 @@ FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
 _FP8_SUFFIXES = (
     "ffn.fc_in",
     "ffn.fc_out",
+    # MiniMax-H3 blocks name their MLP ``ff``.
+    "ff.fc_in",
+    "ff.fc_out",
     "to_q",
     "to_k",
     "to_v",
@@ -43,25 +53,55 @@ _FP8_SUFFIXES = (
     "feed_forward.mlp.fc_out",
 )
 
+# ROCm parts whose hipBLASLt exposes an OCP ``float8_e4m3fn`` scaled GEMM. CDNA3
+# (MI300, gfx942) only has the ``fnuz`` FP8 formats, which this module does not
+# produce, so it takes the bf16 dequant fallback like a pre-sm89 CUDA GPU.
+_ROCM_FP8_ARCHES = frozenset({"gfx950"})
+
 
 def _supports_fp8_compute() -> bool:
-    """Whether the active device supports FP8 ``_scaled_mm`` (sm89+)."""
+    """Whether the active device supports FP8 ``_scaled_mm``.
+
+    CUDA needs sm89+. On ROCm ``torch.cuda.get_device_capability`` reports the
+    GFX generation (gfx942 -> (9, 4), gfx950 -> (9, 5)), so the sm89 test would
+    admit every CDNA part; the e4m3fn ``_scaled_mm`` only runs on CDNA4.
+    """
     if not torch.cuda.is_available():
         return False
+    if getattr(torch.version, "hip", None):
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        arch = str(getattr(props, "gcnArchName", "")).split(":", 1)[0]
+        return arch in _ROCM_FP8_ARCHES
     cap = torch.cuda.get_device_capability()
     return cap[0] > 8 or (cap[0] == 8 and cap[1] >= 9)
 
 
 def _quantize_tensorwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [1] float32)``."""
+    if triton_quant_available(x_2d):
+        return quantize_tensorwise_fused(x_2d)
     x_absmax = x_2d.abs().amax().float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
     x_fp8 = (x_2d / x_scale.to(x_2d.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
     return x_fp8, x_scale.view(1)
 
 
+def _rowwise_scaled_mm_is_slow() -> bool:
+    if getattr(torch.version, "hip", None) or not torch.cuda.is_available():
+        return False
+    from fastvideo.layers.quantization.fp8_kernels import rowwise_scaled_mm_is_slow
+    return rowwise_scaled_mm_is_slow()
+
+
 def _quantize_rowwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [M, 1] float32)``."""
+    # The NaN-preserving fused kernel runs on every GPU with a recent Triton; the
+    # sm89 kernel from fp8_kernels stays as the fast path where it cannot run.
+    if triton_quant_available(x_2d):
+        return quantize_rowwise_fused(x_2d)
+    if x_2d.is_cuda and _rowwise_scaled_mm_is_slow():
+        from fastvideo.layers.quantization.fp8_kernels import quantize_rowwise_fp8
+        return quantize_rowwise_fp8(x_2d)
     x_absmax = x_2d.abs().amax(dim=-1, keepdim=True).float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
     x_fp8 = (x_2d / x_scale.to(x_2d.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
@@ -142,6 +182,12 @@ class FP8QuantizeMethod(QuantizeMethodBase):
 
         w_fp8 = layer._fp8_weight
         w_scale = layer._fp8_weight_scale
+        if self.granularity == "channel" and _rowwise_scaled_mm_is_slow():
+            from fastvideo.layers.quantization.fp8_kernels import scaled_mm_token_channel
+            out = scaled_mm_token_channel(x_fp8, x_scale, w_fp8.t(), w_scale)
+            if bias is not None:
+                out = out + bias
+            return out.view(*original_shape[:-1], out_dim)
         scale_b = w_scale.view(1, -1) if self.granularity == "channel" else w_scale
 
         out = torch._scaled_mm(

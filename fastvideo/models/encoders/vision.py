@@ -79,8 +79,7 @@ def resolve_visual_encoder_outputs(
     num_loaded_layers = len(encoder_outputs) - 1
     offset = max_possible_layers - num_loaded_layers
     hs_pool = [
-        encoder_outputs[layer_idx]
-        if layer_idx >= 0 else encoder_outputs[layer_idx + offset]
+        encoder_outputs[layer_idx] if layer_idx >= 0 else encoder_outputs[layer_idx + offset]
         for layer_idx in feature_sample_layers
     ]
 

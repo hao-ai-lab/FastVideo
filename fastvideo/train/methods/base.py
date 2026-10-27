@@ -12,6 +12,7 @@ from fastvideo import envs
 from fastvideo.logger import init_logger
 from fastvideo.train.roles.base import TrainRoleBase
 from fastvideo.train.utils.checkpoint import _RoleModuleContainer
+from fastvideo.train.utils.optimizer import seed_adamw_parameter_state
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
     OptimizerWrapper,
@@ -43,6 +44,11 @@ class TrainingMethod(torch.nn.Module, ABC):
     # Shared CUDA RNG generator (initialized in on_train_start).
     cuda_generator: torch.Generator | None = None
 
+    # Methods whose updates bf16/fp16 parameter storage would silently round
+    # away set this; the trainer then refuses low-precision trainable masters
+    # unless training.model.allow_low_precision_master_weights opts in.
+    requires_fp32_master_weights: bool = False
+
     def __init__(
         self,
         *,
@@ -56,7 +62,10 @@ class TrainingMethod(torch.nn.Module, ABC):
         self.student = role_models["student"]
         self.training_config = cfg.training
         self.method_config: dict[str, Any] = dict(cfg.method)
-        self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
+        validation = getattr(cfg, "validation", None)
+        if validation is None:
+            validation = (getattr(cfg, "callbacks", {}) or {}).get("validation", {})
+        self.validation_config: dict[str, Any] = dict(validation or {})
 
         # Build nn.ModuleDict for FSDP / checkpoint visibility.  Roles
         # expose their modules through ``TrainRoleBase.checkpoint_modules``
@@ -184,18 +193,14 @@ class TrainingMethod(torch.nn.Module, ABC):
         DCP needs matching entries to load into; without them
         the saved optimizer state is silently dropped.
         """
-        for opt in self.get_optimizers(0):
+        for opt in self._optimizer_dict.values():
             for group in opt.param_groups:
                 for p in group["params"]:
                     if not p.requires_grad:
                         continue
                     if len(opt.state.get(p, {})) > 0:
                         continue
-                    opt.state[p] = {
-                        "step": torch.tensor(0.0),
-                        "exp_avg": torch.zeros_like(p),
-                        "exp_avg_sq": torch.zeros_like(p),
-                    }
+                    seed_adamw_parameter_state(opt, p)
 
     # -- Shared hooks (override in subclasses as needed) --
 
@@ -251,6 +256,133 @@ class TrainingMethod(torch.nn.Module, ABC):
         """
         return {"student": self.student.transformer}
 
+    def apply_configured_lrs(self) -> None:
+        """Re-apply the config's learning rates to live optimizers/schedulers.
+
+        Called after a checkpoint resume when
+        ``training.checkpoint.reset_lr_on_resume`` is set: DCP restores
+        param-group ``lr``/``initial_lr`` and scheduler ``base_lrs`` from the
+        checkpoint, which would otherwise silently override an LR change in
+        the YAML. Methods with per-role LRs override this.
+        """
+        return None
+
+    def inference_checkpoint_modules(
+        self,
+        role: str = "student",
+    ) -> dict[str, torch.nn.Module]:
+        """Return the complete modules that form an inference checkpoint.
+
+        This intentionally does not reuse :meth:`checkpoint_state`: resumable
+        state includes optimizers and every trainable role, while inference
+        exports select one explicit role and must retain frozen parameters too.
+        Methods with a different deployable role contract may override this
+        hook; EMA is never selected implicitly.
+        """
+        model = self._role_models.get(role)
+        if model is None:
+            raise ValueError(f"Inference checkpoint role {role!r} is not available; "
+                             f"known roles: {sorted(self._role_models)}")
+        transformer = getattr(model, "transformer", None)
+        if not isinstance(transformer, torch.nn.Module):
+            raise ValueError(f"Inference checkpoint role {role!r} has no transformer module")
+        module_name = str(getattr(model, "transformer_module_type", "transformer"))
+        return {module_name: transformer}
+
+    def inference_checkpoint_base_model_path(
+        self,
+        role: str = "student",
+    ) -> str:
+        """Return the immutable model directory supplying non-trained parts."""
+        model = self._role_models.get(role)
+        if model is None:
+            raise ValueError(f"Inference checkpoint role {role!r} is not available; "
+                             f"known roles: {sorted(self._role_models)}")
+        path = str(getattr(model, "_init_from", "") or "")
+        if not path:
+            raise ValueError(f"Inference checkpoint role {role!r} does not expose its init_from model path")
+        return path
+
+    def get_grad_sanitize_targets(
+        self,
+        iteration: int,
+    ) -> dict[str, torch.nn.Module]:
+        """Return active modules whose gradients must be made finite.
+
+        Most methods sanitize and clip the same modules. Methods that leave
+        an optimizer role unclipped can override this independently.
+        """
+        return self.get_grad_clip_targets(iteration)
+
+    def set_is_last_backward(
+        self,
+        iteration: int,
+        is_last_backward: bool,
+    ) -> None:
+        """Mark an FSDP2 accumulation boundary without changing reductions.
+
+        Intermediate backwards still reduce-scatter their gradients. Only
+        FSDP's pending-reduction waits and backward-prefetch cleanup are
+        deferred. Use the active gradient targets, including roles whose
+        gradients are sanitized but deliberately not clipped. Non-FSDP
+        modules are unchanged.
+        """
+        seen: set[int] = set()
+        for module in self.get_grad_sanitize_targets(iteration).values():
+            if id(module) in seen:
+                continue
+            seen.add(id(module))
+            set_last_backward = getattr(module, "set_is_last_backward", None)
+            if callable(set_last_backward):
+                set_last_backward(is_last_backward)
+
+    def set_requires_gradient_sync(
+        self,
+        iteration: int,
+        requires_gradient_sync: bool,
+    ) -> None:
+        """Control FSDP gradient communication for accumulation rounds.
+
+        FSDP2 normally reduces gradients after every backward. During
+        gradient accumulation only the final microbatch needs that
+        communication; earlier rounds can accumulate local gradients. The
+        active gradient targets include roles that are deliberately not clipped.
+
+        Non-FSDP modules do not expose ``set_requires_gradient_sync`` and are
+        intentionally left unchanged.
+        """
+        seen: set[int] = set()
+        for module in self.get_grad_sanitize_targets(iteration).values():
+            if id(module) in seen:
+                continue
+            seen.add(id(module))
+            set_sync = getattr(module, "set_requires_gradient_sync", None)
+            if callable(set_sync):
+                set_sync(requires_gradient_sync, recurse=True)
+                set_last_backward = getattr(module, "set_is_last_backward", None)
+                if callable(set_last_backward):
+                    set_last_backward(requires_gradient_sync)
+
+    def supports_gradient_accumulation_no_sync(
+        self,
+        iteration: int,
+    ) -> bool:
+        """Whether every active role safely retains unsharded gradients.
+
+        FSDP2 no-sync holds full, unreduced gradients between accumulation
+        rounds. Model plugins must opt in explicitly; this prevents the
+        optimization from adding roughly one full model's FP32 gradients to
+        memory for ordinary full-weight training.
+        """
+        targets = self.get_grad_sanitize_targets(iteration)
+        if not targets:
+            return False
+        for role in targets:
+            model = self._role_models.get(role)
+            if model is None or not bool(getattr(model, "supports_gradient_accumulation_no_sync", False)):
+                return False
+        return True
+
     def on_train_start(self) -> None:
         from fastvideo.distributed import (
             get_world_group, )
@@ -276,7 +408,7 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def _infer_attn_kind(self) -> Literal["dense", "vsa"]:
         """Derive metadata mode from the student's resolved backend."""
-        backend = (self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
-        if backend == "VIDEO_SPARSE_ATTN":
+        backend = (self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND.get())
+        if backend in {"VIDEO_SPARSE_ATTN", "VIDEO_SPARSE_ATTN_H3"}:
             return "vsa"
         return "dense"

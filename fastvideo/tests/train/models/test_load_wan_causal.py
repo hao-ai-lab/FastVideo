@@ -14,10 +14,10 @@ streaming forward path end-to-end.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29516")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29516")
 
 from pathlib import Path
 
@@ -27,9 +27,7 @@ import torch
 from fastvideo.train.models.wan import WanCausalModel
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" /
-    "wan_causal_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "wan_causal_t2v_min.yaml")
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -51,6 +49,5 @@ def test_wan_causal_model_loads():
     # Spot-check that the override pulled the causal class, not the
     # plain Wan one.  Transformer is a torch.nn.Module wrapping the
     # CausalWanTransformer3DModel architecture.
-    assert "Causal" in type(transformer).__name__, (
-        f"expected CausalWanTransformer3DModel-derived class, got "
-        f"{type(transformer).__name__}")
+    assert "Causal" in type(transformer).__name__, (f"expected CausalWanTransformer3DModel-derived class, got "
+                                                    f"{type(transformer).__name__}")

@@ -1,6 +1,7 @@
 The reference videos are used as part of e2e SSIM regression tests.
-Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
-`test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
+Wan inference coverage now lives in `test_wan_t2v_similarity.py`,
+`test_wan_i2v_similarity.py` and `test_wan_ti2v_similarity.py` alongside the
+other model-specific SSIM files.
 These tests compare newly generated videos against references to detect quality
 regressions.
 
@@ -12,7 +13,7 @@ reference layout:
 `<ssim_dir>/<GPU>_reference_videos/...` is still read as fallback.)
 
 Before SSIM tests run, missing reference videos are auto-downloaded from a
-public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
+public HF repo (configured by `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO`, default:
 `FastVideo/ssim-reference-videos`).
 
 Use the CLI:
@@ -60,12 +61,17 @@ causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
 
 ## Adding a New SSIM Test
 
-SSIM CI runs in one Modal instance (`L40S:8`). The orchestrator
-(`fastvideo/tests/modal/ssim_test.py`) clones/builds/installs once, then
-schedules multiple `pytest` subprocesses by GPU demand. Logs are printed in
-deterministic order for failed tasks (file name, then model id), and
-fail-fast is enabled: if one task fails, active tasks are terminated and the
-full SSIM step fails.
+SSIM CI runs in one four-GPU Slinky Slurm lease. The orchestrator
+(`fastvideo/tests/ssim/ci_runner.py`) runs after the shared worker has cloned,
+built, and installed the exact PR SHA, then schedules multiple `pytest`
+subprocesses by GPU demand. Logs are printed in deterministic order for failed
+tasks (file name, then model id), and fail-fast is enabled: if one task fails,
+active tasks are terminated and the full SSIM step fails.
+
+Change-aware merge gates can pass repeated `--test-file <basename>` arguments,
+so a model-family PR runs only its owning SSIM files. Shared scheduler/helper
+changes, `/test ssim`, `/test full`, and the weekly `main` schedule run the
+complete discovered matrix.
 
 The orchestrator auto-discovers every `test_*.py` file here, so no CI config
 changes are needed when adding a new test. To declare how many GPUs your test
@@ -83,8 +89,9 @@ into one subprocess per model id by setting `FASTVIDEO_SSIM_MODEL_ID`.
 ## Bootstrapping New References
 
 Normal SSIM runs are strict: missing references fail the test. For a new model
-PR, add `[new-model]` to the PR title or set `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1`
-for the Buildkite job. CI then passes `--ssim-bootstrap-mode` to pytest.
+PR, a maintainer sets `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1` for the Buildkite SSIM
+job (the Slurm lane does not read the PR title). CI then passes
+`--ssim-bootstrap-mode` to pytest.
 
 In bootstrap mode, a missing pixel `.mp4` or latent `.pt` reference is treated
 as an expected draft-reference case after the generated artifact has been
@@ -107,8 +114,9 @@ when intentionally replacing reviewed references.
 
 ## Generation Details
 
-SSIM CI currently schedules work across the GPUs configured in
-`fastvideo/tests/modal/ssim_test.py`.
+SSIM CI schedules work across the four GPUs leased by
+`.buildkite/scripts/lanes/ssim.sh` using
+`fastvideo/tests/ssim/ci_runner.py`.
 
 ## Generation Parameters
 

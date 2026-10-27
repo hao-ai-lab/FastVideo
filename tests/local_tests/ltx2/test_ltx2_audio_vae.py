@@ -10,7 +10,6 @@ from safetensors import safe_open
 from safetensors.torch import load_file
 from torch.testing import assert_close
 
-
 repo_root = Path(__file__).resolve().parents[3]
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
@@ -36,9 +35,7 @@ def _load_weights(path: Path) -> dict[str, torch.Tensor]:
     return load_file(str(path))
 
 
-def _select_audio_vae_weights(
-    weights: dict[str, torch.Tensor], prefix: str
-) -> dict[str, torch.Tensor]:
+def _select_audio_vae_weights(weights: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:
     filtered: dict[str, torch.Tensor] = {}
     alt_prefix = prefix.replace("audio_vae.", "")
     for name, tensor in weights.items():
@@ -54,14 +51,11 @@ def _select_audio_vae_weights(
     return filtered
 
 
-def _select_vocoder_weights(
-    weights: dict[str, torch.Tensor]
-) -> dict[str, torch.Tensor]:
+def _select_vocoder_weights(weights: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     if any(name.startswith("vocoder.") for name in weights):
         filtered = {
             name.replace("vocoder.", ""): tensor
-            for name, tensor in weights.items()
-            if name.startswith("vocoder.")
+            for name, tensor in weights.items() if name.startswith("vocoder.")
         }
     else:
         filtered = dict(weights)
@@ -69,20 +63,12 @@ def _select_vocoder_weights(
     return filtered
 
 
-def _load_into_model(
-    model: torch.nn.Module, weights: dict[str, torch.Tensor]
-) -> tuple[int, list[str]]:
+def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> tuple[int, list[str]]:
     model_state = model.state_dict()
-    filtered = {
-        k: v
-        for k, v in weights.items()
-        if k in model_state and model_state[k].shape == v.shape
-    }
+    filtered = {k: v for k, v in weights.items() if k in model_state and model_state[k].shape == v.shape}
     missing = [k for k in model_state.keys() if k not in filtered]
-    print(
-        f"[LTX2 AUDIO VAE TEST] Loading {len(filtered)} / {len(model_state)} tensors "
-        f"from {len(weights)} available"
-    )
+    print(f"[LTX2 AUDIO VAE TEST] Loading {len(filtered)} / {len(model_state)} tensors "
+          f"from {len(weights)} available")
     if not filtered:
         return 0, missing
     model.load_state_dict(filtered, strict=False)
@@ -90,21 +76,13 @@ def _load_into_model(
 
 
 def test_ltx2_audio_vae_vocoder_parity():
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
-    official_path = Path(
-        os.getenv(
-            "LTX2_OFFICIAL_PATH",
-            "official_ltx_weights/ltx-2-19b-distilled.safetensors",
-        )
-    )
-    audio_vae_path = Path(
-        os.getenv("LTX2_AUDIO_VAE_PATH", str(diffusers_root / "audio_vae"))
-    )
-    vocoder_path = Path(
-        os.getenv("LTX2_VOCODER_PATH", str(diffusers_root / "vocoder"))
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
+    official_path = Path(os.getenv(
+        "LTX2_OFFICIAL_PATH",
+        "official_ltx_weights/ltx-2-19b-distilled.safetensors",
+    ))
+    audio_vae_path = Path(os.getenv("LTX2_AUDIO_VAE_PATH", str(diffusers_root / "audio_vae")))
+    vocoder_path = Path(os.getenv("LTX2_VOCODER_PATH", str(diffusers_root / "vocoder")))
     if not official_path.exists():
         pytest.skip(f"LTX-2 weights not found at {official_path}")
     if not audio_vae_path.exists():
@@ -135,25 +113,14 @@ def test_ltx2_audio_vae_vocoder_parity():
     fastvideo_audio_weights_path = audio_vae_path / "model.safetensors"
     fastvideo_vocoder_weights_path = vocoder_path / "model.safetensors"
     if not fastvideo_audio_weights_path.exists():
-        pytest.skip(
-            f"FastVideo audio VAE weights not found at {fastvideo_audio_weights_path}"
-        )
+        pytest.skip(f"FastVideo audio VAE weights not found at {fastvideo_audio_weights_path}")
     if not fastvideo_vocoder_weights_path.exists():
-        pytest.skip(
-            f"FastVideo vocoder weights not found at {fastvideo_vocoder_weights_path}"
-        )
+        pytest.skip(f"FastVideo vocoder weights not found at {fastvideo_vocoder_weights_path}")
     fastvideo_audio_weights = _load_weights(fastvideo_audio_weights_path)
-    fastvideo_encoder_weights = _select_audio_vae_weights(
-        fastvideo_audio_weights, "encoder."
-    )
-    fastvideo_decoder_weights = _select_audio_vae_weights(
-        fastvideo_audio_weights, "decoder."
-    )
-    fastvideo_vocoder_weights = _select_vocoder_weights(
-        _load_weights(fastvideo_vocoder_weights_path)
-    )
-    if (not fastvideo_encoder_weights or not fastvideo_decoder_weights
-            or not fastvideo_vocoder_weights):
+    fastvideo_encoder_weights = _select_audio_vae_weights(fastvideo_audio_weights, "encoder.")
+    fastvideo_decoder_weights = _select_audio_vae_weights(fastvideo_audio_weights, "decoder.")
+    fastvideo_vocoder_weights = _select_vocoder_weights(_load_weights(fastvideo_vocoder_weights_path))
+    if (not fastvideo_encoder_weights or not fastvideo_decoder_weights or not fastvideo_vocoder_weights):
         pytest.skip("FastVideo audio VAE/vocoder weights not found in diffusers files.")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -163,61 +130,34 @@ def test_ltx2_audio_vae_vocoder_parity():
     fastvideo_decoder = LTX2AudioDecoder(config).to(device=device, dtype=precision)
     fastvideo_vocoder = LTX2Vocoder(config).to(device=device, dtype=precision)
 
-    ref_encoder = AudioEncoderConfigurator.from_config(config).to(
-        device=device, dtype=precision
-    )
-    ref_decoder = AudioDecoderConfigurator.from_config(config).to(
-        device=device, dtype=precision
-    )
-    ref_vocoder = VocoderConfigurator.from_config(config).to(
-        device=device, dtype=precision
-    )
+    ref_encoder = AudioEncoderConfigurator.from_config(config).to(device=device, dtype=precision)
+    ref_decoder = AudioDecoderConfigurator.from_config(config).to(device=device, dtype=precision)
+    ref_vocoder = VocoderConfigurator.from_config(config).to(device=device, dtype=precision)
 
-    loaded_fastvideo_encoder, missing_fastvideo_encoder = _load_into_model(
-        fastvideo_encoder.model, fastvideo_encoder_weights
-    )
-    loaded_ref_encoder, missing_ref_encoder = _load_into_model(
-        ref_encoder, encoder_weights
-    )
-    loaded_fastvideo_decoder, missing_fastvideo_decoder = _load_into_model(
-        fastvideo_decoder.model, fastvideo_decoder_weights
-    )
-    loaded_ref_decoder, missing_ref_decoder = _load_into_model(
-        ref_decoder, decoder_weights
-    )
-    loaded_fastvideo_vocoder, missing_fastvideo_vocoder = _load_into_model(
-        fastvideo_vocoder.model, fastvideo_vocoder_weights
-    )
-    loaded_ref_vocoder, missing_ref_vocoder = _load_into_model(
-        ref_vocoder, vocoder_weights
-    )
+    loaded_fastvideo_encoder, missing_fastvideo_encoder = _load_into_model(fastvideo_encoder.model,
+                                                                           fastvideo_encoder_weights)
+    loaded_ref_encoder, missing_ref_encoder = _load_into_model(ref_encoder, encoder_weights)
+    loaded_fastvideo_decoder, missing_fastvideo_decoder = _load_into_model(fastvideo_decoder.model,
+                                                                           fastvideo_decoder_weights)
+    loaded_ref_decoder, missing_ref_decoder = _load_into_model(ref_decoder, decoder_weights)
+    loaded_fastvideo_vocoder, missing_fastvideo_vocoder = _load_into_model(fastvideo_vocoder.model,
+                                                                           fastvideo_vocoder_weights)
+    loaded_ref_vocoder, missing_ref_vocoder = _load_into_model(ref_vocoder, vocoder_weights)
 
     if min(
-        loaded_fastvideo_encoder,
-        loaded_ref_encoder,
-        loaded_fastvideo_decoder,
-        loaded_ref_decoder,
-        loaded_fastvideo_vocoder,
-        loaded_ref_vocoder,
+            loaded_fastvideo_encoder,
+            loaded_ref_encoder,
+            loaded_fastvideo_decoder,
+            loaded_ref_decoder,
+            loaded_fastvideo_vocoder,
+            loaded_ref_vocoder,
     ) == 0:
         pytest.skip("Failed to load audio VAE or vocoder weights.")
-    if (
-        missing_fastvideo_encoder
-        or missing_ref_encoder
-        or missing_fastvideo_decoder
-        or missing_ref_decoder
-        or missing_fastvideo_vocoder
-        or missing_ref_vocoder
-    ):
-        print(
-            f"[LTX2 AUDIO VAE TEST] Missing encoder keys: {len(missing_fastvideo_encoder)}"
-        )
-        print(
-            f"[LTX2 AUDIO VAE TEST] Missing decoder keys: {len(missing_fastvideo_decoder)}"
-        )
-        print(
-            f"[LTX2 AUDIO VAE TEST] Missing vocoder keys: {len(missing_fastvideo_vocoder)}"
-        )
+    if (missing_fastvideo_encoder or missing_ref_encoder or missing_fastvideo_decoder or missing_ref_decoder
+            or missing_fastvideo_vocoder or missing_ref_vocoder):
+        print(f"[LTX2 AUDIO VAE TEST] Missing encoder keys: {len(missing_fastvideo_encoder)}")
+        print(f"[LTX2 AUDIO VAE TEST] Missing decoder keys: {len(missing_fastvideo_decoder)}")
+        print(f"[LTX2 AUDIO VAE TEST] Missing vocoder keys: {len(missing_fastvideo_vocoder)}")
         pytest.skip("Missing audio VAE/vocoder keys; cannot ensure parity.")
 
     fastvideo_encoder.model.eval()

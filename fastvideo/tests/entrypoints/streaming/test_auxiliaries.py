@@ -34,7 +34,6 @@ from fastvideo.entrypoints.streaming.session_logger import (
     SessionLogger,
 )
 
-
 # ----------------------------------------------------------------------
 # Safety
 # ----------------------------------------------------------------------
@@ -60,8 +59,7 @@ class TestPromptSafetyFilter:
         assert result.decision is SafetyDecision.UNAVAILABLE
 
     def test_block_when_classifier_flags_unsafe(self, monkeypatch, tmp_path):
-        fake_model = types.SimpleNamespace(
-            predict=lambda text, k=1: (["__label__unsafe"], [0.95]))
+        fake_model = types.SimpleNamespace(predict=lambda text, k=1: (["__label__unsafe"], [0.95]))
         stub = types.SimpleNamespace(load_model=lambda _p: fake_model)
         monkeypatch.setitem(sys.modules, "fasttext", stub)
         model_path = str(tmp_path / "m.bin")
@@ -73,8 +71,7 @@ class TestPromptSafetyFilter:
         assert result.score == pytest.approx(0.95)
 
     def test_allow_when_classifier_flags_safe(self, monkeypatch, tmp_path):
-        fake_model = types.SimpleNamespace(
-            predict=lambda text, k=1: (["__label__safe"], [0.99]))
+        fake_model = types.SimpleNamespace(predict=lambda text, k=1: (["__label__safe"], [0.99]))
         stub = types.SimpleNamespace(load_model=lambda _p: fake_model)
         monkeypatch.setitem(sys.modules, "fasttext", stub)
         f = PromptSafetyFilter(classifier_path="ignored", enabled=True)
@@ -82,12 +79,10 @@ class TestPromptSafetyFilter:
         assert result.decision is SafetyDecision.ALLOW
 
     def test_below_threshold_allows_even_if_unsafe_label(self, monkeypatch):
-        fake_model = types.SimpleNamespace(
-            predict=lambda text, k=1: (["__label__unsafe"], [0.3]))
+        fake_model = types.SimpleNamespace(predict=lambda text, k=1: (["__label__unsafe"], [0.3]))
         stub = types.SimpleNamespace(load_model=lambda _p: fake_model)
         monkeypatch.setitem(sys.modules, "fasttext", stub)
-        f = PromptSafetyFilter(
-            classifier_path="m", enabled=True, block_threshold=0.5)
+        f = PromptSafetyFilter(classifier_path="m", enabled=True, block_threshold=0.5)
         assert f.classify("x").decision is SafetyDecision.ALLOW
 
     def test_first_blocked_returns_first_hit(self, monkeypatch):
@@ -96,8 +91,7 @@ class TestPromptSafetyFilter:
             (["__label__unsafe"], [0.9]),
             (["__label__safe"], [0.9]),
         ])
-        fake_model = types.SimpleNamespace(
-            predict=lambda text, k=1: next(responses))
+        fake_model = types.SimpleNamespace(predict=lambda text, k=1: next(responses))
         stub = types.SimpleNamespace(load_model=lambda _p: fake_model)
         monkeypatch.setitem(sys.modules, "fasttext", stub)
         f = PromptSafetyFilter(classifier_path="m", enabled=True)
@@ -115,17 +109,22 @@ class TestRewriteSplit:
 
     def test_plain_lines(self):
         assert _split_response("one\ntwo\nthree", limit=3) == [
-            "one", "two", "three",
+            "one",
+            "two",
+            "three",
         ]
 
     def test_numbered_list(self):
         assert _split_response("1. first\n2. second", limit=3) == [
-            "first", "second",
+            "first",
+            "second",
         ]
 
     def test_bulleted_list(self):
         assert _split_response("- one\n* two\n• three", limit=3) == [
-            "one", "two", "three",
+            "one",
+            "two",
+            "three",
         ]
 
     def test_respects_limit(self):
@@ -159,9 +158,7 @@ class TestBuildRewrite:
     def test_returns_limited_alternatives(self):
         import asyncio
 
-        result = asyncio.run(build_rewrite(
-            _StubEnhancer(), "seed",
-            options=RewriteOptions(count=2)))
+        result = asyncio.run(build_rewrite(_StubEnhancer(), "seed", options=RewriteOptions(count=2)))
         assert result.seed_prompt == "seed"
         assert result.alternatives == ["alpha", "beta"]
         assert result.provider == "stub"
@@ -229,11 +226,11 @@ class TestMockServer:
         from fastvideo.entrypoints.streaming.mock_server import MockGenerator
 
         gen = MockGenerator()
-        result = gen.generate(GenerationRequest(
-            prompt="x",
-            sampling=SamplingConfig(
-                num_frames=3, height=32, width=32, num_inference_steps=1),
-        ))
+        result = gen.generate(
+            GenerationRequest(
+                prompt="x",
+                sampling=SamplingConfig(num_frames=3, height=32, width=32, num_inference_steps=1),
+            ))
         assert len(result["frames"]) == 3
         assert result["frames"][0].shape == (32, 32, 3)
         assert result["state"].kind == "ltx2.v1"

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.entrypoints.cli import main as cli_main
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
@@ -59,9 +60,7 @@ def test_generate_parser_preserves_unknown_dotted_overrides(tmp_path):
     assert unknown == ["--request.sampling.seed", "42"]
 
 
-def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(
-    tmp_path,
-):
+def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(tmp_path, ):
     config_path = tmp_path / "run.yaml"
     config_path.write_text(
         "generator:\n"
@@ -188,8 +187,8 @@ def test_build_generate_run_config_rejects_flat_config(tmp_path):
 
     args, unknown = _parse_generate_args(["--config", str(config_path)])
     with pytest.raises(
-        ValueError,
-        match="top-level 'generator' mapping",
+            ValueError,
+            match="top-level 'generator' mapping",
     ):
         build_generate_run_config(args, unknown)
 
@@ -211,8 +210,8 @@ def test_build_generate_run_config_rejects_non_dotted_overrides(tmp_path):
         "2",
     ])
     with pytest.raises(
-        ValueError,
-        match="CLI overrides must use dotted config paths",
+            ValueError,
+            match="CLI overrides must use dotted config paths",
     ):
         build_generate_run_config(args, unknown)
 
@@ -226,8 +225,8 @@ def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
     )
     args, unknown = _parse_generate_args(["--config", str(missing_prompt_path)])
     with pytest.raises(
-        ValueError,
-        match="Either request.prompt or request.inputs.prompt_path must be provided",
+            ValueError,
+            match="Either request.prompt or request.inputs.prompt_path must be provided",
     ):
         build_generate_run_config(args, unknown)
 
@@ -243,8 +242,8 @@ def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
     )
     args, unknown = _parse_generate_args(["--config", str(conflicting_prompt_path)])
     with pytest.raises(
-        ValueError,
-        match="Cannot provide both request.prompt and request.inputs.prompt_path",
+            ValueError,
+            match="Cannot provide both request.prompt and request.inputs.prompt_path",
     ):
         build_generate_run_config(args, unknown)
 
@@ -287,8 +286,8 @@ def test_build_serve_config_rejects_flat_config(tmp_path):
 
     args, unknown = _parse_serve_args(["--config", str(config_path)])
     with pytest.raises(
-        ValueError,
-        match="top-level 'generator' mapping",
+            ValueError,
+            match="top-level 'generator' mapping",
     ):
         build_serve_config(args, unknown)
 
@@ -308,8 +307,8 @@ def test_build_serve_config_rejects_non_dotted_overrides(tmp_path):
         "9000",
     ])
     with pytest.raises(
-        ValueError,
-        match="CLI overrides must use dotted config paths",
+            ValueError,
+            match="CLI overrides must use dotted config paths",
     ):
         build_serve_config(args, unknown)
 
@@ -318,8 +317,8 @@ def test_generate_subcommand_requires_config():
     args, _ = _parse_generate_args([])
 
     with pytest.raises(
-        ValueError,
-        match="fastvideo generate requires --config PATH",
+            ValueError,
+            match="fastvideo generate requires --config PATH",
     ):
         GenerateSubcommand().validate(args)
 
@@ -328,8 +327,8 @@ def test_serve_subcommand_requires_config():
     args, _ = _parse_serve_args([])
 
     with pytest.raises(
-        ValueError,
-        match="fastvideo serve requires --config PATH",
+            ValueError,
+            match="fastvideo serve requires --config PATH",
     ):
         ServeSubcommand().validate(args)
 
@@ -351,8 +350,8 @@ def test_generate_subcommand_rejects_non_positive_num_gpus(tmp_path):
     ])
 
     with pytest.raises(
-        ValueError,
-        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+            ValueError,
+            match=r"generator\.engine\.num_gpus must be > 0; got 0",
     ):
         GenerateSubcommand().validate(args)
 
@@ -372,9 +371,38 @@ def test_serve_subcommand_rejects_non_positive_num_gpus(tmp_path):
     ])
 
     with pytest.raises(
-        ValueError,
-        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+            ValueError,
+            match=r"generator\.engine\.num_gpus must be > 0; got 0",
     ):
+        ServeSubcommand().validate(args)
+
+
+def test_serve_subcommand_rejects_external_launcher_backend(tmp_path):
+    config_path = tmp_path / "serve.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n"
+        "  engine:\n"
+        "    execution_backend: external_launcher\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+
+    with pytest.raises(ValueError, match="synchronized offline generation"):
+        ServeSubcommand().validate(args)
+
+
+def test_serve_subcommand_rejects_external_launcher_env_opt_in(tmp_path, env_overrides):
+    config_path = tmp_path / "serve.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
+
+    with pytest.raises(ValueError, match="synchronized offline generation"):
         ServeSubcommand().validate(args)
 
 
@@ -445,7 +473,14 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args,
+                        host,
+                        port,
+                        output_dir,
+                        default_request,
+                        served_model_name=None,
+                        media_reference_max_bytes=None,
+                        media_policy=None):
         captured["fastvideo_args"] = fastvideo_args
         captured["host"] = host
         captured["port"] = port
@@ -484,8 +519,17 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     def fake_generator_config_to_fastvideo_args(config):
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args,
+                        host,
+                        port,
+                        output_dir,
+                        default_request,
+                        served_model_name=None,
+                        media_reference_max_bytes=None,
+                        media_policy=None):
         captured["default_request"] = default_request
+        captured["media_reference_max_bytes"] = media_reference_max_bytes
+        captured["media_policy"] = media_policy
 
     monkeypatch.setattr(
         "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
@@ -498,6 +542,9 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     default_request = captured["default_request"]
     assert default_request.prompt == "hello"
     assert default_request.sampling.seed == 42
+    # Without server.media_roots or allow_private_media_urls the CLI passes the closed policy.
+    assert captured["media_policy"].roots == ()
+    assert captured["media_policy"].allow_private_urls is False
 
 
 def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch):
@@ -555,7 +602,21 @@ def test_streaming_run_server_rejects_missing_streaming_block():
         streaming=None,
     )
     with pytest.raises(
-        ValueError,
-        match="ServeConfig.streaming must be set",
+            ValueError,
+            match="ServeConfig.streaming must be set",
     ):
         streaming_server.run_server(config)
+
+
+def test_streaming_run_server_rejects_external_launcher():
+    from fastvideo.api.schema import GeneratorConfig, ServeConfig, StreamingConfig
+
+    generator = GeneratorConfig(model_path="x")
+    generator.engine.execution_backend = "external_launcher"
+    config = ServeConfig(
+        generator=generator,
+        streaming=StreamingConfig(),
+    )
+
+    with pytest.raises(ValueError, match="synchronized offline generation"):
+        streaming_server.run_server(config, generator=SimpleNamespace())

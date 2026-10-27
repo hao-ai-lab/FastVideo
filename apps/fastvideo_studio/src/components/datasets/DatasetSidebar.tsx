@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { ImageOff, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 import DownloadCaptions from '@/components/datasets/DownloadCaptions';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,12 +14,14 @@ import {
   type Dataset,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 
 const SIDEBAR_MIN_WIDTH = 320;
 const SIDEBAR_MAX_WIDTH = 900;
 const INITIAL_PAGE_SIZE = 24;
 const PAGE_SIZE = 24;
 const SCROLL_THRESHOLD = 200;
+type CaptionSaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Memoized so a caption keystroke re-renders only the edited card, not every
 // visible <video> in the grid (visibleCount grows unbounded with scrolling).
@@ -27,54 +30,101 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
   mediaUrl,
   caption,
   thumbLoaded,
+  saveState,
   onCaptionChange,
+  onCaptionRetry,
   onThumbLoaded,
 }: {
   fileName: string;
   mediaUrl: string;
   caption: string;
   thumbLoaded: boolean;
+  saveState: CaptionSaveState;
   onCaptionChange: (fileName: string, value: string) => void;
+  onCaptionRetry: (fileName: string, value: string) => void;
   onThumbLoaded: (fileName: string) => void;
 }) {
+  const [mediaFailed, setMediaFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setMediaFailed(false);
+  }, [mediaUrl]);
+
   return (
     <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-background">
-      {!thumbLoaded && (
+      {!thumbLoaded && !mediaFailed && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent-blue" />
         </div>
       )}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video
-        src={mediaUrl}
-        className="aspect-video w-full bg-border object-cover"
-        muted
-        autoPlay
-        loop
-        playsInline
-        onLoadedData={() => onThumbLoaded(fileName)}
-        onError={() => onThumbLoaded(fileName)}
-      />
+      {mediaFailed ? (
+        <div
+          role="status"
+          className="flex aspect-video w-full flex-col items-center justify-center gap-1 bg-muted px-2 text-center text-muted-foreground"
+        >
+          <ImageOff className="size-5" aria-hidden />
+          <span className="text-xs">Preview unavailable</span>
+        </div>
+      ) : (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video
+          src={mediaUrl}
+          aria-label={`Preview of ${fileName}`}
+          className="aspect-video w-full bg-border object-cover"
+          muted
+          autoPlay
+          loop
+          playsInline
+          onLoadedData={() => onThumbLoaded(fileName)}
+          onError={() => {
+            setMediaFailed(true);
+            onThumbLoaded(fileName);
+          }}
+        />
+      )}
       <Textarea
+        aria-label={`Caption for ${fileName}`}
         value={caption}
         onChange={(e) => onCaptionChange(fileName, e.target.value)}
         placeholder="Caption"
         rows={2}
         className="min-h-[2.5rem] resize-y rounded-none border-0 bg-transparent p-1.5 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0"
       />
+      <div
+        aria-live="polite"
+        className="flex min-h-6 items-center px-1.5 pb-1 text-[0.7rem] text-muted-foreground"
+      >
+        {saveState === 'saving' && <span>Saving…</span>}
+        {saveState === 'saved' && <span>Saved</span>}
+        {saveState === 'error' && (
+          <span role="alert" className="text-destructive">
+            Not saved.{' '}
+            <button
+              type="button"
+              onClick={() => onCaptionRetry(fileName, caption)}
+              className="inline-flex min-h-11 items-center font-medium underline underline-offset-2"
+            >
+              Retry
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 });
 
 export default function DatasetSidebar({
   dataset,
+  isMobile = false,
   onClose,
   onWidthChange,
 }: {
   dataset: Dataset;
+  isMobile?: boolean;
   onClose: () => void;
   onWidthChange?: (w: number) => void;
 }) {
+  const drawerRef = useDrawerFocus<HTMLElement>(isMobile);
   const [width, setWidth] = React.useState(400);
   const [isDragging, setIsDragging] = React.useState(false);
   const [fileNames, setFileNames] = React.useState<string[]>([]);
@@ -84,17 +134,21 @@ export default function DatasetSidebar({
   const [thumbLoaded, setThumbLoaded] = React.useState<
     Record<string, boolean>
   >({});
+  const [captionSaveStates, setCaptionSaveStates] = React.useState<
+    Record<string, CaptionSaveState>
+  >({});
 
   // Pending debounced caption saves, keyed per file so editing one caption
   // can't cancel another file's pending save.
   const pendingSaves = React.useRef(
     new Map<string, { timer: ReturnType<typeof setTimeout>; save: () => void }>(),
   );
+  const captionVersions = React.useRef(new Map<string, number>());
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    onWidthChange?.(width);
-  }, [width, onWidthChange]);
+    onWidthChange?.(isMobile ? 0 : width);
+  }, [isMobile, width, onWidthChange]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -106,6 +160,8 @@ export default function DatasetSidebar({
         setCaptions(data.captions);
         setVisibleCount(INITIAL_PAGE_SIZE);
         setThumbLoaded({});
+        setCaptionSaveStates({});
+        captionVersions.current.clear();
       })
       .catch((err) => console.error('Failed to load dataset files:', err))
       .finally(() => {
@@ -138,23 +194,51 @@ export default function DatasetSidebar({
   });
 
   const datasetId = dataset.id;
+  const persistCaption = React.useCallback(
+    (fileName: string, value: string, version: number) => {
+      setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'saving' }));
+      void updateDatasetCaption(datasetId, fileName, value)
+        .then(() => {
+          if (captionVersions.current.get(fileName) !== version) return;
+          setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'saved' }));
+        })
+        .catch((error) => {
+          if (captionVersions.current.get(fileName) !== version) return;
+          console.error('Failed to save caption:', error);
+          setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'error' }));
+          toast.error('Caption was not saved', {
+            description: `${fileName}: check the Studio API, then retry.`,
+          });
+        });
+    },
+    [datasetId],
+  );
+
   const handleCaptionChange = React.useCallback(
     (fileName: string, value: string) => {
       setCaptions((prev) => ({ ...prev, [fileName]: value }));
+      setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'idle' }));
       const pending = pendingSaves.current.get(fileName);
       if (pending) clearTimeout(pending.timer);
-      const save = () => {
-        updateDatasetCaption(datasetId, fileName, value).catch((err) =>
-          console.error('Failed to save caption:', err),
-        );
-      };
+      const version = (captionVersions.current.get(fileName) ?? 0) + 1;
+      captionVersions.current.set(fileName, version);
+      const save = () => persistCaption(fileName, value, version);
       const timer = setTimeout(() => {
         pendingSaves.current.delete(fileName);
         save();
       }, 500);
       pendingSaves.current.set(fileName, { timer, save });
     },
-    [datasetId],
+    [persistCaption],
+  );
+
+  const handleCaptionRetry = React.useCallback(
+    (fileName: string, value: string) => {
+      const version = (captionVersions.current.get(fileName) ?? 0) + 1;
+      captionVersions.current.set(fileName, version);
+      persistCaption(fileName, value, version);
+    },
+    [persistCaption],
   );
 
   function handleScroll() {
@@ -189,8 +273,16 @@ export default function DatasetSidebar({
 
   return (
     <aside
-      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100vh-var(--header-height))] min-w-[320px] shrink-0 flex-col border-l border-border bg-card"
-      style={{ width, maxWidth: SIDEBAR_MAX_WIDTH }}
+      ref={drawerRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-label={`${dataset.name} dataset details`}
+      aria-modal={isMobile || undefined}
+      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100dvh-var(--header-height))] min-w-0 shrink-0 flex-col border-l border-border bg-card md:min-w-[320px]"
+      style={{
+        width: isMobile ? '100%' : width,
+        maxWidth: isMobile ? 'none' : SIDEBAR_MAX_WIDTH,
+      }}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
         <h2 className="m-0 min-w-0 truncate text-base font-semibold text-foreground">
@@ -203,7 +295,7 @@ export default function DatasetSidebar({
             onClick={onClose}
             title="Close"
             aria-label="Close"
-            className="flex items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="h-[18px] w-[18px]" />
           </button>
@@ -231,7 +323,9 @@ export default function DatasetSidebar({
                   mediaUrl={getDatasetMediaUrl(dataset.id, fileName)}
                   caption={captions[fileName] ?? ''}
                   thumbLoaded={!!thumbLoaded[fileName]}
+                  saveState={captionSaveStates[fileName] ?? 'idle'}
                   onCaptionChange={handleCaptionChange}
+                  onCaptionRetry={handleCaptionRetry}
                   onThumbLoaded={markThumbLoaded}
                 />
               ))}
@@ -240,14 +334,14 @@ export default function DatasetSidebar({
         </div>
       </div>
 
-      <div
+      {!isMobile && <div
         role="presentation"
         onMouseDown={onMouseDown}
         className={cn(
           'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
           isDragging && 'bg-accent-blue/25',
         )}
-      />
+      />}
     </aside>
   );
 }

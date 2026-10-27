@@ -55,43 +55,33 @@ export default function DatasetCard({
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if ((e.target as HTMLElement).closest('button')) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onSelect();
-    }
-  }
-
   return (
-    <div
+    <article
       className={cn(
-        'mb-3 flex cursor-pointer flex-col gap-[0.6rem] rounded-lg border border-border bg-background px-[1.15rem] py-4',
+        'mb-3 flex items-start gap-3 rounded-lg border border-border bg-background px-[1.15rem] py-4',
         isSelected && 'border-accent-blue bg-accent-blue/5',
       )}
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest('button')) return;
-        onSelect();
-      }}
-      onKeyDown={handleKeyDown}
-      role="button"
-      tabIndex={0}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <button
+        type="button"
+        aria-pressed={isSelected}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-[0.6rem] rounded-md text-left"
+      >
         <span className="text-[0.95rem] font-semibold">{dataset.name}</span>
-        <Button
-          type="button"
-          variant="destructive"
-          size="sm"
-          onClick={handleDelete}
-          disabled={isLoading}
-        >
-          Delete
-        </Button>
-      </div>
-      <div className="text-sm text-muted-foreground">
-        {fileCount} {fileCount === 1 ? 'file' : 'files'} · {sizeLabel}
-      </div>
-    </div>
+        <span className="text-sm text-muted-foreground">
+          {fileCount} {fileCount === 1 ? 'file' : 'files'} · {sizeLabel}
+        </span>
+      </button>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        onClick={handleDelete}
+        disabled={isLoading}
+      >
+        Delete
+      </Button>
+    </article>
   );
 }

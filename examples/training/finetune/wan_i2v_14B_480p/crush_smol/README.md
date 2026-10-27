@@ -5,7 +5,7 @@ These are e2e examples scripts for finetuning Wan2.1 I2V 14B 480P on the crush-s
 
 ### Download crush-smol dataset:
 
-`bash examples/training/finetune/wan_i2v_14b_480p/crush_smol/download_dataset.sh`
+`bash examples/datasets/crush-smol/download_dataset.sh`
 
 ### Preprocess the videos and captions into latents:
 

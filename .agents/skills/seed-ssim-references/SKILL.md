@@ -35,7 +35,8 @@ The skill is run **manually**, once per new test. Before invoking it, the user
 has already sanity-tested the new test locally — it launches `VideoGenerator`
 and writes an artefact without crashing (the missing-reference assertion at
 the end is expected). The skill does not re-test locally; it goes straight
-to Modal L40S (which is what CI uses).
+to the manual legacy Modal L40S reference-maintenance target. Active CI runs
+on the Slinky Slurm cluster and only consumes the resulting references.
 
 ## When to use
 
@@ -61,7 +62,8 @@ Prompt the user for it if they didn't supply it.
 
 Everything else is fixed:
 
-- Modal runner GPU: **L40S** (hardcoded in `fastvideo/tests/modal/ssim_test.py`).
+- Modal maintenance GPU: **L40S** (hardcoded in
+  `fastvideo/tests/modal/ssim_test.py`; this is not the active CI compute path).
 - Device folder: `L40S_reference_videos`.
 - Quality tier: `default` (the tier CI runs). The `full_quality` tier is not
   seeded by this skill.
@@ -103,8 +105,8 @@ Detect artefact type by inspecting the file's imports / helper call:
 - **pixel** (`.mp4`) — file imports
   `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
   from `fastvideo.tests.ssim.inference_similarity_utils`, OR uses the
-  legacy custom-inline helper pattern (see `test_gamecraft`,
-  `test_longcat`, etc.). Default to pixel when both heuristics fail.
+  legacy custom-inline helper pattern (see `test_gen3c`). Default to pixel
+  when both heuristics fail.
 
 Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
 and 6 are artefact-type-agnostic — `_iter_reference_files`,

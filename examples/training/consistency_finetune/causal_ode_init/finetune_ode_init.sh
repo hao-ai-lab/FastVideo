@@ -80,7 +80,9 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/ode_causal_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class ODEInitTrainingPipeline \
+    --pipeline-module fastvideo.training.ode_causal_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

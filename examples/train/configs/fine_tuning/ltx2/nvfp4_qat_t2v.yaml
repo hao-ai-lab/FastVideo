@@ -12,7 +12,13 @@
 # backward, then ATTN_QAT_INFER during validation. Head-dim-64 audio
 # attention and masked text attention remain dense.
 #
-# Validation requires an sm_120 GPU with the attn_qat_infer extension.
+# Validation-time ATTN_QAT_INFER is arch-aware:
+#   * sm_120 / sm_121: the bundled fastvideo-kernel CUTLASS extension.
+#   * sm_100 (GB200-class) / sm_103 (GB300-class): the FP4 FA4 kernel —
+#     requires the flash-attention-fp4 fork and its dependency pins; see
+#     docs/inference/optimizations.md.
+#   * any other GPU: falls back to flash attention with a logged receipt
+#     (validation still runs, just not with the quantized kernel).
 #
 # Prerequisites: preprocess your dataset into the trainer's latent format
 # (see docs/training/data_preprocess.md;
@@ -20,12 +26,15 @@
 # LTX-2 reference to adapt). Data paths, step counts, and learning rate
 # below are placeholders you must adapt to your workload.
 #
-# Run on multi-GPU sm_120 hardware:
+# Run (multi-GPU; see the validation note above for kernel availability):
 #   NUM_GPUS=4 bash examples/train/run.sh \
 #     examples/train/configs/fine_tuning/ltx2/nvfp4_qat_t2v.yaml
 #
-# GB200 can train and validate with ATTN_QAT_TRAIN, but cannot load the
-# sm_120-only inference kernel. Disable only the validation-time swap:
+# `attn_qat_infer: true` below is the deployment-representative choice on
+# every arch with a quantized kernel available (see the validation note
+# above). Flip it off only when your GPU has no ATTN_QAT_INFER kernel and
+# you prefer validating with the train-time backend instead of the flash
+# fallback:
 #   NUM_GPUS=4 bash examples/train/run.sh \
 #     examples/train/configs/fine_tuning/ltx2/nvfp4_qat_t2v.yaml \
 #     --callbacks.validation.attn_qat_infer false

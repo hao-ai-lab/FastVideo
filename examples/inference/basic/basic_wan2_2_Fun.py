@@ -4,6 +4,8 @@ from fastvideo import VideoGenerator
 
 OUTPUT_PATH = "video_samples_wan2_1_Fun"
 OUTPUT_NAME = "wan2.1_test"
+
+
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -14,8 +16,8 @@ def main():
         # "alibaba-pai/Wan2.2-Fun-A14B-Control",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=False, # set to True if GPU is out of memory
-        dit_cpu_offload=True, # DiT need to be offloaded for MoE
+        use_fsdp_inference=False,  # set to True if GPU is out of memory
+        dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
@@ -30,7 +32,14 @@ def main():
     image_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/8.png"
     control_video_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/pose.mp4"
 
-    video = generator.generate_video(prompt, negative_prompt=negative_prompt, image_path=image_path, video_path=control_video_path, output_path=OUTPUT_PATH, output_video_name=OUTPUT_NAME, save_video=True)
+    video = generator.generate_video(prompt,
+                                     negative_prompt=negative_prompt,
+                                     image_path=image_path,
+                                     video_path=control_video_path,
+                                     output_path=OUTPUT_PATH,
+                                     output_video_name=OUTPUT_NAME,
+                                     save_video=True)
+
 
 if __name__ == "__main__":
     main()

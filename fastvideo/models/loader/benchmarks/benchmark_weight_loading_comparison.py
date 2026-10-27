@@ -47,15 +47,15 @@ def load_independent(files: list[str], device: str):
                 yield name, param
 
 
-def load_broadcast(files: list[str], device: str, node_group,
-                   async_op: bool = False):
+def load_broadcast(files: list[str], device: str, node_group, async_op: bool = False):
     """After-PR behavior: rank 0 reads from disk, broadcasts to other ranks."""
-    local_rank = node_group.local_rank
+    # The broadcast source is node-group rank 0, which is not always on CUDA device 0.
+    is_leader = node_group.rank_in_group == 0
     handles = []
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                if local_rank == 0:
+                if is_leader:
                     param = f.get_tensor(name)
                 else:
                     sl = f.get_slice(name)
@@ -118,19 +118,16 @@ def run_benchmark(label, loader_fn, files, warmup, repeats):
         avg = sum(times) / len(times)
         best = min(times)
         throughput = total_bytes / avg / 1e9
-        print(
-            f"  {label:30s}  "
-            f"avg {avg:.3f}s  best {best:.3f}s  "
-            f"throughput {throughput:.2f} GB/s  "
-            f"({total_params} tensors, {total_bytes/1e9:.2f} GB)"
-        )
+        print(f"  {label:30s}  "
+              f"avg {avg:.3f}s  best {best:.3f}s  "
+              f"throughput {throughput:.2f} GB/s  "
+              f"({total_params} tensors, {total_bytes/1e9:.2f} GB)")
         return avg, best, throughput, total_bytes
     return None, None, None, None
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="A/B benchmark: independent vs broadcast weight loading")
+    parser = argparse.ArgumentParser(description="A/B benchmark: independent vs broadcast weight loading")
     parser.add_argument("--model-path", type=str, required=True)
     parser.add_argument("--subfolder", type=str, default=None)
     parser.add_argument("--warmup", type=int, default=1)
@@ -161,7 +158,9 @@ def main():
     before_avg, before_best, before_tp, total_bytes = run_benchmark(
         "before (independent read)",
         lambda f: load_independent(f, device),
-        files, args.warmup, args.repeats,
+        files,
+        args.warmup,
+        args.repeats,
     )
 
     # Clear GPU memory between benchmarks
@@ -172,7 +171,9 @@ def main():
     after_sync_avg, after_sync_best, after_sync_tp, _ = run_benchmark(
         "after  (sync broadcast)",
         lambda f: load_broadcast(f, device, node_group, async_op=False),
-        files, args.warmup, args.repeats,
+        files,
+        args.warmup,
+        args.repeats,
     )
 
     # Clear GPU memory between benchmarks
@@ -183,7 +184,9 @@ def main():
     after_async_avg, after_async_best, after_async_tp, _ = run_benchmark(
         "after  (async broadcast)",
         lambda f: load_broadcast(f, device, node_group, async_op=True),
-        files, args.warmup, args.repeats,
+        files,
+        args.warmup,
+        args.repeats,
     )
 
     if rank == 0:

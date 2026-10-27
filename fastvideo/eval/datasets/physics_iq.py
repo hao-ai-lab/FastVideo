@@ -27,7 +27,6 @@ pre-downloaded copy) to opt out of network fetches.
 from __future__ import annotations
 
 import csv
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.request import urlretrieve
@@ -35,6 +34,7 @@ from urllib.request import urlretrieve
 import cv2
 import numpy as np
 
+import fastvideo.envs as envs
 from fastvideo.eval.datasets.base import PromptDataset
 from fastvideo.eval.datasets.registry import register_dataset
 from fastvideo.eval.models import get_cache_dir
@@ -59,11 +59,10 @@ _VENDORED_DESCRIPTIONS_CSV = (Path(__file__).resolve().parent.parent / "metrics"
 
 # Public DeepMind bucket; HTTPS-readable, no auth. Override via
 # ``FASTVIDEO_PHYSICS_IQ_BUCKET_URL`` (e.g. for an internal mirror).
-_DEFAULT_BUCKET_URL = "https://storage.googleapis.com/physics-iq-benchmark"
 
 
 def _bucket_url() -> str:
-    return os.environ.get("FASTVIDEO_PHYSICS_IQ_BUCKET_URL", _DEFAULT_BUCKET_URL)
+    return envs.FASTVIDEO_PHYSICS_IQ_BUCKET_URL.get()
 
 
 def _default_dataset_root() -> Path:

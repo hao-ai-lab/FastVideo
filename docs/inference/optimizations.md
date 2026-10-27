@@ -1,7 +1,14 @@
-
 # Optimizations
 
 This page describes the various options for speeding up generation times in FastVideo.
+
+:::note[On a DGX Spark (GB10)?]
+Several options on this page behave differently on the GB10's unified-memory
+hardware — some give little or nothing there. See
+[DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
+for what actually helps on that platform and why. Two Sparks, one clip:
+[Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+:::
 
 ## Table of Contents
 
@@ -27,7 +34,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
-- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120a/sm_121a — RTX 5090 / DGX Spark): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -82,6 +89,7 @@ runtime on some GPU/shape combinations. To use FA4, install the pinned
 `flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
 export FASTVIDEO_FA4=1
 ```
 
@@ -90,6 +98,21 @@ cannot serve there: grad-enabled (training) attention (FA4's backward requires
 sm90+) and GQA attention (FA4's `pack_gqa` fails to JIT-compile below sm90).
 On sm90+ both run on FA4. If FA4 is unusable while `FASTVIDEO_FA4=1` is set,
 FastVideo fails loudly instead of silently falling back.
+
+MiniMax-H3 can additionally use FA4's packed-varlen entry point for its long,
+single-sequence dense DiT self-attention:
+
+```bash
+export FASTVIDEO_FA4=1
+export FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN=1
+```
+
+This route is inference-only and remains disabled by default. Runtime guards
+keep masked attention, batch sizes above one, unequal query/key lengths,
+grad-enabled calls, and NVFP4 on their established paths. It does not apply to
+the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
+reduction order relative to fixed-length FA4, so treat it as a speed/quality
+evaluation option rather than an exact-parity mode.
 
 ### FP4 Flash Attention 4 (Blackwell only)
 
@@ -156,45 +179,76 @@ gen = VideoGenerator.from_pretrained(
 gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 ```
 
+#### fp8 PV mode **[target]**
+
+The FA4-FP4 path keeps V in BF16 by default. The `fa4_pv_mode` knob (an
+attention-impl field accepted by both `FLASH_ATTN` and `ATTN_QAT_INFER` on this
+path; allowed values `"bf16"`/`"fp8"`) casts V to fp8 e4m3 before the kernel —
+an unscaled cast, per the kernel's plain-fp8 PV contract. Model code constructs
+attention with fixed literals, so the user-reachable switch is the
+`FASTVIDEO_FA4_PV_MODE` env var (passing `fa4_pv_mode="fp8"` to
+`VideoGenerator.from_pretrained` sets it for you):
+
+```bash
+FASTVIDEO_FA4_PV_MODE=fp8 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
+```
+
+Kernel-level benchmarks on datacenter Blackwell show it is faster at large
+shapes, but it stays opt-in **[target]** pending an end-to-end compiled
+benchmark and a quality gate before any default consideration. The
+`ATTN_QAT_INFER` receipt line reports the configured `pv_mode`, and the V dtype
+actually fed to the kernel is logged once on the first FA4 forward.
+
 #### Known Limitations
 
 - `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
 
-### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+### NVFP4 Attn-QAT attention (modified SageAttention3, Blackwell sm_120a/sm_121a)
 
-**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
+**`ATTN_QAT_INFER`**
 
-Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
-fly) plus the modified SageAttention3 FP4 attention backend. This is the
-inference half of the Quantization-Aware Distillation (QAD) recipe and the path
-used for the RTX 5090 release.
+Quantizes Q/K/V inside the modified SageAttention3 FP4 attention backend. On
+DGX Spark, keep the transformer linear layers in BF16: the separate
+`transformer_quant=nvfp4_qat` linear path is not supported on sm_121 yet.
 
-The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
-5090)**; on other GPUs the backend logs a notice and falls back to Flash
-Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+The `attn_qat_infer` kernel targets consumer/workstation Blackwell — **sm_120a
+(RTX 5090 / PRO 6000)** and **sm_121a (DGX Spark GB10)**; the block-scaled FP4
+MMA is numerically correct on both (GB10-verified: cos ~0.98 vs bf16 SDPA).
+sm_121a support needs a CUDA 13 build (`TORCH_CUDA_ARCH_LIST=12.1a`). A runtime
+capability gate falls back to Flash Attention on other GPUs.
 
-Enable both halves — attention via the env var, linear via `transformer_quant`:
+For VSA-distilled MiniMax-H3 students, the same kernel has a block-sparse
+forward that runs VSA's 64-token tile selection in FP4
+(`FASTVIDEO_H3_VSA_FP4=1`). See
+[FastH3 NVFP4 on RTX PRO 6000](fasth3_rtx_pro_6000.md).
+
+> **Quality note (stock weights):** on stock Wan-2.1 the FP4-attention output is
+> below bf16 — QAD expects a QAT-distilled checkpoint the model was *trained* to
+> tolerate FP4 attention with. Post-hoc on non-QAT weights, expect a quality
+> cost; use the QAT checkpoint for release-grade output.
+
+See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable FP4 attention with BF16 transformer linears on DGX Spark:
 
 ```python
 import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 
 from fastvideo import VideoGenerator
-from fastvideo.layers.quantization import get_quantization_config
 gen = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     num_gpus=1,
-    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
-    # instance — the bare string is not resolved on the from_pretrained path.
-    transformer_quant=get_quantization_config("nvfp4_qat")(),
-    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+    use_fsdp_inference=False,
 )
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
-Or run the example script:
+The full QAD configuration, pairing this attention backend with
+`transformer_quant=nvfp4_qat`, is currently limited to sm_120. Its RTX 5090
+example is:
 
 ```bash
 python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
@@ -271,6 +325,9 @@ automatically.
 ### Requirements
 
 - **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- **ROCm**: CDNA4 (MI350X / MI355X, gfx950) runs the FP8 `_scaled_mm` path through
+  hipBLASLt (OCP e4m3fn). MI300X (gfx942) only exposes the `fnuz` FP8 formats and
+  takes the bf16 dequant fallback like a pre-sm89 GPU.
 - No additional packages required beyond the base FastVideo install
 
 ### Usage
@@ -331,7 +388,42 @@ Only DiT submodules that declare `_compile_conditions` are compiled
 (most shipped models). The text encoder and VAE are not compiled by this
 flag.
 
-### What to expect
+### Regional fullgraph compile (experimental)
+
+`inference_torch_compile` is a stricter, kwargs-free variant that ports the
+training-side regional compile of
+[#1718](https://github.com/hao-ai-lab/FastVideo/pull/1718) to inference: the
+loader wraps each `_compile_conditions` block in
+`torch.compile(fullgraph=True)` with inductor
+`options={"emulate_precision_casts": True}` right after the transformer
+loads. The ordinary compile path keeps its historical compiler-disabled
+attention boundary by default; regional compile opts in only the compatible
+attention instances owned by this transformer. MiniMax-H3 VSA is supported
+only by the inference-only ptx_blackwell tile-64 route
+(`FASTVIDEO_VSA_PTX_BLACKWELL=1` and `VSA_tile_size=64`); the loader probes that
+route before capture and keeps the transformer eager when the kernel or
+device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
+`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
+eager with one warning instead of failing mid-denoise.
+
+```python
+generator = VideoGenerator.from_pretrained(
+    "MiniMaxAI/MiniMax-H3",
+    inference_torch_compile=True,  # or FASTVIDEO_INFERENCE_TORCH_COMPILE=1
+)
+```
+
+Do not combine it with `torch_compile_kwargs['mode']` (the loader injects
+inductor options, and torch.compile forbids mode+options); it is
+independent of `enable_torch_compile`, and when both are set the regional
+compile wins for the DiT.
+
+### What to expect from generic compile
+
+The Wan result below measures the existing generic
+`enable_torch_compile=True` path. It is useful evidence that compile can help,
+but it is **not** a benchmark or numerical gate for the stricter regional
+fullgraph path above.
 
 | Config | Effect |
 |---|---|
@@ -346,6 +438,24 @@ seconds to minutes, model-dependent). It amortizes over subsequent
 generations with the same input shapes. Always exclude the first
 (warmup) generation when measuring steady-state latency — measuring the
 warmup is the most common way to wrongly conclude "compile is slower".
+
+**Regional MiniMax-H3 accuracy caveat (job 2660).** On one GB200 at
+768×1344×124, the native 50-point schedule ran exactly 49 transformer
+forwards. After one warmup, three fixed-prompt/fixed-seed repeats averaged
+**185.08s → 157.01s end to end** and **174.90s → 147.12s denoising**. Each
+leg was independently pixel-deterministic, but compiled output did **not**
+match eager: mean absolute pixel error **20.247/255**, PSNR **16.67 dB**,
+mean SSIM **0.7108**, and mean MS-SSIM **0.6370** across 124 frames. Treat
+regional MiniMax-H3 compile as an opt-in performance experiment, not an
+eager-parity-safe mode.
+
+The same caveat applies to sparse MiniMax-H3 regional compile. Its mask
+compaction, ptx_blackwell launch, trained compression gates, and inference-only H3
+fusions are fullgraph-compatible, but compilation can still change model
+numerics. The FastH3 `all` profile enables regional compile by default because
+it is the fastest measured route at 124, 243, and 345 frames. Use
+`--no-inference-torch-compile` when comparing against the eager sparse-DiT
+route.
 
 **Numerics.** Inductor's lowering is designed to preserve eager
 semantics within floating-point tolerance, but per-model equivalence is
@@ -365,9 +475,14 @@ MS-SSIM gate on *your* config, especially when combining
   hao-ai-lab/FastVideo#1365 — keep that fix to get a clean compiled
   region under the default offload path.
 - **`mode="reduce-overhead"` / CUDA graphs**: not yet supported
-  end-to-end. The attention dispatch is an untraceable custom op and
-  still breaks the graph, which CUDA-graph trees cannot span. Use the
-  default inductor mode (shown above) until that is resolved.
+  by regional compile because that path injects inductor `options`, and
+  PyTorch rejects `mode` together with `options`. The generic compile path
+  can accept `mode`, but CUDA-graph compatibility remains backend- and
+  shape-dependent. FA2/FA3 inference and FA4 expose traceable custom-op
+  boundaries. MiniMax-H3's ptx_blackwell tile-64 inference route is the only VSA
+  path in the regional support envelope; other VSA paths and the FA3
+  grad-enabled path remain outside it. Use the default inductor mode shown
+  above unless your exact configuration has its own gate.
 
 Extra `torch.compile` options are passed through `torch_compile_kwargs`
 (a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the

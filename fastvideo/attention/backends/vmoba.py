@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import re
 from dataclasses import dataclass
 
 import torch
@@ -8,7 +7,7 @@ from einops import rearrange
 
 from fastvideo_kernel import (moba_attn_varlen, process_moba_input, process_moba_output)
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder)
+                                                   AttentionMetadataBuilder, layer_idx_from_prefix)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -132,10 +131,7 @@ class VMOBAAttentionImpl(AttentionImpl):
         self.pad_input = pad_input
 
     def _get_layer_idx(self, prefix: str) -> int | None:
-        match = re.search(r"blocks\.(\d+)", prefix)
-        if not match:
-            raise ValueError(f"Invalid prefix: {prefix}")
-        return int(match.group(1))
+        return layer_idx_from_prefix(prefix)
 
     def forward(
         self,

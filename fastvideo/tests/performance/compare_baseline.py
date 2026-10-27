@@ -35,6 +35,7 @@ try:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     if repo_root not in sys.path:
@@ -52,6 +53,7 @@ except ImportError:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 
 RESULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -186,11 +188,7 @@ def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
-    metadata = {
-        key: result[key]
-        for key in IDENTITY_KEYS
-        if key in result and result[key] is not None
-    }
+    metadata = {key: result[key] for key in IDENTITY_KEYS if key in result and result[key] is not None}
     recipe = result.get("recipe")
     benchmark = recipe.get("benchmark") if isinstance(recipe, dict) else None
     if isinstance(benchmark, dict):
@@ -207,10 +205,7 @@ def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
     ]
     if missing:
         raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
-    return {
-        key: str(record[key])
-        for key in COMPARISON_IDENTITY_KEYS
-    }
+    return {key: str(record[key]) for key in COMPARISON_IDENTITY_KEYS}
 
 
 def _record_uses_v2_identity(record: dict[str, Any]) -> bool:
@@ -220,10 +215,7 @@ def _record_uses_v2_identity(record: dict[str, Any]) -> bool:
 
 def _recipe_cohort_filters(record: dict[str, Any]) -> dict[str, str]:
     identity = _comparison_identity_filters(record)
-    return {
-        key: identity[key]
-        for key in ("workload_id", "variant_id", "benchmark_version")
-    }
+    return {key: identity[key] for key in ("workload_id", "variant_id", "benchmark_version")}
 
 
 def _comparison_identity_filters_or_none(record: dict[str, Any]) -> dict[str, str] | None:
@@ -248,10 +240,8 @@ def _recipe_mismatch_records(
     current_recipe = str(record.get("recipe_fingerprint"))
     return [
         item for item in cohort_records
-        if _record_can_authorize_recipe_mismatch(item)
-        and item.get("recipe_fingerprint") is not None
-        and str(item.get("recipe_fingerprint")).strip()
-        and str(item.get("recipe_fingerprint")) != current_recipe
+        if _record_can_authorize_recipe_mismatch(item) and item.get("recipe_fingerprint") is not None
+        and str(item.get("recipe_fingerprint")).strip() and str(item.get("recipe_fingerprint")) != current_recipe
     ]
 
 
@@ -364,10 +354,8 @@ def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
 
 def _metric_policy_summary(policy: MetricPolicy) -> str:
     gated = "gated" if policy.gated else "info"
-    return (
-        f"{gated}, >{policy.threshold_percent * 100:.1f}% "
-        f"and >{policy.threshold_absolute:.{policy.precision}f}"
-    )
+    return (f"{gated}, >{policy.threshold_percent * 100:.1f}% "
+            f"and >{policy.threshold_absolute:.{policy.precision}f}")
 
 
 def _check_regressions(
@@ -385,14 +373,12 @@ def _check_regressions(
         delta = regression_delta(policy, curr, baseline)
         if delta is None or not delta.regressed:
             continue
-        failures.append(
-            f"{current['model_id']} {policy.key} regressed by "
-            f"{delta.percent * 100:.1f}% and "
-            f"{delta.absolute:.{policy.precision}f} "
-            f"(current={curr:.{policy.precision}f}, "
-            f"baseline_median={baseline:.{policy.precision}f}, "
-            f"threshold={_metric_policy_summary(policy)})"
-        )
+        failures.append(f"{current['model_id']} {policy.key} regressed by "
+                        f"{delta.percent * 100:.1f}% and "
+                        f"{delta.absolute:.{policy.precision}f} "
+                        f"(current={curr:.{policy.precision}f}, "
+                        f"baseline_median={baseline:.{policy.precision}f}, "
+                        f"threshold={_metric_policy_summary(policy)})")
 
     return failures
 
@@ -408,10 +394,8 @@ def _fixed_threshold_failures(raw_result: dict[str, Any]) -> list[str]:
         threshold = safe_float(thresholds.get(threshold_key))
         if current is None or threshold is None or current <= threshold:
             continue
-        failures.append(
-            f"{raw_result.get('benchmark_id', 'unknown')} {result_key} exceeded fixed threshold "
-            f"(current={current:.3f}, threshold={threshold:.3f})"
-        )
+        failures.append(f"{raw_result.get('benchmark_id', 'unknown')} {result_key} exceeded fixed threshold "
+                        f"(current={current:.3f}, threshold={threshold:.3f})")
     return failures
 
 
@@ -427,8 +411,7 @@ def _recipe_mismatch_failure(
 ) -> str:
     seen = sorted({
         str(item.get("recipe_fingerprint"))
-        for item in recipe_mismatch_records
-        if item.get("recipe_fingerprint") is not None
+        for item in recipe_mismatch_records if item.get("recipe_fingerprint") is not None
     })
     suffix = f"; existing recipe_fingerprint values: {', '.join(seen)}" if seen else ""
     return (f"{record['model_id']} recipe_fingerprint={record.get('recipe_fingerprint')} "
@@ -465,10 +448,8 @@ def _evaluate_record_comparison(
 
     if not baseline_records:
         if identity_filters is not None:
-            return [], STATUS_CALIBRATION_NEEDED, (
-                "No baseline found for exact comparable identity"
-                f"{_format_identity_filters(identity_filters)}"
-            )
+            return [], STATUS_CALIBRATION_NEEDED, ("No baseline found for exact comparable identity"
+                                                   f"{_format_identity_filters(identity_filters)}")
 
         return [], STATUS_PASS, f"No legacy baseline for {record['model_id']} on {record['gpu_type']}"
 
@@ -505,11 +486,7 @@ def _build_summary_row(
     for policy in metric_policies:
         curr = safe_float(record.get(policy.key))
         baseline = _baseline_metric(baseline_records, policy.key)
-        delta = (
-            regression_delta(policy, curr, baseline)
-            if curr is not None and baseline is not None
-            else None
-        )
+        delta = (regression_delta(policy, curr, baseline) if curr is not None and baseline is not None else None)
         regression = None if delta is None else delta.percent * 100.0
         absolute_delta = None if delta is None else delta.absolute
         metric_values[policy.key] = {
@@ -572,11 +549,8 @@ def _build_markdown_summary(
                                 f"{_compact_value(values['base'], policy.precision)}")
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
-        exceeded_metrics = (
-            ", ".join(row["threshold_exceeded_metrics"])
-            if row["threshold_exceeded_metrics"]
-            else "none"
-        )
+        exceeded_metrics = (", ".join(row["threshold_exceeded_metrics"])
+                            if row["threshold_exceeded_metrics"] else "none")
         failing_metrics = ", ".join(row["failing_metrics"]) if row["failing_metrics"] else "none"
         status = row["status"]
         status_detail = row["status_reason"]
@@ -617,9 +591,7 @@ def main() -> int:
     upload_policy = _normalized_upload_policy()
     performance_pytest_failed = _performance_pytest_failed()
 
-    # Strict on upload-enabled runs: silent sync failure would make comparison
-    # and upload state ambiguous.
-    sync_from_hf(TRACKING_ROOT, strict=persist_tracking)
+    sync_from_hf(TRACKING_ROOT, strict=persist_tracking or _detect_run_source() == "pr")
 
     current_results = _load_current_results()
     if not current_results:
@@ -630,6 +602,7 @@ def main() -> int:
     unattributed_pytest_failure = performance_pytest_failed and not any(static_threshold_failures)
 
     all_failures: list[str] = []
+    regression_records: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
     if persist_tracking:
@@ -654,9 +627,8 @@ def main() -> int:
         recipe_mismatch_records: list[dict[str, Any]] = []
         try:
             if identity_filters is None:
-                record["baseline_status"] = (
-                    "invalid_identity" if _record_uses_v2_identity(record) else "skipped_missing_identity"
-                )
+                record["baseline_status"] = ("invalid_identity"
+                                             if _record_uses_v2_identity(record) else "skipped_missing_identity")
             else:
                 baseline_records = load_records_for_identity(
                     TRACKING_ROOT,
@@ -674,9 +646,8 @@ def main() -> int:
                         successful_only=True,
                     )
                     recipe_mismatch_records = _recipe_mismatch_records(record, recipe_cohort_records)
-                    record["baseline_status"] = (
-                        "recipe_mismatch" if recipe_mismatch_records else "initialized_new_cohort"
-                    )
+                    record["baseline_status"] = ("recipe_mismatch"
+                                                 if recipe_mismatch_records else "initialized_new_cohort")
 
             failures, comparison_status, comparison_status_reason = _evaluate_record_comparison(
                 record,
@@ -697,11 +668,11 @@ def main() -> int:
         record["comparison_status_reason"] = comparison_status_reason
 
         record["success"] = not failures
-        record["baseline_eligible"] = (
-            identity_filters is not None
-            and _is_baseline_eligible(record["run_source"], record["success"], comparison_status)
-        )
+        record["baseline_eligible"] = (identity_filters is not None and _is_baseline_eligible(
+            record["run_source"], record["success"], comparison_status))
         all_failures.extend(failures)
+        if comparison_status == STATUS_REGRESSION:
+            regression_records.append(raw)
 
         print(f"{record['model_id']} comparison status: "
               f"{comparison_status} - {comparison_status_reason}")
@@ -725,6 +696,11 @@ def main() -> int:
         print("Performance regression check failed:")
         for item in all_failures:
             print(f"  - {item}")
+        for raw in regression_records:
+            print(format_worker_log_tail(
+                raw.get("benchmark_id", "unknown"),
+                raw.get("worker_log_path"),
+            ))
         return 1
 
     print("Performance baseline comparison passed")

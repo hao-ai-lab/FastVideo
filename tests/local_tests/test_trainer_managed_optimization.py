@@ -79,9 +79,13 @@ class _Method(torch.nn.Module):
         batch = next(data_stream)
         self.calls += 1
         return (
-            {"total_loss": torch.tensor(float(batch["x"]))},
+            {
+                "total_loss": torch.tensor(float(batch["x"]))
+            },
             {},
-            {"managed_metric": float(iteration)},
+            {
+                "managed_metric": float(iteration)
+            },
         )
 
     def backward(self, *args, **kwargs):

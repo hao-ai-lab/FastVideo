@@ -4,21 +4,19 @@
 Mirror of ``fp4linear.py`` but for FP8 (e4m3). The forward pass quantizes both
 activations and weights to FP8 and runs ``torch._scaled_mm``; the backward pass
 is a bf16 straight-through estimator so the high-precision master weights stay
-trainable. Falls back to a bf16 fake-quant forward on GPUs older than sm89.
+trainable. Falls back to a bf16 fake-quant forward wherever the device has no
+e4m3fn ``_scaled_mm`` (pre-sm89 CUDA, pre-CDNA4 ROCm); the capability gate and
+the FP8 constants are shared with ``fp8_config`` so the inference and QAT paths
+cannot drift.
 """
 import torch
 
-FP8_DTYPE = torch.float8_e4m3fn
-FP8_MAX = float(torch.finfo(FP8_DTYPE).max)  # 448.0
-FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
-
-
-def _supports_fp8_compute() -> bool:
-    """Whether the active device supports FP8 ``_scaled_mm`` (sm89+)."""
-    if not torch.cuda.is_available():
-        return False
-    cap = torch.cuda.get_device_capability()
-    return cap[0] > 8 or (cap[0] == 8 and cap[1] >= 9)
+from fastvideo.layers.quantization.fp8_config import (
+    FP8_DTYPE,
+    FP8_MAX,
+    FP8_MIN_SCALE,
+    _supports_fp8_compute,
+)
 
 
 def _quantize_tensorwise(x_2d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:

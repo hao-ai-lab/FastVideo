@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-
 """Validate local markdown links under docs/."""
 
 from __future__ import annotations
@@ -12,8 +11,7 @@ LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
 def is_external(target: str) -> bool:
-    return target.startswith(
-        ("http://", "https://", "mailto:", "#", "<", "javascript:"))
+    return target.startswith(("http://", "https://", "mailto:", "#", "<", "javascript:"))
 
 
 def resolve_candidates(file_path: Path, docs_root: Path, target: str) -> list[Path]:
@@ -41,7 +39,9 @@ def resolve_candidates(file_path: Path, docs_root: Path, target: str) -> list[Pa
 
 def check_links(docs_root: Path) -> list[str]:
     errors: list[str] = []
-    for md_file in sorted(docs_root.rglob("*.md")):
+    for md_file in sorted(path for path in docs_root.rglob("*") if path.suffix in {".md", ".mdx"}):
+        if "node_modules" in md_file.relative_to(docs_root).parts:
+            continue
         content = md_file.read_text(encoding="utf-8")
         for line_no, line in enumerate(content.splitlines(), start=1):
             for target in LINK_PATTERN.findall(line):
@@ -56,9 +56,7 @@ def check_links(docs_root: Path) -> list[str]:
                 if any(path.is_file() for path in candidates):
                     continue
 
-                errors.append(
-                    f"{md_file.relative_to(docs_root.parent)}:{line_no} -> {stripped}"
-                )
+                errors.append(f"{md_file.relative_to(docs_root.parent)}:{line_no} -> {stripped}")
 
     return errors
 

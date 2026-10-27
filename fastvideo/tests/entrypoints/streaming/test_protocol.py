@@ -53,7 +53,10 @@ class TestClientMessageParsing:
             "stream_mode": "av_fmp4",
             "continuation_state": {
                 "kind": "ltx2.v1",
-                "payload": {"schema_version": 1, "segment_index": 2},
+                "payload": {
+                    "schema_version": 1,
+                    "segment_index": 2
+                },
             },
         }
         parsed = parse_client_message(raw)
@@ -107,7 +110,10 @@ class TestServerMessageSerialization:
     def test_ltx2_stream_start(self):
         msg = Ltx2StreamStart(
             preset="ltx2_two_stage",
-            width=1024, height=1536, fps=24, num_frames=121,
+            width=1024,
+            height=1536,
+            fps=24,
+            num_frames=121,
         )
         dumped = msg.model_dump()
         assert dumped["type"] == "ltx2_stream_start"
@@ -133,7 +139,9 @@ class TestServerMessageSerialization:
 
     def test_media_segment_complete(self):
         msg = MediaSegmentComplete(
-            segment_idx=0, stream_id="abc", chunks=4,
+            segment_idx=0,
+            stream_id="abc",
+            chunks=4,
         )
         dumped = msg.model_dump()
         assert dumped["chunks"] == 4
@@ -149,6 +157,8 @@ class TestServerMessageSerialization:
     def test_continuation_state_snapshot(self):
         msg = ContinuationStateSnapshot(state={
             "kind": "ltx2.v1",
-            "payload": {"schema_version": 1},
+            "payload": {
+                "schema_version": 1
+            },
         })
         assert msg.model_dump()["state"]["kind"] == "ltx2.v1"

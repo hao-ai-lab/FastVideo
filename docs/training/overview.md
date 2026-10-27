@@ -48,7 +48,7 @@ For the complete two-stage Wan2.1 MixKit quantization-aware workflow, see
 
 Each example includes:
 
-- `download_dataset.sh` — download sample data
+- a README pointing at the matching download script under `examples/datasets/`
 - `preprocess_*.sh` — run preprocessing
 - `finetune_*.sh` — launch training (full finetune or LoRA)
 - `validation.json` — validation prompts for checkpoints
@@ -62,6 +62,7 @@ FastVideo supports several training approaches:
 | **Full finetune** | Adapt entire model to a new domain or style |
 | **LoRA finetune** | Lightweight adaptation with frozen base weights |
 | **VSA finetune** | Finetune with Variable Sparse Attention for efficiency |
+| **PDD / DMPDD** | [Reference-conditioned MiniMax-H3 distillation](omniref_dmpdd.md) |
 | **Attn-QAT** | Train with fake-quantized attention, optionally followed by DMD2 distillation |
 
 ## Next Steps

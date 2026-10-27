@@ -51,11 +51,10 @@ def test_self_attention_to_q_k_v_out_get_nvfp4_method() -> None:
     attn = _matched_attn()
     for attr in ("to_q", "to_k", "to_v"):
         linear = getattr(attn, attr)
-        assert isinstance(linear, ReplicatedLinear), (
-            f"{attr} must be ReplicatedLinear, got {type(linear).__name__}")
-        assert isinstance(linear.quant_method, NVFP4QuantizeMethod), (
-            f"{attr}.quant_method must be NVFP4QuantizeMethod, got "
-            f"{type(linear.quant_method).__name__}")
+        assert isinstance(linear, ReplicatedLinear), (f"{attr} must be ReplicatedLinear, got {type(linear).__name__}")
+        assert isinstance(linear.quant_method,
+                          NVFP4QuantizeMethod), (f"{attr}.quant_method must be NVFP4QuantizeMethod, got "
+                                                 f"{type(linear.quant_method).__name__}")
     out_linear = attn.to_out[0]
     assert isinstance(out_linear, ReplicatedLinear)
     assert isinstance(out_linear.quant_method, NVFP4QuantizeMethod)
@@ -153,18 +152,16 @@ def test_basic_av_block_propagates_quant_config_to_all_children() -> None:
         block.attn1.to_out[0]: "ltx2.blocks.3.attn1.to_out",
         block.attn2.to_q: "ltx2.blocks.3.attn2.to_q",
         block.attn2.to_out[0]: "ltx2.blocks.3.attn2.to_out",
-        block.audio_to_video_attn.to_q:
-        "ltx2.blocks.3.audio_to_video_attn.to_q",
-        block.video_to_audio_attn.to_v:
-        "ltx2.blocks.3.video_to_audio_attn.to_v",
+        block.audio_to_video_attn.to_q: "ltx2.blocks.3.audio_to_video_attn.to_q",
+        block.video_to_audio_attn.to_v: "ltx2.blocks.3.video_to_audio_attn.to_v",
         block.ff.net[0].proj: "ltx2.blocks.3.ffn.fc_in",
         block.ff.net[2]: "ltx2.blocks.3.ffn.fc_out",
     }
     for linear, expected_prefix in nvfp4_expectations.items():
         assert isinstance(linear, ReplicatedLinear)
-        assert isinstance(linear.quant_method, NVFP4QuantizeMethod), (
-            f"{expected_prefix} expected NVFP4QuantizeMethod, got "
-            f"{type(linear.quant_method).__name__}")
+        assert isinstance(linear.quant_method,
+                          NVFP4QuantizeMethod), (f"{expected_prefix} expected NVFP4QuantizeMethod, got "
+                                                 f"{type(linear.quant_method).__name__}")
         assert linear.quant_method.layer_prefix == expected_prefix
 
     # Confirm the non-quantized projections still get the
@@ -209,14 +206,14 @@ def test_qat_train_uses_the_ltx2_deployment_target_profile() -> None:
     )
 
     deployed_names = {
-        name for name, module in deployed.named_modules()
-        if isinstance(getattr(module, "quant_method", None),
-                      NVFP4QuantizeMethod)
+        name
+        for name, module in deployed.named_modules()
+        if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
     }
     qat_names = {
-        name for name, module in qat.named_modules()
-        if isinstance(getattr(module, "quant_method", None),
-                      NVFP4QATTrainQuantizeMethod)
+        name
+        for name, module in qat.named_modules()
+        if isinstance(getattr(module, "quant_method", None), NVFP4QATTrainQuantizeMethod)
     }
     assert qat_names == deployed_names
     assert len(qat_names) == 12

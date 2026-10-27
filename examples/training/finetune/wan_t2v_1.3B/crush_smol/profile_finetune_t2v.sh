@@ -19,16 +19,13 @@ export FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1
 export FASTVIDEO_TORCH_PROFILER_WITH_STACK=1  
 export FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1
 export FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1
-export FASTVIDEO_TORCH_PROFILER_WAIT_STEPS=2
-export FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS=1
-export FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS=1
 export FASTVIDEO_TORCH_PROFILER_DIR="../profiler_traces/wan_t2v_finetune/"
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune"
   --output_dir "checkpoints/wan_t2v_finetune"
-  --max_train_steps 5000
+  --max_train_steps 1  # Profiler captures every selected region until shutdown.
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 8
@@ -97,7 +94,9 @@ torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
   --master_port 29502 \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

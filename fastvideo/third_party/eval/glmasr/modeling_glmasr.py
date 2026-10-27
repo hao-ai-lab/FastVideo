@@ -42,7 +42,6 @@ from ._compat import (
 )
 from .configuration_glmasr import GlmAsrConfig, GlmAsrEncoderConfig
 
-
 if is_torch_available():
     import torch
     from torch import nn
@@ -94,9 +93,7 @@ class GlmAsrRotaryEmbedding(nn.Module):
         attention_factor = 1.0  # Unused in this type of RoPE
 
         # Compute the inverse frequencies
-        inv_freq = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.int64).to(device=device, dtype=torch.float) / dim)
-        )
+        inv_freq = 1.0 / (base**(torch.arange(0, dim, 2, dtype=torch.int64).to(device=device, dtype=torch.float) / dim))
         return inv_freq, attention_factor
 
     @torch.no_grad()
@@ -117,8 +114,8 @@ class GlmAsrRotaryEmbedding(nn.Module):
 
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
+    x1 = x[..., :x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2:]
     return torch.cat((-x2, x1), dim=-1)
 
 
@@ -211,9 +208,8 @@ class GlmAsrAttention(nn.Module):
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
-            self.config._attn_implementation, eager_attention_forward
-        )
+        attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(self.config._attn_implementation,
+                                                                              eager_attention_forward)
 
         attn_output, attn_weights = attention_interface(
             self,
@@ -232,6 +228,7 @@ class GlmAsrAttention(nn.Module):
 
 
 class GlmAsrMLP(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -246,6 +243,7 @@ class GlmAsrMLP(nn.Module):
 
 
 class GlmAsrEncoderLayer(GradientCheckpointingLayer):
+
     def __init__(self, config: GlmAsrConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -309,8 +307,7 @@ class GlmAsrEncoder(GlmAsrPreTrainedModel):
         self.conv2 = nn.Conv1d(config.hidden_size, config.hidden_size, kernel_size=3, stride=2, padding=1)
 
         self.layers = nn.ModuleList(
-            [GlmAsrEncoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
-        )
+            [GlmAsrEncoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)])
         self.norm = nn.LayerNorm(config.hidden_size)
         self.rotary_emb = GlmAsrRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
@@ -325,9 +322,9 @@ class GlmAsrEncoder(GlmAsrPreTrainedModel):
         inputs_embeds = inputs_embeds.transpose(1, 2)
 
         hidden_states = inputs_embeds
-        position_embeddings = self.rotary_emb(
-            hidden_states, position_ids=torch.arange(hidden_states.shape[1], device=hidden_states.device)[None, :]
-        )
+        position_embeddings = self.rotary_emb(hidden_states,
+                                              position_ids=torch.arange(hidden_states.shape[1],
+                                                                        device=hidden_states.device)[None, :])
 
         for encoder_layer in self.layers:
             hidden_states = encoder_layer(hidden_states, position_embeddings=position_embeddings, **kwargs)
@@ -355,11 +352,9 @@ class GlmAsrMultiModalProjector(nn.Module):
         return hidden_states
 
 
-@auto_docstring(
-    custom_intro="""
+@auto_docstring(custom_intro="""
     The GlmAsr model which consists of a fine-tuned Whisper encoder, a multi-modal projector and a Llama language model.
-    """
-)
+    """)
 class GlmAsrForConditionalGeneration(GlmAsrPreTrainedModel, GenerationMixin):
     _keep_in_fp32_modules_strict = None
     _supports_attention_backend = True
@@ -396,8 +391,8 @@ class GlmAsrForConditionalGeneration(GlmAsrPreTrainedModel, GenerationMixin):
 
     @can_return_tuple
     @auto_docstring(
-        custom_intro="Compute audio embeddings from log-mel input features using the audio encoder and multi-modal projector."
-    )
+        custom_intro=
+        "Compute audio embeddings from log-mel input features using the audio encoder and multi-modal projector.")
     def get_audio_features(
         self,
         input_features: torch.FloatTensor,
@@ -416,9 +411,8 @@ class GlmAsrForConditionalGeneration(GlmAsrPreTrainedModel, GenerationMixin):
         """
         audio_outputs = self.audio_tower(input_features, return_dict=True, **kwargs)
         audio_hidden_states = audio_outputs.last_hidden_state
-        audio_hidden_states = audio_hidden_states.reshape(
-            input_features.shape[0], -1, self.config.audio_config.intermediate_size
-        )
+        audio_hidden_states = audio_hidden_states.reshape(input_features.shape[0], -1,
+                                                          self.config.audio_config.intermediate_size)
         audio_embeds = self.multi_modal_projector(audio_hidden_states)
 
         audio_lengths = input_features_mask.sum(-1)
@@ -485,9 +479,8 @@ class GlmAsrForConditionalGeneration(GlmAsrPreTrainedModel, GenerationMixin):
 
             # replace text-audio token placeholders with audio embeddings
             audio_token_mask = (input_ids == self.config.audio_token_id).unsqueeze(-1)
-            inputs_embeds = inputs_embeds.masked_scatter(
-                audio_token_mask.to(inputs_embeds.device), audio_embeds.to(inputs_embeds.device)
-            )
+            inputs_embeds = inputs_embeds.masked_scatter(audio_token_mask.to(inputs_embeds.device),
+                                                         audio_embeds.to(inputs_embeds.device))
 
         outputs: CausalLMOutputWithPast = self.language_model(
             inputs_embeds=inputs_embeds,

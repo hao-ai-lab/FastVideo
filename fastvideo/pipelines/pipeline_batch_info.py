@@ -78,6 +78,8 @@ class ForwardBatch:
     image_path: str | None = None
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
+    last_image: torch.Tensor | PIL.Image.Image | None = None
+    references: list[Any] | None = None
     preprocessed_image: torch.Tensor | None = None
     # Text inputs
     prompt: str | list[str] | None = None
@@ -90,12 +92,29 @@ class ForwardBatch:
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
 
-    # Refine inputs (LongCat)
-    refine_from: str | None = None
+    # Wan-Animate inputs: paths to the *preprocessed* driving artifacts (the
+    # official wan/modules/animate/preprocess outputs), and the tensors the
+    # animate stages derive from them. background/mask are replace-mode only.
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    # None -> "animation"; normalised in AnimateConditioningLatentsStage. (The
+    # batch is built from SamplingParam with Nones included, so a non-None
+    # default here would never survive.)
+    animate_mode: str | None = None
+    pose_latents: torch.Tensor | None = None
+    face_pixel_values: torch.Tensor | None = None
+
+    # Audio-driven inputs (Wan S2V). `audio_embeds` holds the stacked wav2vec2
+    # hidden states [B, num_layers, C_a, T] produced by the audio encoding stage
+    # and consumed by the DiT's audio injector.
+    audio_path: str | None = None
+    audio_embeds: torch.Tensor | None = None
+
+    # Refine / conditioning-frame inputs
     t_thresh: float = 0.5
-    spatial_refine_only: bool = False
     num_cond_frames: int = 0
-    stage1_video: list[PIL.Image.Image] | None = None  # Loaded frames from refine_from
 
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
@@ -125,10 +144,14 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    audio_latents: torch.Tensor | None = None
     lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
+    # Normalized clean first frame for Wan TI2V and causal-DMD conditioning.
+    first_frame_latent: torch.Tensor | None = None
+    helios_latent_chunks: list[torch.Tensor] | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
@@ -140,13 +163,6 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
-    # Camera/action control inputs (GameCraft)
-    camera_states: torch.Tensor | None = None  # Plücker coordinates [B, T, 6, H, W]
-    gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
-    conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
-    camera_trajectory: str | None = None  # Camera trajectory file/identifier
-    action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
-    action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
     action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
@@ -180,11 +196,19 @@ class ForwardBatch:
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
+
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
 
     # TeaCache
     enable_teacache: bool = False
@@ -200,6 +224,9 @@ class ForwardBatch:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
+    # Enabled only by LTX-2.5 distilled presets. The refine stage supplies an
+    # explicit sigma override and therefore remains deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning
     ltx2_images: list[tuple[str, int, float]] | None = None
@@ -248,6 +275,7 @@ class ForwardBatch:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_samples: bool = field(default=False, kw_only=True)
 
     is_cfg_negative: bool = False
 
@@ -291,6 +319,9 @@ class TrainingBatch:
     audio_latents: torch.Tensor | None = None
     audio_noisy_model_input: torch.Tensor | None = None
     audio_timesteps: torch.Tensor | None = None
+    # Audio follows an independent noise schedule, so multimodal supervised
+    # fine-tuning needs its own sigma to reconstruct the clean-audio target.
+    audio_sigmas: torch.Tensor | None = None
     audio_noise: torch.Tensor | None = None
     audio_encoder_hidden_states: torch.Tensor | None = None
     audio_encoder_attention_mask: torch.Tensor | None = None
@@ -311,6 +342,11 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+    training_target: torch.Tensor | None = None
+
+    # MiniMax H3 reuses the packed row boundaries from batch preparation to
+    # split the transformer's joint sequence back into video and audio outputs.
+    minimax_h3_layout: Any | None = None
 
     attn_metadata_vsa: AttentionMetadata | None = None
     attn_metadata: AttentionMetadata | None = None
@@ -338,6 +374,45 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+    # Ref2VA keeps immutable reference rows separate from DMD2's target-only
+    # latent tensor. Every student/teacher/critic forward prepends these rows,
+    # while losses and rollout state continue to cover only generated media.
+    minimax_h3_condition_video_rows: torch.Tensor | None = None
+
+    minimax_h3_condition_audio_rows: torch.Tensor | None = None
+
+    # DMD2 flattens video and audio into one tensor. This immutable, batch-local
+    # layout records the exact native shapes needed to split it again; keeping
+    # it on the batch avoids mutable geometry state on compiled role models.
+    minimax_h3_dmd_layout: Any | None = None
+
+    # Cross-sample H3 packing retains ragged per-document latents until the
+    # DMD adapter flattens them as doc.video | doc.audio | doc.video | ... .
+    minimax_h3_document_video_latents: tuple[torch.Tensor, ...] | None = None
+
+    minimax_h3_document_audio_latents: tuple[torch.Tensor, ...] | None = None
+
+    # The text refiner and joint DiT have different document boundaries.
+    minimax_h3_text_attn_metadata: AttentionMetadata | None = None
+
+    sequence_packing_num_documents: int = 1
+
+    sequence_packing_num_tokens: int = 0
+
+    # Fixed transformer capacity, independent of scalar latent loss columns.
+    # Zero/None retains legacy logging when token padding is disabled.
+    sequence_padded_num_tokens: int = 0
+
+    sequence_padding_ratio: float | None = None
+
+    # Precomputed by the pack scheduler to preserve document-normalized loss
+    # across variable-size packs and gradient-accumulation windows.
+    sequence_packing_loss_scale: float = 1.0
+
+    # Global effective-document fraction routed through data forcing in the
+    # current packed accumulation window. None preserves legacy 0/1 metrics.
+    sequence_packing_data_forced_ratio: float | None = None
 
 
 @dataclass

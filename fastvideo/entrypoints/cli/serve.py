@@ -15,6 +15,15 @@ logger = init_logger(__name__)
 _VALIDATED_SERVE_CONFIG_ATTR = "_fastvideo_validated_serve_config"
 
 
+def _validate_execution_backend(serve_config) -> None:
+    from fastvideo.worker.executor import reject_external_launcher
+
+    reject_external_launcher(
+        serve_config.generator.engine.execution_backend,
+        entrypoint="fastvideo serve",
+    )
+
+
 class ServeSubcommand(CLISubcommand):
     """Starts an OpenAI-compatible API server."""
 
@@ -29,6 +38,7 @@ class ServeSubcommand(CLISubcommand):
                 args,
                 overrides=getattr(args, "_unknown", None),
             )
+        _validate_execution_backend(serve_config)
 
         logger.info("CLI serve config: %s", serve_config)
 
@@ -42,6 +52,7 @@ class ServeSubcommand(CLISubcommand):
 
         from fastvideo.entrypoints.openai.api_server import (
             run_server, )
+        from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 
         logger.info(
             "Server will listen on %s:%d",
@@ -56,6 +67,12 @@ class ServeSubcommand(CLISubcommand):
             port=serve_config.server.port,
             output_dir=serve_config.server.output_dir,
             default_request=serve_config.default_request,
+            served_model_name=serve_config.server.served_model_name,
+            media_reference_max_bytes=serve_config.server.media_reference_max_bytes,
+            media_policy=MediaPolicy(
+                roots=tuple(serve_config.server.media_roots),
+                allow_private_urls=serve_config.server.allow_private_media_urls,
+            ),
         )
 
     def validate(self, args: argparse.Namespace) -> None:
@@ -64,14 +81,12 @@ class ServeSubcommand(CLISubcommand):
                              "serve config plus optional dotted overrides")
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
-        setattr(
+        serve_config = build_serve_config(
             args,
-            _VALIDATED_SERVE_CONFIG_ATTR,
-            build_serve_config(
-                args,
-                overrides=getattr(args, "_unknown", None),
-            ),
+            overrides=getattr(args, "_unknown", None),
         )
+        _validate_execution_backend(serve_config)
+        setattr(args, _VALIDATED_SERVE_CONFIG_ATTR, serve_config)
 
     def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         serve_parser = subparsers.add_parser(

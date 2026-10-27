@@ -4,8 +4,8 @@ from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 # importing modified version of AST
 from fastvideo.third_party.eval.synchformer.hf_src.modeling_ast import (ASTConfig, ASTForAudioClassification)
-from fastvideo.third_party.eval.synchformer.motionformer import (AveragePooling, BaseEncoderLayer,
-                                               TemporalTransformerEncoderLayer)
+from fastvideo.third_party.synchformer.motionformer import (AveragePooling, BaseEncoderLayer,
+                                                            TemporalTransformerEncoderLayer)
 
 
 class AST(torch.nn.Module):
@@ -90,11 +90,10 @@ class AST(torch.nn.Module):
                     # we can reuse the same layer as for temporal factorization (B, dim_to_agg, D) -> (B, D)
                     # we need to add pos emb (PE) because previously we added the same PE for each segment
                     pos_max_len = max_segments if max_segments is not None else 16  # 16 = 10sec//0.64sec + 1
-                    self.global_attn_agg = TemporalTransformerEncoderLayer(
-                        add_pos_emb=True,
-                        pos_emb_drop=self.config.hidden_dropout_prob,
-                        pos_max_len=pos_max_len,
-                        **transf_enc_layer_kwargs)
+                    self.global_attn_agg = TemporalTransformerEncoderLayer(add_pos_emb=True,
+                                                                           pos_emb_drop=self.config.hidden_dropout_prob,
+                                                                           pos_max_len=pos_max_len,
+                                                                           **transf_enc_layer_kwargs)
                 elif agg_segments_module == 'AveragePooling':
                     self.global_attn_agg = AveragePooling(avg_pattern='B S D -> B D')
         else:
@@ -132,10 +131,7 @@ class AST(torch.nn.Module):
             orig_shape_s = (B, 1, T, F)
             # NOTE: since x is (B, S, T, F), and forward_segments expects (BS, T, F).
             # (B, S, T, F)[:, s] is (B, T, F) or (BS, T, F) if S=1.
-            x = torch.cat([
-                self.forward_segments(x[:, s], orig_shape_s, **ast_kwargs).unsqueeze(1)
-                for s in range(S)
-            ],
+            x = torch.cat([self.forward_segments(x[:, s], orig_shape_s, **ast_kwargs).unsqueeze(1) for s in range(S)],
                           dim=1)
         else:
             orig_shape = (B, S, T, F)
@@ -168,8 +164,7 @@ class AST(torch.nn.Module):
                 if cont_mask is not None:
                     # duplicating the mask for the latent dimension (D) to be compatible with the next func
                     x_mask = x_mask.unsqueeze(-1).expand(-1, -1, self.config.hidden_size)
-                    x_mask = self.restore_freq_temp_dims(x_mask,
-                                                         orig_shape)  # (BS, D, f, t) <- (B*S, T, D)
+                    x_mask = self.restore_freq_temp_dims(x_mask, orig_shape)  # (BS, D, f, t) <- (B*S, T, D)
                     # again removing the latent
                     x_mask = x_mask[:, 0, :, :]
                 else:
@@ -222,8 +217,7 @@ class AST(torch.nn.Module):
         if self.max_spec_t is not None:
             self.config.max_length = self.max_spec_t
         f, t = self.ast.embeddings.get_shape(self.config)
-        shortened = self.ast.embeddings.position_embeddings[:, :f * t + 2].clone(
-        )  # +2 for CLS and distill tokens
+        shortened = self.ast.embeddings.position_embeddings[:, :f * t + 2].clone()  # +2 for CLS and distill tokens
         self.ast.embeddings.position_embeddings = torch.nn.Parameter(shortened).to(self.device)
 
     def to(self, device):

@@ -1,0 +1,548 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Convert every official MMAudio variant into a FastVideo component tree.
+
+The converter is deliberately offline: every large source asset must already
+exist locally. It splits the shared DFN5B OpenCLIP checkpoint into native
+FastVideo text and vision encoders, preserves the exact MMAudio transformer,
+Synchformer, VAE, and BigVGAN weights, and emits the standard
+``model_index.json`` layout consumed by ``ComposedPipelineBase``.
+
+Example::
+
+    python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
+      --transformer-checkpoint ../MMAudio/weights/mmaudio_large_44k_v2.pth \
+      --audio-vae-checkpoint ../MMAudio/ext_weights/v1-44.pth \
+      --synchformer-checkpoint ../MMAudio/ext_weights/synchformer_state_dict.pth \
+      --dfn5b-dir official_weights/mmaudio/DFN5B-CLIP-ViT-H-14-384 \
+      --bigvgan-dir official_weights/mmaudio/bigvgan_v2_44khz_128band_512x \
+      --output converted_weights/mmaudio/large_44k_v2
+
+Use ``--variant small_16k`` with ``v1-16.pth`` and ``best_netG.pt`` for
+the 16 kHz model. The four 44.1 kHz variants share ``v1-44.pth`` and the
+NVIDIA BigVGAN-v2 directory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+from pathlib import Path
+from typing import Any
+
+import torch
+from safetensors.torch import save_file
+
+
+BASE_TRANSFORMER_CONFIG = {
+    "_class_name": "MMAudioTransformer",
+    "latent_dim": 40,
+    "clip_dim": 1024,
+    "sync_dim": 768,
+    "text_dim": 1024,
+    "mlp_ratio": 4.0,
+    "latent_seq_len": 345,
+    "clip_seq_len": 64,
+    "sync_seq_len": 192,
+    "text_seq_len": 77,
+}
+
+TRANSFORMER_VARIANTS = {
+    "small_16k": {
+        "latent_dim": 20,
+        "hidden_dim": 448,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 7,
+        "latent_seq_len": 250,
+        "v2": False,
+    },
+    "small_44k": {
+        "hidden_dim": 448,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 7,
+        "v2": False,
+    },
+    "medium_44k": {
+        "hidden_dim": 896,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 14,
+        "v2": False,
+    },
+    "large_44k": {
+        "hidden_dim": 896,
+        "depth": 21,
+        "fused_depth": 14,
+        "num_heads": 14,
+        "v2": False,
+    },
+    "large_44k_v2": {
+        "hidden_dim": 896,
+        "depth": 21,
+        "fused_depth": 14,
+        "num_heads": 14,
+        "v2": True,
+    },
+}
+
+BIGVGAN_16K_CONFIG = {
+    "_class_name": "BigVGANV2",
+    "resblock": "1",
+    "num_mels": 80,
+    "upsample_rates": [4, 4, 2, 2, 2, 2],
+    "upsample_kernel_sizes": [8, 8, 4, 4, 4, 4],
+    "upsample_initial_channel": 1536,
+    "resblock_kernel_sizes": [3, 7, 11],
+    "resblock_dilation_sizes": [
+        [1, 3, 5],
+        [1, 3, 5],
+        [1, 3, 5],
+    ],
+    "activation": "snakebeta",
+    "snake_logscale": True,
+    "use_bias_at_final": True,
+    "use_tanh_at_final": True,
+    "weight_norm_removed": False,
+}
+
+
+TEXT_ENCODER_CONFIG = {
+    "architectures": ["MMAudioDFNCLIPTextEncoder"],
+    "vocab_size": 49408,
+    "hidden_size": 1024,
+    "intermediate_size": 4096,
+    "projection_dim": 1024,
+    "num_hidden_layers": 24,
+    "num_attention_heads": 16,
+    "max_position_embeddings": 77,
+    "text_len": 77,
+    "hidden_act": "quick_gelu",
+    "layer_norm_eps": 1e-5,
+    "pad_token_id": 0,
+    "bos_token_id": 49406,
+    "eos_token_id": 49407,
+}
+
+IMAGE_ENCODER_CONFIG = {
+    "architectures": ["MMAudioDFNCLIPVisionEncoder"],
+    "hidden_size": 1280,
+    "intermediate_size": 5120,
+    "projection_dim": 1024,
+    "num_hidden_layers": 32,
+    "num_attention_heads": 16,
+    "num_channels": 3,
+    "image_size": 378,
+    "patch_size": 14,
+    "hidden_act": "quick_gelu",
+    "layer_norm_eps": 1e-5,
+}
+
+SYNCHFORMER_CONFIG = {
+    "architectures": ["MMAudioSynchformerVisualEncoder"],
+    "image_size": 224,
+    "num_channels": 3,
+    "segment_size": 16,
+    "segment_stride": 8,
+    "hidden_size": 768,
+    "tokens_per_segment": 8,
+}
+
+MODEL_INDEX = {
+    "_class_name": "MMAudioPipeline",
+    "_diffusers_version": "0.36.0",
+    "_fastvideo_model_family": "mmaudio",
+    "_fastvideo_workload_types": ["V2A", "T2A"],
+    "transformer": [
+        "fastvideo.models.dits.mmaudio",
+        "MMAudioTransformer",
+    ],
+    "text_encoder": [
+        "fastvideo.models.encoders.mmaudio_clip",
+        "MMAudioDFNCLIPTextEncoder",
+    ],
+    "tokenizer": ["transformers", "CLIPTokenizer"],
+    "image_encoder": [
+        "fastvideo.models.encoders.mmaudio_clip",
+        "MMAudioDFNCLIPVisionEncoder",
+    ],
+    "image_encoder_2": [
+        "fastvideo.models.encoders.mmaudio_synchformer",
+        "MMAudioSynchformerVisualEncoder",
+    ],
+    "audio_vae": ["fastvideo.models.audio.mmaudio_vae", "MMAudioVAE"],
+    "vocoder": ["fastvideo.models.audio.bigvgan", "BigVGANV2"],
+    "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+}
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def _write_component(output: Path, name: str, state: dict[str, torch.Tensor], config: dict[str, Any]) -> None:
+    directory = output / name
+    directory.mkdir(parents=True, exist_ok=True)
+    contiguous = {key: tensor.detach().cpu().contiguous() for key, tensor in state.items()}
+    save_file(contiguous, directory / "diffusion_pytorch_model.safetensors", metadata={"format": "pt"})
+    _write_json(directory / "config.json", config)
+
+
+def _load_torch_state(path: Path) -> dict[str, torch.Tensor]:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    value = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(value, dict):
+        raise TypeError(f"Expected a state dict in {path}, got {type(value)}")
+    for key in ("state_dict", "model", "generator"):
+        nested = value.get(key)
+        if isinstance(nested, dict) and nested:
+            value = nested
+            break
+    if not all(isinstance(tensor, torch.Tensor) for tensor in value.values()):
+        raise TypeError(f"Checkpoint {path} contains non-tensor state entries")
+    return value
+
+
+def map_open_clip_text_state(
+    state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    mapped: dict[str, torch.Tensor] = {
+        "text_model.embeddings.token_embedding.weight": state["token_embedding.weight"],
+        "text_model.embeddings.position_embedding.weight": state["positional_embedding"],
+        "text_model.final_layer_norm.weight": state["ln_final.weight"],
+        "text_model.final_layer_norm.bias": state["ln_final.bias"],
+    }
+    for name, tensor in state.items():
+        if not name.startswith("transformer.resblocks."):
+            continue
+        target = name.replace("transformer.resblocks.", "text_model.encoder.layers.")
+        target = target.replace(".ln_1.", ".layer_norm1.")
+        target = target.replace(".ln_2.", ".layer_norm2.")
+        target = target.replace(".attn.in_proj_", ".self_attn.qkv_proj.")
+        target = target.replace(".attn.out_proj.", ".self_attn.out_proj.")
+        target = target.replace(".mlp.c_fc.", ".mlp.fc1.")
+        target = target.replace(".mlp.c_proj.", ".mlp.fc2.")
+        mapped[target] = tensor
+    return mapped
+
+
+def map_open_clip_vision_state(
+    state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    mapped: dict[str, torch.Tensor] = {
+        "vision_model.embeddings.class_embedding": state["visual.class_embedding"],
+        "vision_model.embeddings.patch_embedding.weight": state["visual.conv1.weight"],
+        "vision_model.embeddings.position_embedding.weight": state["visual.positional_embedding"],
+        "vision_model.pre_layrnorm.weight": state["visual.ln_pre.weight"],
+        "vision_model.pre_layrnorm.bias": state["visual.ln_pre.bias"],
+        "vision_model.post_layernorm.weight": state["visual.ln_post.weight"],
+        "vision_model.post_layernorm.bias": state["visual.ln_post.bias"],
+        "visual_projection.weight": state["visual.proj"].t(),
+    }
+    for name, tensor in state.items():
+        if not name.startswith("visual.transformer.resblocks."):
+            continue
+        target = name.replace("visual.transformer.resblocks.", "vision_model.encoder.layers.")
+        target = target.replace(".ln_1.", ".layer_norm1.")
+        target = target.replace(".ln_2.", ".layer_norm2.")
+        target = target.replace(".attn.in_proj_", ".self_attn.qkv_proj.")
+        target = target.replace(".attn.out_proj.", ".self_attn.out_proj.")
+        target = target.replace(".mlp.c_fc.", ".mlp.fc1.")
+        target = target.replace(".mlp.c_proj.", ".mlp.fc2.")
+        mapped[target] = tensor
+    return mapped
+
+
+def write_open_clip_tokenizer(output: Path) -> None:
+    """Write the bundled OpenAI CLIP BPE as an AutoTokenizer component.
+
+    OpenCLIP pads its 77-token tensor with integer zero. ``CLIPTokenizer``
+    cannot use vocabulary ID zero as a special pad token without changing how
+    a literal exclamation mark is tokenized, so the MMAudio text stage zeros
+    positions selected by ``attention_mask`` after tokenization.
+    """
+    from open_clip.tokenizer import bytes_to_unicode, default_bpe
+
+    with gzip.open(default_bpe()) as bpe_file:
+        merges_raw = bpe_file.read().decode("utf-8").split("\n")
+    merges = merges_raw[1 : 49152 - 256 - 2 + 1]
+    merge_pairs = [tuple(merge.split()) for merge in merges]
+    vocab = list(bytes_to_unicode().values())
+    vocab += [token + "</w>" for token in vocab]
+    vocab += ["".join(pair) for pair in merge_pairs]
+    vocab += ["<start_of_text>", "<end_of_text>"]
+    encoder = {token: index for index, token in enumerate(vocab)}
+
+    directory = output / "tokenizer"
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_json(directory / "vocab.json", encoder)
+    with (directory / "merges.txt").open("w", encoding="utf-8") as handle:
+        handle.write("#version: 0.2\n")
+        for first, second in merge_pairs:
+            handle.write(f"{first} {second}\n")
+    _write_json(
+        directory / "tokenizer_config.json",
+        {
+            "tokenizer_class": "CLIPTokenizer",
+            "model_max_length": 77,
+            "bos_token": "<start_of_text>",
+            "eos_token": "<end_of_text>",
+            "unk_token": "<end_of_text>",
+            "pad_token": "<end_of_text>",
+            "do_lower_case": True,
+        },
+    )
+    _write_json(
+        directory / "special_tokens_map.json",
+        {
+            "bos_token": "<start_of_text>",
+            "eos_token": "<end_of_text>",
+            "unk_token": "<end_of_text>",
+            "pad_token": "<end_of_text>",
+        },
+    )
+
+
+def _load_dfn5b_state(directory: Path) -> dict[str, torch.Tensor]:
+    if not directory.is_dir():
+        raise FileNotFoundError(directory)
+    from open_clip import create_model_from_pretrained
+
+    model = create_model_from_pretrained(f"local-dir:{directory}",
+                                         return_transform=False)
+    state = {key: tensor.detach().cpu() for key, tensor in model.state_dict().items()}
+    del model
+    return state
+
+
+def convert(args: argparse.Namespace) -> None:
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    mode = "16k" if args.variant.endswith("16k") else "44k"
+    model_index = dict(MODEL_INDEX)
+    model_index["_fastvideo_mmaudio_variant"] = args.variant
+    model_index["_fastvideo_audio_sample_rate"] = (
+        16000 if mode == "16k" else 44100
+    )
+
+    transformer_config_only = bool(getattr(args, "transformer_config_only", False))
+    if args.transformer_only and args.preprocessor_only:
+        raise ValueError(
+            "--transformer-only and --preprocessor-only are mutually exclusive")
+    if transformer_config_only and (args.transformer_only or args.preprocessor_only):
+        raise ValueError(
+            "--transformer-config-only cannot be combined with other partial conversion flags"
+        )
+
+    transformer_config = {
+        **BASE_TRANSFORMER_CONFIG,
+        **TRANSFORMER_VARIANTS[args.variant],
+    }
+    if transformer_config_only:
+        transformer_dir = output / "transformer"
+        transformer_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(transformer_dir / "config.json", transformer_config)
+        transformer_model_index = {
+            key: value
+            for key, value in model_index.items()
+            if key.startswith("_") or key == "transformer"
+        }
+        _write_json(output / "model_index.json", transformer_model_index)
+        print(f"Wrote MMAudio {args.variant} transformer export skeleton to {output}")
+        return
+
+    if not args.preprocessor_only:
+        if args.transformer_checkpoint is None:
+            raise ValueError(
+                "--transformer-checkpoint is required unless --preprocessor-only is used")
+        transformer_state = _load_torch_state(args.transformer_checkpoint)
+        # Official ``MMAudio.load_weights`` discards these derived buffers.
+        transformer_state.pop("t_embed.freqs", None)
+        transformer_state.pop("latent_rot", None)
+        transformer_state.pop("clip_rot", None)
+        _write_component(output, "transformer", transformer_state,
+                         transformer_config)
+
+    if args.transformer_only:
+        transformer_model_index = {
+            key: value
+            for key, value in model_index.items()
+            if key.startswith("_") or key == "transformer"
+        }
+        _write_json(output / "model_index.json", transformer_model_index)
+        print(f"Converted MMAudio {args.variant} transformer to {output}")
+        return
+
+    required_assets = {
+        "--audio-vae-checkpoint": args.audio_vae_checkpoint,
+        "--synchformer-checkpoint": args.synchformer_checkpoint,
+        "--dfn5b-dir": args.dfn5b_dir,
+    }
+    if not args.preprocessor_only:
+        if mode == "16k":
+            required_assets["--bigvgan-checkpoint"] = args.bigvgan_checkpoint
+        else:
+            required_assets["--bigvgan-dir"] = args.bigvgan_dir
+    missing_assets = [name for name, path in required_assets.items() if path is None]
+    if missing_assets:
+        raise ValueError(
+            "Full pipeline conversion requires " + ", ".join(missing_assets)
+        )
+
+    assert args.audio_vae_checkpoint is not None
+    assert args.synchformer_checkpoint is not None
+    assert args.dfn5b_dir is not None
+    if not args.preprocessor_only:
+        if mode == "16k":
+            assert args.bigvgan_checkpoint is not None
+        else:
+            assert args.bigvgan_dir is not None
+
+    vae_state = _load_torch_state(args.audio_vae_checkpoint)
+    if args.preprocessor_only:
+        audio_vae_state = vae_state
+        need_encoder = True
+        if not any(key.startswith("encoder.") for key in audio_vae_state):
+            raise ValueError(
+                "Audio VAE checkpoint did not contain encoder weights")
+    else:
+        audio_vae_state = {
+            key: tensor
+            for key, tensor in vae_state.items()
+            if key.startswith("decoder.") or key in {"data_mean", "data_std"}
+        }
+        need_encoder = False
+        if not audio_vae_state:
+            raise ValueError(
+                "Audio VAE checkpoint did not contain decoder weights")
+    _write_component(
+        output,
+        "audio_vae",
+        audio_vae_state,
+        {
+            "_class_name": "MMAudioVAE",
+            "mode": mode,
+            "need_encoder": need_encoder
+        },
+    )
+
+    synchformer_state = _load_torch_state(args.synchformer_checkpoint)
+    synchformer_visual_state = {
+        name: tensor
+        for name, tensor in synchformer_state.items()
+        if name.startswith("vfeat_extractor.")
+    }
+    if not synchformer_visual_state:
+        raise ValueError(
+            "Synchformer checkpoint did not contain vfeat_extractor weights")
+    _write_component(output, "image_encoder_2", synchformer_visual_state,
+                     SYNCHFORMER_CONFIG)
+
+    dfn_state = _load_dfn5b_state(args.dfn5b_dir)
+    _write_component(output, "text_encoder", map_open_clip_text_state(dfn_state), TEXT_ENCODER_CONFIG)
+    _write_component(output, "image_encoder", map_open_clip_vision_state(dfn_state), IMAGE_ENCODER_CONFIG)
+    write_open_clip_tokenizer(output)
+
+    if args.preprocessor_only:
+        preprocess_components = {
+            key: value
+            for key, value in model_index.items()
+            if key.startswith("_") or key in {
+                "audio_vae",
+                "text_encoder",
+                "tokenizer",
+                "image_encoder",
+                "image_encoder_2",
+            }
+        }
+        preprocess_components["_fastvideo_preprocessor_only"] = True
+        _write_json(output / "model_index.json", preprocess_components)
+        print(f"Converted MMAudio {mode} preprocessing components to {output}")
+        return
+
+    if mode == "16k":
+        assert args.bigvgan_checkpoint is not None
+        bigvgan_config = dict(BIGVGAN_16K_CONFIG)
+        bigvgan_state = _load_torch_state(args.bigvgan_checkpoint)
+    else:
+        assert args.bigvgan_dir is not None
+        bigvgan_config_path = args.bigvgan_dir / "config.json"
+        if not bigvgan_config_path.is_file():
+            raise FileNotFoundError(bigvgan_config_path)
+        with bigvgan_config_path.open(encoding="utf-8") as handle:
+            bigvgan_config = json.load(handle)
+        bigvgan_config["_class_name"] = "BigVGANV2"
+        bigvgan_config["weight_norm_removed"] = False
+        bigvgan_state = _load_torch_state(
+            args.bigvgan_dir / "bigvgan_generator.pt")
+    _write_component(output, "vocoder", bigvgan_state, bigvgan_config)
+
+    _write_json(
+        output / "scheduler/scheduler_config.json",
+        {
+            "_class_name": "FlowMatchEulerDiscreteScheduler",
+            "num_train_timesteps": 1000,
+            "shift": 1.0,
+            "invert_sigmas": True,
+            "sigma_min": 0.0,
+            "use_reference_discrete_timesteps": True,
+        },
+    )
+    _write_json(output / "model_index.json", model_index)
+    print(f"Converted MMAudio {args.variant} components to {output}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--variant",
+        choices=tuple(TRANSFORMER_VARIANTS),
+        default="large_44k_v2",
+        help="Transformer architecture. v1 variants are required for training.",
+    )
+    parser.add_argument("--transformer-checkpoint", type=Path)
+    parser.add_argument("--audio-vae-checkpoint", type=Path)
+    parser.add_argument("--synchformer-checkpoint", type=Path)
+    parser.add_argument("--dfn5b-dir", type=Path)
+    parser.add_argument(
+        "--bigvgan-dir",
+        type=Path,
+        help="NVIDIA BigVGAN-v2 directory used by 44.1 kHz variants.",
+    )
+    parser.add_argument(
+        "--bigvgan-checkpoint",
+        type=Path,
+        help="Official best_netG.pt used by the small_16k variant.",
+    )
+    parser.add_argument(
+        "--transformer-only",
+        action="store_true",
+        help="Write only the transformer component needed by training.",
+    )
+    parser.add_argument(
+        "--transformer-config-only",
+        action="store_true",
+        help=(
+            "Write a weight-free transformer component tree used as the "
+            "DCP export template for from-scratch training."
+        ),
+    )
+    parser.add_argument(
+        "--preprocessor-only",
+        action="store_true",
+        help=(
+            "Write only the VAE encoder, DFN5B text/vision encoders, "
+            "Synchformer, and tokenizer needed for offline feature extraction."
+        ),
+    )
+    parser.add_argument("--output", type=Path, required=True)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    convert(parse_args())

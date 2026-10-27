@@ -9,7 +9,7 @@
 # flag (see fastvideo/models/loader/component_loader.py). No monkey-patching.
 #
 # Init the generator from the stage-1 finetune checkpoint (finetune_qat.sh).
-# Data: run download_mixkit_data.sh first.
+# Data: run examples/datasets/mixkit/download_dataset.sh first.
 #
 # Verified end-to-end on Blackwell (GB200/sm_100): generator loads with
 # ATTN_QAT_TRAIN while teacher/critic load full-precision; the DMD double loop
@@ -29,7 +29,9 @@ VALIDATION_FILE="$(dirname "$0")/../crush_smol/validation.json"
 NUM_GPUS=${NUM_GPUS:-4}
 
 torchrun --nnodes 1 --nproc_per_node "${NUM_GPUS}" \
-    fastvideo/training/wan_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_distillation_pipeline \
     --num_gpus "${NUM_GPUS}" --sp_size 1 --tp_size 1 \
     --hsdp_replicate_dim "${NUM_GPUS}" --hsdp_shard_dim 1 \
     --model_path "${BASE}" --pretrained_model_name_or_path "${BASE}" \

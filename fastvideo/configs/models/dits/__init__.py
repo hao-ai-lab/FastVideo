@@ -1,27 +1,39 @@
 from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
-from fastvideo.configs.models.dits.dreamx_world import DreamXWorldARConfig, DreamXWorldConfig
 from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
-from fastvideo.configs.models.dits.glm_image import GlmImageDiTConfig
-from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
+from fastvideo.configs.models.dits.helios import HeliosConfig
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
-from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+from fastvideo.configs.models.dits.pan2 import PAN2VideoConfig
+from fastvideo.configs.models.dits.mmaudio import (
+    MMAUDIO_44K_TRAINING_VARIANTS,
+    MMAUDIO_TRAINING_VARIANTS,
+    MMAUDIO_VARIANT_ARCHITECTURES,
+    MMAudioArchConfig,
+    MMAudioTransformerConfig,
+    get_mmaudio_transformer_config,
+)
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
-from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
-from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
+from fastvideo.models.wan.config import WanVideoConfig
+from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, QwenImage21Config
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
+from fastvideo.configs.models.dits.kandinsky6 import Kandinsky6ArchConfig, Kandinsky6VideoAudioConfig
+from fastvideo.configs.models.dits.kandinsky6_sr import Kandinsky6SRArchConfig, Kandinsky6SRConfig
 from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
+from fastvideo.configs.models.dits.lingbotworld_fast import LingBotWorldFastVideoConfig
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "DreamXWorldConfig",
-    "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
-    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
-    "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "ZImageDiTConfig"
+    "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
+    "FluxDiTConfig", "Flux2Config", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "Kandinsky6ArchConfig",
+    "Kandinsky6VideoAudioConfig", "Kandinsky6SRArchConfig", "Kandinsky6SRConfig", "MagiHumanVideoConfig",
+    "StableAudioConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotWorldFastVideoConfig",
+    "LingBotVideoConfig", "MiniMaxH3Config", "PAN2VideoConfig", "MMAudioArchConfig", "MMAudioTransformerConfig",
+    "MMAUDIO_VARIANT_ARCHITECTURES", "MMAUDIO_TRAINING_VARIANTS", "MMAUDIO_44K_TRAINING_VARIANTS",
+    "get_mmaudio_transformer_config", "QwenImage21ArchConfig", "QwenImage21Config"
 ]

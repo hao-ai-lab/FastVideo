@@ -34,19 +34,15 @@ pytestmark = [
         not torch.cuda.is_available(),
         reason="Flux2 component parity tests require CUDA",
     ),
-    pytest.mark.filterwarnings(
-        "ignore:.*torch.jit.script_method.*:DeprecationWarning",
-    ),
+    pytest.mark.filterwarnings("ignore:.*torch.jit.script_method.*:DeprecationWarning", ),
 ]
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
-MODEL_DIR = Path(
-    os.getenv(
-        "FLUX2_MODEL_DIR",
-        "/FastVideo/official_weights/black-forest-labs__FLUX.2-klein-4B",
-    )
-)
+MODEL_DIR = Path(os.getenv(
+    "FLUX2_MODEL_DIR",
+    "/FastVideo/official_weights/black-forest-labs__FLUX.2-klein-4B",
+))
 FULL_MODEL_DIR = Path(os.getenv("FLUX2_FULL_MODEL_DIR", ""))
 
 
@@ -70,13 +66,11 @@ def _print_assert_close_means(
 ) -> None:
     expected_f32 = expected.detach().float()
     actual_f32 = actual.detach().float()
-    print(
-        f"[{label}] assert_close means "
-        f"expected_mean={expected_f32.mean().item():.6f} "
-        f"actual_mean={actual_f32.mean().item():.6f} "
-        f"expected_abs_mean={expected_f32.abs().mean().item():.6f} "
-        f"actual_abs_mean={actual_f32.abs().mean().item():.6f}"
-    )
+    print(f"[{label}] assert_close means "
+          f"expected_mean={expected_f32.mean().item():.6f} "
+          f"actual_mean={actual_f32.mean().item():.6f} "
+          f"expected_abs_mean={expected_f32.abs().mean().item():.6f} "
+          f"actual_abs_mean={actual_f32.abs().mean().item():.6f}")
 
 
 def _iter_safetensors(path: str):
@@ -88,8 +82,7 @@ def _iter_safetensors(path: str):
 def _iter_pretrained_safetensors(model_dir: Path):
     candidates = [
         ("model.safetensors", "model.safetensors.index.json"),
-        ("diffusion_pytorch_model.safetensors",
-         "diffusion_pytorch_model.safetensors.index.json"),
+        ("diffusion_pytorch_model.safetensors", "diffusion_pytorch_model.safetensors.index.json"),
     ]
     for single_name, index_name in candidates:
         single = model_dir / single_name
@@ -104,10 +97,8 @@ def _iter_pretrained_safetensors(model_dir: Path):
                 yield from _iter_safetensors(str(model_dir / shard))
             return
 
-    raise FileNotFoundError(
-        f"Missing safetensors checkpoint in {model_dir} "
-        "(expected model.safetensors or diffusion_pytorch_model.safetensors)"
-    )
+    raise FileNotFoundError(f"Missing safetensors checkpoint in {model_dir} "
+                            "(expected model.safetensors or diffusion_pytorch_model.safetensors)")
 
 
 def _require_full_model_dir() -> Path:
@@ -119,6 +110,7 @@ def _require_full_model_dir() -> Path:
 # -----------------------------------------------------------------
 # dist / TP fixture (single-GPU stub)
 # -----------------------------------------------------------------
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _init_dist_and_tp_groups():
@@ -190,9 +182,7 @@ def _init_dist_and_tp_groups():
             initialize_model_parallel(
                 tensor_model_parallel_size=1,
                 sequence_model_parallel_size=1,
-                data_parallel_size=(
-                    dist.get_world_size() if dist.is_initialized() else 1
-                ),
+                data_parallel_size=(dist.get_world_size() if dist.is_initialized() else 1),
             )
             created_tp = True
     except Exception:
@@ -246,6 +236,7 @@ def _init_dist_and_tp_groups():
 # DiT transformer parity
 # -----------------------------------------------------------------
 
+
 def test_flux2_transformer_parity():
     """Numerical forward parity: Diffusers Flux2Transformer2DModel vs FastVideo Flux2.
 
@@ -289,10 +280,16 @@ def test_flux2_transformer_parity():
     enc_cpu = torch.randn(B, txt_len, joint_dim, dtype=torch.float32)
     timestep_cpu = torch.tensor([0.5], dtype=torch.float32)
     txt_ids_cpu = torch.cartesian_prod(
-        torch.arange(1), torch.arange(1), torch.arange(1), torch.arange(txt_len),
+        torch.arange(1),
+        torch.arange(1),
+        torch.arange(1),
+        torch.arange(txt_len),
     )
     img_ids_cpu = torch.cartesian_prod(
-        torch.arange(1), torch.arange(img_h), torch.arange(img_w), torch.arange(1),
+        torch.arange(1),
+        torch.arange(img_h),
+        torch.arange(img_w),
+        torch.arange(1),
     )
 
     ref = RefTransformer.from_pretrained(
@@ -333,28 +330,21 @@ def test_flux2_transformer_parity():
                 timestep=timestep_cpu.to(device=device, dtype=dtype),
             ).detach().float().cpu()
 
-    assert fv_out.shape == (B, seq_len, in_channels), (
-        f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}"
-    )
+    assert fv_out.shape == (B, seq_len,
+                            in_channels), (f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}")
     assert torch.isfinite(fv_out).all(), "FastVideo DiT output contains non-finite values"
     assert torch.isfinite(ref_out).all(), "Diffusers DiT output contains non-finite values"
 
     diff = (ref_out - fv_out).abs()
-    print(
-        f"[FLUX2 DIT] diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
-    print(
-        "[FLUX2 DIT] abs-mean drift "
-        f"diffusers={ref_out.abs().mean().item():.6f} "
-        f"fastvideo={fv_out.abs().mean().item():.6f}"
-    )
+    print(f"[FLUX2 DIT] diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
+    print("[FLUX2 DIT] abs-mean drift "
+          f"diffusers={ref_out.abs().mean().item():.6f} "
+          f"fastvideo={fv_out.abs().mean().item():.6f}")
     _print_assert_close_means("FLUX2 DIT", ref_out, fv_out)
     assert_close(ref_out, fv_out, atol=1e-5, rtol=1e-5)
 
-    hidden_5d = hidden_cpu.reshape(B, img_h, img_w, in_channels).permute(
-        0, 3, 1, 2
-    ).unsqueeze(2).contiguous()
+    hidden_5d = hidden_cpu.reshape(B, img_h, img_w, in_channels).permute(0, 3, 1, 2).unsqueeze(2).contiguous()
     with torch.no_grad():
         with set_forward_context(current_timestep=0, attn_metadata=None):
             fv_out_5d = fv(
@@ -362,14 +352,10 @@ def test_flux2_transformer_parity():
                 encoder_hidden_states=enc_cpu.to(device=device, dtype=dtype),
                 timestep=timestep_cpu.to(device=device, dtype=dtype),
             ).detach().float().cpu()
-    fv_out_5d_seq = fv_out_5d.squeeze(2).permute(0, 2, 3, 1).reshape(
-        B, seq_len, in_channels
-    )
+    fv_out_5d_seq = fv_out_5d.squeeze(2).permute(0, 2, 3, 1).reshape(B, seq_len, in_channels)
     diff_5d = (ref_out - fv_out_5d_seq).abs()
-    print(
-        f"[FLUX2 DIT 5D] diff max={diff_5d.max().item():.6f} "
-        f"mean={diff_5d.mean().item():.6f} median={diff_5d.median().item():.6f}"
-    )
+    print(f"[FLUX2 DIT 5D] diff max={diff_5d.max().item():.6f} "
+          f"mean={diff_5d.mean().item():.6f} median={diff_5d.median().item():.6f}")
     _print_assert_close_means("FLUX2 DIT 5D", ref_out, fv_out_5d_seq)
     assert_close(ref_out, fv_out_5d_seq, atol=1e-5, rtol=1e-5)
 
@@ -419,10 +405,16 @@ def test_flux2_full_transformer_guidance_parity():
     timestep_cpu = torch.tensor([0.5], dtype=torch.float32)
     guidance_cpu = torch.tensor([4.0], dtype=torch.float32)
     txt_ids_cpu = torch.cartesian_prod(
-        torch.arange(1), torch.arange(1), torch.arange(1), torch.arange(txt_len),
+        torch.arange(1),
+        torch.arange(1),
+        torch.arange(1),
+        torch.arange(txt_len),
     )
     img_ids_cpu = torch.cartesian_prod(
-        torch.arange(1), torch.arange(img_h), torch.arange(img_w), torch.arange(1),
+        torch.arange(1),
+        torch.arange(img_h),
+        torch.arange(img_w),
+        torch.arange(1),
     )
 
     ref = RefTransformer.from_pretrained(
@@ -472,17 +464,14 @@ def test_flux2_full_transformer_guidance_parity():
                 txt_ids=txt_ids_cpu.to(device=device),
             ).detach().float().cpu()
 
-    assert fv_out.shape == (B, seq_len, in_channels), (
-        f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}"
-    )
+    assert fv_out.shape == (B, seq_len,
+                            in_channels), (f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}")
     assert torch.isfinite(fv_out).all(), "FastVideo full DiT output contains non-finite values"
     assert torch.isfinite(ref_out).all(), "Diffusers full DiT output contains non-finite values"
 
     diff = (ref_out - fv_out).abs()
-    print(
-        f"[FLUX2 FULL DIT] diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"[FLUX2 FULL DIT] diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     _print_assert_close_means("FLUX2 FULL DIT", ref_out, fv_out)
     assert_close(ref_out, fv_out, atol=1e-5, rtol=1e-5)
 
@@ -495,6 +484,7 @@ def test_flux2_full_transformer_guidance_parity():
 # -----------------------------------------------------------------
 # VAE parity
 # -----------------------------------------------------------------
+
 
 def test_flux2_vae_encode_decode_parity():
     """Encode/decode parity: Diffusers AutoencoderKLFlux2 vs FastVideo Flux2 VAE."""
@@ -516,16 +506,16 @@ def test_flux2_vae_encode_decode_parity():
     torch.manual_seed(0)
 
     ref = RefVAE.from_pretrained(
-        str(vae_dir), local_files_only=True, torch_dtype=dtype,
+        str(vae_dir),
+        local_files_only=True,
+        torch_dtype=dtype,
     ).eval().to(device)
 
     x = torch.randn(1, 3, 64, 64, device=device, dtype=dtype)
 
     with torch.no_grad():
         ref_latents = ref.encode(x).latent_dist.mean.detach().float().cpu()
-        ref_dec = ref.decode(
-            ref_latents.to(device=device, dtype=dtype)
-        ).sample.detach().float().cpu()
+        ref_dec = ref.decode(ref_latents.to(device=device, dtype=dtype)).sample.detach().float().cpu()
 
     del ref
     gc.collect()
@@ -548,9 +538,7 @@ def test_flux2_vae_encode_decode_parity():
 
     with torch.no_grad():
         fv_latents = fv.encode(x).mean.detach().float().cpu()
-        fv_dec_output = fv.decode(
-            fv_latents.to(device=device, dtype=dtype)
-        )
+        fv_dec_output = fv.decode(fv_latents.to(device=device, dtype=dtype))
         fv_dec_sample = getattr(fv_dec_output, "sample", fv_dec_output)
         fv_dec = fv_dec_sample.detach().float().cpu()
 
@@ -586,16 +574,16 @@ def test_flux2_full_vae_encode_decode_parity():
     torch.manual_seed(0)
 
     ref = RefVAE.from_pretrained(
-        str(vae_dir), local_files_only=True, torch_dtype=dtype,
+        str(vae_dir),
+        local_files_only=True,
+        torch_dtype=dtype,
     ).eval().to(device)
 
     x = torch.randn(1, 3, 64, 64, device=device, dtype=dtype)
 
     with torch.no_grad():
         ref_latents = ref.encode(x).latent_dist.mean.detach().float().cpu()
-        ref_dec = ref.decode(
-            ref_latents.to(device=device, dtype=dtype)
-        ).sample.detach().float().cpu()
+        ref_dec = ref.decode(ref_latents.to(device=device, dtype=dtype)).sample.detach().float().cpu()
 
     del ref
     gc.collect()
@@ -637,6 +625,7 @@ def test_flux2_full_vae_encode_decode_parity():
 # Qwen3 text encoder parity
 # -----------------------------------------------------------------
 
+
 def test_flux2_qwen3_text_encoder_parity():
     """Hidden-state parity for the Flux2 Qwen3 loader path.
 
@@ -655,11 +644,15 @@ def test_flux2_qwen3_text_encoder_parity():
     torch.manual_seed(0)
 
     tokenizer = AutoTokenizer.from_pretrained(
-        str(MODEL_DIR / "tokenizer"), local_files_only=True,
+        str(MODEL_DIR / "tokenizer"),
+        local_files_only=True,
     )
     prompt = "a photo of a cat"
     formatted = tokenizer.apply_chat_template(
-        [{"role": "user", "content": prompt}],
+        [{
+            "role": "user",
+            "content": prompt
+        }],
         tokenize=False,
         add_generation_prompt=True,
         enable_thinking=False,
@@ -687,9 +680,7 @@ def test_flux2_qwen3_text_encoder_parity():
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-        ref_embeds = torch.stack(
-            [ref_out.hidden_states[k] for k in (9, 18, 27)], dim=1
-        )
+        ref_embeds = torch.stack([ref_out.hidden_states[k] for k in (9, 18, 27)], dim=1)
         ref_embeds = ref_embeds.permute(0, 2, 1, 3).reshape(
             input_ids.shape[0],
             input_ids.shape[1],
@@ -717,8 +708,7 @@ def test_flux2_qwen3_text_encoder_parity():
         device=device,
     )
     assert fv.__class__.__module__.startswith("transformers"), (
-        "Flux2 Qwen3 should load through the exact HuggingFace passthrough path"
-    )
+        "Flux2 Qwen3 should load through the exact HuggingFace passthrough path")
 
     with torch.no_grad():
         fv_out = fv(
@@ -726,9 +716,7 @@ def test_flux2_qwen3_text_encoder_parity():
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-        fv_embeds = torch.stack(
-            [fv_out.hidden_states[k] for k in (9, 18, 27)], dim=1
-        )
+        fv_embeds = torch.stack([fv_out.hidden_states[k] for k in (9, 18, 27)], dim=1)
         fv_embeds = fv_embeds.permute(0, 2, 1, 3).reshape(
             input_ids.shape[0],
             input_ids.shape[1],
@@ -736,10 +724,8 @@ def test_flux2_qwen3_text_encoder_parity():
         ).detach().float().cpu()
 
     diff = (ref_embeds - fv_embeds).abs()
-    print(
-        f"[FLUX2 QWEN3] diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"[FLUX2 QWEN3] diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     _print_assert_close_means("FLUX2 QWEN3", ref_embeds, fv_embeds)
     assert_close(ref_embeds, fv_embeds, atol=1e-5, rtol=1e-5)
 
@@ -805,9 +791,7 @@ def test_flux2_mistral3_text_encoder_parity():
             output_hidden_states=True,
             use_cache=False,
         )
-        ref_embeds = torch.stack(
-            [ref_out.hidden_states[k] for k in (10, 20, 30)], dim=1
-        )
+        ref_embeds = torch.stack([ref_out.hidden_states[k] for k in (10, 20, 30)], dim=1)
         ref_embeds = ref_embeds.permute(0, 2, 1, 3).reshape(
             input_ids.shape[0],
             input_ids.shape[1],
@@ -832,8 +816,7 @@ def test_flux2_mistral3_text_encoder_parity():
         device=device,
     )
     assert fv.__class__.__module__.startswith("transformers"), (
-        "Flux2 Mistral3 should load through the exact HuggingFace passthrough path"
-    )
+        "Flux2 Mistral3 should load through the exact HuggingFace passthrough path")
 
     with torch.no_grad():
         fv_out = fv(
@@ -842,9 +825,7 @@ def test_flux2_mistral3_text_encoder_parity():
             output_hidden_states=True,
             use_cache=False,
         )
-        fv_embeds = torch.stack(
-            [fv_out.hidden_states[k] for k in (10, 20, 30)], dim=1
-        )
+        fv_embeds = torch.stack([fv_out.hidden_states[k] for k in (10, 20, 30)], dim=1)
         fv_embeds = fv_embeds.permute(0, 2, 1, 3).reshape(
             input_ids.shape[0],
             input_ids.shape[1],
@@ -852,10 +833,8 @@ def test_flux2_mistral3_text_encoder_parity():
         ).detach().float().cpu()
 
     diff = (ref_embeds - fv_embeds).abs()
-    print(
-        f"[FLUX2 MISTRAL3] diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"[FLUX2 MISTRAL3] diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     _print_assert_close_means("FLUX2 MISTRAL3", ref_embeds, fv_embeds)
     assert_close(ref_embeds, fv_embeds, atol=1e-5, rtol=1e-5)
 

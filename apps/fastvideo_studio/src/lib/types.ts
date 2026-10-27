@@ -5,6 +5,7 @@ export type JobType = "inference" | "finetuning" | "distillation";
 export interface Job {
 	id: string;
 	model_id: string;
+	name?: string;
 	prompt: string;
 	job_type?: JobType;
 	workload_type?: string;

@@ -72,17 +72,14 @@ class TestDreamverseLoadKwargsShape:
     field, not in the ``experimental`` escape hatch."""
 
     def test_all_kwargs_land_on_typed_fields(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         assert isinstance(config, GeneratorConfig)
         # None of the kwargs should have been routed to experimental.
-        assert config.pipeline.experimental == {}, (
-            "Dreamverse kwargs leaked into pipeline.experimental: "
-            f"{config.pipeline.experimental}")
+        assert config.pipeline.experimental == {}, ("Dreamverse kwargs leaked into pipeline.experimental: "
+                                                    f"{config.pipeline.experimental}")
 
     def test_refine_enabled_reaches_preset_overrides(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         refine = config.pipeline.preset_overrides.get("refine") or {}
         assert refine.get("enabled") is True
         assert refine.get("add_noise") is True
@@ -90,17 +87,14 @@ class TestDreamverseLoadKwargsShape:
         assert refine.get("guidance_scale") == 1.0
 
     def test_refine_assets_reach_component_config(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         assert isinstance(config.pipeline.components, ComponentConfig)
-        assert (config.pipeline.components.upsampler_weights ==
-                "/models/ltx2-refine")
+        assert (config.pipeline.components.upsampler_weights == "/models/ltx2-refine")
         assert config.pipeline.components.lora_path == "/models/ltx2-refine-lora"
         assert config.pipeline.components.config_root == "/models/ltx2-config"
 
     def test_torch_compile_kwargs_reach_typed_fields(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         assert isinstance(config.engine.compile, CompileConfig)
         assert config.engine.compile.enabled is True
         assert config.engine.compile.backend == "inductor"
@@ -113,21 +107,23 @@ class TestDreamverseLoadKwargsShape:
         kwargs = _dreamverse_load_kwargs()
         kwargs["torch_compile_kwargs"] = {
             **kwargs["torch_compile_kwargs"],
-            "options": {"epilogue_fusion": True},
+            "options": {
+                "epilogue_fusion": True
+            },
         }
         config = legacy_from_pretrained_to_config("/models/ltx2", kwargs)
         assert config.engine.compile.extras == {
-            "options": {"epilogue_fusion": True},
+            "options": {
+                "epilogue_fusion": True
+            },
         }
 
     def test_vae_tiling_reaches_pipeline_selection(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         assert config.pipeline.vae_tiling is True
 
     def test_offload_fields_reach_typed_offload_config(self):
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2", _dreamverse_load_kwargs())
+        config = legacy_from_pretrained_to_config("/models/ltx2", _dreamverse_load_kwargs())
         assert config.engine.offload.dit is False
         assert config.engine.offload.vae is False
         assert config.engine.offload.text_encoder is False
@@ -188,9 +184,7 @@ class TestDreamverseRequestShape:
         translation path so Dreamverse callers can opt in."""
         request = GenerationRequest(
             prompt="x",
-            output=__import__(
-                "fastvideo.api", fromlist=["OutputConfig"]).OutputConfig(
-                    return_state=True),
+            output=__import__("fastvideo.api", fromlist=["OutputConfig"]).OutputConfig(return_state=True),
         )
         normalized = normalize_generation_request(request)
         assert normalized.output.return_state is True

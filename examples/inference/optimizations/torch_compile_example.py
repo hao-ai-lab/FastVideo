@@ -23,17 +23,14 @@ import time
 
 from fastvideo import VideoGenerator
 
-PROMPT = (
-    "A high-definition video of a robotic arm welding a metal structure, "
-    "bright sparks and smoke, industrial setting."
-)
+PROMPT = ("A high-definition video of a robotic arm welding a metal structure, "
+          "bright sparks and smoke, industrial setting.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="torch.compile A/B")
     parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    parser.add_argument("--compile", action="store_true",
-                        help="Enable torch.compile for the DiT")
+    parser.add_argument("--compile", action="store_true", help="Enable torch.compile for the DiT")
     parser.add_argument("--num_gpus", type=int, default=1)
     args = parser.parse_args()
 
@@ -54,12 +51,15 @@ def main() -> None:
         # prompt/seed/shapes both runs so the compiled graph is reused.
         request: dict = {
             "prompt": PROMPT,
-            "sampling": {"seed": 1024},
-            "output": {"save_video": save},
+            "sampling": {
+                "seed": 1024
+            },
+            "output": {
+                "save_video": save
+            },
         }
         if save:
-            request["output"]["output_path"] = (
-                f"video_samples/torch_compile_{tag}.mp4")
+            request["output"]["output_path"] = (f"video_samples/torch_compile_{tag}.mp4")
         t0 = time.perf_counter()
         generator.generate(request)
         return time.perf_counter() - t0

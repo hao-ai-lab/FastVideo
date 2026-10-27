@@ -75,7 +75,6 @@ import torch
 from huggingface_hub import hf_hub_download, snapshot_download
 from safetensors.torch import load_file, save_file
 
-
 # MagiHuman base arch — keys must be valid `MagiHumanArchConfig` fields.
 # FastVideo's `TransformerLoader.load` calls `ArchConfig.update_model_arch`
 # with this dict (minus `_class_name`, `_diffusers_version`) and rejects
@@ -91,9 +90,9 @@ MAGI_HUMAN_BASE_ARCH: dict = {
     "head_dim": 128,
     "num_query_groups": 8,
     # Modality channels.
-    "video_in_channels": 192,            # 48 (VAE z_dim) * patch_size product 1*2*2
+    "video_in_channels": 192,  # 48 (VAE z_dim) * patch_size product 1*2*2
     "audio_in_channels": 64,
-    "text_in_channels": 3584,            # T5Gemma-9B encoder hidden size
+    "text_in_channels": 3584,  # T5Gemma-9B encoder hidden size
     # Block-level switches.
     "mm_layers": [0, 1, 2, 3, 36, 37, 38, 39],
     "local_attn_layers": [],
@@ -110,7 +109,6 @@ MAGI_HUMAN_BASE_ARCH: dict = {
     "tread_end_layer_idx": 25,
 }
 
-
 SCHEDULER_CONFIG: dict = {
     "_class_name": "FlowUniPCMultistepScheduler",
     "_diffusers_version": "0.33.0",
@@ -124,7 +122,6 @@ SCHEDULER_CONFIG: dict = {
     "disable_corrector": [],
     "flow_shift": 5.0,
 }
-
 
 MAX_SHARD_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB shards, matches HF defaults
 
@@ -316,10 +313,7 @@ def _write_model_index(
 ) -> None:
     pipeline_class = "MagiHumanPipeline"
     if include_sr_transformer:
-        pipeline_class = (
-            "MagiHumanSR1080pPipeline"
-            if sr_subfolder == "1080p_sr" else "MagiHumanSRPipeline"
-        )
+        pipeline_class = ("MagiHumanSR1080pPipeline" if sr_subfolder == "1080p_sr" else "MagiHumanSRPipeline")
     index = {
         "_class_name": pipeline_class,
         "_diffusers_version": "0.33.0",
@@ -374,13 +368,11 @@ def _bundle_sa_audio_vae(out_dir: Path, source_repo: str = "stabilityai/stable-a
     https://huggingface.co/stabilityai/stable-audio-open-1.0.
     """
     print(f"  fetching audio VAE from {source_repo} (gated) ...")
-    token = (
-        os.environ.get("HF_TOKEN")
-        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or os.environ.get("HF_API_KEY")
-    )
+    token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_API_KEY"))
     local = snapshot_download(
-        repo_id=source_repo, token=token, allow_patterns=["vae/*"],
+        repo_id=source_repo,
+        token=token,
+        allow_patterns=["vae/*"],
     )
     src = Path(local) / "vae"
     if not src.exists():
@@ -399,11 +391,7 @@ def _bundle_text_encoder(out_dir: Path, source_repo: str = "google/t5gemma-9b-9b
     accepted terms of use for the repo.
     """
     print(f"  fetching text encoder from {source_repo} (gated) ...")
-    token = (
-        os.environ.get("HF_TOKEN")
-        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or os.environ.get("HF_API_KEY")
-    )
+    token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_API_KEY"))
     local = snapshot_download(
         repo_id=source_repo,
         token=token,
@@ -428,8 +416,9 @@ def _bundle_text_encoder(out_dir: Path, source_repo: str = "google/t5gemma-9b-9b
     dst_tokenizer.mkdir(parents=True, exist_ok=True)
 
     for fname in src.iterdir():
-        if fname.name in {"tokenizer.model", "tokenizer.json", "tokenizer_config.json",
-                          "special_tokens_map.json", "spiece.model"}:
+        if fname.name in {
+                "tokenizer.model", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "spiece.model"
+        }:
             shutil.copy(fname, dst_tokenizer / fname.name)
         else:
             shutil.copy(fname, dst_encoder / fname.name)
@@ -462,29 +451,28 @@ def main() -> None:
     parser.add_argument(
         "--cast-bf16",
         action="store_true",
-        help=(
-            "Cast fp32 DiT weights to bfloat16 on save. Recommended for the "
-            "distill subfolder (61 GB fp32 upstream -> 30 GB bf16 artifact). "
-            "Keeps norms, RoPE bands, and other precision-sensitive tensors "
-            "in fp32."
-        ),
+        help=("Cast fp32 DiT weights to bfloat16 on save. Recommended for the "
+              "distill subfolder (61 GB fp32 upstream -> 30 GB bf16 artifact). "
+              "Keeps norms, RoPE bands, and other precision-sensitive tensors "
+              "in fp32."),
     )
     parser.add_argument(
         "--bundle-text-encoder",
         action="store_true",
         help="Download google/t5gemma-9b-9b-ul2 into <output>/text_encoder/ and tokenizer/. "
-             "Requires a write-scoped HF token with accepted terms of use.",
+        "Requires a write-scoped HF token with accepted terms of use.",
     )
     parser.add_argument(
         "--bundle-audio-vae",
         action="store_true",
         help="Download stabilityai/stable-audio-open-1.0 VAE into <output>/audio_vae/. "
-             "Requires HF terms accepted for the Stability AI gated repo.",
+        "Requires HF terms accepted for the Stability AI gated repo.",
     )
     parser.add_argument(
         "--sr-source",
         default=None,
-        help="Optional HF repo id or local directory containing SR DiT shards. When set, writes <output>/sr_transformer/.",
+        help=
+        "Optional HF repo id or local directory containing SR DiT shards. When set, writes <output>/sr_transformer/.",
     )
     parser.add_argument(
         "--sr-subfolder",

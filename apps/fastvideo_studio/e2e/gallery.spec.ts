@@ -4,7 +4,7 @@ import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
  * Gallery page: the seeded completed inference job surfaces as a media tile
- * (an <article> wrapping a <video>) captioned with its prompt.
+ * with playback controls or an explicit media-error fallback.
  */
 test.describe('gallery', () => {
   skipWithoutMock();
@@ -30,12 +30,15 @@ test.describe('gallery', () => {
       page.getByRole('heading', { level: 1, name: 'Gallery' }),
     ).toBeVisible();
 
-    // The completed job renders as an <article> containing a <video> tile.
-    const tile = page
-      .locator('article')
-      .filter({ has: page.locator('video') });
-    await expect(tile.first()).toBeVisible();
+    const tile = page.locator('article').filter({ hasText: completed!.prompt });
+    await expect(tile).toBeVisible();
+    await expect(
+      tile.locator('video').or(tile.getByText('Preview unavailable')),
+    ).toBeVisible();
 
-    await expect(page.getByText(completed!.prompt)).toBeVisible();
+    const video = tile.locator('video');
+    if (await video.isVisible()) {
+      await expect(video).toHaveAttribute('controls', '');
+    }
   });
 });

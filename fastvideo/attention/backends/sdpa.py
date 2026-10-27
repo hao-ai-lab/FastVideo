@@ -4,7 +4,7 @@ import torch
 from dataclasses import dataclass
 from torch.nn import functional as F
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
-    AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
+    AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder, PackedSequenceMetadata)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -41,6 +41,8 @@ class SDPABackend(AttentionBackend):
 class SDPAMetadata(AttentionMetadata):
     current_timestep: int
     attn_mask: torch.Tensor | None = None
+    # The mask is exactly native causal attention, with no additional padding.
+    is_causal: bool = False
 
 
 class SDPAMetadataBuilder(AttentionMetadataBuilder):
@@ -124,6 +126,51 @@ class SDPAImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: SDPAMetadata,
     ) -> torch.Tensor:
+        packed_sequence = getattr(attn_metadata, "packed_sequence", None) if attn_metadata is not None else None
+        if packed_sequence is not None:
+            if not isinstance(packed_sequence, PackedSequenceMetadata):
+                raise TypeError("packed_sequence must be PackedSequenceMetadata")
+            if getattr(attn_metadata, "attn_mask", None) is not None:
+                raise ValueError("Packed SDPA uses document boundaries and cannot also take an attention mask")
+            if query.shape[0] != 1 or key.shape[0] != 1 or value.shape[0] != 1:
+                raise ValueError("Packed SDPA expects flattened Q/K/V with physical batch size 1")
+            if query.shape[1] != packed_sequence.total_query_tokens + packed_sequence.pad_tokens:
+                raise ValueError("Packed SDPA query length does not match its document lengths plus padding: "
+                                 f"{query.shape[1]} != {packed_sequence.total_query_tokens} "
+                                 f"+ {packed_sequence.pad_tokens}")
+            if (key.shape[1] != packed_sequence.total_key_value_tokens + packed_sequence.pad_tokens
+                    or value.shape[1] != key.shape[1]):
+                raise ValueError("Packed SDPA key/value lengths do not match their document lengths")
+
+            # A block-diagonal [total,total] mask is prohibitive for H3. Run
+            # one exact SDPA call per logical document and concatenate. These
+            # lengths are host metadata, so this introduces no CUDA sync.
+            # Trailing capacity rows are never passed as queries or keys.
+            outputs = []
+            query_start = 0
+            key_start = 0
+            for query_length, key_length in zip(packed_sequence.query_lengths,
+                                                packed_sequence.key_value_lengths,
+                                                strict=True):
+                query_part = query[:, query_start:query_start + query_length].transpose(1, 2)
+                key_part = key[:, key_start:key_start + key_length].transpose(1, 2)
+                value_part = value[:, key_start:key_start + key_length].transpose(1, 2)
+                kwargs = {
+                    "attn_mask": None,
+                    "dropout_p": self.dropout,
+                    "is_causal": self.causal,
+                    "scale": self.softmax_scale,
+                }
+                if query_part.shape[1] != key_part.shape[1]:
+                    kwargs["enable_gqa"] = True
+                outputs.append(
+                    torch.nn.functional.scaled_dot_product_attention(query_part, key_part, value_part,
+                                                                     **kwargs).transpose(1, 2))
+                query_start += query_length
+                key_start += key_length
+            output = torch.cat(outputs, dim=1)
+            return F.pad(output, (0, 0, 0, 0, 0, packed_sequence.pad_tokens)) if packed_sequence.pad_tokens else output
+
         # transpose to bs, heads, seq_len, head_dim
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)

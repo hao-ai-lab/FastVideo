@@ -124,8 +124,12 @@ class FeedForward(nn.Module):
 
 class Attention(nn.Module):
 
-    def __init__(self, dim: int, dim_heads: int = 64, dim_context: int | None = None,
-                 zero_init_output: bool = True, qk_norm: str | None = None) -> None:
+    def __init__(self,
+                 dim: int,
+                 dim_heads: int = 64,
+                 dim_context: int | None = None,
+                 zero_init_output: bool = True,
+                 qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.dim_heads = dim_heads
@@ -154,11 +158,15 @@ class Attention(nn.Module):
         else:
             raise ValueError(f"Unsupported qk_norm={qk_norm!r}; expected 'ln' or None.")
 
-        self.attn = LocalAttention(num_heads=self.num_heads, head_size=dim_heads,
-                                   num_kv_heads=self.kv_heads, causal=False,
+        self.attn = LocalAttention(num_heads=self.num_heads,
+                                   head_size=dim_heads,
+                                   num_kv_heads=self.kv_heads,
+                                   causal=False,
                                    supported_attention_backends=_SUPPORTED_BACKENDS)
 
-    def forward(self, x: torch.Tensor, context: torch.Tensor | None = None,
+    def forward(self,
+                x: torch.Tensor,
+                context: torch.Tensor | None = None,
                 rotary_pos_emb: tuple[torch.Tensor, float] | None = None) -> torch.Tensor:
         h, kv_h, has_context = self.num_heads, self.kv_heads, context is not None
         kv_input = context if has_context else x
@@ -201,26 +209,35 @@ class Attention(nn.Module):
 
 class TransformerBlock(nn.Module):
 
-    def __init__(self, dim: int, dim_heads: int = 64, cross_attend: bool = False,
-                 dim_context: int | None = None, zero_init_branch_outputs: bool = True,
+    def __init__(self,
+                 dim: int,
+                 dim_heads: int = 64,
+                 cross_attend: bool = False,
+                 dim_context: int | None = None,
+                 zero_init_branch_outputs: bool = True,
                  qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.dim_heads = min(dim_heads, dim)
         self.cross_attend = cross_attend
         self.pre_norm = FP32LayerNorm(dim, elementwise_affine=True)
-        self.self_attn = Attention(dim, dim_heads=self.dim_heads,
+        self.self_attn = Attention(dim,
+                                   dim_heads=self.dim_heads,
                                    zero_init_output=zero_init_branch_outputs,
                                    qk_norm=qk_norm)
         if cross_attend:
             self.cross_attend_norm = FP32LayerNorm(dim, elementwise_affine=True)
-            self.cross_attn = Attention(dim, dim_heads=self.dim_heads, dim_context=dim_context,
+            self.cross_attn = Attention(dim,
+                                        dim_heads=self.dim_heads,
+                                        dim_context=dim_context,
                                         zero_init_output=zero_init_branch_outputs,
                                         qk_norm=qk_norm)
         self.ff_norm = FP32LayerNorm(dim, elementwise_affine=True)
         self.ff = FeedForward(dim, zero_init_output=zero_init_branch_outputs)
 
-    def forward(self, x: torch.Tensor, context: torch.Tensor | None = None,
+    def forward(self,
+                x: torch.Tensor,
+                context: torch.Tensor | None = None,
                 rotary_pos_emb: tuple[torch.Tensor, float] | None = None) -> torch.Tensor:
         x = x + self.self_attn(self.pre_norm(x), rotary_pos_emb=rotary_pos_emb)
         if context is not None and self.cross_attend:
@@ -231,26 +248,35 @@ class TransformerBlock(nn.Module):
 
 class ContinuousTransformer(nn.Module):
 
-    def __init__(self, dim: int, depth: int, *, dim_heads: int = 64, dim_in: int | None = None,
-                 dim_out: int | None = None, cross_attend: bool = False,
-                 cond_token_dim: int | None = None, zero_init_branch_outputs: bool = True,
+    def __init__(self,
+                 dim: int,
+                 depth: int,
+                 *,
+                 dim_heads: int = 64,
+                 dim_in: int | None = None,
+                 dim_out: int | None = None,
+                 cross_attend: bool = False,
+                 cond_token_dim: int | None = None,
+                 zero_init_branch_outputs: bool = True,
                  qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.depth = depth
-        self.project_in = (ReplicatedLinear(dim_in, dim, bias=False) if dim_in is not None
-                           else nn.Identity())
-        self.project_out = (ReplicatedLinear(dim, dim_out, bias=False) if dim_out is not None
-                            else nn.Identity())
+        self.project_in = (ReplicatedLinear(dim_in, dim, bias=False) if dim_in is not None else nn.Identity())
+        self.project_out = (ReplicatedLinear(dim, dim_out, bias=False) if dim_out is not None else nn.Identity())
         self.rotary_pos_emb = RotaryEmbedding(max(dim_heads // 2, 32))
         self.layers = nn.ModuleList([
-            TransformerBlock(dim, dim_heads=dim_heads, cross_attend=cross_attend,
+            TransformerBlock(dim,
+                             dim_heads=dim_heads,
+                             cross_attend=cross_attend,
                              dim_context=cond_token_dim,
                              zero_init_branch_outputs=zero_init_branch_outputs,
                              qk_norm=qk_norm) for _ in range(depth)
         ])
 
-    def forward(self, x: torch.Tensor, prepend_embeds: torch.Tensor | None = None,
+    def forward(self,
+                x: torch.Tensor,
+                prepend_embeds: torch.Tensor | None = None,
                 context: torch.Tensor | None = None) -> torch.Tensor:
         if isinstance(self.project_in, ReplicatedLinear):
             x, _ = self.project_in(x)
@@ -273,8 +299,7 @@ class StableAudioDiT(BaseDiT):
     param_names_mapping = _DEFAULT_CONFIG.arch_config.param_names_mapping
     reverse_param_names_mapping: dict = {}
 
-    def __init__(self, config: StableAudioConfig | None = None,
-                 hf_config: dict[str, Any] | None = None) -> None:
+    def __init__(self, config: StableAudioConfig | None = None, hf_config: dict[str, Any] | None = None) -> None:
         if config is None:
             config = StableAudioConfig()
         super().__init__(config=config, hf_config=hf_config or {})
@@ -317,8 +342,13 @@ class StableAudioDiT(BaseDiT):
         )
 
         self.transformer = ContinuousTransformer(
-            dim=embed_dim, depth=depth, dim_heads=embed_dim // num_heads, dim_in=io_channels,
-            dim_out=io_channels, cross_attend=True, cond_token_dim=cond_embed_dim,
+            dim=embed_dim,
+            depth=depth,
+            dim_heads=embed_dim // num_heads,
+            dim_in=io_channels,
+            dim_out=io_channels,
+            cross_attend=True,
+            cond_token_dim=cond_embed_dim,
             qk_norm=qk_norm,
         )
 
@@ -364,7 +394,8 @@ class StableAudioDiT(BaseDiT):
         return self.postprocess_conv(out) + out
 
     @classmethod
-    def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
+    def from_official_state_dict(cls,
+                                 state_dict: dict[str, torch.Tensor],
                                  prefix: str = "model.model.") -> "StableAudioDiT":
         """Load from a raw `stable_audio_tools` monolithic state dict.
         Kept for tests / older checkpoints; production loads go through
@@ -381,8 +412,7 @@ class StableAudioDiT(BaseDiT):
             remapped[new_key] = v
         missing, unexpected = model.load_state_dict(remapped, strict=True)
         if missing or unexpected:
-            raise RuntimeError(
-                f"StableAudioDiT load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
+            raise RuntimeError(f"StableAudioDiT load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
         return model
 
 

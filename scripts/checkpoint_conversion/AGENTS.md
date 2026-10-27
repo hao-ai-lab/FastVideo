@@ -9,18 +9,12 @@
 
 ```
 checkpoint_conversion/
-├── convert_gamecraft_full.py            # Combined DiT + VAE
-├── convert_gamecraft_vae.py             # VAE only
-├── convert_gamecraft_weights.py         # DiT only
 ├── convert_gen3c_to_fastvideo.py
 ├── convert_ltx2_weights.py
-├── convert_turbodiffusion_to_diffusers.py
-├── convert_turbodiffusion_i2v_to_diffusers.py
-├── extract_llava_text_encoder.py        # Encoder extraction from a multimodal repo
-├── longcat_to_fastvideo.py
+├── convert_minimax_h3_adaln_rank.py     # Rank-reduces AdaLN in place; same family
+├── quantize_minimax_h3_text_encoder_fp8.py  # Block-FP8 H3 text encoder (Hopper residency)
 ├── stable_audio_to_diffusers.py
 ├── wan_to_diffusers.py
-├── validate_longcat_weights.py          # Post-conversion validation
 ├── pt_to_safetensors.py                 # Generic format flip
 └── create_hf_repo.py                    # Push to HF after conversion
 ```

@@ -41,6 +41,10 @@ class AsyncDictStore:
         async with self._lock:
             return list(self._items.values())
 
+    async def clear(self) -> None:
+        async with self._lock:
+            self._items.clear()
+
 
 # Global stores shared by OpenAI entrypoints
 VIDEO_STORE = AsyncDictStore()

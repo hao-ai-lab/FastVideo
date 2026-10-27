@@ -28,9 +28,9 @@ def _frame(width: int, height: int, value: int = 128) -> np.ndarray:
 
 
 def test_encoder_emits_init_then_media_chunks():
+
     async def run():
-        enc = FragmentedMP4Encoder(
-            width=64, height=64, fps=24, segment_idx=0)
+        enc = FragmentedMP4Encoder(width=64, height=64, fps=24, segment_idx=0)
         chunks: list[FragmentedMP4Chunk] = []
         async with enc:
             frames = [_frame(64, 64, v) for v in range(4, 28)]
@@ -46,9 +46,9 @@ def test_encoder_emits_init_then_media_chunks():
 
 def test_encoder_init_chunk_is_fmp4():
     """The first chunk must contain the ``ftyp`` box (fMP4 init segment)."""
+
     async def run():
-        enc = FragmentedMP4Encoder(
-            width=64, height=64, fps=24, segment_idx=0)
+        enc = FragmentedMP4Encoder(width=64, height=64, fps=24, segment_idx=0)
         first_chunk = None
         async with enc:
             async for chunk in enc.encode([_frame(64, 64, 20)] * 24):
@@ -64,9 +64,9 @@ def test_encoder_init_chunk_is_fmp4():
 
 
 def test_encoder_rejects_non_ndarray_frames():
+
     async def run():
-        enc = FragmentedMP4Encoder(
-            width=64, height=64, fps=24, segment_idx=0)
+        enc = FragmentedMP4Encoder(width=64, height=64, fps=24, segment_idx=0)
         async with enc:
             with pytest.raises(TypeError):
                 async for _ in enc.encode(["not-a-frame"]):
@@ -76,22 +76,21 @@ def test_encoder_rejects_non_ndarray_frames():
 
 
 def test_encoder_rejects_wrong_shape():
+
     async def run():
-        enc = FragmentedMP4Encoder(
-            width=64, height=64, fps=24, segment_idx=0)
+        enc = FragmentedMP4Encoder(width=64, height=64, fps=24, segment_idx=0)
         async with enc:
             with pytest.raises(ValueError):
-                async for _ in enc.encode(
-                        [np.zeros((64, 64, 4), dtype=np.uint8)]):
+                async for _ in enc.encode([np.zeros((64, 64, 4), dtype=np.uint8)]):
                     pass
 
     asyncio.run(run())
 
 
 def test_encoder_close_is_idempotent():
+
     async def run():
-        enc = FragmentedMP4Encoder(
-            width=64, height=64, fps=24, segment_idx=0)
+        enc = FragmentedMP4Encoder(width=64, height=64, fps=24, segment_idx=0)
         await enc.__aenter__()
         await enc.close()
         await enc.close()  # no raise

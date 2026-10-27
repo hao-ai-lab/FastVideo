@@ -41,9 +41,8 @@ def _expected_filename(row: dict) -> str:
     return row["auxiliary_info"]["expected_gen_filename"]
 
 
-def _generate_videos(rows: list[dict], videos_dir: Path,
-                     model: str, num_gpus: int,
-                     num_frames: int, height: int, width: int) -> None:
+def _generate_videos(rows: list[dict], videos_dir: Path, model: str, num_gpus: int, num_frames: int, height: int,
+                     width: int) -> None:
     from fastvideo import VideoGenerator
 
     videos_dir.mkdir(parents=True, exist_ok=True)
@@ -59,36 +58,43 @@ def _generate_videos(rows: list[dict], videos_dir: Path,
     try:
         for row, out_path in todo:
             gen.generate_video(
-                prompt=row["prompt"], output_path=str(out_path), save_video=True,
-                num_frames=num_frames, height=height, width=width,
+                prompt=row["prompt"],
+                output_path=str(out_path),
+                save_video=True,
+                num_frames=num_frames,
+                height=height,
+                width=width,
             )
     finally:
         gen.shutdown()
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset-root", type=Path, default=None,
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--dataset-root",
+                   type=Path,
+                   default=None,
                    help="Path to a pre-downloaded Physics-IQ release. "
-                        "Defaults to ${FASTVIDEO_EVAL_CACHE}/datasets/physics_iq, "
-                        "auto-fetching missing assets from the public bucket.")
-    p.add_argument("--videos-dir", type=Path,
+                   "Defaults to ${FASTVIDEO_EVAL_CACHE}/datasets/physics_iq, "
+                   "auto-fetching missing assets from the public bucket.")
+    p.add_argument("--videos-dir",
+                   type=Path,
                    default=Path("outputs_video/bench_physics_iq"),
                    help="Where to read/write generated videos.")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Truncate to first N scenarios for smoke runs.")
+    p.add_argument("--limit", type=int, default=None, help="Truncate to first N scenarios for smoke runs.")
     p.add_argument("--num-gpus", type=int, default=1)
-    p.add_argument("--model", default="Davids048/LTX2-Base-Diffusers",
+    p.add_argument("--model",
+                   default="Davids048/LTX2-Base-Diffusers",
                    help="HF repo id of the text→video generator to use.")
     p.add_argument("--num-frames", type=int, default=121)
     p.add_argument("--height", type=int, default=1088)
     p.add_argument("--width", type=int, default=1920)
-    p.add_argument("--skip-generation", action="store_true",
-                   help="Re-score existing videos under --videos-dir.")
-    p.add_argument("--scores-out", type=Path, default=None,
+    p.add_argument("--skip-generation", action="store_true", help="Re-score existing videos under --videos-dir.")
+    p.add_argument("--scores-out",
+                   type=Path,
+                   default=None,
                    help="Where to write per-scenario scores (JSON). "
-                        "Defaults to <videos-dir>/scores.json.")
+                   "Defaults to <videos-dir>/scores.json.")
     args = p.parse_args()
 
     # 1. Walk the Physics-IQ corpus. Pass --limit to the dataset
@@ -100,8 +106,13 @@ def main() -> None:
     # 2. Generate (or reuse) one mp4 per scenario.
     if not args.skip_generation:
         _generate_videos(
-            rows, args.videos_dir, args.model, args.num_gpus,
-            args.num_frames, args.height, args.width,
+            rows,
+            args.videos_dir,
+            args.model,
+            args.num_gpus,
+            args.num_frames,
+            args.height,
+            args.width,
         )
 
     # 3. Score each scenario. The metric reads file paths directly out
@@ -126,28 +137,26 @@ def main() -> None:
 
     # 4. Aggregate per the upstream scoring recipe.
     metric = get_metric("physics_iq")
-    components = metric.aggregate_components(
-        [r["physics_iq"] for r in all_results]
-    )
+    components = metric.aggregate_components([r["physics_iq"] for r in all_results])
 
     print()
     print("=== Physics-IQ aggregate ===")
     for name, value in components.items():
         print(f"  {name:24s}  {value:.4f}")
 
-    detailed = [
-        {
-            "scenario": row["auxiliary_info"]["scenario_id"],
-            "view": row["view"],
-            "scenario_name": row["auxiliary_info"]["scenario_name"],
-            "score": results["physics_iq"].score,
-        }
-        for row, results in zip(matched, all_results)
-    ]
+    detailed = [{
+        "scenario": row["auxiliary_info"]["scenario_id"],
+        "view": row["view"],
+        "scenario_name": row["auxiliary_info"]["scenario_name"],
+        "score": results["physics_iq"].score,
+    } for row, results in zip(matched, all_results)]
     out = args.scores_out or (args.videos_dir / "scores.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(
-        {"aggregate": components, "per_scenario": detailed},
+        {
+            "aggregate": components,
+            "per_scenario": detailed
+        },
         indent=2,
     ))
     print(f"\n[done] per-scenario scores → {out}")

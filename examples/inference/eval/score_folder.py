@@ -34,16 +34,15 @@ def _list_videos(directory: Path) -> list[Path]:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--videos", type=Path, required=True,
-                   help="Directory of generated videos.")
-    p.add_argument("--reference-dir", type=Path, default=None,
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--videos", type=Path, required=True, help="Directory of generated videos.")
+    p.add_argument("--reference-dir",
+                   type=Path,
+                   default=None,
                    help="Directory of reference videos with matching stems.")
     p.add_argument("--metrics", default="vbench.aesthetic_quality")
     p.add_argument("--num-gpus", type=int, default=1)
-    p.add_argument("--fps", type=float, default=None,
-                   help="Frame-rate annotation for fps-aware metrics.")
+    p.add_argument("--fps", type=float, default=None, help="Frame-rate annotation for fps-aware metrics.")
     p.add_argument("--output", type=Path, default=Path("scores.json"))
     args = p.parse_args()
 
@@ -52,10 +51,8 @@ def main() -> None:
         raise SystemExit(f"No videos under {args.videos}")
     print(f"Found {len(video_paths)} videos in {args.videos}")
 
-    metrics: list[str] | str = (
-        args.metrics if args.metrics == "all"
-        else [m.strip() for m in args.metrics.split(",") if m.strip()]
-    )
+    metrics: list[str] | str = (args.metrics
+                                if args.metrics == "all" else [m.strip() for m in args.metrics.split(",") if m.strip()])
     evaluator = create_evaluator(metrics=metrics, num_gpus=args.num_gpus)
 
     # Build per-video sample dicts holding *paths*, not pre-loaded
@@ -79,13 +76,13 @@ def main() -> None:
     all_results = evaluator.evaluate(samples=samples)
     evaluator.shutdown()
 
-    payload = [
-        {
-            "video": str(vp),
-            "scores": {name: r.score for name, r in results.items()},
-        }
-        for vp, results in zip(video_paths, all_results)
-    ]
+    payload = [{
+        "video": str(vp),
+        "scores": {
+            name: r.score
+            for name, r in results.items()
+        },
+    } for vp, results in zip(video_paths, all_results)]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2))
     print(f"Wrote {args.output}")

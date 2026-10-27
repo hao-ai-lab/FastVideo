@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 import torch
-from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoConfig
+from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
 
 
 def _is_transformer_block(param_name: str, module: torch.nn.Module) -> bool:

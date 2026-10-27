@@ -6,15 +6,16 @@ This module contains an implementation of the Wan video-to-video diffusion pipel
 using the modular pipeline architecture.
 """
 
+from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
-from fastvideo.pipelines.stages import (RefImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
-                                        VideoVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (RefImageEncodingStage, ConditioningStage, DecodingStage, VideoVAEEncodingStage,
+                                        InputValidationStage, LatentPreparationStage, TextEncodingStage,
+                                        TimestepPreparationStage)
 # isort: on
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 
@@ -62,9 +63,9 @@ class WanVideoToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=VideoVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(transformer=self.get_module("transformer"),
-                                            transformer_2=self.get_module("transformer_2"),
-                                            scheduler=self.get_module("scheduler")))
+                       stage=WanDenoisingStage(transformer=self.get_module("transformer"),
+                                               transformer_2=self.get_module("transformer_2"),
+                                               scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 

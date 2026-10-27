@@ -12,6 +12,7 @@ import multiprocessing as mp
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,9 +29,9 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     InProcessGpuPool,
     PoolAcquireTimeout,
     SubprocessGpuPool,
+    _PendingJob,
     _WorkerHandle,
 )
-
 
 # ----------------------------------------------------------------------
 # In-process pool
@@ -53,8 +54,7 @@ class _MockGenerator:
 class TestInProcessGpuPool:
 
     def test_is_gpu_pool(self):
-        assert isinstance(
-            InProcessGpuPool(_MockGenerator()), GpuPool)
+        assert isinstance(InProcessGpuPool(_MockGenerator()), GpuPool)
 
     def test_acquire_returns_deterministic_assignment(self):
         pool = InProcessGpuPool(_MockGenerator(), gpu_id=7)
@@ -83,8 +83,7 @@ class TestInProcessGpuPool:
 
         async def run():
             with pytest.raises(RuntimeError):
-                await pool.run(
-                    "sess-a", GenerationRequest(prompt="hi"))
+                await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         asyncio.run(run())
 
@@ -93,8 +92,7 @@ class TestInProcessGpuPool:
 
         async def run():
             await pool.acquire("sess-a")
-            return await pool.run(
-                "sess-a", GenerationRequest(prompt="hi"))
+            return await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         result = asyncio.run(run())
         assert result["prompt_echo"] == "hi"
@@ -106,8 +104,7 @@ class TestInProcessGpuPool:
             await pool.acquire("sess-a")
             await pool.release("sess-a")
             with pytest.raises(RuntimeError):
-                await pool.run(
-                    "sess-a", GenerationRequest(prompt="hi"))
+                await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         asyncio.run(run())
 
@@ -234,6 +231,7 @@ def _thread_worker_factory(generator_builder):
         threading.Thread(target=_await_ready, daemon=True).start()
 
         class _FakeProcess:
+
             def __init__(self, stop: threading.Event, worker: _ThreadWorker):
                 self._stop = stop
                 self._worker = worker
@@ -273,8 +271,7 @@ def pool_factory():
             generator_config=GeneratorConfig(model_path="/models/fake"),
             pool_config=GpuPoolConfig(num_workers=num_workers),
             warmup_config=WarmupConfig(enabled=False),
-            worker_factory=_thread_worker_factory(
-                lambda gpu_id: _MockGenerator()),
+            worker_factory=_thread_worker_factory(lambda gpu_id: _MockGenerator()),
         )
         await pool.start()
         return pool
@@ -285,6 +282,7 @@ def pool_factory():
 class TestSubprocessGpuPool:
 
     def test_start_spawns_requested_workers(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=3)
             try:
@@ -297,6 +295,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_acquire_decrements_available(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             try:
@@ -309,6 +308,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_acquire_timeout_when_all_busy(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
@@ -321,12 +321,12 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_run_returns_worker_result(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
                 await pool.acquire("sess-a")
-                result = await pool.run(
-                    "sess-a", GenerationRequest(prompt="hello"))
+                result = await pool.run("sess-a", GenerationRequest(prompt="hello"))
                 assert result["prompt_echo"] == "hello"
             finally:
                 await pool.shutdown()
@@ -334,6 +334,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_release_returns_worker_to_pool(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
@@ -348,6 +349,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_sticky_binding_across_multiple_runs(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             try:
@@ -363,18 +365,19 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_run_without_acquire_raises(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
                 with pytest.raises(RuntimeError):
-                    await pool.run(
-                        "sess-x", GenerationRequest(prompt="x"))
+                    await pool.run("sess-x", GenerationRequest(prompt="x"))
             finally:
                 await pool.shutdown()
 
         asyncio.run(run())
 
     def test_shutdown_is_idempotent(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             await pool.shutdown()
@@ -385,6 +388,109 @@ class TestSubprocessGpuPool:
 
 class TestSubprocessGpuPoolFailureModes:
     """Coverage for boot/runtime failures the pool has to absorb."""
+
+    @pytest.mark.parametrize("worker_raises", [False, True])
+    @pytest.mark.parametrize("cancel_during_dispatch", [False, True])
+    def test_cancelled_request_does_not_break_worker(self, monkeypatch, worker_raises, cancel_during_dispatch):
+        """An abandoned result must not take down the reader for later jobs."""
+
+        async def run():
+            loop = asyncio.get_running_loop()
+            started = asyncio.Event()
+            dispatch_started = asyncio.Event()
+            finish_generation = threading.Event()
+            finish_dispatch = threading.Event()
+
+            class _BlockingGenerator:
+
+                def generate(self, request):
+                    if request.prompt == "cancel-me":
+                        loop.call_soon_threadsafe(started.set)
+                        if not finish_generation.wait(timeout=5.0):
+                            raise RuntimeError("test failed to unblock generation")
+                        if worker_raises:
+                            raise RuntimeError("abandoned worker error")
+                    return {"prompt_echo": request.prompt}
+
+            pool = SubprocessGpuPool(
+                generator_config=GeneratorConfig(model_path="/models/fake"),
+                pool_config=GpuPoolConfig(num_workers=1),
+                warmup_config=WarmupConfig(enabled=False),
+                worker_factory=_thread_worker_factory(lambda gpu_id: _BlockingGenerator()),
+            )
+            await pool.start()
+            request_task = None
+            try:
+                await pool.acquire("sess-a")
+                if cancel_during_dispatch:
+                    job_queue = pool._workers[0].job_queue
+                    original_put = job_queue.put
+
+                    def blocked_put(item):
+                        if item is not None and item["request"].prompt == "cancel-me":
+                            loop.call_soon_threadsafe(dispatch_started.set)
+                            if not finish_dispatch.wait(timeout=5.0):
+                                raise RuntimeError("test failed to unblock dispatch")
+                        original_put(item)
+
+                    monkeypatch.setattr(job_queue, "put", blocked_put)
+
+                request_task = asyncio.create_task(pool.run("sess-a", GenerationRequest(prompt="cancel-me")))
+                await asyncio.wait_for(dispatch_started.wait() if cancel_during_dispatch else started.wait(), 2.0)
+                request_task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await request_task
+                # Cancelling the caller cannot stop an executor thread or a
+                # worker already generating, but must detach its pending job.
+                assert not pool._pending
+                finish_dispatch.set()
+                await asyncio.wait_for(started.wait(), 2.0)
+                finish_generation.set()
+
+                # Reuse the same worker for another session. FIFO delivery
+                # ensures its reader sees the abandoned result first.
+                await pool.release("sess-a")
+                await pool.acquire("sess-b", timeout=2.0)
+                result = await asyncio.wait_for(pool.run("sess-b", GenerationRequest(prompt="next")), 2.0)
+                assert result["prompt_echo"] == "next"
+                assert not pool._pending
+                assert all(not task.done() for task in pool._result_reader_tasks)
+            finally:
+                finish_dispatch.set()
+                finish_generation.set()
+                if request_task is not None:
+                    request_task.cancel()
+                    await asyncio.gather(request_task, return_exceptions=True)
+                await pool.shutdown()
+
+        asyncio.run(run())
+
+    @pytest.mark.parametrize("worker_raises", [False, True])
+    def test_reader_ignores_cancelled_future_before_request_cleanup(self, pool_factory, worker_raises):
+        """A cancelled future still in ``_pending`` must not kill the reader."""
+
+        async def run():
+            pool = await pool_factory(num_workers=1)
+            try:
+                handle = pool._workers[0]
+                future = Future()
+                future.cancel()
+                pool._pending["cancelled"] = _PendingJob("cancelled", future, "sess-a", handle.worker_id)
+                handle.result_queue.put({
+                    "job_id": "cancelled",
+                    "kind": "error" if worker_raises else "result",
+                    "error": "abandoned error",
+                    "result": {},
+                })
+                await pool.acquire("sess-b")
+                result = await asyncio.wait_for(pool.run("sess-b", GenerationRequest(prompt="next")), 2.0)
+                assert result["prompt_echo"] == "next"
+                assert not pool._pending
+                assert all(not task.done() for task in pool._result_reader_tasks)
+            finally:
+                await pool.shutdown()
+
+        asyncio.run(run())
 
     def test_failed_boot_excluded_from_available(self):
         """A worker whose factory leaves ``boot_ok`` unset must not be
@@ -404,10 +510,13 @@ class TestSubprocessGpuPoolFailureModes:
                 boot_ok.set()
 
             class _AliveProcess:
+
                 def is_alive(self) -> bool:
                     return True
+
                 def join(self, timeout: float | None = None) -> None:
                     return
+
                 def kill(self) -> None:
                     return
 

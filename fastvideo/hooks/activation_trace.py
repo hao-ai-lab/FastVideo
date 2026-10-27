@@ -187,18 +187,18 @@ class ActivationTraceManager:
 
 def attach_activation_trace(model: nn.Module | None) -> ActivationTraceManager | None:
     """Attach activation-stat hooks to model. Returns None if trace is off."""
-    if not envs.FASTVIDEO_TRACE_ACTIVATIONS or model is None:
+    if not envs.FASTVIDEO_TRACE_ACTIVATIONS.get() or model is None:
         return None
 
-    pattern_spec = envs.FASTVIDEO_TRACE_LAYERS
+    pattern_spec = envs.FASTVIDEO_TRACE_LAYERS.get()
     pattern = re.compile(pattern_spec) if pattern_spec else re.compile(".*")
-    stats = _resolve_stats(envs.FASTVIDEO_TRACE_STATS)
+    stats = _resolve_stats(envs.FASTVIDEO_TRACE_STATS.get())
     if not stats:
         logger.warning("FASTVIDEO_TRACE_STATS yielded no valid stats; trace disabled.")
         return None
 
-    sink = JsonlSink(_resolve_output_path(envs.FASTVIDEO_TRACE_OUTPUT))
-    step_filter = _parse_step_filter(envs.FASTVIDEO_TRACE_STEPS)
+    sink = JsonlSink(_resolve_output_path(envs.FASTVIDEO_TRACE_OUTPUT.get()))
+    step_filter = _parse_step_filter(envs.FASTVIDEO_TRACE_STEPS.get())
     managers = []
     for name, module in model.named_modules():
         if not name or not pattern.search(name):

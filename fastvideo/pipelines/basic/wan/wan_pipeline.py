@@ -6,12 +6,14 @@ This module contains an implementation of the Wan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
+from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
+from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
-                                        LatentPreparationStage, TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
+                                        TextEncodingStage, TimestepPreparationStage)
 
 logger = init_logger(__name__)
 
@@ -47,12 +49,14 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
                                                     transformer=self.get_module("transformer", None)))
 
+        self.add_stage(stage_name="first_frame_encoding_stage",
+                       stage=WanFirstFrameEncodingStage(vae=self.get_module("vae")))
+
         self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(transformer=self.get_module("transformer"),
-                                            transformer_2=self.get_module("transformer_2", None),
-                                            scheduler=self.get_module("scheduler"),
-                                            vae=self.get_module("vae"),
-                                            pipeline=self))
+                       stage=WanDenoisingStage(transformer=self.get_module("transformer"),
+                                               transformer_2=self.get_module("transformer_2", None),
+                                               scheduler=self.get_module("scheduler"),
+                                               pipeline=self))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 

@@ -1,4 +1,4 @@
-"""Build and reuse FastVideo kernel wheels in Modal CI.
+"""Build and reuse FastVideo kernel wheels in the dormant Modal rollback path.
 
 This module stays standalone because Modal launchers execute it from a freshly
 cloned checkout after dependency installation. Shared cache consumers are
@@ -22,8 +22,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 4
 DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-prebuilt"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
 DEFAULT_BUILD_INFO_OUTPUT = "/opt/fastvideo-kernel-prebuilt/default/metadata.json"
@@ -39,11 +38,7 @@ def _log(message: str) -> None:
     print(f"[fastvideo-kernel-cache] {message}", flush=True)
 
 
-def _run(args: list[str],
-         *,
-         cwd: Path | None = None,
-         env: dict[str, str] | None = None,
-         capture: bool = False) -> str:
+def _run(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None, capture: bool = False) -> str:
     _log("$ " + " ".join(str(arg) for arg in args))
     result = subprocess.run(
         args,
@@ -82,8 +77,8 @@ def _hash_directory(root: Path) -> str:
     hasher = hashlib.sha256()
     skip_dirs = {".git", ".mypy_cache", ".pytest_cache", "__pycache__", "build", "dist"}
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(
-            dirname for dirname in dirnames if dirname not in skip_dirs and not dirname.endswith(".egg-info"))
+        dirnames[:] = sorted(dirname for dirname in dirnames
+                             if dirname not in skip_dirs and not dirname.endswith(".egg-info"))
         for filename in sorted(filenames):
             path = Path(current_root) / filename
             hasher.update(path.relative_to(root).as_posix().encode("utf-8"))
@@ -100,8 +95,7 @@ def _kernel_source_hash(repo_root: Path) -> dict[str, str]:
     try:
         tree_hash = _run(["git", "rev-parse", f"HEAD:{KERNEL_RELATIVE_DIR}"], cwd=repo_root, capture=True)
         diff = _run_optional(["git", "diff", "--binary", "--", KERNEL_RELATIVE_DIR], cwd=repo_root)
-        cached_diff = _run_optional(["git", "diff", "--cached", "--binary", "--", KERNEL_RELATIVE_DIR],
-                                    cwd=repo_root)
+        cached_diff = _run_optional(["git", "diff", "--cached", "--binary", "--", KERNEL_RELATIVE_DIR], cwd=repo_root)
         submodules = _run_optional(
             [
                 "git",
@@ -172,6 +166,7 @@ def _torch_metadata() -> dict[str, object]:
         return {
             "torch_version": str(torch.__version__),
             "torch_cuda_version": str(torch.version.cuda),
+            "torch_git_version": str(getattr(torch.version, "git_version", "")),
             "torch_file": str(getattr(torch, "__file__", "")),
             "torch_config": str(torch.__config__.show()),
             "cxx11_abi": cxx11_abi,
@@ -180,14 +175,15 @@ def _torch_metadata() -> dict[str, object]:
         return {
             "torch_version": f"<unavailable: {error}>",
             "torch_cuda_version": "<unavailable>",
+            "torch_git_version": "<unavailable>",
             "torch_file": "<unavailable>",
             "torch_config": "<unavailable>",
             "cxx11_abi": "<unavailable>",
         }
 
 
-def _selected_command_metadata(environment_name: str, default_command: str) -> dict[str, str]:
-    raw = os.environ.get(environment_name, "").strip() or default_command
+def _selected_command_metadata(configured_command: str, default_command: str) -> dict[str, str]:
+    raw = configured_command.strip() or default_command
     try:
         command = shlex.split(raw)
     except ValueError as error:
@@ -211,13 +207,13 @@ def _selected_command_metadata(environment_name: str, default_command: str) -> d
 def _compiler_libc_metadata() -> dict[str, object]:
     return {
         "compiler": {
-            "cc": _selected_command_metadata("CC", "cc"),
-            "cxx": _selected_command_metadata("CXX", "c++"),
+            "cc": _selected_command_metadata(os.environ.get("CC", ""), "cc"),
+            "cxx": _selected_command_metadata(os.environ.get("CXX", ""), "c++"),
         },
         "build_tools": {
             "cmake_version": _run_optional(["cmake", "--version"]),
             "ninja_version": _run_optional(["ninja", "--version"]),
-            "linker": _selected_command_metadata("LD", "ld"),
+            "linker": _selected_command_metadata(os.environ.get("LD", ""), "ld"),
         },
         "libc": {
             "platform_libc": list(platform.libc_ver()),
@@ -229,6 +225,11 @@ def _compiler_libc_metadata() -> dict[str, object]:
 def _build_metadata(repo_root: Path) -> dict[str, object]:
     explicit_arch = os.environ.get("TORCH_CUDA_ARCH_LIST", "").strip()
     resolved_arch = explicit_arch or _detect_arch_from_torch()
+    torch_metadata = _torch_metadata()
+    torch_cache_metadata = {
+        name: torch_metadata[name]
+        for name in ("torch_version", "torch_cuda_version", "torch_git_version", "cxx11_abi")
+    }
     cache_key_build = {
         "gpu_backend": os.environ.get("GPU_BACKEND", "CUDA"),
         "resolved_torch_cuda_arch_list": resolved_arch,
@@ -248,16 +249,17 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
             "platform": sysconfig.get_platform(),
             "machine": platform.machine(),
         },
-        "torch": _torch_metadata(),
+        "torch": torch_cache_metadata,
         "cuda": {
             "cuda_home": os.environ.get("CUDA_HOME", ""),
-            "nvcc": _selected_command_metadata("CUDACXX", "nvcc"),
+            "nvcc": _selected_command_metadata(os.environ.get("CUDACXX", ""), "nvcc"),
         },
         "abi": _compiler_libc_metadata(),
         "build": cache_key_build,
     }
     metadata = {
         **cache_key_metadata,
+        "torch": torch_metadata,
         "build": {
             **cache_key_build,
             "torch_cuda_arch_list": explicit_arch,
@@ -268,11 +270,8 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
 
 
 def _find_wheel(directory: Path) -> Path:
-    candidates = sorted(
-        path
-        for pattern in ("fastvideo_kernel-*.whl", "fastvideo-kernel-*.whl")
-        for path in directory.glob(pattern)
-    )
+    candidates = sorted(path for pattern in ("fastvideo_kernel-*.whl", "fastvideo-kernel-*.whl")
+                        for path in directory.glob(pattern))
     if not candidates:
         raise RuntimeError(f"No fastvideo-kernel wheel found in {directory}")
     return candidates[-1]
@@ -427,8 +426,7 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
             "created_at_utc": _utc_now_isoformat(),
             "artifact": _wheel_artifact(stored_wheel),
         }
-        (temp_entry / METADATA_FILE).write_text(json.dumps(stored_metadata, indent=2, sort_keys=True),
-                                                encoding="utf-8")
+        (temp_entry / METADATA_FILE).write_text(json.dumps(stored_metadata, indent=2, sort_keys=True), encoding="utf-8")
         temp_entry.rename(cache_entry)
     except OSError as error:
         shutil.rmtree(temp_entry, ignore_errors=True)

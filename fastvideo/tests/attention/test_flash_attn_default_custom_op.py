@@ -41,10 +41,8 @@ def fa_default_impls():
         pytest.skip(f"flash_attn_default not importable: {exc}")
 
     if fa_module.fa_version not in ("2", "3"):
-        pytest.skip(
-            f"FA2/FA3 default custom op only exists for fa_version in (2, 3); "
-            f"got {fa_module.fa_version!r}"
-        )
+        pytest.skip(f"FA2/FA3 default custom op only exists for fa_version in (2, 3); "
+                    f"got {fa_module.fa_version!r}")
 
     # compilable dispatcher, the original FA wrapper it falls back to, the
     # raw custom op for opcheck, and the fa_version (FA2 has full register_
@@ -60,8 +58,7 @@ def fa_default_impls():
 def _qkv(dtype, requires_grad):
     device = torch.device("cuda")
     batch, seqlen, nheads, headdim = 2, 64, 4, 64
-    q = torch.randn(batch, seqlen, nheads, headdim, device=device,
-                    dtype=dtype, requires_grad=requires_grad)
+    q = torch.randn(batch, seqlen, nheads, headdim, device=device, dtype=dtype, requires_grad=requires_grad)
     k = torch.randn_like(q, requires_grad=requires_grad)
     v = torch.randn_like(q, requires_grad=requires_grad)
     return q, k, v
@@ -107,10 +104,8 @@ def test_default_compilable_training_backward_flows(fa_default_impls, dtype, cau
     out_test = compilable(q_test, k_test, v_test, softmax_scale=None, causal=causal)
 
     dout = torch.randn_like(out_ref)
-    dq_ref, dk_ref, dv_ref = torch.autograd.grad(
-        (out_ref * dout).sum(), (q_ref, k_ref, v_ref))
-    dq_test, dk_test, dv_test = torch.autograd.grad(
-        (out_test * dout).sum(), (q_test, k_test, v_test))
+    dq_ref, dk_ref, dv_ref = torch.autograd.grad((out_ref * dout).sum(), (q_ref, k_ref, v_ref))
+    dq_test, dk_test, dv_test = torch.autograd.grad((out_test * dout).sum(), (q_test, k_test, v_test))
 
     atol = rtol = 6e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(dq_test, dq_ref, atol=atol, rtol=rtol)
@@ -156,15 +151,14 @@ def test_default_op_backward_through_registered_autograd(fa_default_impls, dtype
     # Custom-op grads via the registered backward — unpack (out, lse), discard lse.
     out_test, _ = op(q_test, k_test, v_test, None, causal)
 
-    torch.testing.assert_close(out_test, out_ref,
+    torch.testing.assert_close(out_test,
+                               out_ref,
                                atol=0 if dtype == torch.float16 else 1e-3,
                                rtol=0 if dtype == torch.float16 else 1e-3)
 
     dout = torch.randn_like(out_ref)
-    dq_ref, dk_ref, dv_ref = torch.autograd.grad(
-        (out_ref * dout).sum(), (q_ref, k_ref, v_ref))
-    dq_test, dk_test, dv_test = torch.autograd.grad(
-        (out_test * dout).sum(), (q_test, k_test, v_test))
+    dq_ref, dk_ref, dv_ref = torch.autograd.grad((out_ref * dout).sum(), (q_ref, k_ref, v_ref))
+    dq_test, dk_test, dv_test = torch.autograd.grad((out_test * dout).sum(), (q_test, k_test, v_test))
 
     atol = rtol = 6e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(dq_test, dq_ref, atol=atol, rtol=rtol)

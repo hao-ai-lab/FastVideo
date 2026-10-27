@@ -53,39 +53,32 @@ class LTX2PrecomputedDataset(Dataset):
     def _setup_data_root(data_root: str) -> Path:
         data_root_path = Path(data_root).expanduser().resolve()
         if not data_root_path.exists():
-            raise FileNotFoundError(
-                f"Data root directory does not exist: {data_root_path}")
+            raise FileNotFoundError(f"Data root directory does not exist: {data_root_path}")
         if (data_root_path / PRECOMPUTED_DIR_NAME).exists():
             data_root_path = data_root_path / PRECOMPUTED_DIR_NAME
         return data_root_path
 
     @staticmethod
-    def _normalize_data_sources(
-        data_sources: dict[str, str] | list[str] | None,
-    ) -> dict[str, str]:
+    def _normalize_data_sources(data_sources: dict[str, str] | list[str] | None, ) -> dict[str, str]:
         if data_sources is None:
             return {"latents": "latents", "conditions": "conditions"}
         if isinstance(data_sources, list):
             return {source: source for source in data_sources}
         if isinstance(data_sources, dict):
             return data_sources.copy()
-        raise TypeError(
-            f"data_sources must be dict, list, or None, got {type(data_sources)}")
+        raise TypeError(f"data_sources must be dict, list, or None, got {type(data_sources)}")
 
     def _setup_source_paths(self) -> dict[str, Path]:
         source_paths: dict[str, Path] = {}
         for dir_name in self.data_sources:
             source_path = self.data_root / dir_name
             if not source_path.exists():
-                raise FileNotFoundError(
-                    f"Required {dir_name} directory does not exist: {source_path}")
+                raise FileNotFoundError(f"Required {dir_name} directory does not exist: {source_path}")
             source_paths[dir_name] = source_path
         return source_paths
 
     def _discover_samples(self) -> dict[str, list[Path]]:
-        data_key = ("latents"
-                    if "latents" in self.data_sources else next(iter(
-                        self.data_sources.keys())))
+        data_key = ("latents" if "latents" in self.data_sources else next(iter(self.data_sources.keys())))
         data_path = self.source_paths[data_key]
         data_files = list(data_path.glob("**/*.pt"))
         if not data_files:
@@ -100,8 +93,7 @@ class LTX2PrecomputedDataset(Dataset):
 
     def _all_source_files_exist(self, data_file: Path, rel_path: Path) -> bool:
         for dir_name in self.data_sources:
-            expected_path = self._get_expected_file_path(dir_name, data_file,
-                                                         rel_path)
+            expected_path = self._get_expected_file_path(dir_name, data_file, rel_path)
             if not expected_path.exists():
                 logger.warning(
                     "No matching %s file found for: %s (expected in: %s)",
@@ -112,33 +104,23 @@ class LTX2PrecomputedDataset(Dataset):
                 return False
         return True
 
-    def _get_expected_file_path(self, dir_name: str, data_file: Path,
-                                rel_path: Path) -> Path:
+    def _get_expected_file_path(self, dir_name: str, data_file: Path, rel_path: Path) -> Path:
         source_path = self.source_paths[dir_name]
         if dir_name == "conditions" and data_file.name.startswith("latent_"):
             return source_path / f"condition_{data_file.stem[7:]}.pt"
         return source_path / rel_path
 
-    def _fill_sample_data_files(self, data_file: Path, rel_path: Path,
-                                sample_files: dict[str, list[Path]]) -> None:
+    def _fill_sample_data_files(self, data_file: Path, rel_path: Path, sample_files: dict[str, list[Path]]) -> None:
         for dir_name, output_key in self.data_sources.items():
-            expected_path = self._get_expected_file_path(dir_name, data_file,
-                                                         rel_path)
-            sample_files[output_key].append(
-                expected_path.relative_to(self.source_paths[dir_name]))
+            expected_path = self._get_expected_file_path(dir_name, data_file, rel_path)
+            sample_files[output_key].append(expected_path.relative_to(self.source_paths[dir_name]))
 
     def _validate_setup(self) -> None:
         if not self.sample_files:
-            raise ValueError(
-                "No valid samples found - all data sources must have matching files"
-            )
-        sample_counts = {
-            key: len(files)
-            for key, files in self.sample_files.items()
-        }
+            raise ValueError("No valid samples found - all data sources must have matching files")
+        sample_counts = {key: len(files) for key, files in self.sample_files.items()}
         if len(set(sample_counts.values())) > 1:
-            raise ValueError(
-                f"Mismatched sample counts across sources: {sample_counts}")
+            raise ValueError(f"Mismatched sample counts across sources: {sample_counts}")
 
     def __len__(self) -> int:
         first_key = next(iter(self.sample_files.keys()))
@@ -156,8 +138,7 @@ class LTX2PrecomputedDataset(Dataset):
                     data = self._normalize_video_latents(data)
                 result[output_key] = data
             except Exception as e:
-                raise RuntimeError(
-                    f"Failed to load {output_key} from {file_path}: {e}") from e
+                raise RuntimeError(f"Failed to load {output_key} from {file_path}: {e}") from e
         result["idx"] = index
         return result
 

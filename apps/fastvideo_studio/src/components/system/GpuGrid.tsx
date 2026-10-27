@@ -1,7 +1,9 @@
 'use client';
 
 import * as React from 'react';
+import { AlertTriangle } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getGpus, type GpuInfo, type GpuSnapshot } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -97,7 +99,8 @@ function GpuCard({ gpu }: { gpu: GpuInfo }) {
 
 export default function GpuGrid() {
   const [snapshot, setSnapshot] = React.useState<GpuSnapshot | null>(null);
-  const [fetchError, setFetchError] = React.useState(false);
+  const [fetchError, setFetchError] = React.useState<string | null>(null);
+  const [retryToken, setRetryToken] = React.useState(0);
 
   React.useEffect(() => {
     let mounted = true;
@@ -110,10 +113,14 @@ export default function GpuGrid() {
         const next = await getGpus();
         if (mounted) {
           setSnapshot(next);
-          setFetchError(false);
+          setFetchError(null);
         }
       } catch {
-        if (mounted) setFetchError(true);
+        if (mounted) {
+          setFetchError(
+            'GPU status could not be refreshed. The values below may be stale.',
+          );
+        }
       } finally {
         inFlight = false;
       }
@@ -125,14 +132,27 @@ export default function GpuGrid() {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [retryToken]);
 
   if (fetchError && !snapshot) {
     return (
-      <p className="py-8 text-center text-muted-foreground">
-        Could not reach the API server. GPU status needs the studio API server
-        running.
-      </p>
+      <div
+        role="alert"
+        className="flex flex-col items-center gap-3 py-8 text-center"
+      >
+        <AlertTriangle className="size-6 text-destructive" aria-hidden />
+        <p className="text-muted-foreground">
+          Could not reach the API server. GPU status needs the Studio API server
+          running.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setRetryToken((token) => token + 1)}
+        >
+          Try Again
+        </Button>
+      </div>
     );
   }
   if (!snapshot) {
@@ -150,9 +170,22 @@ export default function GpuGrid() {
   return (
     <div className="flex flex-col gap-4">
       {fetchError && (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
-          Lost contact with the API server — showing the last known values.
-        </p>
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
+        >
+          <AlertTriangle className="size-4 text-amber-600" aria-hidden />
+          <span className="min-w-0 flex-1">{fetchError}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setRetryToken((token) => token + 1)}
+          >
+            Refresh Now
+          </Button>
+        </div>
       )}
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
         {snapshot.gpus.map((gpu) => (

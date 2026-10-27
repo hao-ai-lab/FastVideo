@@ -6,13 +6,13 @@ the noisy latent channels. The stage topology is therefore closest to Wan V2V,
 but the model repo does not include CLIP image-encoder components.
 """
 
+from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_v2v_pipeline import WanVideoToVideoPipeline
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
-    DenoisingStage,
     InputValidationStage,
     LatentPreparationStage,
     TextEncodingStage,
@@ -67,7 +67,7 @@ class LucyEditPipeline(WanVideoToVideoPipeline):
 
         self.add_stage(
             stage_name="denoising_stage",
-            stage=DenoisingStage(
+            stage=WanDenoisingStage(
                 transformer=self.get_module("transformer"),
                 transformer_2=self.get_module("transformer_2"),
                 scheduler=self.get_module("scheduler"),

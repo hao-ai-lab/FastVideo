@@ -43,6 +43,8 @@ FastVideo maps a Diffusers-style repo into a pipeline like:
 - `fastvideo/models/*`: model implementations (DiT, VAE, encoders, upsamplers).
 - `fastvideo/configs/models/*`: arch configs and `param_names_mapping` for
   weight name translation.
+- `fastvideo/models/wan/`: Wan's dense transformer, VAE, and component configs
+  live together. The old Wan modules remain compatibility re-exports.
 - `fastvideo/configs/pipelines/*`: pipeline wiring (component classes + names).
 - `fastvideo/api/sampling_param.py`: runtime sampling parameters.
 - `fastvideo/pipelines/basic/*`: end-to-end pipeline logic built from stages.
@@ -127,8 +129,9 @@ factors, outputs may not match exactly, but they should be comparable.
 This is an example workflow for adding a full model pipeline (model + configs +
 examples + tests). This guide is in active development; feedback is welcome.
 
-!!! note
-    If you get stuck, refer to existing models/pipelines in FastVideo or ask in Slack.
+:::note
+If you get stuck, refer to existing models/pipelines in FastVideo or ask in Slack.
+:::
 
 ### 0) Fetch official model's code and weights
 
@@ -147,15 +150,18 @@ Action:
   handling and download it directly with
   `scripts/huggingface/download_hf.py`.
 
-!!! note
-    This step is best done manually because large downloads can time out.
-    Example:
-    ```bash
-    python scripts/huggingface/download_hf.py \
-      --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-      --local_dir official_weights/Wan2.1-T2V-1.3B-Diffusers \
-      --repo_type model
-    ```
+:::note
+This step is best done manually because large downloads can time out.
+Example:
+
+```bash
+python scripts/huggingface/download_hf.py \
+  --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+  --local_dir official_weights/Wan2.1-T2V-1.3B-Diffusers \
+  --repo_type model
+```
+
+:::
   
 ### 1) Implement the model + config mapping
 
@@ -187,15 +193,17 @@ Action:
   - If you are using an agent, ask it to implement the model, config mapping,
     and a parity test together so you can validate numerics immediately.
 
-!!! note
-    After the first component is aligned and parity‑tested, open a **DRAFT PR**
-    on FastVideo so the rest of the pipeline work can build on top of it.
+:::note
+After the first component is aligned and parity‑tested, open a **DRAFT PR**
+on FastVideo so the rest of the pipeline work can build on top of it.
+:::
 
-!!! note
-    If a Diffusers-format HF repo already exists and loads correctly, you can
-    skip conversion entirely (no conversion script needed) and just download it
-    with `scripts/huggingface/download_hf.py`. Otherwise, you may need a
-    conversion script + a `converted_weights/<model>/` staging directory.
+:::note
+If a Diffusers-format HF repo already exists and loads correctly, you can
+skip conversion entirely (no conversion script needed) and just download it
+with `scripts/huggingface/download_hf.py`. Otherwise, you may need a
+conversion script + a `converted_weights/<model>/` staging directory.
+:::
 
 Example (key renaming via arch config mapping, Wan2.1‑style):
 
@@ -209,7 +217,7 @@ class OfficialWanTransformer(torch.nn.Module):
     def forward(self, x):
         return self.patch_embedding(x)
 
-# FastVideo model (simplified) in fastvideo/models/dits/wanvideo.py
+# FastVideo model (simplified) in fastvideo/models/wan/transformer.py
 class PatchEmbed(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -227,7 +235,7 @@ class WanTransformer3DModel(torch.nn.Module):
         return self.patch_embedding(x)
 
 # Mapping defined in a config (simplified; see the real mapping in
-# fastvideo/configs/models/dits/wanvideo.py)
+# fastvideo/models/wan/config.py)
 param_names_mapping = {
     r"^patch_embedding\.(.*)$": r"patch_embedding.proj.\1",
     r"^blocks\.(\d+)\.attn1\.to_q\.(.*)$": r"blocks.\1.to_q.\2",
@@ -275,7 +283,7 @@ Mapping steps:
   - Instantiate the FastVideo DiT (`WanTransformer3DModel`) and compare
     its `state_dict().keys()` to the official keys.
   - Update `param_names_mapping` in
-    fastvideo/configs/models/dits/wanvideo.py to resolve missing/unexpected keys.
+    fastvideo/models/wan/config.py to resolve missing/unexpected keys.
   - Use `load_state_dict(strict=False)` during iteration to surface mismatches.
 ```
 
@@ -403,6 +411,9 @@ Action:
   causal masks, and broadcast shapes).
 - **Scheduler / sigma schedule mismatch**: even small differences in schedules
   or timestep shapes can cause noticeable drift.
+- **Skipped parity tests**: local parity tests skip when the reference clone,
+  weights, or a GPU are missing. A skip is not a pass; run them where the
+  reference and weights are available before claiming parity.
 
 ## Diffusers vs manual conversion
 
@@ -466,19 +477,24 @@ The Wan2.1 T2V 1.3B Diffusers pipeline is a good “standard” example for
 FastVideo integration.
 
 1. Verify model config + mapping.
-   - DiT mapping: `fastvideo/configs/models/dits/wanvideo.py`
-   - VAE: `fastvideo/models/vaes/wanvae.py`
+   - DiT: `fastvideo/models/wan/transformer.py`
+   - DiT mapping: `fastvideo/models/wan/config.py`
+   - VAE: `fastvideo/models/wan/vae.py`
+   - VAE config: `fastvideo/models/wan/vae_config.py`
    - Text encoder: `fastvideo/models/encoders/t5.py`
 
 2. Parity test the core components.
+   - Start with `bash scripts/validate_wan.sh all`: contracts and tiny goldens.
    - Example tests: `fastvideo/tests/transformers/test_wanvideo.py`,
      `fastvideo/tests/vaes/test_wan_vae.py`,
      `fastvideo/tests/encoders/test_t5_encoder.py`
 
 3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
-   - Pipeline config: `fastvideo/configs/pipelines/wan.py`
-   - Sampling defaults: `fastvideo/pipelines/basic/wan/profiles.py`
+   - Denoising and first-frame preparation: `fastvideo/pipelines/basic/wan/stages/`
+   - Variant definitions: `fastvideo/models/wan/definition.py`
+   - Pipeline config: `fastvideo/models/wan/pipeline_config.py`
+   - Sampling defaults: `fastvideo/pipelines/basic/wan/presets.py`
 
 4. Minimal example.
    - Script: `examples/inference/basic/basic.py`

@@ -271,16 +271,14 @@ def _validate_no_existing_seed(
 ) -> None:
     identity = _source_identity(record)
     if load_records_for_identity(
-        records_root,
-        identity,
-        last_n=1,
-        successful_only=True,
-        baseline_eligible_only=True,
+            records_root,
+            identity,
+            last_n=1,
+            successful_only=True,
+            baseline_eligible_only=True,
     ):
-        raise ValueError(
-            f"{source} already has a baseline-eligible record for the exact comparable identity; "
-            "the CALIBRATION_NEEDED source artifact is stale"
-        )
+        raise ValueError(f"{source} already has a baseline-eligible record for the exact comparable identity; "
+                         "the CALIBRATION_NEEDED source artifact is stale")
 
     cohort_records = load_records_for_identity(
         records_root,
@@ -290,10 +288,8 @@ def _validate_no_existing_seed(
     mismatches = _recipe_mismatch_records(record, cohort_records)
     if mismatches:
         recipes = sorted({str(item["recipe_fingerprint"]) for item in mismatches})
-        raise ValueError(
-            f"{source} already has trusted records for another recipe in this workload, "
-            f"variant, and benchmark version: {', '.join(recipes)}"
-        )
+        raise ValueError(f"{source} already has trusted records for another recipe in this workload, "
+                         f"variant, and benchmark version: {', '.join(recipes)}")
 
 
 def _repository_descriptor() -> dict[str, str]:
@@ -308,7 +304,9 @@ def _reservation_path(staging_root: str, identity: dict[str, str]) -> str:
     payload = json.dumps({
         "identity": identity,
         "repository": _repository_descriptor(),
-    }, sort_keys=True, separators=(",", ":"))
+    },
+                         sort_keys=True,
+                         separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return os.path.join(staging_root, ".seed-reservations", digest)
 
@@ -319,10 +317,8 @@ def _reserve_staging_identity(staging_root: str, identity: dict[str, str]) -> st
     try:
         os.mkdir(reservation, 0o700)
     except FileExistsError as exc:
-        raise ValueError(
-            "staging already has a reservation for the exact comparable identity; "
-            "reuse or explicitly clean the existing preparation"
-        ) from exc
+        raise ValueError("staging already has a reservation for the exact comparable identity; "
+                         "reuse or explicitly clean the existing preparation") from exc
     return reservation
 
 
@@ -375,15 +371,20 @@ def _write_preparation_manifest(
             "sha256": hashlib.sha256(blob).hexdigest(),
         })
     manifest = {
-        "manifest_schema_version": 1,
-        "repository": _repository_descriptor(),
-        "identity": identity,
+        "manifest_schema_version":
+        1,
+        "repository":
+        _repository_descriptor(),
+        "identity":
+        identity,
         "recipe_cohort": {
             key: identity[key]
             for key in ("workload_id", "variant_id", "benchmark_version")
         },
-        "staging_root": os.path.realpath(os.path.abspath(staging_root)),
-        "source_records": source_manifest_entries,
+        "staging_root":
+        os.path.realpath(os.path.abspath(staging_root)),
+        "source_records":
+        source_manifest_entries,
         "prepared_records": [{
             "path": os.path.realpath(os.path.abspath(path)),
             "sha256": _file_sha256(path),
@@ -408,13 +409,11 @@ def _validate_prepared_seed(record: dict[str, Any]) -> None:
         raise ValueError("prepared records must retain CALIBRATION_NEEDED source provenance")
     if not str(record.get("baseline_seed_reason") or "").strip():
         raise ValueError("prepared records must retain a non-empty approval rationale")
-    if (
-        record.get("baseline_seed_source_success") is not True
-        or record.get("baseline_seed_source_run_source") != "scheduled_main"
-        or record.get("baseline_seed_source_branch") != "main"
-        or record.get("baseline_seed_source_test_scope") != "full"
-        or _truthy_pr_number(record.get("baseline_seed_source_pr_number"))
-    ):
+    if (record.get("baseline_seed_source_success") is not True
+            or record.get("baseline_seed_source_run_source") != "scheduled_main"
+            or record.get("baseline_seed_source_branch") != "main"
+            or record.get("baseline_seed_source_test_scope") != "full"
+            or _truthy_pr_number(record.get("baseline_seed_source_pr_number"))):
         raise ValueError("prepared records must retain trusted scheduled-main source provenance")
 
 
@@ -515,8 +514,8 @@ def upload_prepared_seed_manifest(manifest_path: str) -> str:
     ordered_sources = _order_sources_by_timestamp(source_paths, source_records)
     records_by_index = sorted(records, key=lambda record: record["baseline_seed_batch_index"])
     for index, ((source_path, source_record), record) in enumerate(
-        zip(ordered_sources, records_by_index, strict=True),
-        start=1,
+            zip(ordered_sources, records_by_index, strict=True),
+            start=1,
     ):
         expected = build_baseline_seed_record(
             source_record,
@@ -589,10 +588,8 @@ def _order_sources_by_timestamp(
             timestamp = None
 
         if timestamp is None:
-            print(
-                f"Warning: source artifact {index} has a missing or unparsable timestamp; "
-                "preserving its input order after timestamped sources."
-            )
+            print(f"Warning: source artifact {index} has a missing or unparsable timestamp; "
+                  "preserving its input order after timestamped sources.")
             undated.append((source_path, record))
             continue
 
@@ -621,11 +618,8 @@ def _validate_batch_consistency(
     print(f"Source batch consistency (maximum regression {max_regression * 100:.1f}%):")
     failures = []
     for policy in DEFAULT_METRIC_POLICIES:
-        values = [
-            (index, value)
-            for index, record in enumerate(records, start=1)
-            if (value := safe_float(record.get(policy.key))) is not None
-        ]
+        values = [(index, value) for index, record in enumerate(records, start=1)
+                  if (value := safe_float(record.get(policy.key))) is not None]
         if len(values) < 2:
             continue
 
@@ -640,16 +634,14 @@ def _validate_batch_consistency(
             else:
                 regression = (batch_median - value) / batch_median
             regressions.append((source_index, regression))
-            print(
-                f"  {policy.key} source={source_index} value={value:.6f} "
-                f"median={batch_median:.6f} regression={regression * 100:.1f}%")
+            print(f"  {policy.key} source={source_index} value={value:.6f} "
+                  f"median={batch_median:.6f} regression={regression * 100:.1f}%")
 
         worst_source, worst_regression = max(regressions, key=lambda item: item[1])
         print(f"  {policy.key} worst regression: {worst_regression * 100:.1f}% (source={worst_source})")
         if worst_regression > max_regression:
-            failures.append(
-                f"source artifact {worst_source} {policy.key} regresses by "
-                f"{worst_regression * 100:.1f}% against the batch median")
+            failures.append(f"source artifact {worst_source} {policy.key} regresses by "
+                            f"{worst_regression * 100:.1f}% against the batch median")
 
     if failures:
         raise ValueError("source batch exceeds maximum intra-batch regression: " + "; ".join(failures))
@@ -657,8 +649,7 @@ def _validate_batch_consistency(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create reviewed baseline seed records from v2 CALIBRATION_NEEDED artifacts.",
-    )
+        description="Create reviewed baseline seed records from v2 CALIBRATION_NEEDED artifacts.", )
     parser.add_argument(
         "--source-result",
         dest="source_results",
@@ -674,10 +665,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--tracking-root",
         default=TRACKING_ROOT,
-        help=(
-            "Operator tracking-mirror path used only to enforce staging separation; "
-            "remote validation uses a fresh temporary snapshot."
-        ),
+        help=("Operator tracking-mirror path used only to enforce staging separation; "
+              "remote validation uses a fresh temporary snapshot."),
     )
     parser.add_argument(
         "--staging-root",
@@ -730,10 +719,8 @@ def main(argv: list[str] | None = None) -> int:
         seed_records.append((seed_record, suffix))
 
     reservation = _reserve_staging_identity(args.staging_root, identity)
-    prepared_seeds = [
-        (_seed_record_path(reservation, seed_record, suffix=suffix), seed_record, suffix)
-        for seed_record, suffix in seed_records
-    ]
+    prepared_seeds = [(_seed_record_path(reservation, seed_record, suffix=suffix), seed_record, suffix)
+                      for seed_record, suffix in seed_records]
     prepared_paths = [seed_path for seed_path, _seed_record, _suffix in prepared_seeds]
     try:
         for seed_path, seed_record, suffix in prepared_seeds:

@@ -21,7 +21,7 @@ Common examples:
 [docs] Add LoRA finetuning guide
 [new-model] Port HunyuanVideo 1.5 to FastVideo
 [infra] Add activation trace hooks for pipeline debugging
-[skill] Add add-model agent skill
+[skill] Add reseed-ssim-references agent skill
 ```
 
 Accepted tags are `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`,
@@ -42,19 +42,20 @@ The important process labels are:
 
 | Label | Meaning |
 |---|---|
-| `ready` | The PR is ready for Full Suite and auto-merge consideration. |
+| `ready` | The PR is ready for the change-aware merge gate and auto-merge consideration. |
 | `needs-rebase` | The PR has merge conflicts with `main`. |
 | `do-not-merge` | A maintainer has blocked merge. |
 
 ## CI Summary
 
-FastVideo has three validation tiers:
+FastVideo has three routine validation tiers plus an explicit full diagnostic:
 
 | Tier | Runs when | What it does |
 |---|---|---|
 | Pre-commit | Pull requests and `/test pre-commit` | Formatting, linting, typing, spelling, Markdown, workflow syntax, filename checks |
-| Fastcheck | PR Buildkite builds | Path-filtered component and unit checks on Modal GPU runners |
-| Full Suite | `/merge`, `ready`, `/test full`, or new pushes to ready PRs | Path-filtered integration, SSIM, training, eval, API, and performance checks |
+| Fastcheck | PR Buildkite builds | Six component, kernel, unit, and app lanes on Slinky Slurm |
+| Merge gate | `/merge`, `ready`, or new pushes to ready PRs | Only path-relevant integration lanes on Slinky Slurm; Fastcheck remains the baseline |
+| Full Suite | `/test full` | Explicit all-twenty-lane diagnostic run on Slinky Slurm |
 
 See [CI/CD Architecture](ci_architecture.md#ci-tiers) for exact jobs, path
 filters, and workflow files.
@@ -66,10 +67,12 @@ filters, and workflow files.
 3. Fix pre-commit failures locally with `pre-commit run --all-files`.
 4. Wait for at least one approving review.
 5. When the PR is approved and ready, comment `/merge`.
-6. `/merge` adds `ready` and triggers the Full Suite for the PR branch.
+6. `/merge` adds `ready`, directly calls the trusted merge-gate workflow,
+   waits for cheap checks, and triggers the minimal
+   path-relevant integration lanes for the PR branch.
 7. If all required checks pass, Mergify squash-merges the PR to `main`.
-8. If Full Suite fails, fix the regression, push again, and re-run `/merge` or
-   the failed test.
+8. If the merge gate fails, fix the regression, push again, and re-run
+   `/merge`. Use a targeted `/test` command for diagnosis.
 
 Only contributors with repository write permission can use slash commands. If
 you are an external contributor, ask a maintainer to run `/merge` or add
@@ -92,8 +95,9 @@ All supported `/test` names and their `TEST_TYPE` mappings are listed in
 [CI/CD Architecture](ci_architecture.md#slash-commands).
 
 When a direct test succeeds, the aggregate `fastcheck-passed` or
-`full-suite-passed` status is refreshed automatically if all jobs in that tier
-are now green.
+`full-suite-passed` status is refreshed automatically if that tier previously
+failed and all its jobs are now green. A targeted test cannot replace an
+initial Fastcheck or Full Suite run.
 
 ## Troubleshooting
 
@@ -128,7 +132,7 @@ git push --force-with-lease
 
 Mergify removes `needs-rebase` after conflicts are resolved.
 
-### Full Suite Fails
+### Merge Gate Or Full Suite Fails
 
 The failing Buildkite step is the source of truth. Common causes are:
 

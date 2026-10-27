@@ -19,6 +19,32 @@ const makeJob = (overrides: Partial<Job> = {}): Job =>
   });
 
 describe('JobDetailsSidebar', () => {
+  it('fills the mobile viewport without reserving main-content width', async () => {
+    vi.mocked(getJobLogs).mockResolvedValue({
+      lines: [],
+      total: 0,
+      progress: 0,
+      progress_msg: '',
+      phase: '',
+    });
+    const onWidthChange = vi.fn();
+
+    render(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'completed' })}
+        isMobile
+        onClose={vi.fn()}
+        onWidthChange={onWidthChange}
+      />,
+    );
+
+    const drawer = screen.getByRole('dialog', { name: 'Job details' });
+    expect(drawer).toHaveStyle({ width: '100%', maxWidth: 'none' });
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveFocus();
+    expect(onWidthChange).toHaveBeenCalledWith(0);
+  });
+
   it('renders log lines streamed from the job log poll', async () => {
     vi.mocked(getJobLogs).mockResolvedValue({
       lines: ['boot sequence started', 'loading model weights'],

@@ -1,0 +1,49 @@
+# TODO(cookbook-review): Design sample only. Before merge, double-check the
+# selected options, schema types/ranges, and baseline values for each deployment.
+# TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
+title: Wan2.1 I2V 14B
+summary: Image-conditioned video generation from a source frame.
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: i2v
+    defaults: examples/serving/openai_wan21_i2v_14b.yaml
+    # Existing requirement in the referenced native YAML's header.
+    requirements:
+      - >-
+        Each request must supply its own source image through the OpenAI-compatible
+        reference fields, e.g. {"input_reference": "/path/to/first-frame.png"} or
+        {"image_reference": [{"image_url": "https://example.com/first-frame.png"}]};
+        there is no default image.
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.*
+      - "!generator.engine.parallelism.hsdp_*"
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - generator.pipeline.experimental.flow_shift
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.seed
+    overrides:
+      # WanT2V480PConfig declares flow_shift in fastvideo/models/wan/pipeline_config.py.
+      # A complete local schema enables the new path only because options selects it.
+      generator.pipeline.experimental.flow_shift:
+        title: Flow shift
+        type: number
+        # Positive-only editing is cookbook policy, not a native schema bound.
+        exclusiveMinimum: 0
+        description: Positive scheduler time shift (cookbook policy); the serving baseline recommends 3.0.
+      # Wan uses an 8-pixel VAE stride and a 2x2 spatial DiT patch.
+      default_request.sampling.height:
+        minimum: 16
+        multipleOf: 16
+      default_request.sampling.width:
+        minimum: 16
+        multipleOf: 16
+      # Generic stage verification accepts nonnegative seeds, including zero.
+      default_request.sampling.seed:
+        minimum: 0

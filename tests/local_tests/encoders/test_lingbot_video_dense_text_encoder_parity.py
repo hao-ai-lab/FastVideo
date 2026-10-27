@@ -64,6 +64,7 @@ def _load_native(device: torch.device, checkpoint: Path) -> LingBotVideoQwen3VLT
         override_text_encoder_quant=None,
         override_text_encoder_safetensors=None,
         pin_cpu_memory=False,
+        disable_offload_on_unified_memory=lambda device_id, offload_flag=None: False,
     )
     model = TextEncoderLoader().load_model(
         str(checkpoint / "text_encoder"),

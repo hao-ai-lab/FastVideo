@@ -4,12 +4,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+DEFAULT_MEDIA_REFERENCE_MAX_BYTES = 2 * 1024**3
+
 
 @dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     output_dir: str = "outputs/"
+    served_model_name: str | None = None
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+    # Directories whose files HTTP callers may reference by local path. Empty rejects local paths.
+    media_roots: list[str] = field(default_factory=list)
+    # Allows media URLs that resolve to loopback, private, or link-local addresses.
+    allow_private_media_urls: bool = False
+
+    def __post_init__(self) -> None:
+        if self.media_reference_max_bytes <= 0:
+            raise ValueError("server.media_reference_max_bytes must be positive")
+        if any(not isinstance(root, str) or not root.strip() for root in self.media_roots):
+            raise ValueError("server.media_roots entries must be non-empty paths")
 
 
 @dataclass
@@ -18,7 +32,7 @@ class ParallelismConfig:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None
+    dist_timeout: int | None = None  # positive process-group timeout in seconds
 
 
 @dataclass
@@ -29,6 +43,12 @@ class OffloadConfig:
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
+    # Not a CPU offload: loads each heavy component on first use and frees it
+    # after the last stage that needs it, so peak memory is the largest
+    # overlapping set rather than the sum. Grouped here because it is the same
+    # decision the offload knobs answer, which is how much of the model has to
+    # be resident at once. ``None`` auto-enables on unified-memory devices.
+    lazy_module_load: bool | None = None
 
 
 @dataclass
@@ -69,12 +89,20 @@ class CompileConfig:
 class QuantizationConfig:
     text_encoder_quant: str | None = None
     transformer_quant: str | None = None
+    # Forwarded onto ``NVFP4Config`` when ``transformer_quant`` is ``NVFP4``.
+    # ``h3_dit`` selects the packed MiniMax-H3 attention+FFN export.
+    # ``h3_dit_ffn`` selects a packed FFN-only export (attention stays dense).
+    # ``h3_dit_vsa`` is ``h3_dit`` plus the VSA compression gates.
+    layer_profile: str | None = None
+    # NVFP4 can purge the original dense weights after conversion. Keep them
+    # when inference will later merge a transformer LoRA adapter.
+    transformer_retain_original_weights: bool | None = None
 
 
 @dataclass
 class EngineConfig:
     num_gpus: int = 1
-    execution_backend: Literal["mp", "ray"] = "mp"
+    execution_backend: Literal["mp", "uni", "ray", "external_launcher"] = "mp"
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)
@@ -94,13 +122,15 @@ class ComponentConfig:
     vae_weights: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
+    lora_nickname: str = "default"
+    lora_strength: float = 1.0
     override_pipeline_cls_name: str | None = None
     override_transformer_cls_name: str | None = None
 
 
 @dataclass
 class PipelineSelection:
-    workload_type: Literal["t2v", "i2v", "t2i", "i2i"] | None = None
+    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = None
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
@@ -124,15 +154,23 @@ class InputConfig:
     prompt_path: str | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
+    pose_video_path: str | list[str] | None = None
+    face_video_path: str | list[str] | None = None
+    background_video_path: str | list[str] | None = None
+    mask_video_path: str | list[str] | None = None
+    animate_mode: str | None = None
+    audio_path: str | list[str] | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
+    latents: Any | None = None
+    audio_latents: Any | None = None
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
     action_path: str | None = None
-    refine_from: str | None = None
-    stage1_video: Any | None = None
 
 
 @dataclass
@@ -146,18 +184,28 @@ class SamplingConfig:
     height_sr: int = 1072
     width_sr: int = 1920
     fps: int = 24
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
+
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
 
 
 @dataclass
@@ -174,6 +222,7 @@ class OutputConfig:
     save_video: bool = True
     return_frames: bool = True
     return_state: bool = False
+    return_samples: bool = field(default=False, kw_only=True)
 
 
 @dataclass

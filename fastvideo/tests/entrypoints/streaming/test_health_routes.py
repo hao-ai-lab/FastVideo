@@ -12,23 +12,15 @@ from fastapi import FastAPI  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
 from fastvideo.api.schema import (  # noqa: E402
-    GeneratorConfig,
-    GenerationRequest,
-    SamplingConfig,
-    ServeConfig,
-    StreamingConfig,
+    GeneratorConfig, GenerationRequest, SamplingConfig, ServeConfig, StreamingConfig,
 )
 from fastvideo.entrypoints.streaming.gpu_pool import (  # noqa: E402
-    GpuPool,
-    PoolAssignment,
-    PoolHealth,
+    GpuPool, PoolAssignment, PoolHealth,
 )
 from fastvideo.entrypoints.streaming.health import (  # noqa: E402
-    build_health_router,
-    get_pool_status,
+    build_health_router, get_pool_status,
 )
 from fastvideo.entrypoints.streaming.server import build_app  # noqa: E402
-
 
 _STATUS_KEYS = {
     "total_gpus",
@@ -88,7 +80,9 @@ def _fake_status() -> dict[str, Any]:
                 "warmup_enabled": True,
                 "warmup_success": True,
                 "warmup_error": None,
-                "warmup_timings": {"load": 1.2},
+                "warmup_timings": {
+                    "load": 1.2
+                },
             },
             1: {
                 "ready": False,
@@ -114,15 +108,13 @@ def _build_health_client(pool=None) -> TestClient:
 def _build_serve_config() -> ServeConfig:
     return ServeConfig(
         generator=GeneratorConfig(model_path="/models/fake"),
-        default_request=GenerationRequest(
-            sampling=SamplingConfig(
-                num_frames=12,
-                height=64,
-                width=64,
-                fps=12,
-                num_inference_steps=1,
-            ),
-        ),
+        default_request=GenerationRequest(sampling=SamplingConfig(
+            num_frames=12,
+            height=64,
+            width=64,
+            fps=12,
+            num_inference_steps=1,
+        ), ),
         streaming=StreamingConfig(
             session_timeout_seconds=60,
             generation_segment_cap=2,

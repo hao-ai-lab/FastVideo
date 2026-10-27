@@ -281,7 +281,8 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         self_kv_cache = self._initialize_self_kv_cache(1, kv_size, transformer_dtype, device)
         cross_kv_cache = self._initialize_crossattn_cache(1, max_sequence_length, transformer_dtype, device)
 
-        self.transformer = self.transformer.to(device)
+        if not fastvideo_args.use_fsdp_inference:
+            self.transformer = self.transformer.to(device)
         self._cross_attn_initialized = False
         pred_latent_chunks = []
         latents_chunk = noise.split(chunk_size, dim=1)
@@ -307,6 +308,9 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
                 }
                 x0 = current_latent
                 for timestep_idx, timestep_value in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     timestep = torch.stack([timestep_value]).to(device)
                     noise_pred = self.transformer(
                         x=[current_latent.to(device)],

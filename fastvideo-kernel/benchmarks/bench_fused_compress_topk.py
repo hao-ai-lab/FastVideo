@@ -46,11 +46,15 @@ def parse_arguments() -> argparse.Namespace:
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--num_heads", type=int, default=12)
     p.add_argument("--head_dim", type=int, default=128, choices=[64, 128])
-    p.add_argument("--seq_lens", type=int, nargs="+", default=[49152],
+    p.add_argument("--seq_lens",
+                   type=int,
+                   nargs="+",
+                   default=[49152],
                    help="Sequence lengths to benchmark (must be divisible by block_elements)")
-    p.add_argument("--block_elements", type=int, default=64, choices=[64, 256],
-                   help="Tokens per block (64 or 256)")
-    p.add_argument("--topk", type=int, default=None,
+    p.add_argument("--block_elements", type=int, default=64, choices=[64, 256], help="Tokens per block (64 or 256)")
+    p.add_argument("--topk",
+                   type=int,
+                   default=None,
                    help="KV blocks to select per Q block (default: ~10%% of kv_blocks)")
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--rep", type=int, default=50)
@@ -62,6 +66,7 @@ def parse_arguments() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 # Old PyTorch baselines (extracted from ops.py before commit d9cd0b9)
 # ---------------------------------------------------------------------------
+
 
 def pytorch_block_mean(
     x: torch.Tensor,
@@ -91,6 +96,7 @@ def pytorch_topk_mask(
 # Accuracy helpers
 # ---------------------------------------------------------------------------
 
+
 def accuracy_compress(ref: torch.Tensor, test: torch.Tensor) -> dict:
     ref_f = ref.float()
     test_f = test.float()
@@ -118,13 +124,20 @@ def accuracy_topk(ref_mask: torch.Tensor, test_mask: torch.Tensor) -> dict:
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
+
 def bench_compress_fwd(
-    B: int, H: int, seq_len: int, D: int, block_elements: int,
-    dtype: torch.dtype, warmup: int, rep: int,
+    B: int,
+    H: int,
+    seq_len: int,
+    D: int,
+    block_elements: int,
+    dtype: torch.dtype,
+    warmup: int,
+    rep: int,
 ) -> None:
     num_blocks = seq_len // block_elements
     x = torch.randn(B, H, seq_len, D, dtype=dtype, device="cuda")
-    vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
+    vbs = torch.full((num_blocks, ), block_elements, dtype=torch.int32, device="cuda")
     if num_blocks > 4:
         vbs[1] = block_elements - 2
         vbs[-2] = block_elements - 5
@@ -144,11 +157,17 @@ def bench_compress_fwd(
 
 
 def bench_compress_bwd(
-    B: int, H: int, seq_len: int, D: int, block_elements: int,
-    dtype: torch.dtype, warmup: int, rep: int,
+    B: int,
+    H: int,
+    seq_len: int,
+    D: int,
+    block_elements: int,
+    dtype: torch.dtype,
+    warmup: int,
+    rep: int,
 ) -> None:
     num_blocks = seq_len // block_elements
-    vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
+    vbs = torch.full((num_blocks, ), block_elements, dtype=torch.int32, device="cuda")
     if num_blocks > 4:
         vbs[1] = block_elements - 2
         vbs[-2] = block_elements - 5
@@ -176,7 +195,8 @@ def bench_compress_bwd(
         torch.autograd.grad(loss_o, x_o, retain_graph=True)
     old_ms = do_bench(
         lambda: torch.autograd.grad(loss_o, x_o, retain_graph=True),
-        warmup=0, rep=rep,
+        warmup=0,
+        rep=rep,
     )
 
     x_n = x_old.detach().clone().requires_grad_(True)
@@ -186,7 +206,8 @@ def bench_compress_bwd(
         torch.autograd.grad(loss_n, x_n, retain_graph=True)
     new_ms = do_bench(
         lambda: torch.autograd.grad(loss_n, x_n, retain_graph=True),
-        warmup=0, rep=rep,
+        warmup=0,
+        rep=rep,
     )
 
     speedup = old_ms / new_ms if new_ms > 0 else float("inf")
@@ -195,8 +216,13 @@ def bench_compress_bwd(
 
 
 def bench_topk(
-    B: int, H: int, num_blocks: int, topk: int,
-    dtype: torch.dtype, warmup: int, rep: int,
+    B: int,
+    H: int,
+    num_blocks: int,
+    topk: int,
+    dtype: torch.dtype,
+    warmup: int,
+    rep: int,
 ) -> None:
     scores = torch.randn(B, H, num_blocks, num_blocks, dtype=dtype, device="cuda")
 
@@ -215,8 +241,12 @@ def bench_topk(
 
 
 def bench_topk_neginf(
-    B: int, H: int, num_blocks: int, topk: int,
-    dtype: torch.dtype, inf_ratio: float = 0.3,
+    B: int,
+    H: int,
+    num_blocks: int,
+    topk: int,
+    dtype: torch.dtype,
+    inf_ratio: float = 0.3,
 ) -> None:
     """Test topk correctness when a fraction of scores are -inf (masked positions)."""
     scores = torch.randn(B, H, num_blocks, num_blocks, dtype=dtype, device="cuda")
@@ -236,8 +266,13 @@ _MAX_KV_BLOCK_SIZE = 4096
 
 
 def bench_topk_large_kv(
-    B: int, H: int, kv_blocks: int, topk: int,
-    dtype: torch.dtype, warmup: int, rep: int,
+    B: int,
+    H: int,
+    kv_blocks: int,
+    topk: int,
+    dtype: torch.dtype,
+    warmup: int,
+    rep: int,
 ) -> None:
     """Test topk with large kv_blocks that may exceed Triton block size limit."""
     import triton

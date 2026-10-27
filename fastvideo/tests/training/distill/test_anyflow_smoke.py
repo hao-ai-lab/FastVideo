@@ -19,14 +19,9 @@ from pathlib import Path
 
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PRETRAIN_YAML = (
-    REPO_ROOT
-    / "examples/train/configs/distribution_matching/wan/anyflow_pretrain_t2v.yaml")
-ONPOLICY_YAML = (
-    REPO_ROOT
-    / "examples/train/configs/distribution_matching/wan/anyflow_onpolicy_t2v.yaml")
+PRETRAIN_YAML = (REPO_ROOT / "examples/train/configs/distribution_matching/wan/anyflow_pretrain_t2v.yaml")
+ONPOLICY_YAML = (REPO_ROOT / "examples/train/configs/distribution_matching/wan/anyflow_onpolicy_t2v.yaml")
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -45,9 +40,7 @@ def _have_enough_gpus() -> bool:
     return torch.cuda.device_count() >= 2
 
 
-pytestmark = pytest.mark.skipif(
-    not _have_enough_gpus(),
-    reason="AnyFlow smoke test requires >= 2 CUDA devices")
+pytestmark = pytest.mark.skipif(not _have_enough_gpus(), reason="AnyFlow smoke test requires >= 2 CUDA devices")
 
 
 def _run_torchrun(config_path: Path, *, output_dir: Path) -> None:
@@ -64,16 +57,26 @@ def _run_torchrun(config_path: Path, *, output_dir: Path) -> None:
         sys.executable,
         "-m",
         "torch.distributed.run",
-        "--nnodes", NUM_NODES,
-        "--nproc_per_node", NUM_GPUS_PER_NODE,
-        "--master_port", env["MASTER_PORT"],
-        "-m", "fastvideo.train.entrypoint.train",
-        "--config", str(config_path),
-        "--training.loop.max_train_steps", "2",
-        "--training.checkpoint.output_dir", str(output_dir),
-        "--training.distributed.num_gpus", NUM_GPUS_PER_NODE,
-        "--training.distributed.hsdp_shard_dim", NUM_GPUS_PER_NODE,
-        "--training.data.train_batch_size", "1",
+        "--nnodes",
+        NUM_NODES,
+        "--nproc_per_node",
+        NUM_GPUS_PER_NODE,
+        "--master_port",
+        env["MASTER_PORT"],
+        "-m",
+        "fastvideo.train.entrypoint.train",
+        "--config",
+        str(config_path),
+        "--training.loop.max_train_steps",
+        "2",
+        "--training.checkpoint.output_dir",
+        str(output_dir),
+        "--training.distributed.num_gpus",
+        NUM_GPUS_PER_NODE,
+        "--training.distributed.hsdp_shard_dim",
+        NUM_GPUS_PER_NODE,
+        "--training.data.train_batch_size",
+        "1",
     ]
     process = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if process.stdout:
@@ -81,8 +84,7 @@ def _run_torchrun(config_path: Path, *, output_dir: Path) -> None:
     if process.stderr:
         print("STDERR:", process.stderr)
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(
-            process.returncode, cmd, process.stdout, process.stderr)
+        raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
 
 def test_anyflow_pretrain_smoke(tmp_path: Path) -> None:
@@ -107,18 +109,30 @@ def test_anyflow_onpolicy_smoke(tmp_path: Path) -> None:
         sys.executable,
         "-m",
         "torch.distributed.run",
-        "--nnodes", NUM_NODES,
-        "--nproc_per_node", NUM_GPUS_PER_NODE,
-        "--master_port", env["MASTER_PORT"],
-        "-m", "fastvideo.train.entrypoint.train",
-        "--config", str(ONPOLICY_YAML),
-        "--training.loop.max_train_steps", "2",
-        "--training.checkpoint.output_dir", str(tmp_path / "onpolicy"),
-        "--training.distributed.num_gpus", NUM_GPUS_PER_NODE,
-        "--training.distributed.hsdp_shard_dim", NUM_GPUS_PER_NODE,
-        "--training.data.train_batch_size", "1",
-        "--models.student.init_from", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--method.student_sample_steps", "2",
+        "--nnodes",
+        NUM_NODES,
+        "--nproc_per_node",
+        NUM_GPUS_PER_NODE,
+        "--master_port",
+        env["MASTER_PORT"],
+        "-m",
+        "fastvideo.train.entrypoint.train",
+        "--config",
+        str(ONPOLICY_YAML),
+        "--training.loop.max_train_steps",
+        "2",
+        "--training.checkpoint.output_dir",
+        str(tmp_path / "onpolicy"),
+        "--training.distributed.num_gpus",
+        NUM_GPUS_PER_NODE,
+        "--training.distributed.hsdp_shard_dim",
+        NUM_GPUS_PER_NODE,
+        "--training.data.train_batch_size",
+        "1",
+        "--models.student.init_from",
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "--method.student_sample_steps",
+        "2",
     ]
     process = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if process.stdout:
@@ -126,5 +140,4 @@ def test_anyflow_onpolicy_smoke(tmp_path: Path) -> None:
     if process.stderr:
         print("STDERR:", process.stderr)
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(
-            process.returncode, cmd, process.stdout, process.stderr)
+        raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
