@@ -112,10 +112,6 @@ def test_flashinfer_checks_current_device(monkeypatch, current_supported):
 
 @pytest.mark.parametrize("head_size", [64, 256])
 def test_flashinfer_cudnn_rejects_non_128_head_size_at_dispatch(env_overrides, monkeypatch, head_size: int) -> None:
-    # FlashInferBackend.get_supported_head_sizes() allows 64/128/256 generally,
-    # but the cudnn prefill arm narrows that to 128 only (FlashInferImpl.__init__).
-    # This must fail here, at backend selection, not later per-layer during
-    # model construction.
     env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     _patch_capability(monkeypatch, supported=True)
     _install_fake_flashinfer_with_cudnn(monkeypatch)
