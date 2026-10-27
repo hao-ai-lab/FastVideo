@@ -155,14 +155,9 @@ class BaseLayerWithLoRA(nn.Module):
         """The wrapped layer's bias, or ``None`` when it has none."""
         return getattr(self.base_layer, "bias", None)
 
-    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        lora_A = self.lora_A
-        lora_B = self.lora_B
-        if isinstance(self.lora_B, DTensor):
-            lora_B = self.lora_B.to_local()
-            lora_A = self.lora_A.to_local()
-
+        # The base layer runs eagerly, outside any compiled region: compiling a packed NVFP4/FP8 linear changes its
+        # numerics, and a wrapped layer with no adapter or strength 0 must equal the unwrapped layer exactly.
         if self.lora_A is None or (self.side_branch and self._strength_is_zero):
             # No adapter, or strength 0 on a side branch, is exactly the unadapted layer, down to the output dtype.
             # A merge-mode wrapper reaches this branch while its first adapter is still loading or after a load
@@ -170,25 +165,33 @@ class BaseLayerWithLoRA(nn.Module):
             # not depend on an adapter that is not there.
             return self.base_layer(x)
 
-        if not self.merged and not self.disable_lora:
-            lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
-            lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
-            alpha_over_rank = 1.0
-            if self.lora_alpha != self.lora_rank:
-                alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
-            out, output_bias = self.base_layer(x)
-            if self.side_branch:
-                # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
-                _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
-                return out, output_bias
-            scale = float(self.lora_strength) * alpha_over_rank
-            delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
-            if scale != 1.0:
-                delta = delta * scale
-            return out + delta, output_bias
-        else:
-            out, output_bias = self.base_layer(x)
+        out, output_bias = self.base_layer(x)
+        if self.merged or self.disable_lora:
             return out.to(x), output_bias
+        return self._add_adapter(out, x), output_bias
+
+    @torch.compile()
+    def _add_adapter(self, out: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Add the LoRA delta to the base output; only this part is compiled."""
+        lora_A = self.lora_A
+        lora_B = self.lora_B
+        if isinstance(lora_B, DTensor):
+            lora_B = lora_B.to_local()
+            lora_A = lora_A.to_local()
+        lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
+        lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
+        alpha_over_rank = 1.0
+        if self.lora_alpha != self.lora_rank:
+            alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
+        if self.side_branch:
+            # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
+            _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
+            return out
+        scale = float(self.lora_strength) * alpha_over_rank
+        delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
+        if scale != 1.0:
+            delta = delta * scale
+        return out + delta
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A

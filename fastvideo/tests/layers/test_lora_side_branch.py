@@ -69,6 +69,42 @@ def test_a_wrapped_layer_without_an_adapter_runs_the_base_layer() -> None:
         assert torch.equal(wrapped(x)[0], base(x)[0])
 
 
+@pytest.mark.parametrize("packed", [False, True])
+def test_wrapped_layer_at_strength_zero_is_bitwise_the_base_layer(packed: bool) -> None:
+    base = _packed_linear() if packed else _dense_linear()
+    layer = get_lora_layer(base)
+    a, b = _factors()
+    layer.set_lora_weights(a, b, lora_alpha=8, strength=0.0)
+    x = _x()
+    with torch.no_grad():
+        if layer.side_branch:
+            assert torch.equal(layer(x)[0], base(x)[0])
+        else:
+            layer.lora_strength = 1.0
+            layer.lora_A = None
+            assert torch.equal(layer(x)[0], base(x)[0])
+
+
+def test_base_layer_runs_outside_the_compiled_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compiling a packed base layer changes its numerics, so the wrapper must call it eagerly."""
+    monkeypatch.setattr(torch._dynamo.config, "disable", False)
+    torch._dynamo.reset()
+    base = _packed_linear()
+    layer = get_lora_layer(base)
+    layer.set_lora_weights(*_factors(), lora_alpha=8, strength=0.5)
+    seen: list[bool] = []
+    original = base.forward
+
+    def spy(x: torch.Tensor):
+        seen.append(torch.compiler.is_compiling())
+        return original(x)
+
+    monkeypatch.setattr(base, "forward", spy)
+    with torch.no_grad():
+        layer(_x())
+    assert seen == [False]
+
+
 def _factors(seed: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
     generator = torch.Generator().manual_seed(seed)
     return torch.randn(RANK, IN, generator=generator), torch.randn(OUT, RANK, generator=generator)
