@@ -68,6 +68,75 @@ def test_a_wrapped_layer_without_an_adapter_runs_the_base_layer() -> None:
         assert torch.equal(wrapped(x)[0], base(x)[0])
 
 
+@pytest.mark.parametrize("packed", [False, True])
+def test_wrapped_layer_at_strength_zero_is_bitwise_the_base_layer(packed: bool) -> None:
+    base = _packed_linear() if packed else _dense_linear()
+    x = _x()
+    with torch.no_grad():
+        # Taken before wrapping, so a merge that wrongly rewrites the shared base weight cannot also change it.
+        expected = base(x)[0].clone()
+    layer = get_lora_layer(base)
+    layer.set_lora_weights(*_factors(), lora_alpha=8, strength=0.0)
+    assert layer.lora_A is not None and layer.lora_strength == 0.0
+    with torch.no_grad():
+        assert torch.equal(layer(x)[0], expected)
+
+
+@pytest.mark.parametrize("backend", ["eager", "inductor"])
+@pytest.mark.parametrize("adapter", [False, True])
+def test_wrapping_does_not_change_a_compiled_block(monkeypatch: pytest.MonkeyPatch, backend: str,
+                                                   adapter: bool) -> None:
+    """Under a caller's compile the base layer is traced with the block, as it is unwrapped; the wrapper adds no
+    region of its own, so the compiled block is unchanged with no adapter or at strength 0."""
+    if backend == "inductor" and not torch.cuda.is_available():
+        pytest.skip("Inductor execution requires a CUDA GPU for this regression")
+    device = torch.device("cuda" if backend == "inductor" else "cpu")
+    monkeypatch.setattr(torch._dynamo.config, "disable", False)
+    torch._dynamo.reset()
+
+    class Block(torch.nn.Module):
+
+        def __init__(self, proj: torch.nn.Module) -> None:
+            super().__init__()
+            self.proj = proj
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.proj(x)[0] + x[..., :OUT]
+
+    x = _x().to(device)
+    try:
+        with torch.no_grad():
+            expected = torch.compile(Block(_packed_linear().to(device)), backend=backend, fullgraph=True)(x)
+            torch._dynamo.reset()
+            layer = get_lora_layer(_packed_linear().to(device))
+            if adapter:
+                layer.set_lora_weights(*(factor.to(device) for factor in _factors()), lora_alpha=8, strength=0.0)
+            actual = torch.compile(Block(layer), backend=backend, fullgraph=True)(x)
+        assert torch.equal(actual, expected)
+    finally:
+        torch._dynamo.reset()
+
+
+def test_wrapper_adds_no_compiled_region_around_the_base_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compiling a packed base layer on its own changes its numerics, so an uncompiled caller runs it eagerly."""
+    monkeypatch.setattr(torch._dynamo.config, "disable", False)
+    torch._dynamo.reset()
+    base = _packed_linear()
+    layer = get_lora_layer(base)
+    layer.set_lora_weights(*_factors(), lora_alpha=8, strength=0.5)
+    seen: list[bool] = []
+    original = base.forward
+
+    def spy(x: torch.Tensor):
+        seen.append(torch.compiler.is_compiling())
+        return original(x)
+
+    monkeypatch.setattr(base, "forward", spy)
+    with torch.no_grad():
+        layer(_x())
+    assert seen == [False]
+
+
 def _factors(seed: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
     generator = torch.Generator().manual_seed(seed)
     return torch.randn(RANK, IN, generator=generator), torch.randn(OUT, RANK, generator=generator)
