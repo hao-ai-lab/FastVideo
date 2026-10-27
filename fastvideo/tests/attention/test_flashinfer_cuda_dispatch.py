@@ -19,6 +19,7 @@ from fastvideo.platforms.interface import AttentionBackendEnum
 
 
 def _patch_capability(monkeypatch, *, supported: bool) -> None:
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
     monkeypatch.setattr(CudaPlatformBase, "has_device_capability",
                         classmethod(lambda cls, capability, device_id=0: supported))
 
@@ -73,3 +74,24 @@ def test_flashinfer_warns_on_dtype_cast(monkeypatch, caplog) -> None:
     with caplog.at_level("WARNING"):
         CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.float32)
     assert any("cast" in record.message for record in caplog.records)
+
+
+@pytest.mark.parametrize("current_supported", [True, False])
+def test_flashinfer_checks_current_device(monkeypatch, current_supported):
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    checked = []
+
+    def capability(cls, required, device_id=0):
+        checked.append((required, device_id))
+        return current_supported if device_id == 1 else not current_supported
+
+    monkeypatch.setattr(CudaPlatformBase, "has_device_capability", classmethod(capability))
+    _install_fake_flashinfer(monkeypatch)
+    if current_supported:
+        assert CudaPlatformBase.get_attn_backend_cls(
+            AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16
+        ).endswith("FlashInferBackend")
+    else:
+        with pytest.raises(RuntimeError, match="sm80"):
+            CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+    assert checked == [(80, 1)]
