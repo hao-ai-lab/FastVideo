@@ -176,6 +176,33 @@ def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
     assert 'python -c "import cv2; print(\'OpenCV\', cv2.__version__)"' in dockerfile
 
 
+def test_gb10_image_builds_sm121a_without_fa4_cute() -> None:
+    """The CUDA 13 arm64 leg is the DGX Spark image: sm_121a keeps fastvideo-kernel's FP4
+    attention, skipping the FA4 cute overlay keeps flashinfer importable, and leaving FA2
+    out keeps the output identical to a native Spark install."""
+    workflow = yaml.load(
+        (REPO_ROOT / ".github/workflows/infra-build-image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["build-cuda-images"]
+    cuda = {entry["version"]: entry for entry in job["strategy"]["matrix"]["cuda"]}
+
+    assert cuda["13.0.0"]["torch_cuda_arch_list"]["arm64"] == "12.1a"
+    assert cuda["13.0.0"]["install_fa4_cute"] == {"amd64": "1", "arm64": "0"}
+    assert cuda["13.0.0"]["install_flash_attn"] == {"amd64": "1", "arm64": "0"}
+    assert cuda["12.6.3"]["install_flash_attn"] == {"amd64": "1", "arm64": "1"}
+    assert cuda["12.6.3"]["install_fa4_cute"] == {"amd64": "1", "arm64": "1"}
+    for arg in ("INSTALL_FLASH_ATTN", "INSTALL_FA4_CUTE"):
+        key = arg.lower()
+        assert f"{arg}=${{{{ matrix.cuda.{key}[matrix.architecture.name] }}}}" in job["with"]["build_args"]
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    assert "ARG INSTALL_FA4_CUTE=1" in dockerfile
+    assert "ARG INSTALL_FLASH_ATTN=1" in dockerfile
+    assert 'if [ "${INSTALL_FLASH_ATTN}" != "1" ]; then' in dockerfile
+    assert 'if [ "${INSTALL_FA4_CUTE}" = "1" ]; then' in dockerfile
+
+
 def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
     """The dormant Modal rollback image layers apt packages + rustup on top of
     the release image (pr_test.py). Keep those packages baked into the release

@@ -149,6 +149,7 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      output_channels: "Decoded pixel channel count fixed by the model; used to allocate the output buffer."
 
   pipeline_config_extensions:
     preset_owned:
@@ -282,6 +283,18 @@ surfaces:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
           - fastvideo.configs.pipelines.hyworld.HYWorldConfig
           - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      text_system_prompt:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_encoder_skip_layers:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_max_sequence_length:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      i2v_skip_first_latent_cfg:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
@@ -442,6 +455,15 @@ surfaces:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
       sample_fps:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      reference_resolution:
+        target: generator.pipeline.experimental.reference_resolution
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      use_kv_cache:
+        target: generator.pipeline.experimental.use_kv_cache
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      kv_cache_device:
+        target: generator.pipeline.experimental.kv_cache_device
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -460,6 +482,8 @@ surfaces:
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
       vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
+      video_scheduler_shift: "MiniMax-H3 training-time video noise clock; inference samples with the checkpoint's scheduler config."
+      audio_scheduler_shift: "MiniMax-H3 training-time audio noise clock; inference samples with the checkpoint's scheduler config."
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."

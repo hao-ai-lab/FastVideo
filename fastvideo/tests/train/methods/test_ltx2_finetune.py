@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from fastvideo.tests.ci_backend import on_spark_backend
 from fastvideo.train.methods.fine_tuning.finetune import (
     FineTuneMethod, )
 from fastvideo.train.models.ltx2 import LTX2Model
@@ -90,6 +91,9 @@ def _build_synthetic_batch(
 @pytest.mark.usefixtures("distributed_setup")
 @pytest.mark.parametrize("case", _CASES.keys())
 def test_ltx2_finetune_single_train_step(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    if on_spark_backend():
+        pytest.skip("OOMs the 128GB unified memory of the DGX Spark (GB10) runner (FASTVIDEO_CI_BACKEND=spark4); "
+                    "runs on the Slurm cluster")
     if _gpu_too_small():
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
                     "memory (LTX-2 DiT is 18.9B params)")

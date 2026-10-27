@@ -71,14 +71,22 @@ class _RecordingDiT:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, np.ndarray]] = []
+        self.refiner_inputs: list[np.ndarray] = []
+        self.text_embeddings: list[object] = []
 
     def precompute_adaln(self, timesteps, *, drop_weights: bool = True):
         self.adaln_timesteps = np.asarray(timesteps)
         return None
 
-    def forward_with_cache(self, x_v, x_a, text, *, layout, step_timesteps, row_timestep_inverse, step_index=0):
-        import mlx.core as mx
+    def refine_text(self, text):
+        self.refiner_inputs.append(np.asarray(text).copy())
+        # Distinguishable from the raw conditioning so a missing cache argument
+        # cannot accidentally satisfy the pipeline handoff assertions.
+        return text * 2.0 + 1.0
 
+    def forward_with_cache(self, x_v, x_a, text, *, layout, step_timesteps, row_timestep_inverse, step_index=0,
+                           precomputed_text_embeds=None):
+        self.text_embeddings.append(precomputed_text_embeds)
         self.calls.append({
             "video_rows": np.asarray(x_v),
             "audio_rows": np.asarray(x_a),
@@ -180,9 +188,10 @@ def test_denoise_hands_the_encoder_rows_to_every_forward(tmp_path: Path) -> None
     video_conditions = np.full((layout.num_condition_video_rows, PATCH_DIM), 3.0, dtype=np.float32)
     audio_conditions = np.full((layout.num_condition_audio_rows, AUDIO_IN_CHANNELS), 4.0, dtype=np.float32)
     dit = _RecordingDiT()
+    text_rows = np.arange(NUM_TEXT_TOKENS * 16, dtype=np.float32).reshape(NUM_TEXT_TOKENS, 16) / 16
 
     video_rows, audio_rows = pipeline.denoise(
-        np.zeros((NUM_TEXT_TOKENS, 16), dtype=np.float32),
+        text_rows,
         np.full(NUM_TEXT_TOKENS, 1, dtype=np.int64),
         height=HEIGHT,
         width=WIDTH,
@@ -197,6 +206,11 @@ def test_denoise_hands_the_encoder_rows_to_every_forward(tmp_path: Path) -> None
     )
 
     assert len(dit.calls) == 2
+    assert len(dit.refiner_inputs) == 1
+    np.testing.assert_array_equal(dit.refiner_inputs[0], text_rows)
+    assert len(dit.text_embeddings) == len(dit.calls)
+    for embeds in dit.text_embeddings:
+        np.testing.assert_array_equal(np.asarray(embeds), text_rows * 2.0 + 1.0)
     for call in dit.calls:
         assert call["video_rows"].shape == (layout.video_indices.shape[0], PATCH_DIM)
         assert call["audio_rows"].shape == (layout.audio_indices.shape[0], AUDIO_IN_CHANNELS)
