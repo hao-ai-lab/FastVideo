@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 
+import fastvideo.platforms as platforms
 from fastvideo.distributed import communication_op
 
 
@@ -40,8 +41,9 @@ class _RecordingPlatform:
 def _patch_warmup_inputs(monkeypatch, platform: _RecordingPlatform, group: _RecordingSpGroup) -> None:
     # Set the lazy source, not the public attribute: a pinned current_platform
     # would leak into later tests that replace _current_platform.
-    monkeypatch.delattr("fastvideo.platforms.current_platform", raising=False)
-    monkeypatch.setattr("fastvideo.platforms._current_platform", platform)
+    monkeypatch.setattr(platforms, "_current_platform", platform)
+    if "current_platform" in vars(platforms):
+        monkeypatch.delitem(vars(platforms), "current_platform")
     monkeypatch.setattr(communication_op, "model_parallel_is_initialized", lambda: True)
     monkeypatch.setattr(communication_op, "get_sp_world_size", lambda: 2)
     monkeypatch.setattr(communication_op, "get_sp_group", lambda: group)
