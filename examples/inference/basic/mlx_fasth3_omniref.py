@@ -114,9 +114,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vsa-ref-keep-rate", type=float, default=None,
                         help="fraction of each reference video's tiles a query keeps (p2_multi_region); "
                         "default is the contract's trained value")
-    parser.add_argument("--vsa-impl", choices=("auto", "reference", "simd"), default="auto",
+    parser.add_argument("--vsa-impl", choices=("auto", "reference", "simd", "sdpa", "nax"), default="auto",
                         help="sparse attention backend; auto uses the SIMD Metal kernel for 128-token tiles and "
-                        "gather+SDPA otherwise, reference forces gather+SDPA")
+                        "gather+SDPA otherwise, reference forces gather+SDPA; sdpa shares K/V with a tile mask "
+                        "and nax uses M5 TensorOps over selected blocks (both opt-in, incompatible with --reuse-prefix-kv)")
     parser.add_argument("--reuse-prefix-kv", action="store_true",
                         help="opt-in, lossy: record the text/reference rows' per-block K/V on step 1 and run later "
                         "steps on the target audio/video rows only (faster, slightly different output)")
@@ -145,6 +146,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("Ref2VA needs at least one image or video reference")
     if args.model_root is None and (args.export is None or args.base_model_path is None):
         parser.error("give --model-root, or --export together with --base-model-path")
+    if args.vsa_impl in ("sdpa", "nax") and args.reuse_prefix_kv:
+        parser.error(f"--vsa-impl {args.vsa_impl} does not support --reuse-prefix-kv")
     return args
 
 

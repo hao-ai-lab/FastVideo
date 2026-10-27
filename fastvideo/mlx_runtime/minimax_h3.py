@@ -1603,6 +1603,7 @@ class MLXMiniMaxH3DiT:
         pdd_block: tuple[int, int] | None = None,
         pdd_integration_weights: dict[str, np.ndarray] | None = None,
         record_prefix_kv: Any | None = None,
+        precomputed_text_embeds: Any | None = None,
     ):
         """Denoise-step forward served entirely from the AdaLN cache.
 
@@ -1616,6 +1617,11 @@ class MLXMiniMaxH3DiT:
         ``step_timesteps``. With a PDD checkpoint pass the step's
         ``pdd_block`` and ``pdd_integration_weights`` so the widened output
         heads are fused into the block's weighted mean.
+
+        ``precomputed_text_embeds`` may hold ``refine_text(text_rows)`` for
+        this request. The refiner is independent of the denoising timestep;
+        callers own its lifetime and must recompute it for changed text or
+        weights. No embeddings are retained on the model.
         """
         import mlx.core as mx
 
@@ -1640,7 +1646,16 @@ class MLXMiniMaxH3DiT:
             self.weights["audio_proj_in.weight"],
             self.weights["audio_proj_in.bias"],
         )
-        text_embeds = self.refine_text(text_rows)
+        if precomputed_text_embeds is None:
+            text_embeds = self.refine_text(text_rows)
+        else:
+            expected_shape = (len(layout.text_indices), self.hidden_size)
+            if precomputed_text_embeds.shape != expected_shape:
+                raise ValueError(f"Precomputed text embeddings have shape {precomputed_text_embeds.shape}; "
+                                 f"expected {expected_shape}.")
+            if precomputed_text_embeds.dtype not in (mx.float32, mx.float16, mx.bfloat16):
+                raise ValueError("Precomputed text embeddings must have a floating-point dtype.")
+            text_embeds = precomputed_text_embeds
 
         packed = mx.zeros((sequence_length, self.hidden_size), dtype=text_embeds.dtype)
         packed[mx.array(layout.text_indices)] = text_embeds
