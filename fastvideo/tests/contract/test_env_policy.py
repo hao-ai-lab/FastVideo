@@ -98,7 +98,7 @@ EXTERNAL_ALLOWLIST = {
 # Variables that FastVideo's own CI and CI tooling define. They keep their names
 # and test code under fastvideo/tests/ reads them directly; the value names what sets them.
 CI_ONLY_VARIABLES = {
-    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-ssim.yml",
+    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-full-suite.yml",
     "PERF_RUN_SOURCE": ".buildkite/scripts/lanes/performance.sh",
     "PERF_UPLOAD_POLICY": ".buildkite/scripts/lanes/performance.sh",
     "PERF_REPORTS_DIR": ".buildkite/scripts/lanes/performance.sh",
@@ -111,6 +111,7 @@ CI_ONLY_VARIABLES = {
     "GPU_BACKEND": "fastvideo-kernel/CMakeLists.txt (kernel build).",
     "FASTVIDEO_PERFORMANCE_PROFILE_VERSION": "fastvideo/tests/modal/launch_l40s_job.py; recorded in performance identity.",
     "FASTVIDEO_CONTAINER_IMAGE_REF": "Modal CI launchers; recorded in performance identity.",
+    "FASTVIDEO_CI_BACKEND": "DGX Spark CI runner sets spark4; see docs/contributing/ci_architecture.md.",
     "FASTVIDEO_SSIM_MODEL_ID": "fastvideo/tests/ssim/ci_runner.py (SSIM CI scheduler).",
     "FASTVIDEO_MODAL_IMAGE": "Modal launch tooling in fastvideo/tests/modal/.",
     "FASTVIDEO_MODAL_VOLUME": "Modal launch tooling in fastvideo/tests/modal/.",
@@ -189,9 +190,8 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/ssim/ci_runner.py: whole-environ': 1,
     'fastvideo/tests/ssim/reference_videos_cli.py: read <dynamic>': 1,
     'fastvideo/tests/train/methods/test_minimax_h3_finetune.py: whole-environ': 2,
-    'fastvideo/tests/train/models/test_load_kandinsky5.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/tests/training/distill/test_anyflow_smoke.py: whole-environ': 2,
-    'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 2,
+    'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/utils.py: read <dynamic>': 5,
     'fastvideo/utils.py: write <dynamic>': 1,
     'fastvideo/worker/ray_distributed_executor.py: read <dynamic>': 2,

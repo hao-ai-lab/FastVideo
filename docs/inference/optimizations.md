@@ -1,14 +1,14 @@
-
 # Optimizations
 
 This page describes the various options for speeding up generation times in FastVideo.
 
-!!! note "On a DGX Spark (GB10)?"
-    Several options on this page behave differently on the GB10's unified-memory
-    hardware — some give little or nothing there. See
-    [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
-    for what actually helps on that platform and why. Two Sparks, one clip:
-    [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+:::note[On a DGX Spark (GB10)?]
+Several options on this page behave differently on the GB10's unified-memory
+hardware — some give little or nothing there. See
+[DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
+for what actually helps on that platform and why. Two Sparks, one clip:
+[Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+:::
 
 ## Table of Contents
 
@@ -399,8 +399,8 @@ loader wraps each `_compile_conditions` block in
 loads. The ordinary compile path keeps its historical compiler-disabled
 attention boundary by default; regional compile opts in only the compatible
 attention instances owned by this transformer. MiniMax-H3 VSA is supported
-only by the inference-only sm_100a tile-64 route
-(`FASTVIDEO_VSA_SM100A=1` and `VSA_tile_size=64`); the loader probes that
+only by the inference-only ptx_blackwell tile-64 route
+(`FASTVIDEO_VSA_PTX_BLACKWELL=1` and `VSA_tile_size=64`); the loader probes that
 route before capture and keeps the transformer eager when the kernel or
 device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
 `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
@@ -450,7 +450,7 @@ regional MiniMax-H3 compile as an opt-in performance experiment, not an
 eager-parity-safe mode.
 
 The same caveat applies to sparse MiniMax-H3 regional compile. Its mask
-compaction, sm_100a launch, trained compression gates, and inference-only H3
+compaction, ptx_blackwell launch, trained compression gates, and inference-only H3
 fusions are fullgraph-compatible, but compilation can still change model
 numerics. The FastH3 `all` profile enables regional compile by default because
 it is the fastest measured route at 124, 243, and 345 frames. Use
@@ -479,7 +479,7 @@ MS-SSIM gate on *your* config, especially when combining
   PyTorch rejects `mode` together with `options`. The generic compile path
   can accept `mode`, but CUDA-graph compatibility remains backend- and
   shape-dependent. FA2/FA3 inference and FA4 expose traceable custom-op
-  boundaries. MiniMax-H3's sm_100a tile-64 inference route is the only VSA
+  boundaries. MiniMax-H3's ptx_blackwell tile-64 inference route is the only VSA
   path in the regional support envelope; other VSA paths and the FA3
   grad-enabled path remain outside it. Use the default inductor mode shown
   above unless your exact configuration has its own gate.

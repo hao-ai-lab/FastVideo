@@ -30,11 +30,16 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler, transformer, use_btchw_layout: bool = False) -> None:
+    def __init__(self,
+                 scheduler,
+                 transformer,
+                 use_btchw_layout: bool = False,
+                 latent_dtype: torch.dtype | None = None) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.transformer = transformer
         self.use_btchw_layout = use_btchw_layout
+        self.latent_dtype = latent_dtype
 
     def forward(
         self,
@@ -88,7 +93,7 @@ class LatentPreparationStage(PipelineStage):
             batch.prompt_embeds = [dummy_prompt]
             batch.negative_prompt_embeds = []
             batch.do_classifier_free_guidance = False
-        dtype = batch.prompt_embeds[0].dtype
+        dtype = self.latent_dtype or batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
@@ -137,12 +142,8 @@ class LatentPreparationStage(PipelineStage):
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
-            # Pre-initialized latents:
-            # - For LongCat refine (refine_from or stage1_video present), we should not re-scale by init_noise_sigma.
-            # - For other models, keep the original behavior.
             latents = latents.to(device)
-            is_longcat_refine = (batch.refine_from is not None) or (batch.stage1_video is not None)
-            if (not is_longcat_refine) and hasattr(self.scheduler, "init_noise_sigma"):
+            if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 
         # Update batch with prepared latents

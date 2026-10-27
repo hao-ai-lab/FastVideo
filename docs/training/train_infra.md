@@ -5,10 +5,11 @@ framework for training and distilling video diffusion models. A single config
 file controls everything — models, algorithms, distributed strategy,
 checkpointing, and validation — with no code changes needed to mix and match.
 
-!!! note "Relationship to legacy training"
-    This system replaces the older script-based training in `fastvideo/training/`.
-    The legacy scripts still work for basic fine-tuning, but new development
-    should use the config-driven system documented here.
+:::note[Relationship to legacy training]
+This system replaces the older script-based training in `fastvideo/training/`.
+The legacy scripts still work for basic fine-tuning, but new development
+should use the config-driven system documented here.
+:::
 
 ---
 

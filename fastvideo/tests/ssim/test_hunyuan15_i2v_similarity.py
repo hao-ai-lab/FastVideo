@@ -88,5 +88,6 @@ def test_hunyuan15_i2v_inference_similarity(
         model_id=model_id,
         default_params_map=HUNYUAN15_I2V_MODEL_TO_PARAMS,
         full_quality_params_map=FULL_QUALITY_HUNYUAN15_I2V_MODEL_TO_PARAMS,
+        init_kwargs_override={"revision": "854c04a4c8a53d990b418c7478f0802c0fc8c726"},
         min_acceptable_ssim=0.95,
     )

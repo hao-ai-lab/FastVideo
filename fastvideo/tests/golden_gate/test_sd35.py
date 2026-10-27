@@ -16,6 +16,7 @@ tensors only — no RoPE, no mask; sincos pos embed is added before the blocks
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
@@ -73,5 +74,6 @@ SPEC = GateSpec(
 )
 
 
+@pytest.mark.skip(reason="SD3.5 golden gate is paused while gated-model access is not provisioned for CI.")
 def test_sd35_golden_gate(distributed_runtime) -> None:
     run_gate(SPEC)

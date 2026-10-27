@@ -97,8 +97,8 @@ class ComposedPipelineBase(ABC):
     # component and loading it again is only safe when nothing outside the
     # loader has changed it. Two habits break that and neither raises:
     #
-    #   * mutating a component after load. ``LongCatPipeline.initialize_pipeline``
-    #     turns on block-sparse attention and writes parameters into every
+    #   * mutating a component after load, e.g. an ``initialize_pipeline`` that
+    #     turns on a sparse-attention mode and writes parameters into every
     #     transformer block. That runs once, so a re-materialized component
     #     silently comes back with the feature off.
     #   * reading a component's attributes while building stages. The shared

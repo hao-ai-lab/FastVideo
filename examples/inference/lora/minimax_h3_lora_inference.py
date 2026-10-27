@@ -33,6 +33,7 @@ import argparse
 import json
 import math
 import os
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -82,9 +83,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="video sparse attention; inferred from the adapter when omitted")
     parser.add_argument("--vsa-sparsity", type=float, default=0.9)
     parser.add_argument("--vsa-tile-size", type=int, choices=(64, 256), default=64)
-    parser.add_argument("--vsa-kernel", choices=("triton", "sm100a"), default="sm100a")
+    parser.add_argument("--vsa-kernel", choices=("triton", "ptx_blackwell", "sm100a"), default="ptx_blackwell")
     parser.add_argument("--fa4", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args(argv)
+    if args.vsa_kernel == "sm100a":
+        warnings.warn("--vsa-kernel sm100a is deprecated; use --vsa-kernel ptx_blackwell", FutureWarning, stacklevel=2)
+        args.vsa_kernel = "ptx_blackwell"
     if not args.prompt and not args.prompts_file:
         parser.error("pass --prompt or --prompts-file")
     # Whether VSA is required is a property of the adapter, not of having one at all --
@@ -110,7 +114,7 @@ def configure_environment(args: argparse.Namespace) -> None:
     """
     env: dict[str, str | None] = {
         "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if args.vsa else "FLASH_ATTN",
-        "FASTVIDEO_VSA_SM100A": "1" if (args.vsa and args.vsa_kernel == "sm100a") else "0",
+        "FASTVIDEO_VSA_PTX_BLACKWELL": "1" if (args.vsa and args.vsa_kernel == "ptx_blackwell") else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
         "FASTVIDEO_H3_VSA_PROBE": None,
         "FASTVIDEO_DISABLE_ATTENTION_COMPILE": "0",

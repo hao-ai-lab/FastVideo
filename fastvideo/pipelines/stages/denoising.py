@@ -196,26 +196,6 @@ class DenoisingStage(PipelineStage):
             },
         )
 
-        camera_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "camera_states": batch.camera_states,
-            },
-        )
-
-        dreamx_y_camera = batch.extra.get("dreamx_y_camera", batch.extra.get("y_camera"))
-        if isinstance(dreamx_y_camera, dict):
-            dreamx_y_camera = {
-                key: value.to(device=local_device, dtype=target_dtype) if torch.is_tensor(value) else value
-                for key, value in dreamx_y_camera.items()
-            }
-        dreamx_camera_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "y_camera": dreamx_y_camera,
-            },
-        )
-
         for key in ("flux2_txt_ids", "flux2_img_ids"):
             value = batch.extra.get(key)
             if torch.is_tensor(value):
@@ -421,8 +401,6 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
-                            **camera_kwargs,
-                            **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
                             **animate_kwargs,
@@ -467,8 +445,6 @@ class DenoisingStage(PipelineStage):
                                     **image_kwargs,
                                     **neg_cond_kwargs,
                                     **action_kwargs,
-                                    **camera_kwargs,
-                                    **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
                                     **animate_uncond_kwargs,
@@ -496,6 +472,9 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+
+                        noise_pred = self.finish_guidance(noise_pred, noise_pred_text, batch, fastvideo_args)
+                noise_pred = self.prepare_scheduler_model_output(noise_pred, state)
                 if scheduler_fp32:
                     # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
@@ -628,6 +607,14 @@ class DenoisingStage(PipelineStage):
 
     def prepare_timestep(self, timestep, latent_model_input, batch, state) -> torch.Tensor:
         return timestep.repeat(latent_model_input.shape[0])
+
+    def finish_guidance(self, noise_pred, noise_pred_text, batch, fastvideo_args) -> torch.Tensor:
+        """The guided prediction handed on to the scheduler; a model overrides it to keep part of the output out of CFG."""
+        return noise_pred
+
+    def prepare_scheduler_model_output(self, noise_pred, state) -> torch.Tensor:
+        """The model output handed to the scheduler step, which returns the next latents in its dtype."""
+        return noise_pred
 
     def finish_step(self, latents, state) -> torch.Tensor:
         return latents

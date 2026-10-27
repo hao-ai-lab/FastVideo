@@ -112,12 +112,9 @@ class ForwardBatch:
     audio_path: str | None = None
     audio_embeds: torch.Tensor | None = None
 
-    # Refine inputs (LongCat)
-    refine_from: str | None = None
+    # Refine / conditioning-frame inputs
     t_thresh: float = 0.5
-    spatial_refine_only: bool = False
     num_cond_frames: int = 0
-    stage1_video: list[PIL.Image.Image] | None = None  # Loaded frames from refine_from
 
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
@@ -166,13 +163,6 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
-    # Camera/action control inputs (GameCraft)
-    camera_states: torch.Tensor | None = None  # Plücker coordinates [B, T, 6, H, W]
-    gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
-    conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
-    camera_trajectory: str | None = None  # Camera trajectory file/identifier
-    action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
-    action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
     action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
@@ -206,8 +196,6 @@ class ForwardBatch:
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
@@ -386,6 +374,45 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+    # Ref2VA keeps immutable reference rows separate from DMD2's target-only
+    # latent tensor. Every student/teacher/critic forward prepends these rows,
+    # while losses and rollout state continue to cover only generated media.
+    minimax_h3_condition_video_rows: torch.Tensor | None = None
+
+    minimax_h3_condition_audio_rows: torch.Tensor | None = None
+
+    # DMD2 flattens video and audio into one tensor. This immutable, batch-local
+    # layout records the exact native shapes needed to split it again; keeping
+    # it on the batch avoids mutable geometry state on compiled role models.
+    minimax_h3_dmd_layout: Any | None = None
+
+    # Cross-sample H3 packing retains ragged per-document latents until the
+    # DMD adapter flattens them as doc.video | doc.audio | doc.video | ... .
+    minimax_h3_document_video_latents: tuple[torch.Tensor, ...] | None = None
+
+    minimax_h3_document_audio_latents: tuple[torch.Tensor, ...] | None = None
+
+    # The text refiner and joint DiT have different document boundaries.
+    minimax_h3_text_attn_metadata: AttentionMetadata | None = None
+
+    sequence_packing_num_documents: int = 1
+
+    sequence_packing_num_tokens: int = 0
+
+    # Fixed transformer capacity, independent of scalar latent loss columns.
+    # Zero/None retains legacy logging when token padding is disabled.
+    sequence_padded_num_tokens: int = 0
+
+    sequence_padding_ratio: float | None = None
+
+    # Precomputed by the pack scheduler to preserve document-normalized loss
+    # across variable-size packs and gradient-accumulation windows.
+    sequence_packing_loss_scale: float = 1.0
+
+    # Global effective-document fraction routed through data forcing in the
+    # current packed accumulation window. None preserves legacy 0/1 metrics.
+    sequence_packing_data_forced_ratio: float | None = None
 
 
 @dataclass

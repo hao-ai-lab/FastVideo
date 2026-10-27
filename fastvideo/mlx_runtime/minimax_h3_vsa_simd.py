@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SIMD-group block-sparse attention for MiniMax H3 VSA.
 
-This backend is an explicit opt-in. It supports tile size 64 and head dimension
-128, evaluates the tile map selected by the reference router, and leaves
+This backend supports tile sizes 64 and 128 and head dimension 128, evaluates the tile map selected by the reference router, and leaves
 unsupported shapes to the reference implementation.
 """
 
@@ -15,203 +14,168 @@ import numpy as np
 _SIMD_KERNEL = None
 _SIMD_KERNEL_ERROR: str | None = None
 
+SIMD_TILE_SIZES = (64, 128)
+SIMD_HEAD_DIM = 128
+
 _SIMD_HEADER = """
 #include <metal_stdlib>
 #include <metal_simdgroup>
 #include <metal_simdgroup_matrix>
 using namespace metal;
-
-METAL_FUNC void scale_rows_simd8x8(thread simdgroup_float8x8 &mat, const threadgroup float *row_scale,
-                                   threadgroup float *tmp, uint lane) {
-    simdgroup_store(mat, tmp, 8);
-    simdgroup_barrier(mem_flags::mem_threadgroup);
-    if (lane < 8) {
-        float s = row_scale[lane];
-        for (int c = 0; c < 8; c++) {
-            tmp[lane * 8 + c] *= s;
-        }
-    }
-    simdgroup_barrier(mem_flags::mem_threadgroup);
-    simdgroup_load(mat, tmp, 8);
-}
 """
 
-# One threadgroup = one (head, video query tile). 8 SIMD-groups x 32 = 256
-# threads cover 64 query rows. Q is half smem (16 KiB). K/V stage 8 keys.
+# Flash-style block-sparse attention. One threadgroup = (head, video query tile,
+# 32-row slice of the tile); each of its 4 SIMD-groups owns 8 query rows. Per
+# selected key tile, K/V chunks of BK rows are staged once in threadgroup memory
+# (read in place from the [S, H, D] inputs, no gathered copy) and consumed with
+# 8x8 simdgroup MMAs and an online softmax in fp32. Only the valid prefix of a
+# ragged key tile is visited, and rows of a partially filled query tile are
+# written as zero. Packed-tile padding rows are zero in Q/K/V by construction.
 _SIMD_SOURCE = """
-    const int TILE = 64;
-    const int D = 128;
-    const int SG = 32;
-    const int N_SG = 8;
-    const int ROWS = 8;
-    const int KCHUNK = 8;
-    threadgroup float kvsmem[8 * 128];
-    threadgroup float score_smem[8 * 64];
-    threadgroup float scale_tmp[8 * 64];
-    threadgroup float qtile[8 * 64];
-    threadgroup float row_alpha[8 * 8];
+    constexpr int D = 128;
+    constexpr int NSG = 4;
+    constexpr int NT = NSG * 32;
+    constexpr int BK = 16;
+    constexpr int NKB = BK / 8;
+    constexpr int RB = 1;
+    constexpr int LD = D + 8;
+    constexpr float NEG = -3.0e38f;
+    threadgroup T ksm[BK * LD];
+    threadgroup T vsm[BK * LD];
 
     uint tid = thread_position_in_threadgroup.x;
-    uint sid = tid / SG;
-    uint lane = tid % SG;
-    uint q_tile = thread_position_in_grid.y;
-    uint head = thread_position_in_grid.z;
+    uint sid = simdgroup_index_in_threadgroup;
+    uint lane = thread_index_in_simdgroup;
+    int qsub = (int)threadgroup_position_in_grid.x;
+    int q_tile = (int)threadgroup_position_in_grid.y;
+    int head = (int)threadgroup_position_in_grid.z;
     int k_max = meta_i[4];
     int n_prefix = meta_i[5];
     int n_video = meta_i[6];
-    int S = meta_i[2];
-    float scale = meta_f[0];
-    bool active = ((int)q_tile < n_video && (int)head < (int)q_shape[0]);
-    int qt = n_prefix + (int)q_tile;
-    int q_valid = active ? vbs[qt] : 0;
-    int q_base_tile = (((int)head * S) + qt * TILE) * D;
-    threadgroup float *sg_scores = score_smem + sid * 64;
-    threadgroup float *sg_tmp = scale_tmp + sid * 64;
-    threadgroup float *sg_qtile = qtile + sid * 64;
-    threadgroup float *sg_alpha = row_alpha + sid * 8;
-    int qrow0 = (int)sid * ROWS;
+    int H = meta_i[7];
+    float scale_log2 = meta_f[0] * 1.44269504088896341f;
+    int qt = n_prefix + q_tile;
+    int q_valid = vbs[qt];
+    int row_base = qsub * NSG * 8 * RB;
+    if (row_base >= q_valid) {
+        return;
+    }
+    int row_stride = H * D;
+    int srow0 = row_base + (int)sid * 8 * RB;
+    int fm = (int)(((lane / 4) & 4) + ((lane / 2) % 4));
+    int fn = (int)(((lane / 4) & 2) * 2 + (lane % 2) * 2);
 
-    thread simdgroup_float8x8 qfrag[16];
-    for (int kk = 0; kk < 16; kk++) {
-        simdgroup_barrier(mem_flags::mem_threadgroup);
-        int r0 = (int)lane / 8;
-        int c0 = (int)lane % 8;
-        int g0 = qrow0 + r0;
-        int g1 = qrow0 + r0 + 4;
-        float v0 = 0.0f;
-        float v1 = 0.0f;
-        if (active && g0 < q_valid) {
-            v0 = float(q[q_base_tile + g0 * D + kk * 8 + c0]);
+    simdgroup_matrix<T, 8, 8> qf[RB][16];
+    simdgroup_matrix<float, 8, 8> acc[RB][16];
+    for (int r = 0; r < RB; r++) {
+        device const T *qp = q + ((long)(qt * TILE + srow0 + r * 8) * H + head) * D;
+        for (int kk = 0; kk < 16; kk++) {
+            simdgroup_load(qf[r][kk], qp + kk * 8, row_stride);
+            acc[r][kk] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
         }
-        if (active && g1 < q_valid) {
-            v1 = float(q[q_base_tile + g1 * D + kk * 8 + c0]);
-        }
-        sg_qtile[lane] = v0;
-        sg_qtile[lane + 32] = v1;
-        simdgroup_barrier(mem_flags::mem_threadgroup);
-        simdgroup_load(qfrag[kk], sg_qtile, 8);
+    }
+    float row_m[RB];
+    float row_l[RB];
+    for (int r = 0; r < RB; r++) {
+        row_m[r] = NEG;
+        row_l[r] = 0.0f;
     }
 
-    thread simdgroup_float8x8 acc[16];
-    for (int kk = 0; kk < 16; kk++) {
-        acc[kk] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
-    }
-    float row_m = -3.402823466e+38f;
-    float row_lse = 0.0f;
-    int nsel = active ? block_num[(int)head * n_video + (int)q_tile] : 0;
-
+    int nsel = block_num[head * n_video + q_tile];
     for (int s = 0; s < nsel; s++) {
-        int kt = block_idx[(((int)head * n_video) + (int)q_tile) * k_max + s];
+        int kt = block_idx[(head * n_video + q_tile) * k_max + s];
         int k_valid = vbs[kt];
-        int kv_base = (((int)head * S) + kt * TILE) * D;
-        for (int j0 = 0; j0 < TILE; j0 += KCHUNK) {
-            for (uint i = tid; i < (uint)(KCHUNK * D); i += N_SG * SG) {
-                int row = (int)i / D;
-                int col = (int)i - row * D;
-                int gtok = j0 + row;
-                float val = 0.0f;
-                if (gtok < k_valid && gtok < TILE && col < D) {
-                    val = float(k[kv_base + gtok * D + col]);
-                }
-                kvsmem[i] = val;
+        long kv0 = (long)kt * TILE * H + head;
+        for (int j0 = 0; j0 < k_valid; j0 += BK) {
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (int i = (int)tid; i < BK * (D / 4); i += NT) {
+                int row = i / (D / 4);
+                int c4 = i - row * (D / 4);
+                long src = (kv0 + (long)(j0 + row) * H) * D + c4 * 4;
+                *(threadgroup vec<T, 4> *)(ksm + row * LD + c4 * 4) = *(device const vec<T, 4> *)(k + src);
+                *(threadgroup vec<T, 4> *)(vsm + row * LD + c4 * 4) = *(device const vec<T, 4> *)(v + src);
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
 
-            thread simdgroup_float8x8 smat = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
-            for (int kk = 0; kk < 16; kk++) {
-                simdgroup_float8x8 kmat;
-                simdgroup_load(kmat, (const threadgroup float*)(kvsmem + kk * 8), D, ulong2(0, 0), true);
-                simdgroup_multiply_accumulate(smat, qfrag[kk], kmat, smat);
+            simdgroup_matrix<float, 8, 8> sf[RB][NKB];
+            for (int r = 0; r < RB; r++) {
+                for (int c = 0; c < NKB; c++) {
+                    sf[r][c] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+                }
             }
-            simdgroup_store(smat, sg_scores, KCHUNK);
-            simdgroup_barrier(mem_flags::mem_threadgroup);
-
-            float scores[8];
-            float cmax = -3.402823466e+38f;
-            if (lane < (uint)ROWS) {
-                int grow = qrow0 + (int)lane;
-                for (int t = 0; t < KCHUNK; t++) {
-                    int gtok = j0 + t;
-                    float sc = -3.402823466e+38f;
-                    if (grow < q_valid && gtok < k_valid && gtok < TILE) {
-                        sc = sg_scores[(int)lane * KCHUNK + t] * scale;
+            for (int kk = 0; kk < 16; kk++) {
+                for (int c = 0; c < NKB; c++) {
+                    simdgroup_matrix<T, 8, 8> km;
+                    simdgroup_load(km, (const threadgroup T *)(ksm + c * 8 * LD + kk * 8), LD, ulong2(0, 0), true);
+                    for (int r = 0; r < RB; r++) {
+                        simdgroup_multiply_accumulate(sf[r][c], qf[r][kk], km, sf[r][c]);
                     }
-                    scores[t] = sc;
-                    cmax = metal::max(cmax, sc);
                 }
-                float m_new = metal::max(row_m, cmax);
-                float alpha = metal::exp(row_m - m_new);
-                row_lse *= alpha;
-                row_m = m_new;
-                sg_alpha[(int)lane] = alpha;
             }
-            simdgroup_barrier(mem_flags::mem_threadgroup);
-            for (int kk = 0; kk < 16; kk++) {
-                scale_rows_simd8x8(acc[kk], sg_alpha, sg_tmp, lane);
-            }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
 
-            for (uint i = tid; i < (uint)(KCHUNK * D); i += N_SG * SG) {
-                int row = (int)i / D;
-                int col = (int)i - row * D;
-                int gtok = j0 + row;
-                float val = 0.0f;
-                if (gtok < k_valid && gtok < TILE && col < D) {
-                    val = float(v[kv_base + gtok * D + col]);
-                }
-                kvsmem[i] = val;
-            }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-
-            float local = 0.0f;
-            if (lane < (uint)ROWS) {
-                int grow = qrow0 + (int)lane;
-                for (int t = 0; t < KCHUNK; t++) {
-                    float w = 0.0f;
-                    if (grow < q_valid) {
-                        w = metal::exp(scores[t] - row_m);
+            simdgroup_matrix<T, 8, 8> pf[RB][NKB];
+            for (int r = 0; r < RB; r++) {
+                float cmax = NEG;
+                for (int c = 0; c < NKB; c++) {
+                    for (int e = 0; e < 2; e++) {
+                        int col = j0 + c * 8 + fn + e;
+                        float sc = (col < k_valid) ? sf[r][c].thread_elements()[e] * scale_log2 : NEG;
+                        sf[r][c].thread_elements()[e] = sc;
+                        cmax = metal::max(cmax, sc);
                     }
-                    sg_scores[(int)lane * KCHUNK + t] = w;
-                    local += w;
                 }
-                row_lse += local;
+                cmax = metal::max(cmax, simd_shuffle_xor(cmax, ushort(1)));
+                cmax = metal::max(cmax, simd_shuffle_xor(cmax, ushort(8)));
+                float m_new = metal::max(row_m[r], cmax);
+                float alpha = metal::fast::exp2(row_m[r] - m_new);
+                row_m[r] = m_new;
+                row_l[r] *= alpha;
+                for (int c = 0; c < NKB; c++) {
+                    for (int e = 0; e < 2; e++) {
+                        float p = metal::fast::exp2(sf[r][c].thread_elements()[e] - m_new);
+                        row_l[r] += p;
+                        pf[r][c].thread_elements()[e] = static_cast<T>(p);
+                    }
+                }
+                for (int kk = 0; kk < 16; kk++) {
+                    acc[r][kk].thread_elements()[0] *= alpha;
+                    acc[r][kk].thread_elements()[1] *= alpha;
+                }
             }
-            simdgroup_barrier(mem_flags::mem_threadgroup);
-
-            thread simdgroup_float8x8 pmat;
-            simdgroup_load(pmat, sg_scores, KCHUNK);
             for (int kk = 0; kk < 16; kk++) {
-                simdgroup_float8x8 vmat;
-                simdgroup_load(vmat, (const threadgroup float*)(kvsmem + kk * 8), D);
-                simdgroup_multiply_accumulate(acc[kk], pmat, vmat, acc[kk]);
+                for (int c = 0; c < NKB; c++) {
+                    simdgroup_matrix<T, 8, 8> vm;
+                    simdgroup_load(vm, (const threadgroup T *)(vsm + c * 8 * LD + kk * 8), LD);
+                    for (int r = 0; r < RB; r++) {
+                        simdgroup_multiply_accumulate(acc[r][kk], pf[r][c], vm, acc[r][kk]);
+                    }
+                }
             }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
         }
     }
 
-    if (lane < (uint)ROWS) {
-        sg_alpha[(int)lane] = row_lse > 0.0f ? 1.0f / row_lse : 0.0f;
-    }
-    simdgroup_barrier(mem_flags::mem_threadgroup);
-    for (int kk = 0; kk < 16; kk++) {
-        scale_rows_simd8x8(acc[kk], sg_alpha, sg_tmp, lane);
-        simdgroup_store(acc[kk], sg_tmp, 8);
-        simdgroup_barrier(mem_flags::mem_threadgroup);
-        if (active) {
-            int r0 = (int)lane / 8;
-            int c0 = (int)lane % 8;
-            int g0 = qrow0 + r0;
-            int g1 = qrow0 + r0 + 4;
-            if (g0 < TILE) {
-                out[q_base_tile + g0 * D + kk * 8 + c0] = (g0 < q_valid) ? T(sg_tmp[lane]) : T(0);
-            }
-            if (g1 < TILE) {
-                out[q_base_tile + g1 * D + kk * 8 + c0] = (g1 < q_valid) ? T(sg_tmp[lane + 32]) : T(0);
+    for (int r = 0; r < RB; r++) {
+        float l = row_l[r];
+        l += simd_shuffle_xor(l, ushort(1));
+        l += simd_shuffle_xor(l, ushort(8));
+        float inv = l > 0.0f ? 1.0f / l : 0.0f;
+        int orow = srow0 + r * 8 + fm;
+        if (orow < q_valid) {
+            device T *op = out + ((long)(qt * TILE + orow) * H + head) * D + fn;
+            for (int kk = 0; kk < 16; kk++) {
+                op[kk * 8] = static_cast<T>(acc[r][kk].thread_elements()[0] * inv);
+                op[kk * 8 + 1] = static_cast<T>(acc[r][kk].thread_elements()[1] * inv);
             }
         }
-        simdgroup_barrier(mem_flags::mem_threadgroup);
     }
 """
+
+# Tuned on M4 Max (tile 128, bf16): 4 SIMD-groups x 8 rows per threadgroup and 16
+# staged keys per chunk (BK in the source). 16 rows per SIMD-group spills
+# registers; 8 or 32 keys per chunk, and 8 or 16 SIMD-groups, were slower.
+_SIMDGROUPS = 4
+_THREADS = 32 * _SIMDGROUPS
+_ROWS_PER_GROUP = 8 * _SIMDGROUPS
 
 
 def simd_kernel_error() -> str | None:
@@ -265,22 +229,32 @@ def _simd_kernel() -> Any | None:
             kernel = mx.fast.metal_kernel(**kwargs, compile_options={"math_mode": "safe"})
         except TypeError:
             kernel = mx.fast.metal_kernel(**kwargs)
-        from fastvideo.mlx_runtime.minimax_h3_vsa import build_h3_tile_geometry
-
-        geometry = build_h3_tile_geometry((1, ), (4, 4, 4), 64)
-        indices = mx.array([[[0, 1]]], dtype=mx.int32)
-        counts = mx.array([[2]], dtype=mx.int32)
         # Constructing a CustomKernel does not compile it. Execute every
-        # supported dtype once before advertising this backend as available.
-        for dtype in (mx.float32, mx.float16, mx.bfloat16):
-            q = mx.zeros((geometry.padded_length, 1, 128), dtype=dtype)
-            probe = _launch_simd_block_sparse(kernel, q, q, q, indices, counts, geometry, 128**-0.5)
-            mx.eval(probe)
+        # supported tile and dtype once before advertising this backend.
+        for tile in SIMD_TILE_SIZES:
+            for dtype in (mx.float32, mx.float16, mx.bfloat16):
+                q, indices, counts, geometry = _probe_inputs(tile, dtype)
+                probe = _launch_simd_block_sparse(kernel, q, q, q, indices, counts, geometry, SIMD_HEAD_DIM**-0.5)
+                mx.eval(probe)
         _SIMD_KERNEL = kernel
     except Exception as error:  # noqa: BLE001 - keep reference usable
         _SIMD_KERNEL_ERROR = str(error)
         _SIMD_KERNEL = None
     return _SIMD_KERNEL
+
+
+def _probe_inputs(tile: int, dtype):
+    """Tiled Q and routing for the capability probe, sized exactly like a real launch."""
+    import mlx.core as mx
+
+    from fastvideo.mlx_runtime.minimax_h3_vsa import build_h3_tile_geometry
+
+    geometry = build_h3_tile_geometry((1, ), (4, 4, 8), tile)
+    selected = [0, geometry.num_tiles - 1]
+    indices = mx.array([[selected] * geometry.num_video_tiles], dtype=mx.int32)
+    counts = mx.full((1, geometry.num_video_tiles), len(selected), dtype=mx.int32)
+    q = mx.zeros((geometry.padded_length, 1, SIMD_HEAD_DIM), dtype=dtype)
+    return q, indices, counts, geometry
 
 
 def simd_block_sparse(
@@ -302,25 +276,28 @@ def simd_block_sparse(
 
 def _launch_simd_block_sparse(kernel: Any, q_tiled: Any, k_tiled: Any, v_tiled: Any, block_idx: Any, block_num: Any,
                               geometry: Any, scale: float) -> Any:
+    """Run the kernel on tiled ``[S_pad, H, D]`` inputs; returns the same layout."""
     import mlx.core as mx
 
-    if geometry.tile_elems != 64:
-        raise ValueError(f"SIMD-group VSA kernel supports tile 64 only, got {geometry.tile_elems}")
+    tile = geometry.tile_elems
+    if tile not in SIMD_TILE_SIZES:
+        raise ValueError(f"SIMD-group VSA kernel supports tiles {SIMD_TILE_SIZES}, got {tile}")
     heads, dim = q_tiled.shape[1], q_tiled.shape[2]
-    if dim != 128:
-        raise ValueError(f"SIMD-group VSA kernel supports head dim 128, got {dim}")
-    q = mx.contiguous(q_tiled.transpose(1, 0, 2))
-    k = mx.contiguous(k_tiled.transpose(1, 0, 2))
-    v = mx.contiguous(v_tiled.transpose(1, 0, 2))
+    if dim != SIMD_HEAD_DIM:
+        raise ValueError(f"SIMD-group VSA kernel supports head dim {SIMD_HEAD_DIM}, got {dim}")
+    q = mx.contiguous(q_tiled)
+    k = mx.contiguous(k_tiled)
+    v = mx.contiguous(v_tiled)
     meta_i = mx.array(
         [
             dim,
-            geometry.tile_elems,
+            tile,
             geometry.padded_length,
             geometry.num_tiles,
             int(block_idx.shape[-1]),
             geometry.num_prefix_tiles,
             geometry.num_video_tiles,
+            heads,
         ],
         dtype=mx.int32,
     )
@@ -336,9 +313,9 @@ def _launch_simd_block_sparse(kernel: Any, q_tiled: Any, k_tiled: Any, v_tiled: 
             meta_i,
             meta_f,
         ],
-        "template": [("T", q.dtype)],
-        "grid": (256, geometry.num_video_tiles, heads),
-        "threadgroup": (256, 1, 1),
+        "template": [("T", q.dtype), ("TILE", tile)],
+        "grid": (_THREADS * (tile // _ROWS_PER_GROUP), geometry.num_video_tiles, heads),
+        "threadgroup": (_THREADS, 1, 1),
         "output_shapes": [q.shape],
         "output_dtypes": [q.dtype],
     }
@@ -346,4 +323,4 @@ def _launch_simd_block_sparse(kernel: Any, q_tiled: Any, k_tiled: Any, v_tiled: 
         outputs = kernel(**call_kwargs, init_value=0)
     except TypeError:
         outputs = kernel(**call_kwargs)
-    return outputs[0].transpose(1, 0, 2)
+    return outputs[0]

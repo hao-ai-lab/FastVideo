@@ -18,7 +18,7 @@ Native serving YAML + option schemas + deployment manifests
                          |
                Generated JSON catalogs
                          |
-                 MkDocs / static hosting
+                 Blume / static hosting
                          |
             cookbook-config.js + UI edits
                          |
@@ -34,7 +34,7 @@ Native serving YAML + option schemas + deployment manifests
 | `docs/js/cookbook-config.mjs` | Load catalogs, preview fields, validate edits and produce output |
 
 Catalog generation runs in Node without importing FastVideo or loading model
-weights. The docs build generates assets before MkDocs copies them into the
+weights. The docs build generates assets before Blume copies them into the
 published site. Generated JSON, the combined API/validator bundle and its license notices
 are Git-ignored build output published together under `assets/cookbook-config/`.
 Website visitors need only the static assets. The schemas are author-maintained
@@ -74,9 +74,10 @@ to documentation, not embedded HTML.
 
 ## Shared JavaScript API
 
-`docs/js/cookbook-config.mjs` exports the four functions below. The generated
-`assets/cookbook-config/cookbook-config.js` bundles them with Ajv and exposes
-the browser global `FastVideoConfigCookbook` and CommonJS exports:
+`docs/js/cookbook-config.mjs` exports the recipe, capacity, and assessment
+helpers below. The generated `assets/cookbook-config/cookbook-config.js` bundles
+them with Ajv and exposes the browser global `FastVideoConfigCookbook` and
+CommonJS exports:
 
 | Function | Result |
 | --- | --- |
@@ -84,6 +85,23 @@ the browser global `FastVideoConfigCookbook` and CommonJS exports:
 | `loadDeployment(index, id, {signal, fetcher} = {})` | Promise of the selected complete catalog |
 | `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]`, including GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
+| `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
+| `WORKLOADS` | Frozen `t2v`/`i2v`/`t2i`/`t2a`/`v2a` input/output/endpoint/media metadata used by the builder and sample client |
+| `estimateMemory({config, workload, model, hardware, memoryBudgetGiB, partitionId, hostMemoryGb, headroom})` | Analytical one-device estimate with separate device and host budgets |
+| `assessCapacity({model, example, hardware, config, request, env, revisions, ...})` | `{status, basis, analytical, evidence, compatibility, notes}` combining analysis and applicable evidence |
+| `matchEvidence({model, example, config, request, env, hardware, revisions})` | `{applicable, unverified, rejected}` measured runs |
+| `recommendCapacity({models, hardware, task, request, env, revisions, limit})` | Candidates with model/example, assessment, reasons, and lower-memory alternatives; unknown remains explicit |
+| `resolveExecution({model, config, env})` | Effective topology, offload, precision, attention, and unsupported switches |
+| `loadCapacityIndex(url, options)` | Promise of the model-summary index and resolved source URL |
+| `loadCapacityModel(index, id, options)` | Promise of one expanded model, examples, and reference runs |
+| `loadCapacityHardware(index, options)` | Promise of `{version, devices, url}` for the source-backed hardware lookup |
+
+`sampleRequest()` is also used by model pages backed by a checked-in serving
+YAML rather than a full editable catalog. Its metadata supplies `model.id`,
+`workload`, and `runtime.interface`/`runtime.server_defaults`. It builds client
+instructions only; it does not validate the configuration or run a request.
+The shared workload map selects the canonical REST endpoint and output
+extension; it does not establish that a model supports that workload.
 
 For WebSocket deployments, `clientRequest` is `null` and `websocketUrl` is
 present. REST deployments return a request object and omit `websocketUrl`.
@@ -205,20 +223,21 @@ recipe needs it. It is not implemented in this change:
   sibling fields. The current LTX2 baseline fixes refinement on and uses 64-pixel
   dimensions accordingly.
 
-Memory estimates, measured hardware support, format versioning and HTTP cache
-freshness remain separate follow-ups. No general arithmetic validator or CLI
-override workflow is introduced here.
+The [capacity metadata catalog](../contributing/capacity_estimation.md) supplies
+shared hardware/component facts and optional recorded runs through separate
+static loaders. Optional `capacity` sections extend existing model manifests;
+model identity and example configurations are derived from their deployments
+and native baseline YAML. `estimateMemory()` is analytical and never verifies a
+recipe. `assessCapacity()` keeps analytical fit, measured device peaks, and
+applicable evidence distinct; allocator-only peaks and successful generations
+do not establish device fit or a minimum-VRAM requirement. The hardware asset is
+versioned and source-backed; the UI owns catalog search and the custom-device
+form, while the shared API owns lookup, normalization, and estimation. No general
+arithmetic validator or CLI override workflow is introduced here.
 
-## Coexistence with the current cookbook
+## Cookbook interface
 
-Family pages still load `docs/assets/cookbook-recipes.json` through `cookbook.js`
-for generate commands, hardware evidence, and the H3 "Run a server" panel.
-Those pages are unchanged. This catalog and API sit beside them: manifests under
-`docs/cookbook/recipes/` point at the same `examples/serving/*.yaml` baselines
-the family pages already advertise, plus authored editable-field metadata.
-
-A later UI change can call `loadIndex` / `resolveConfig` from those pages so
-users download a customized serving YAML instead of copying a static file. Until
-then, keep recipe IDs aligned with the family catalog (`fasth3-8step`,
-`fastwan21`, `wan21-i2v`, `ltx2-distilled`) and treat `cookbook-recipes.json`
-`serving.source` as the native baseline, not a second options schema.
+Family and model pages use the React cookbook in `docs-site/`. The model inventory
+comes from `docs/assets/cookbook-recipes.json`; the shared configuration API
+continues to own editable serving recipes. The old family JavaScript selector
+and site-theme assets have been removed.

@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1.7
+# CI-only GB10 image. The regular Spark image keeps its native SDPA defaults.
+ARG SPARK_BASE_IMAGE=ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest
+FROM ${SPARK_BASE_IMAGE}
+
+# VMoBA and the Wan causal gate require FA2. Install only this wheel so the
+# validated torch/flashinfer/CUTLASS stack from the base image stays intact.
+ARG FLASH_ATTN_WHEEL=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22/flash_attn-2.8.3+cu130torch2.12-cp312-cp312-linux_aarch64.whl
+RUN /root/.local/bin/uv pip install --python /opt/venv/bin/python --no-deps "${FLASH_ATTN_WHEEL}" && \
+    /opt/venv/bin/python -c "import glob, shutil; [shutil.rmtree(p) for p in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
+    /opt/venv/bin/python -c "import flash_attn, flashinfer; assert hasattr(flash_attn, 'flash_attn_varlen_func'); print('FA2', flash_attn.__version__, 'flashinfer', flashinfer.__version__)"

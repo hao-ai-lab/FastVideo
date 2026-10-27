@@ -97,7 +97,7 @@ def main():
     os.environ.setdefault("FASTVIDEO_MINIMAX_H3_FUSIONS", "all")
     os.environ.setdefault("FASTVIDEO_H3_VAE_TILE_BATCH", "28")
     os.environ.setdefault("FASTVIDEO_VSA_TRITON", "1")
-    os.environ.setdefault("FASTVIDEO_VSA_SM100A", "0")
+    os.environ.setdefault("FASTVIDEO_VSA_PTX_BLACKWELL", "0")
     os.environ.setdefault("FASTVIDEO_FA4", "0")
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     ap_table = os.environ.get("FASTVIDEO_H3_ADALN_TABLE")

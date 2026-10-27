@@ -15,15 +15,7 @@ ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
-GENERATED_DOC_PREFIXES = (
-    "examples/",
-    "getting_started/examples/",
-    "inference/examples/",
-    "training/examples/",
-    "distillation/examples/",
-)
 COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
-COOKBOOK_SERVING_DATA = ROOT_DIR / "docs/assets/cookbook-serving.json"
 COOKBOOK_CLIENTS = {
     "python": ("video.py", "python -m pip install openai==3.6.0"),
     "javascript": ("video.mjs", "npm install openai@7.8.0"),
@@ -38,18 +30,16 @@ COOKBOOK_SOURCE_ROOTS = (
 # (e.g. black-forest-labs/FLUX.1-dev) and are grouped for documentation only.
 COOKBOOK_FAMILIES = {
     "wan",
-    "turbodiffusion",
     "ltx2",
     "hunyuan",
     "cosmos",
     "kandinsky5",
     "kandinsky6",
+    "pan2",
     "flux",
-    "glm_image",
-    "zimage",
+    "qwen_image21",
     "sd35",
     "minimax_h3",
-    "longcat",
     "stable_audio",
     "mmaudio",
     "matrixgame",
@@ -234,15 +224,6 @@ def validate_cookbook() -> None:
             if related_id not in ids:
                 raise ValueError(f"Cookbook recipe references unknown related id: {recipe['id']}: {related_id}")
 
-    cache_bust = f"cookbook-recipes.json?v={version}"
-    cookbook_pages = ROOT_DIR / "docs/cookbook"
-    for page in sorted(cookbook_pages.glob("*.md")):
-        text = page.read_text(encoding="utf-8")
-        if "cookbook-recipes.json" not in text:
-            continue
-        if cache_bust not in text:
-            raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
-
 
 def cookbook_serving_profile(recipe: dict) -> dict:
     """Read server facts separately from the local inference run's evidence."""
@@ -323,13 +304,6 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     }
 
 
-def generate_cookbook_serving() -> None:
-    """Publish executable clients and config facts through the docs build."""
-    data = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8"))
-    profiles = {recipe["id"]: cookbook_serving_profile(recipe) for recipe in data["recipes"] if "serving" in recipe}
-    COOKBOOK_SERVING_DATA.write_text(json.dumps(profiles, indent=2) + "\n", encoding="utf-8")
-
-
 def fix_case(text: str) -> str:
     subs = {
         "api": "API",
@@ -390,7 +364,7 @@ class Index:
         content = f"# {self.title}\n\n{self.description}\n\n"
         if self.caption:
             content += f"## {self.caption}\n\n"
-        # Generate a simple list of links for MkDocs
+        # Generate a simple list of documentation links
         for doc in self.documents:
             # Convert document path to proper link
             doc_link = doc.replace("\\", "/")
@@ -522,7 +496,7 @@ class Example:
                 continue
 
             file_rel_path = file.relative_to(self.path)
-            # Use collapsible admonition syntax for MkDocs
+            # Use collapsible admonitions, normalized by the site preparation
             content += f"??? note \"{file_rel_path}\"\n\n"
 
             try:
@@ -850,28 +824,8 @@ def generate_examples(generate_main_index: bool = False) -> None:
             f.write(examples_index.generate())
 
 
-def on_pre_build(config, **kwargs):
-    """
-    MkDocs hook to generate examples before building the documentation.
-    This function is called automatically by MkDocs' native hook system.
-    """
-    validate_cookbook()
-    generate_cookbook_serving()
-    print("Generating example documentation...")
-    generate_examples(generate_main_index=True)
-    print("Example documentation generated successfully!")
-
-
-def on_page_context(context, page, **kwargs):
-    """Hide repository edit actions for pages that only exist at build time."""
-    if page.file.src_uri.startswith(GENERATED_DOC_PREFIXES):
-        page.edit_url = None
-    return context
-
-
 if __name__ == "__main__":
     validate_cookbook()
-    generate_cookbook_serving()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")

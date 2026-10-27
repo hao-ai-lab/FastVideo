@@ -42,7 +42,7 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert args.num_gpus == 4
     assert args.vsa_sparsity == 0.9
     assert args.vsa_tile_size == 64
-    assert args.vsa_kernel == "sm100a"
+    assert args.vsa_kernel == "ptx_blackwell"
     assert args.seed == 1000
     assert args.warmup_seed == 999
     assert args.warmup is True
@@ -69,7 +69,7 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
         "vae_parallel_decode_strategy": "gather",
     }
 
-    assert environment["FASTVIDEO_VSA_SM100A"] == "1"
+    assert environment["FASTVIDEO_VSA_PTX_BLACKWELL"] == "1"
     assert environment["FASTVIDEO_VSA_CUTEDSL"] == "0"
     assert environment["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] == "0"
     assert environment["FASTVIDEO_FA4"] == "1"
@@ -175,7 +175,7 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     config = fasth3.build_generator_config(args)
 
     assert "FASTVIDEO_H3_VSA_PROBE" not in fasth3.os.environ
-    assert fasth3.os.environ["FASTVIDEO_VSA_SM100A"] == "0"
+    assert fasth3.os.environ["FASTVIDEO_VSA_PTX_BLACKWELL"] == "0"
     assert fasth3.os.environ["FASTVIDEO_VSA_CUTEDSL"] == "0"
     assert fasth3.os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] == "0"
     assert fasth3.os.environ["FASTVIDEO_FA4"] == "0"
@@ -208,7 +208,7 @@ def test_hopper_route_selects_tk_kernel_and_resident_fp8_text_encoder():
     config = fasth3.build_generator_config(args)
 
     assert environment["FASTVIDEO_VSA_TK"] == "1"
-    assert environment["FASTVIDEO_VSA_SM100A"] == "0"
+    assert environment["FASTVIDEO_VSA_PTX_BLACKWELL"] == "0"
     assert environment["FASTVIDEO_FA4"] == "0"
     assert config.engine.use_fsdp_inference is True
     assert config.engine.offload.text_encoder is False
@@ -230,7 +230,7 @@ def test_tk_profile_requires_the_sm90_extension(monkeypatch):
 
 def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: False)
-    monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: False)
+    monkeypatch.setattr(fasth3, "_ptx_blackwell_kernel_is_installed", lambda: False)
 
     with pytest.raises(RuntimeError, match="flash-attn-4"):
         fasth3.validate_profile_dependencies(_args())
@@ -240,7 +240,7 @@ def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "triton"))
 
     monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: True)
-    monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: True)
+    monkeypatch.setattr(fasth3, "_ptx_blackwell_kernel_is_installed", lambda: True)
     fasth3.validate_profile_dependencies(_args())
 
 

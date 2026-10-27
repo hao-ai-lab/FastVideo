@@ -28,12 +28,13 @@ uv pip install flash-attn --no-build-isolation -v
 The cookbook selects complete, checked-in recipes instead of mixing model,
 parallelism, offload, and attention settings independently.
 
-[Open the inference cookbook](../cookbook/index.md){ .md-button .md-button--primary }
+[Open the inference cookbook](../cookbook/index.md)
 
-!!! tip "Need more control?"
-    Start from a maintained recipe, then use the
-    [configuration](../inference/configuration.md) and
-    [optimization](../inference/optimizations.md) guides for supported changes.
+:::tip[Need more control?]
+Start from a maintained recipe, then use the
+[configuration](../inference/configuration.md) and
+[optimization](../inference/optimizations.md) guides for supported changes.
+:::
 
 ## Next Steps
 

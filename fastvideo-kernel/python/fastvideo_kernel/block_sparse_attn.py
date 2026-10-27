@@ -49,18 +49,21 @@ def _force_tk() -> bool:
     return os.environ.get("FASTVIDEO_VSA_TK", "0") == "1"
 
 
-def _force_sm100a() -> bool:
+def _force_ptx_blackwell() -> bool:
     """True iff the data-center Blackwell forward is explicitly opted into.
 
-    Opt-in only (same legacy-named env the H3 backend honors). Honored only when
-    ``block_sparse_attn_sm100a.is_supported`` passes; the backward then runs the
-    sm_100a/sm_103a CUDA backward when ``block_sparse_attn_bwd_sm100a.is_supported``
+    Opt-in only (same env the H3 backend honors). Honored only when
+    ``block_sparse_attn_ptx_blackwell.is_supported`` passes; the backward then runs the
+    ptx_blackwell backward when ``block_sparse_attn_bwd_ptx_blackwell.is_supported``
     passes and Triton otherwise (the forward's lse is already in Triton's M
     format). Unsupported 64-token metadata falls through to the default
     selection; unsupported 128-token metadata raises because Triton has no
-    compatible fallback. ``FASTVIDEO_VSA_TRITON`` still wins.
+    compatible fallback. ``FASTVIDEO_VSA_TRITON`` still wins. The deprecated name
+    ``FASTVIDEO_VSA_SM100A`` is read when ``FASTVIDEO_VSA_PTX_BLACKWELL`` is unset.
     """
-    return _env_bool("FASTVIDEO_VSA_SM100A")
+    if "FASTVIDEO_VSA_PTX_BLACKWELL" not in os.environ and "FASTVIDEO_VSA_SM100A" in os.environ:
+        return _env_bool("FASTVIDEO_VSA_SM100A")
+    return _env_bool("FASTVIDEO_VSA_PTX_BLACKWELL")
 
 
 def _env_bool(name: str) -> bool:
@@ -79,12 +82,12 @@ def _env_bool(name: str) -> bool:
                      "or an empty string")
 
 
-def _sm100a_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
+def _ptx_blackwell_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     try:
-        from fastvideo_kernel import block_sparse_attn_sm100a as vsa_sm100a
+        from fastvideo_kernel import block_sparse_attn_ptx_blackwell as vsa_ptx_blackwell
     except Exception:
         return False
-    return vsa_sm100a.is_supported(q, variable_block_sizes)
+    return vsa_ptx_blackwell.is_supported(q, variable_block_sizes)
 
 
 def _infer_block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
@@ -386,10 +389,10 @@ def _backward_sm90(ctx, grad_o, grad_lse):
 block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_context_sm90)
 
 # ---------------------------------------------------------------------------
-# Data-center Blackwell backend custom op (index-native; legacy sm100a API name)
+# Data-center Blackwell backend custom op (index-native; the ptx_blackwell kernels)
 #
-# Forward runs the sm_100a/sm_103a CUDA extension. Backward runs the sm_100a CUDA
-# backward when block_sparse_attn_bwd_sm100a.is_supported passes (64- or 128-token
+# Forward runs the ptx_blackwell extension. Backward runs the ptx_blackwell
+# backward when block_sparse_attn_bwd_ptx_blackwell.is_supported passes (64- or 128-token
 # blocks, data-center Blackwell device, extension built with that block's op) and
 # the Triton kernels otherwise. The native forward emits lse in exactly Triton's M
 # format (max*log2e + log2(l)), so either pairing needs no conversion. The Triton
@@ -399,11 +402,11 @@ block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_co
 
 
 @torch.library.custom_op(
-    "fastvideo_kernel::block_sparse_attn_backward_sm100a",
+    "fastvideo_kernel::block_sparse_attn_backward_ptx_blackwell",
     mutates_args=(),
     device_types="cuda",
 )
-def block_sparse_attn_backward_sm100a(
+def block_sparse_attn_backward_ptx_blackwell(
     grad_o: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -414,19 +417,19 @@ def block_sparse_attn_backward_sm100a(
     q2k_num: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from fastvideo_kernel.block_sparse_attn_bwd_sm100a import (
-        block_sparse_attn_backward_sm100a_from_k2q, )
+    from fastvideo_kernel.block_sparse_attn_bwd_ptx_blackwell import (
+        block_sparse_attn_backward_ptx_blackwell_from_k2q, )
 
     num_kv_blocks = variable_block_sizes.numel()
     k2q_idx, k2q_num = _invert_indices_for_backward(q2k_idx, q2k_num, num_kv_blocks)
-    dq, dk, dv = block_sparse_attn_backward_sm100a_from_k2q(
+    dq, dk, dv = block_sparse_attn_backward_ptx_blackwell_from_k2q(
         grad_o.contiguous(), q.contiguous(), k.contiguous(), v.contiguous(), o.contiguous(),
         lse.contiguous(), k2q_idx, k2q_num, variable_block_sizes)
     return dq, dk, dv
 
 
-@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_backward_sm100a")
-def _block_sparse_attn_backward_sm100a_fake(
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_backward_ptx_blackwell")
+def _block_sparse_attn_backward_ptx_blackwell_fake(
     grad_o: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -440,20 +443,20 @@ def _block_sparse_attn_backward_sm100a_fake(
     return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
 
 
-def _sm100a_backward_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
+def _ptx_blackwell_backward_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     try:
-        from fastvideo_kernel import block_sparse_attn_bwd_sm100a as vsa_bwd_sm100a
+        from fastvideo_kernel import block_sparse_attn_bwd_ptx_blackwell as vsa_bwd_ptx_blackwell
     except ImportError:  # pragma: no cover - extension not built
         return False
-    return vsa_bwd_sm100a.is_supported(q, variable_block_sizes)
+    return vsa_bwd_ptx_blackwell.is_supported(q, variable_block_sizes)
 
 
 @torch.library.custom_op(
-    "fastvideo_kernel::block_sparse_attn_sm100a",
+    "fastvideo_kernel::block_sparse_attn_ptx_blackwell",
     mutates_args=(),
     device_types="cuda",
 )
-def block_sparse_attn_sm100a_op(
+def block_sparse_attn_ptx_blackwell_op(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -461,15 +464,15 @@ def block_sparse_attn_sm100a_op(
     q2k_num: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    from fastvideo_kernel.block_sparse_attn_sm100a import block_sparse_attn_sm100a
+    from fastvideo_kernel.block_sparse_attn_ptx_blackwell import block_sparse_attn_ptx_blackwell
 
-    o, M = block_sparse_attn_sm100a(q, k, v, q2k_idx, q2k_num, variable_block_sizes,
-                                    need_lse=True)
+    o, M = block_sparse_attn_ptx_blackwell(q, k, v, q2k_idx, q2k_num, variable_block_sizes,
+                                           need_lse=True)
     return o, M
 
 
-@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a")
-def _block_sparse_attn_sm100a_fake(
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_ptx_blackwell")
+def _block_sparse_attn_ptx_blackwell_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -486,32 +489,32 @@ def _block_sparse_attn_sm100a_fake(
     return o, M
 
 
-def _setup_context_sm100a(ctx, inputs, output):
+def _setup_context_ptx_blackwell(ctx, inputs, output):
     q, k, v, q2k_idx, q2k_num, variable_block_sizes = inputs
     o, M = output
     ctx.save_for_backward(q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes)
 
 
-def _backward_sm100a(ctx, grad_o, grad_M):
+def _backward_ptx_blackwell(ctx, grad_o, grad_M):
     q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes = ctx.saved_tensors
-    if _sm100a_backward_is_supported(q, variable_block_sizes):
-        dq, dk, dv = block_sparse_attn_backward_sm100a(grad_o, q, k, v, o, M, q2k_idx,
-                                                       q2k_num, variable_block_sizes)
+    if _ptx_blackwell_backward_is_supported(q, variable_block_sizes):
+        dq, dk, dv = block_sparse_attn_backward_ptx_blackwell(grad_o, q, k, v, o, M, q2k_idx,
+                                                              q2k_num, variable_block_sizes)
     else:
         block = q.shape[2] // variable_block_sizes.numel()
         if block != 64:
             raise RuntimeError(
-                "block_sparse_attn_sm100a backward: no sm_100a/sm_103a backward for "
+                "block_sparse_attn_ptx_blackwell backward: no ptx_blackwell backward for "
                 f"{block}-token blocks on this build/device, and the Triton backward is "
                 "hardcoded to 64-token blocks. Run this metadata without grad, or build "
-                "the extension with block_sparse_sm100a_blk128_bwd.")
+                "the extension with block_sparse_ptx_blackwell_blk128_bwd.")
         dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx,
                                                        q2k_num, variable_block_sizes)
     return dq, dk, dv, None, None, None
 
 
-block_sparse_attn_sm100a_op.register_autograd(_backward_sm100a,
-                                              setup_context=_setup_context_sm100a)
+block_sparse_attn_ptx_blackwell_op.register_autograd(_backward_ptx_blackwell,
+                                                     setup_context=_setup_context_ptx_blackwell)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -538,9 +541,8 @@ def block_sparse_attn_from_indices(
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
-    # - FASTVIDEO_VSA_SM100A opts into the data-center Blackwell forward (CUDA
-    #   backward when supported, else Triton). The environment name is retained
-    #   for compatibility.
+    # - FASTVIDEO_VSA_PTX_BLACKWELL opts into the data-center Blackwell forward (CUDA
+    #   backward when supported, else Triton).
     #   Unsupported 64-token metadata falls through; unsupported 128-token
     #   metadata raises because Triton cannot consume it.
     # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
@@ -548,13 +550,13 @@ def block_sparse_attn_from_indices(
     # - Otherwise: TK on sm_90 if available, else Triton.
     if _force_triton():
         use_sm90 = False
-    elif _force_sm100a():
-        if _sm100a_is_supported(q, variable_block_sizes):
-            return block_sparse_attn_sm100a_op(q, k, v, q2k_idx, q2k_num,
-                                               variable_block_sizes)
+    elif _force_ptx_blackwell():
+        if _ptx_blackwell_is_supported(q, variable_block_sizes):
+            return block_sparse_attn_ptx_blackwell_op(q, k, v, q2k_idx, q2k_num,
+                                                      variable_block_sizes)
         if _infer_block_size(q, variable_block_sizes) == 128:
             raise NotImplementedError(
-                "128-token block-sparse attention requires the sm_100a/sm_103a forward; "
+                "128-token block-sparse attention requires the ptx_blackwell forward; "
                 "the Triton fallback only supports 64-token blocks, and the "
                 "native data-center Blackwell route is unavailable for this input.")
         use_sm90 = sm90_available

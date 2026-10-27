@@ -93,3 +93,25 @@ def test_fused_int8_epilogue_large_accumulators_and_small_scales(dtype, has_bias
         expected = expected + bias.float()
     actual = fused_int8_dequant_bias(acc, x_scale, w_scale, bias, dtype)
     torch.testing.assert_close(actual, expected.to(dtype), rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for fused INT8 epilogue")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize(("acc_value", "x_scale_value", "weight_scale_value", "bias_value"), [
+    (41104, 0.026947021484375, 0.007559554651379585, 0.3650893568992615),
+    (69320, 0.0205841064453125, 0.007878062315285206, -0.43253710865974426),
+])
+def test_fused_int8_epilogue_preserves_fp16_rounding_boundaries(
+    dtype, acc_value, x_scale_value, weight_scale_value, bias_value,
+):
+    from fastvideo.models.vaes.minimax_h3_int8_kernels import fused_int8_dequant_bias
+
+    # Captured CI failures: contracting the final multiply and bias add changes
+    # which side of an FP16 midpoint the FP32 result lands on.
+    acc = torch.full((129, 128), acc_value, device="cuda", dtype=torch.int32)
+    x_scale = torch.full((129, 1), x_scale_value, device="cuda", dtype=torch.float16)
+    weight_scale = torch.full((128, 1), weight_scale_value, device="cuda", dtype=torch.float32)
+    bias = torch.full((128,), bias_value, device="cuda", dtype=torch.float32)
+    expected = acc.float() * x_scale.float() * weight_scale.t().float() + bias
+    actual = fused_int8_dequant_bias(acc, x_scale, weight_scale, bias, dtype)
+    torch.testing.assert_close(actual, expected.to(dtype), rtol=0, atol=0)

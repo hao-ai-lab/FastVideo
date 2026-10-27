@@ -52,6 +52,7 @@ class ServeSubcommand(CLISubcommand):
 
         from fastvideo.entrypoints.openai.api_server import (
             run_server, )
+        from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 
         logger.info(
             "Server will listen on %s:%d",
@@ -67,6 +68,11 @@ class ServeSubcommand(CLISubcommand):
             output_dir=serve_config.server.output_dir,
             default_request=serve_config.default_request,
             served_model_name=serve_config.server.served_model_name,
+            media_reference_max_bytes=serve_config.server.media_reference_max_bytes,
+            media_policy=MediaPolicy(
+                roots=tuple(serve_config.server.media_roots),
+                allow_private_urls=serve_config.server.allow_private_media_urls,
+            ),
         )
 
     def validate(self, args: argparse.Namespace) -> None:

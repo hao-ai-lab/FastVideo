@@ -21,7 +21,7 @@ Common examples:
 [docs] Add LoRA finetuning guide
 [new-model] Port HunyuanVideo 1.5 to FastVideo
 [infra] Add activation trace hooks for pipeline debugging
-[skill] Add add-model agent skill
+[skill] Add reseed-ssim-references agent skill
 ```
 
 Accepted tags are `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`,

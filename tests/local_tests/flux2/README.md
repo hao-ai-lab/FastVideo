@@ -46,9 +46,8 @@ blocked_on: none
 ## Weight Setup
 
 ```bash
-python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
-    "black-forest-labs/FLUX.2-klein-4B" \
-    "official_weights/black-forest-labs__FLUX.2-klein-4B"
+hf download "black-forest-labs/FLUX.2-klein-4B" \
+    --local-dir "official_weights/black-forest-labs__FLUX.2-klein-4B"
 ```
 
 ## Tests in this directory
