@@ -189,8 +189,6 @@ def test_keyframe_and_reference_inputs_bypass_text_reuse(make_stage, monkeypatch
     for _ in range(2):
         batch = SimpleNamespace(prompt="ab", references=None, extra={MINIMAX_H3_KEYFRAMES_KEY: [object()]})
         stage.forward(batch, SimpleNamespace(text_encoder_cpu_offload=False))
-    # An input carrying references is not admitted to the text-only memo even
-    # when the FL/T2VA presentation has no keyframe tokens.
     for _ in range(2):
         batch = SimpleNamespace(prompt="ab", references=[object()], extra={MINIMAX_H3_KEYFRAMES_KEY: []})
         stage.forward(batch, SimpleNamespace(text_encoder_cpu_offload=False))
