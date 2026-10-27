@@ -27,14 +27,12 @@ def test_wan_flashinfer_request_reaches_self_and_cross_attention(
     selections = []
 
     def resolve_backend(selected_backend, head_size, dtype):
-        # Before the fix, the selector changes this request to None because
-        # the Wan layer does not declare support for FLASHINFER.
         assert selected_backend is AttentionBackendEnum.FLASHINFER
         assert head_size == 128
         selections.append(selected_backend)
         return "fastvideo.attention.backends.flashinfer.FlashInferBackend"
 
-    monkeypatch.setattr(platforms, "current_platform", SimpleNamespace(get_attn_backend_cls=resolve_backend))
+    monkeypatch.setattr(platforms, "_current_platform", SimpleNamespace(get_attn_backend_cls=resolve_backend))
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(wan, "ReplicatedLinear", lambda *args, **kwargs: torch.nn.Identity())
     monkeypatch.setattr(wan, "RMSNorm", lambda *args, **kwargs: torch.nn.Identity())
@@ -45,10 +43,25 @@ def test_wan_flashinfer_request_reaches_self_and_cross_attention(
             supported_attention_backends=wan.WanTransformer3DModel._supported_attention_backends,
         )
         assert backend is FlashInferBackend
-        cross_attention = cross_attention_cls(dim=256, num_heads=2)
+        cross_attention = cross_attention_cls(
+            dim=256, num_heads=2,
+            supported_attention_backends=wan.WanTransformer3DModel._supported_attention_backends,
+        )
         assert cross_attention.attn.backend is AttentionBackendEnum.FLASHINFER
         assert isinstance(cross_attention.attn.attn_impl, FlashInferImpl)
         assert cross_attention.attn.attn_impl.prefill_backend == prefill_backend
         assert len(selections) == 2
     finally:
         _cached_get_attn_backend.cache_clear()
+
+
+def test_platform_mock_preserves_lazy_resolution(monkeypatch, env_overrides):
+    with monkeypatch.context() as scoped:
+        test_wan_flashinfer_request_reaches_self_and_cross_attention(
+            env_overrides, scoped, "single", wan.WanT2VCrossAttention,
+        )
+
+    assert "current_platform" not in vars(platforms)
+    next_platform = SimpleNamespace()
+    monkeypatch.setattr(platforms, "_current_platform", next_platform)
+    assert platforms.current_platform is next_platform
