@@ -54,6 +54,21 @@ def _packed_linear(seed: int = 0) -> ReplicatedLinear:
     return layer
 
 
+def test_a_wrapped_layer_without_an_adapter_runs_the_base_layer() -> None:
+    """A dense wrapper with no adapter is the base layer.
+
+    The streaming_v2 server wraps every linear when its first request selects an adapter. A request that then
+    renders without one, or a load that failed part-way, must still produce the base model's output instead of
+    failing on the missing factors.
+    """
+    base = _dense_linear()
+    wrapped = get_lora_layer(base)
+    assert not wrapped.side_branch and wrapped.lora_A is None
+    x = torch.randn(2, IN, dtype=torch.bfloat16)
+    with torch.no_grad():
+        assert torch.equal(wrapped(x)[0], base(x)[0])
+
+
 def _factors(seed: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
     generator = torch.Generator().manual_seed(seed)
     return torch.randn(RANK, IN, generator=generator), torch.randn(OUT, RANK, generator=generator)
