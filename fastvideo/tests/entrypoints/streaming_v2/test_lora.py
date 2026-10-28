@@ -17,17 +17,22 @@ import pytest
 from PIL import Image
 from starlette.testclient import TestClient
 
+from fastvideo import envs
 from fastvideo.api.results import GenerationResult
 from fastvideo.api.schema import (
+    ComponentConfig,
     EngineConfig,
     GeneratorConfig,
     LoRAAdapterConfig,
+    PipelineSelection,
     QuantizationConfig,
+    ServeConfig,
+    StreamingV2Config,
     StreamingV2LoRAConfig,
 )
 from fastvideo.entrypoints.streaming_v2.lora import adapters_attach_as_side_branch
 from fastvideo.entrypoints.streaming_v2.routes import generate as generate_route
-from fastvideo.entrypoints.streaming_v2.server import create_app
+from fastvideo.entrypoints.streaming_v2.server import create_app, validate_serve_config
 from fastvideo.layers.quantization.nvfp4_config import H3_NVFP4_DIT_EXPORT_FILENAME
 
 _CHUNKS = [b"init-segment", b"fragment-1"]
@@ -44,8 +49,8 @@ def _body(**overrides: Any) -> dict[str, Any]:
         "prompt": "a lighthouse at dusk",
         "references": [{"media_type": "image", "data": _png_base64()}],
         "width": 64,
-        "height": 48,
-        "num_frames": 4,
+        "height": 32,
+        "num_frames": 124,
         "seed": 7,
     }
     body.update(overrides)
@@ -55,8 +60,9 @@ def _body(**overrides: Any) -> dict[str, Any]:
 class _FakeGenerator:
     """Records each adapter change and each generation, in the order they arrive."""
 
-    def __init__(self, change_error: Exception | None = None) -> None:
+    def __init__(self, change_error: Exception | None = None, failing_ids: set[str] | None = None) -> None:
         self.change_error = change_error
+        self.failing_ids = failing_ids or set()
         self.calls: list[tuple[str, str, str, float]] = []
         self.requests: list[Any] = []
 
@@ -64,6 +70,8 @@ class _FakeGenerator:
         self.calls.append(("set_lora_adapter", lora_nickname, lora_path or "", strength))
         if self.change_error is not None:
             raise self.change_error
+        if lora_nickname in self.failing_ids:
+            raise RuntimeError(f"cannot load {lora_nickname}")
 
     def generate(self, request: Any) -> GenerationResult:
         self.calls.append(("generate", "", "", 0.0))
@@ -146,14 +154,10 @@ def _generator_config(tmp_path: Path, quant: str | None, packed: bool) -> Genera
     ],
 )
 def test_adapters_attach_as_side_branch_follows_the_checkpoint_and_env(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quant: str | None, packed: bool, side_branch_env: bool,
+        tmp_path: Path, quant: str | None, packed: bool, side_branch_env: bool,
         expected: bool) -> None:
-    if side_branch_env:
-        monkeypatch.setenv("FASTVIDEO_LORA_SIDE_BRANCH", "1")
-    else:
-        monkeypatch.delenv("FASTVIDEO_LORA_SIDE_BRANCH", raising=False)
-
-    assert adapters_attach_as_side_branch(_generator_config(tmp_path, quant, packed)) is expected
+    with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(side_branch_env):
+        assert adapters_attach_as_side_branch(_generator_config(tmp_path, quant, packed)) is expected
 
 
 def test_generate_applies_the_adapter_to_a_text_request() -> None:
@@ -305,3 +309,58 @@ def test_serve_config_parses_the_lora_adapters_block() -> None:
     assert (adapter.id, adapter.path, adapter.default_strength) == ("realism", "fal/MiniMax-H3-Realism-People-LoRA", 0.8)
     assert (adapter.min_strength, adapter.max_strength) == (0.0, 2.0)
     assert adapter.description == "photoreal people"
+
+
+def _changes(generator: _FakeGenerator) -> list[tuple[str, str, str, float]]:
+    return [call for call in generator.calls if call[0] == "set_lora_adapter"]
+
+
+def test_a_failed_change_returns_the_previous_adapter_to_strength_0() -> None:
+    generator = _FakeGenerator(failing_ids={"orbit"})
+    with TestClient(create_app(generator, lora_config=_two_adapters())) as client:
+        client.post("/v1/streamv2/generate", json=_body(lora={"id": "realism"}))
+        failed = client.post("/v1/streamv2/generate", json=_body(lora={"id": "orbit"}))
+        client.post("/v1/streamv2/generate", json=_body())
+
+    assert failed.text.startswith("event: error\n")
+    assert _changes(generator) == [
+        ("set_lora_adapter", "realism", "fal/MiniMax-H3-Realism-People-LoRA", 0.8),
+        ("set_lora_adapter", "orbit", "pablodawson/MiniMax-H3-360-Orbit-LoRA", 1.0),
+        ("set_lora_adapter", "realism", "fal/MiniMax-H3-Realism-People-LoRA", 0.0),
+    ]
+    assert len(generator.requests) == 2
+
+
+def test_a_request_without_lora_restores_the_base_model_after_a_failed_first_change() -> None:
+    generator = _FakeGenerator(failing_ids={"realism"})
+    with TestClient(create_app(generator, lora_config=_two_adapters())) as client:
+        client.post("/v1/streamv2/generate", json=_body(lora={"id": "realism"}))
+        response = client.post("/v1/streamv2/generate", json=_body())
+
+    assert response.text.startswith("event: video_start\n")
+    assert _changes(generator)[1:] == [
+        ("set_lora_adapter", "realism", "fal/MiniMax-H3-Realism-People-LoRA", 0.0),
+        ("set_lora_adapter", "orbit", "pablodawson/MiniMax-H3-360-Orbit-LoRA", 0.0),
+    ]
+    assert len(generator.requests) == 1
+
+
+def test_a_request_without_lora_fails_while_the_adapter_state_stays_unknown() -> None:
+    generator = _FakeGenerator(failing_ids={"realism", "orbit"})
+    with TestClient(create_app(generator, lora_config=_two_adapters())) as client:
+        client.post("/v1/streamv2/generate", json=_body(lora={"id": "realism"}))
+        response = client.post("/v1/streamv2/generate", json=_body())
+
+    payload = json.loads(response.text.split("data: ", 1)[1])
+    assert payload["code"] == "generation_failed"
+    assert "adapter state unknown" in payload["message"]
+    assert generator.requests == []
+
+
+def test_serve_config_refuses_a_startup_adapter() -> None:
+    components = ComponentConfig(lora_path="fal/MiniMax-H3-Realism-People-LoRA")
+    generator = GeneratorConfig(model_path="model", pipeline=PipelineSelection(components=components))
+    config = ServeConfig(generator=generator, streaming_v2=StreamingV2Config())
+
+    with pytest.raises(ValueError, match="applies LoRA adapters per request"):
+        validate_serve_config(config)

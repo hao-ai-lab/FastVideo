@@ -100,8 +100,17 @@ def create_app(
     return app
 
 
+def validate_serve_config(serve_config: ServeConfig) -> None:
+    """Refuse a startup adapter: requests without ``lora`` must render the base model."""
+    if serve_config.generator.pipeline.components.lora_path is not None:
+        raise ValueError("streaming_v2 applies LoRA adapters per request; remove "
+                         "generator.pipeline.components.lora_path and list the adapter under "
+                         "streaming_v2.lora.adapters.")
+
+
 def run_server(serve_config: ServeConfig) -> None:
     """Create the generator from the serve config, serve until stopped, then shut the generator down."""
+    validate_serve_config(serve_config)
     import uvicorn
 
     from fastvideo import VideoGenerator  # lazy: loading a model is slow

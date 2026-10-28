@@ -76,9 +76,10 @@ class LoraRuntime:
     """The adapters a request may select, and the adapter the generator currently carries."""
     config: StreamingV2LoRAConfig
     runtime_switching: bool = False
-    # ``None`` until the first request selects an adapter.
     current_id: str | None = None
     current_strength: float | None = None
+    # Set when a failed change left the generator's adapter state unknown; cleared by the next successful change.
+    unknown_state: bool = False
     adapters: dict[str, LoRAAdapterConfig] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -98,8 +99,17 @@ class LoraRuntime:
                                    f"{adapter.max_strength:g}; got {strength:g}.")
 
     def apply(self, generator: Any, selection: LoraSelection | None) -> None:
-        """Make the selection current on ``generator``; ``None`` sets the current adapter to strength 0."""
+        """Make the selection current on ``generator``; ``None`` sets the current adapter to strength 0.
+
+        Raises ``RuntimeError`` for a request without ``lora`` when the generator's adapter state is unknown and
+        cannot be brought back to the base model, so the server never renders with an adapter nobody asked for.
+        """
         if selection is None:
+            if self.unknown_state:
+                if not self._reset_to_base(generator, list(self.adapters)):
+                    raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and no "
+                                       "adapter could be set to strength 0 to restore the base model.")
+                return
             if self.current_id is None or self.current_strength == 0.0:
                 return
             self._set(generator, self.current_id, 0.0)
@@ -107,19 +117,38 @@ class LoraRuntime:
         self.validate(selection)
         adapter = self.adapters[selection.id]
         strength = adapter.default_strength if selection.strength is None else selection.strength
-        if self.current_id == adapter.id and self.current_strength == strength:
+        if not self.unknown_state and self.current_id == adapter.id and self.current_strength == strength:
             return
         self._set(generator, adapter.id, strength)
 
     def _set(self, generator: Any, adapter_id: str, strength: float) -> None:
         adapter = self.adapters[adapter_id]
         logger.info("streaming_v2 applies LoRA adapter %r at strength %g", adapter_id, strength)
+        previous_id = None if self.unknown_state else self.current_id
         try:
             generator.set_lora_adapter(adapter_id, adapter.path, strength=strength)
         except Exception as error:
-            # A partial adapter may remain, so the next request must set one unconditionally.
+            # The failed change may keep the previous adapter active or leave a partial one.
             self.current_id = None
             self.current_strength = None
+            self.unknown_state = True
+            if previous_id is not None:
+                self._reset_to_base(generator, [previous_id])
             raise LoraRequestError(f"LoRA adapter {adapter_id!r} could not be applied: {error}") from error
         self.current_id = adapter_id
         self.current_strength = strength
+        self.unknown_state = False
+
+    def _reset_to_base(self, generator: Any, candidates: list[str]) -> bool:
+        """Re-apply the first candidate that loads at strength 0, which is exactly the base model."""
+        for adapter_id in candidates:
+            try:
+                generator.set_lora_adapter(adapter_id, self.adapters[adapter_id].path, strength=0.0)
+            except Exception:
+                logger.exception("streaming_v2 could not set LoRA adapter %r to strength 0", adapter_id)
+                continue
+            self.current_id = adapter_id
+            self.current_strength = 0.0
+            self.unknown_state = False
+            return True
+        return False
