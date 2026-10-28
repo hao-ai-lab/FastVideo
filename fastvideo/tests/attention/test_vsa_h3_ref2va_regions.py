@@ -611,3 +611,34 @@ def test_forward_tile128_real_ptx_blackwell_kernel_matches_oracle(env_overrides,
     torch.cuda.synchronize()
     assert actual.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     torch.testing.assert_close(actual.float(), expected, atol=0.04, rtol=0.02)
+
+
+@pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
+def test_forward_tile128_real_triton64_split_matches_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate):
+    """Tile 128 without the ptx_blackwell kernel: two 64-token Triton tiles per tile against the FP32 oracle."""
+    if not torch.cuda.is_available() or vsa_h3.block_sparse_attn_64_bhsd is None:
+        pytest.skip("requires a CUDA GPU and the fastvideo_kernel Triton block-sparse kernels")
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", None)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
+    device = torch.device("cuda")
+    meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
+    n_tiles = meta.variable_block_sizes.numel()
+    logical = n_tiles * 128
+    assert int(meta.variable_block_sizes.min()) < 64, "the layout must exercise a partial second half"
+    impl = _impl(_DIM)
+    torch.manual_seed(19)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
+    with torch.inference_mode():
+        query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
+        actual = impl.postprocess_output(impl.forward(query, key, value, None, meta), meta)
+        logical_query, logical_key, logical_value = (t[:, :logical] for t in (query, key, value))
+        scores = torch.matmul(_pool_tiles(logical_query, meta.variable_block_sizes, 128),
+                              _pool_tiles(logical_key, meta.variable_block_sizes, 128).transpose(-2, -1)) / _DIM**0.5
+        mask = _mask(meta, scores, sparsity)
+        assert not mask.all(), "the oracle must exercise a sparse mask"
+        expected = impl.postprocess_output(
+            _sparse_attention_oracle(logical_query.float(), logical_key.float(), logical_value.float(), mask, meta),
+            meta)
+    torch.cuda.synchronize()
+    assert actual.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    torch.testing.assert_close(actual.float(), expected, atol=0.04, rtol=0.02)
