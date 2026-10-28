@@ -88,12 +88,27 @@ block. If `num_frames` is absent, `seconds * fps` is used. FastVideo also keeps
 the legacy `input_reference`, `reference_url`, `video_path`, and `video_url`
 spellings.
 
-Reference objects support URL or local-path strings through `image_url`,
-`video_url`, and `audio_url`. `file_id` references are schema-compatible but
-return HTTP 400 because FastVideo does not provide an OpenAI Files store.
-Image URLs, data URLs, local paths, and multipart `input_reference` uploads are
-materialized and decoded under the configured output directory during
-admission. Invalid media returns HTTP 400 before a job is created.
+Reference objects carry one string each through `image_url`, `video_url`, and
+`audio_url`. Each field accepts these forms:
+
+| Field | `http(s)` URL | `data:` URL | Local path |
+| --- | --- | --- | --- |
+| `image_reference[].image_url`, `input_reference`, `reference_url` | yes | `data:image/...;base64,` | under `server.media_roots` |
+| `video_reference[].video_url`, `video_path`, `video_url` | yes | `data:video/...;base64,` | under `server.media_roots` |
+| `audio_reference[].audio_url` | yes | `data:audio/...;base64,` | under `server.media_roots` |
+
+`input_reference` also accepts a multipart upload. `file_id` references are
+schema-compatible but return HTTP 400 because FastVideo does not provide an
+OpenAI Files store.
+
+URLs must resolve to public addresses unless
+`server.allow_private_media_urls` is set. A `data:` URL must be base64-encoded,
+and its media type must match its field: a `data:audio/...` URL in
+`video_reference` is refused. Each downloaded file, and each decoded video or
+audio file, is limited to `server.media_reference_max_bytes`. URLs and `data:` URLs are
+written under `server.output_dir/uploads` during admission, keep their order
+within each field, and are deleted when the job ends. Invalid, oversized, or
+mismatched media returns HTTP 400 before a job is created.
 
 ## Jobs and synchronous responses
 

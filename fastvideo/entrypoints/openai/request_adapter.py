@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 from fastvideo.entrypoints.openai.media_policy import (
     MediaPolicy,
     MediaPolicyError,
+    data_url_media_type,
+    decode_data_url,
     discard,
     fetch_media,
     resolve_local_media,
@@ -41,7 +43,23 @@ class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
 
 
-_VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"})
+_MEDIA_SUFFIXES = {
+    "video": frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}),
+    "audio": frozenset({".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".webm"}),
+}
+_DEFAULT_SUFFIXES = {"video": ".mp4", "audio": ".wav"}
+# Media types whose subtype is not already the file suffix; decoding probes content, so this is only a hint.
+_DATA_URL_SUFFIXES = {
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+    "video/x-msvideo": ".avi",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/wave": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/x-flac": ".flac",
+}
 
 
 def _as_list(value: Any | list[Any] | None) -> list[Any]:
@@ -93,30 +111,62 @@ def _local_media(source: str, policy: MediaPolicy) -> str:
         raise RequestAdaptationError(str(error)) from error
 
 
-async def _materialize_video(source: str,
+async def _decode_data_media(source: str, target_base: str, kind: str, *, max_bytes: int | None) -> str:
+    try:
+        media_type = data_url_media_type(source)
+        if media_type.partition("/")[0] != kind:
+            raise MediaPolicyError(f"{kind.capitalize()} references need a data:{kind}/... URL, got media type "
+                                   f"{media_type or 'none'!r}.")
+        subtype_suffix = f".{media_type.partition('/')[2]}"
+        suffix = _DATA_URL_SUFFIXES.get(media_type, subtype_suffix)
+        target = f"{target_base}{suffix if suffix in _MEDIA_SUFFIXES[kind] else _DEFAULT_SUFFIXES[kind]}"
+        decoding = asyncio.ensure_future(
+            asyncio.to_thread(decode_data_url,
+                              source,
+                              target,
+                              max_bytes=get_media_reference_max_bytes() if max_bytes is None else max_bytes))
+        try:
+            await asyncio.shield(decoding)
+        except asyncio.CancelledError:
+            # The decoding thread cannot be interrupted; remove its file once it has finished writing.
+            def remove(done: asyncio.Future) -> None:
+                if not done.cancelled():
+                    done.exception()  # mark it retrieved; the request is already gone
+                discard(target)
+
+            decoding.add_done_callback(remove)
+            raise
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
+    return target
+
+
+async def _materialize_media(source: str,
                              target_base: str,
+                             kind: str,
                              *,
                              max_bytes: int | None = None,
-                             policy: MediaPolicy | None = None) -> str:
+                             policy: MediaPolicy | None = None) -> tuple[str, bool]:
+    """Return a local file for a video or audio reference and whether this request created it."""
     policy = get_media_policy() if policy is None else policy
     source = source.strip()
     if not source:
-        raise RequestAdaptationError("Video references must not be empty.")
+        raise RequestAdaptationError(f"{kind.capitalize()} references must not be empty.")
     if source.lower().startswith(("http://", "https://")):
         suffix = os.path.splitext(urlparse(source).path)[1].lower()
-        if suffix not in _VIDEO_SUFFIXES:
-            suffix = ".mp4"
+        if suffix not in _MEDIA_SUFFIXES[kind]:
+            suffix = _DEFAULT_SUFFIXES[kind]
         target = f"{target_base}{suffix}"
         try:
             await _download_media(source, target, max_bytes=max_bytes, policy=policy)
         except RequestAdaptationError:
             raise
         except Exception as error:
-            raise RequestAdaptationError(f"Unable to fetch video reference: {error}") from error
-        return target
+            raise RequestAdaptationError(f"Unable to fetch {kind} reference: {error}") from error
+        return target, True
     if source.lower().startswith("data:"):
-        raise RequestAdaptationError("Data video references are not supported; provide a URL or local path.")
-    return _local_media(source, policy)
+        return await _decode_data_media(source, target_base, kind, max_bytes=max_bytes), True
+    return _local_media(source, policy), False
 
 
 async def _materialize_image_url(source: str, target_base: str, *, max_bytes: int | None, policy: MediaPolicy) -> str:
@@ -163,6 +213,8 @@ async def prepare_reference_media(
                 local_path = track(await save_base64_image_to_path(source, target))
             except Exception as error:
                 raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
+        elif source.lower().startswith("data:"):
+            raise RequestAdaptationError("Image references need a data:image/... URL.")
         elif is_remote(source):
             local_path = track(await _materialize_image_url(source, target, max_bytes=max_bytes, policy=policy))
         else:
@@ -172,6 +224,14 @@ async def prepare_reference_media(
         except Exception as error:
             raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
         return local_path
+
+    async def materialize_clip(source: str, name: str, kind: str) -> str:
+        local_path, created_here = await _materialize_media(source,
+                                                            os.path.join(uploads_dir, f"{request_id}_{name}"),
+                                                            kind,
+                                                            max_bytes=max_bytes,
+                                                            policy=policy)
+        return track(local_path) if created_here else local_path
 
     try:
         index = 0
@@ -191,29 +251,13 @@ async def prepare_reference_media(
 
         for index, reference in enumerate(_as_list(request.video_reference)):
             if isinstance(reference, UrlVideoReference):
-                remote = is_remote(reference.video_url)
-                reference.video_url = await _materialize_video(reference.video_url,
-                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"),
-                                                               max_bytes=max_bytes,
-                                                               policy=policy)
-                if remote:
-                    track(reference.video_url)
+                reference.video_url = await materialize_clip(reference.video_url, f"video_{index}", "video")
         if request.video_path:
-            remote = is_remote(request.video_path)
-            request.video_path = await _materialize_video(request.video_path,
-                                                          os.path.join(uploads_dir, f"{request_id}_video_path"),
-                                                          max_bytes=max_bytes,
-                                                          policy=policy)
-            if remote:
-                track(request.video_path)
+            request.video_path = await materialize_clip(request.video_path, "video_path", "video")
         if request.video_url:
-            remote = is_remote(request.video_url)
-            request.video_url = await _materialize_video(request.video_url,
-                                                         os.path.join(uploads_dir, f"{request_id}_video_url"),
-                                                         max_bytes=max_bytes,
-                                                         policy=policy)
-            if remote:
-                track(request.video_url)
+            request.video_url = await materialize_clip(request.video_url, "video_url", "video")
+        for index, reference in enumerate(_as_list(request.audio_reference)):
+            reference.audio_url = await materialize_clip(reference.audio_url, f"audio_{index}", "audio")
     except BaseException:
         # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
         discard_materialized_media(created)
