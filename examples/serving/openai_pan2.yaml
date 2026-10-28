@@ -1,0 +1,36 @@
+# OpenAI-compatible server for PAN 2 text-to-video and first-frame image-to-video.
+#   fastvideo serve --config examples/serving/openai_pan2.yaml
+# Omit image_reference for text-to-video; send it (or input_reference) for image-to-video.
+generator:
+  model_path: IFM/PAN2
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      vae: false
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_pan2
+  served_model_name: pan2
+
+default_request:
+  sampling:
+    height: 704
+    width: 1248
+    num_frames: 313
+    fps: 24
+    num_inference_steps: 50
+    guidance_scale: 3.0
+  output:
+    return_frames: false

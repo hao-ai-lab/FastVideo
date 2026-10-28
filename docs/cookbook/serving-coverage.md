@@ -49,6 +49,7 @@ never deleted. See `examples/serving/README.md`.
 | `openai_hunyuan15_i2v_480p.yaml` | HunyuanVideo 1.5 I2V 480p | `i2v` | CUDA REST | `hunyuan15-i2v-480p` | Source-backed; preset renders 720x1280 |
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va` | Source-backed |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va-distilled` | Source-backed |
+| `openai_pan2.yaml` | PAN 2 | `t2v` (a reference switches to image-to-video) | CUDA REST | `pan2/cuda-rest` | Source-backed; checkpoint not public, no recorded run |
 | `openai_ltx2_distilled.yaml` | LTX2 Distilled | `t2v` | CUDA REST | `ltx2-distilled/cuda-rest` | Source-backed |
 | `streaming_demo.yaml` | LTX2 Distilled | `t2v` | CUDA streaming | `ltx2-distilled/cuda-streaming` | Source-backed |
 | `mlx_fasth3.yaml` | FastH3 V1 converted | `t2v` | MLX REST | none (legacy catalog only) | Source runtime; T2VA only |

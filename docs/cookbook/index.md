@@ -6,6 +6,7 @@ The interactive catalog groups models by family and generates YAML for supported
 - [FastH3](minimax-h3.md)
 - [Wan and FastMetal](wan.md)
 - [LTX](ltx.md)
+- [PAN 2](pan2.md)
 - [FLUX](flux.md)
 - [Qwen-Image-2.1](qwen-image21.md)
 - [Stable Diffusion](stable-diffusion.md)
