@@ -934,10 +934,19 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
         mbarrier_wait_parity_suspend(smem_ptr_u32(&full_bar_spo[m_tile]), spo_ph.get_phase());
 
         uint32_t s_regs[S_COLS];
+        // sm_103a: a tile with no masked key takes its row max from tcgen05.ld.red.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)
+        constexpr bool USE_LDRED = true;
+#else
+        constexpr bool USE_LDRED = false;
+#endif
+        [[maybe_unused]] float s_part[S_COLS / S_LD_COLS];
         #pragma unroll
         for (int c0 = 0; c0 < S_COLS; c0 += S_LD_COLS) {
           const uint32_t taddr = s_tmem_addr + (uint32_t)c0;
-          if      constexpr (S_LD_COLS == 32)  tcgen05_ld_32x32b_x32 (taddr, *reinterpret_cast<uint32_t(*)[32]>(&s_regs[c0]));
+          if      constexpr (USE_LDRED)        tcgen05_ld_red_32x32b_max_f32<S_LD_COLS>(taddr, s_part[c0 / S_LD_COLS],
+                                                                                      *reinterpret_cast<uint32_t(*)[S_LD_COLS]>(&s_regs[c0]));
+          else if constexpr (S_LD_COLS == 32)  tcgen05_ld_32x32b_x32 (taddr, *reinterpret_cast<uint32_t(*)[32]>(&s_regs[c0]));
           else if constexpr (S_LD_COLS == 64)  tcgen05_ld_32x32b_x64 (taddr, *reinterpret_cast<uint32_t(*)[64]>(&s_regs[c0]));
           else if constexpr (S_LD_COLS == 128) tcgen05_ld_32x32b_x128(taddr, *reinterpret_cast<uint32_t(*)[128]>(&s_regs[c0]));
         }
@@ -954,15 +963,22 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
           if (vbs_thr1_ < 64) mask_s_row_r2p<false, 64>(scores + 64, 0, 0, vbs_thr1_);
         }
 
-        float rmax0 = m_run, rmax1 = -INFINITY, rmax2 = -INFINITY, rmax3 = -INFINITY;
-        #pragma unroll
-        for (int j = 0; j < S_COLS; j += 8) {
-          rmax0 = fmaxf(fmaxf(rmax0, scores[j + 0]), scores[j + 1]);
-          rmax1 = fmaxf(fmaxf(rmax1, scores[j + 2]), scores[j + 3]);
-          rmax2 = fmaxf(fmaxf(rmax2, scores[j + 4]), scores[j + 5]);
-          rmax3 = fmaxf(fmaxf(rmax3, scores[j + 6]), scores[j + 7]);
+        const bool full_tile = USE_LDRED && (BLK128 ? vbs_thr0_ >= S_COLS : (vbs_thr0_ >= 64 && vbs_thr1_ >= 64));
+        float new_m = m_run;
+        if (full_tile) {
+          #pragma unroll
+          for (int p = 0; p < S_COLS / S_LD_COLS; ++p) new_m = fmaxf(new_m, s_part[p]);
+        } else {
+          float rmax0 = m_run, rmax1 = -INFINITY, rmax2 = -INFINITY, rmax3 = -INFINITY;
+          #pragma unroll
+          for (int j = 0; j < S_COLS; j += 8) {
+            rmax0 = fmaxf(fmaxf(rmax0, scores[j + 0]), scores[j + 1]);
+            rmax1 = fmaxf(fmaxf(rmax1, scores[j + 2]), scores[j + 3]);
+            rmax2 = fmaxf(fmaxf(rmax2, scores[j + 4]), scores[j + 5]);
+            rmax3 = fmaxf(fmaxf(rmax3, scores[j + 6]), scores[j + 7]);
+          }
+          new_m = fmaxf(fmaxf(rmax0, rmax1), fmaxf(rmax2, rmax3));
         }
-        float new_m = fmaxf(fmaxf(rmax0, rmax1), fmaxf(rmax2, rmax3));
 
           new_m = fmaxf(new_m, -FLT_MAX);
         float alpha = 0.0f;

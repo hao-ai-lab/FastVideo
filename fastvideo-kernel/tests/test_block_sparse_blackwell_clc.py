@@ -58,6 +58,9 @@ def test_clc_slot_reuse_never_drops_or_misplaces_a_tile(block, num_blocks):
     tile_shape = (1, heads, num_blocks, block * HEAD_DIM)
     nan = float("nan")
     failures = []
+    # Release the cached blocks earlier tests left behind: with another free block of the same
+    # size in the cache, the op's output can land there instead of in the poisoned block.
+    torch.cuda.empty_cache()
     for call in range(calls):
         # Pre-fill the blocks the op is about to allocate: same sizes, freed in reverse order.
         poison_lse = torch.full((1, heads, S), nan, device="cuda", dtype=torch.float32)
