@@ -49,7 +49,8 @@ async def generate_segment(raw_request: Request) -> Response:
     try:
         body = GenerateRequest.model_validate(await raw_request.json())
         references = _validate_request_references(body.references)
-    except ValueError as error:  # malformed JSON, schema violations, bad references
+        state.validate_lora(body.lora)
+    except ValueError as error:  # malformed JSON, schema violations, bad references, unservable LoRA
         error_body = ErrorEvent(code="invalid_request", message=str(error))
         return JSONResponse(status_code=400, content=error_body.model_dump())
     return StreamingResponse(
@@ -97,7 +98,7 @@ async def stream_segment(
     """
     try:
         generation_request, reference_dir = _prepare_request(body, references, state.default_request)
-        result, generation_ms = await state.generate(generation_request, reference_dir)
+        result, generation_ms = await state.generate(generation_request, body.lora, reference_dir)
     except ValueError as error:
         logger.warning("streaming_v2 rejected a request: %s", error)
         yield format_sse(ErrorEvent(code="invalid_request", message=str(error)))

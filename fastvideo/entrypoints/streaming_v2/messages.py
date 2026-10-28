@@ -7,6 +7,19 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class LoraSelection(BaseModel):
+    """The adapter a request selects, and the strength to apply it at.
+
+    ``id`` names one adapter of the server's allow-list, as ``GET /v1/streamv2/capabilities`` reports it.
+    ``strength`` multiplies the published adapter delta; omitted, the adapter's default strength applies, and
+    ``0`` returns the base model's output unchanged.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    strength: float | None = Field(default=None, ge=0.0)
+
+
 class Reference(BaseModel):
     """One ordered reference: its media type and its base64 bytes."""
 
@@ -32,6 +45,9 @@ class GenerateRequest(BaseModel):
     num_frames: int = Field(gt=0)
     seed: int | None = None
     return_last_frame: bool = False
+    # Omitted, the request renders with the base model (or, after another request loaded an adapter, at strength 0,
+    # which is the base model's output).
+    lora: LoraSelection | None = None
 
 
 class LastFrameEvent(BaseModel):

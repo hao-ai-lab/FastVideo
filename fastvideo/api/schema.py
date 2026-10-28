@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -308,8 +309,61 @@ class StreamingConfig:
 
 
 @dataclass
+class LoRAAdapterConfig:
+    """One community LoRA that a streaming_v2 server may apply to a request.
+
+    ``id`` is what clients ask for; it is the only adapter name a client sees. ``path`` is the local file or
+    directory, or the Hugging Face repo id, that ``VideoGenerator.set_lora_adapter`` loads. The strengths multiply
+    the published adapter delta, so ``0`` is exactly the base model.
+    """
+    id: str
+    path: str
+    default_strength: float = 0.8
+    min_strength: float = 0.0
+    max_strength: float = 2.0
+    # Optional metadata that the capabilities route passes through to clients.
+    description: str = ""
+    license: str = ""
+    source_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("streaming_v2.lora.adapters[].id must not be empty")
+        if not self.path.strip():
+            raise ValueError(f"streaming_v2 LoRA adapter {self.id!r} has an empty path")
+        if not all(
+                math.isfinite(strength) for strength in (self.min_strength, self.default_strength, self.max_strength)):
+            raise ValueError(f"streaming_v2 LoRA adapter {self.id!r} has a non-finite strength")
+        if not self.min_strength <= self.default_strength <= self.max_strength:
+            raise ValueError(f"streaming_v2 LoRA adapter {self.id!r} needs min_strength <= default_strength <= "
+                             f"max_strength, got {self.min_strength}, {self.default_strength}, {self.max_strength}")
+
+
+@dataclass
+class StreamingV2LoRAConfig:
+    """The LoRAs a streaming_v2 server allows a request to select.
+
+    An empty list leaves the server base-model only. No adapter is loaded at startup: the transformer gains LoRA
+    layers when the first request selects one, so a deployment that always requests the base model never pays for
+    them.
+    """
+    adapters: list[LoRAAdapterConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        ids = [adapter.id for adapter in self.adapters]
+        duplicates = sorted({adapter_id for adapter_id in ids if ids.count(adapter_id) > 1})
+        if duplicates:
+            raise ValueError(f"streaming_v2.lora.adapters repeats id(s): {', '.join(duplicates)}")
+
+
+@dataclass
 class StreamingV2Config:
-    """Selects the stateless HTTP + SSE server in ``fastvideo.entrypoints.streaming_v2``; it has no options yet."""
+    """Selects the stateless HTTP + SSE server in ``fastvideo.entrypoints.streaming_v2``.
+
+    ``lora`` lists the adapters that requests may select. Without it the server advertises no LoRA support and
+    refuses every request that carries a ``lora`` field.
+    """
+    lora: StreamingV2LoRAConfig | None = None
 
 
 @dataclass
@@ -351,6 +405,7 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "LoRAAdapterConfig",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",
@@ -366,5 +421,6 @@ __all__ = [
     "ServerConfig",
     "StreamingConfig",
     "StreamingV2Config",
+    "StreamingV2LoRAConfig",
     "WarmupConfig",
 ]

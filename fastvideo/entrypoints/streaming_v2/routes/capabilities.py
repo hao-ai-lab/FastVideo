@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request
 
+from fastvideo.entrypoints.streaming_v2.lora import lora_capabilities
 from fastvideo.pipelines.basic.minimax_h3.reference import (
     MINIMAX_H3_MAX_REFERENCE_AUDIOS,
     MINIMAX_H3_MAX_REFERENCE_IMAGES,
@@ -63,5 +64,6 @@ CAPABILITIES: dict[str, Any] = {
 
 @router.get("/v1/streamv2/capabilities")
 async def get_capabilities(raw_request: Request) -> dict[str, Any]:
-    """The served model's facts."""
-    return CAPABILITIES
+    """The served model's facts plus the ``lora`` block; a server with no adapter list reports it unsupported."""
+    state: ServerState = raw_request.app.state.streaming_v2
+    return {**CAPABILITIES, "lora": lora_capabilities(state.lora)}

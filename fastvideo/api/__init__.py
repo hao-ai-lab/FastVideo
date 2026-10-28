@@ -11,6 +11,7 @@ from fastvideo.api.schema import (
     GeneratorConfig,
     GpuPoolConfig,
     InputConfig,
+    LoRAAdapterConfig,
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
@@ -26,6 +27,7 @@ from fastvideo.api.schema import (
     ServerConfig,
     StreamingConfig,
     StreamingV2Config,
+    StreamingV2LoRAConfig,
     WarmupConfig,
 )
 from fastvideo.api.errors import ConfigValidationError
@@ -85,6 +87,7 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "LoRAAdapterConfig",
     "MiniMaxH3Reference",
     "OffloadConfig",
     "OutputConfig",
@@ -102,6 +105,7 @@ __all__ = [
     "ServerConfig",
     "StreamingConfig",
     "StreamingV2Config",
+    "StreamingV2LoRAConfig",
     "VideoEvent",
     "VideoFinalEvent",
     "VideoPartialEvent",

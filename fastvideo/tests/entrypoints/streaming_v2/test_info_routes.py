@@ -31,6 +31,7 @@ def test_capabilities_reports_hardcoded_h3_ref2va_facts() -> None:
             "5": 124, "6": 158, "7": 175, "8": 192, "9": 226, "10": 243,
             "11": 277, "12": 294, "13": 328, "14": 345, "15": 362,
         },
+        "lora": {"supported": False, "runtime_switching": False, "adapters": []},
     }
 
 
