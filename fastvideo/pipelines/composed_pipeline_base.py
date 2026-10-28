@@ -420,6 +420,8 @@ class ComposedPipelineBase(ABC):
         if args is None or args.inference_mode:
 
             kwargs['model_path'] = model_path
+            if pipeline_config is not None:
+                kwargs['pipeline_config'] = pipeline_config
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
         else:
             assert args is not None, "args must be provided for training mode"
