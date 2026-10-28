@@ -502,6 +502,54 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
     assert captured["output_dir"] == "serve-outputs/"
 
 
+def test_serve_subcommand_forwards_lora_allow_list(tmp_path, monkeypatch):
+    config_path = tmp_path / "serve-lora.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n"
+        "lora:\n"
+        "  adapters:\n"
+        "    - id: realism\n"
+        "      path: org/realism-lora\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+    captured: dict[str, object] = {}
+
+    def fake_run_server(fastvideo_args, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
+        lambda config: SimpleNamespace(model_path=config.model_path),
+    )
+    monkeypatch.setattr(api_server, "run_server", fake_run_server)
+
+    ServeSubcommand().cmd(args)
+
+    runtime = captured["lora_runtime"]
+    assert list(runtime.adapters) == ["realism"]
+    assert runtime.runtime_switching is False
+
+
+def test_serve_cmd_refuses_allow_list_with_startup_adapter_override(tmp_path):
+    config_path = tmp_path / "serve-lora-conflict.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n"
+        "lora:\n"
+        "  adapters:\n"
+        "    - id: realism\n"
+        "      path: org/realism-lora\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(
+        ["--config", str(config_path), "--generator.pipeline.components.lora_path", "/x/adapter.safetensors"])
+
+    with pytest.raises(ValueError, match="startup adapter"):
+        ServeSubcommand().cmd(args)
+
+
 def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     config_path = tmp_path / "serve-default-request.yaml"
     config_path.write_text(

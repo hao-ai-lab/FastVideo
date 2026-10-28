@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
 
-from fastvideo.entrypoints.openai.state import get_served_model_name, get_server_args
+from fastvideo.entrypoints.openai.state import get_served_model_name, get_server_args, get_serving_engine
 from fastvideo.logger import init_logger
 
 router = APIRouter(prefix="/v1")
@@ -58,12 +58,13 @@ async def retrieve_model(model: str):
 async def model_info():
     """Get basic model information"""
     args = get_server_args()
+    lora_runtime = get_serving_engine().lora_runtime
     return {
         "model_path":
         args.model_path,
         "served_model_name":
         get_served_model_name(),
-        "lora": ({
+        "lora": (lora_runtime.info() if lora_runtime is not None else {
             "name": args.lora_nickname,
             "path": args.lora_path,
             "scale": args.lora_strength,
