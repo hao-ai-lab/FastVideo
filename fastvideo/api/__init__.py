@@ -25,6 +25,7 @@ from fastvideo.api.schema import (
     ServeConfig,
     ServerConfig,
     StreamingConfig,
+    StreamingV2Config,
     WarmupConfig,
 )
 from fastvideo.api.errors import ConfigValidationError
@@ -100,6 +101,7 @@ __all__ = [
     "ServeConfig",
     "ServerConfig",
     "StreamingConfig",
+    "StreamingV2Config",
     "VideoEvent",
     "VideoFinalEvent",
     "VideoPartialEvent",

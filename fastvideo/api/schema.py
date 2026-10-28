@@ -308,6 +308,11 @@ class StreamingConfig:
 
 
 @dataclass
+class StreamingV2Config:
+    """Selects the stateless HTTP + SSE server in ``fastvideo.entrypoints.streaming_v2``; it has no options yet."""
+
+
+@dataclass
 class ServeConfig:
     """Typed serve config loaded from ``fastvideo serve --config``.
 
@@ -332,6 +337,8 @@ class ServeConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)
     streaming: StreamingConfig | None = None
+    # A `streaming_v2: {}` block selects the stateless HTTP + SSE segment server.
+    streaming_v2: StreamingV2Config | None = None
 
 
 __all__ = [
@@ -358,5 +365,6 @@ __all__ = [
     "ServeConfig",
     "ServerConfig",
     "StreamingConfig",
+    "StreamingV2Config",
     "WarmupConfig",
 ]

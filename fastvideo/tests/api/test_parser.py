@@ -19,6 +19,7 @@ from fastvideo.api import (
     RunConfig,
     ServeConfig,
     StreamingConfig,
+    StreamingV2Config,
     WarmupConfig,
 )
 
@@ -293,6 +294,14 @@ def test_load_serve_config_supports_json_roundtrip(tmp_path) -> None:
 def test_serve_config_streaming_defaults_to_none() -> None:
     raw = {"generator": {"model_path": "/models/server"}}
     loaded = parse_config(ServeConfig, raw)
+    assert loaded.streaming is None
+    assert loaded.streaming_v2 is None
+
+
+def test_serve_config_parses_empty_streaming_v2_block() -> None:
+    raw = {"generator": {"model_path": "/models/server"}, "streaming_v2": {}}
+    loaded = parse_config(ServeConfig, raw)
+    assert isinstance(loaded.streaming_v2, StreamingV2Config)
     assert loaded.streaming is None
 
 

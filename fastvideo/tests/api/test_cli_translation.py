@@ -17,6 +17,7 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import api_server
 from fastvideo.entrypoints.streaming import server as streaming_server
+from fastvideo.entrypoints.streaming_v2 import server as streaming_v2_server
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.utils import FlexibleArgumentParser
 
@@ -592,6 +593,47 @@ def test_serve_cmd_dispatches_to_streaming_when_streaming_block_set(tmp_path, mo
     serve_config = captured["serve_config"]
     assert serve_config.streaming is not None
     assert serve_config.streaming.stream_mode == "av_fmp4"
+
+
+def test_serve_cmd_dispatches_to_streaming_v2_when_streaming_v2_block_set(tmp_path, monkeypatch):
+    config_path = tmp_path / "serve-streaming-v2.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: stream-model\n"
+        "streaming_v2: {}\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+
+    captured: dict[str, object] = {}
+
+    def fake_run_server(serve_config):
+        captured["serve_config"] = serve_config
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("only the streaming_v2 server may run when streaming_v2 is set")
+
+    monkeypatch.setattr(streaming_v2_server, "run_server", fake_run_server)
+    monkeypatch.setattr(streaming_server, "run_server", fail_if_called)
+    monkeypatch.setattr(api_server, "run_server", fail_if_called)
+    ServeSubcommand().cmd(args)
+
+    assert captured["serve_config"].streaming_v2 is not None
+
+
+def test_serve_cmd_rejects_both_streaming_blocks(tmp_path):
+    config_path = tmp_path / "serve-both-streaming.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: stream-model\n"
+        "streaming: {}\n"
+        "streaming_v2: {}\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+
+    with pytest.raises(ValueError, match="not both"):
+        ServeSubcommand().cmd(args)
 
 
 def test_streaming_run_server_rejects_missing_streaming_block():

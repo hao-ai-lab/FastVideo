@@ -42,6 +42,16 @@ class ServeSubcommand(CLISubcommand):
 
         logger.info("CLI serve config: %s", serve_config)
 
+        if serve_config.streaming is not None and serve_config.streaming_v2 is not None:
+            raise ValueError("A serve config may set `streaming:` or `streaming_v2:`, not both.")
+
+        # A `streaming_v2:` block selects the stateless HTTP + SSE segment server.
+        if serve_config.streaming_v2 is not None:
+            from fastvideo.entrypoints.streaming_v2.server import (
+                run_server as run_streaming_v2_server, )
+            run_streaming_v2_server(serve_config)
+            return
+
         # A `streaming:` block selects the WebSocket/Dynamo runtime;
         # its deps stay out of REST-only deployments via lazy import.
         if serve_config.streaming is not None:
