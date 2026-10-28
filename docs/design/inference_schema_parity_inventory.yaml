@@ -153,6 +153,8 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      text_conditioning_cache_max_bytes:
+        sources: [fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig]
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig
