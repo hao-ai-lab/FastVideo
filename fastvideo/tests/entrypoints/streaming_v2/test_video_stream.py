@@ -12,10 +12,12 @@ import pytest
 from fastvideo import envs
 from fastvideo.entrypoints.streaming_v2.video_stream import encode_fmp4, video_mime
 
-pytestmark = pytest.mark.skipif(
-    shutil.which(envs.FASTVIDEO_FFMPEG_BIN.get()) is None,
-    reason="ffmpeg is not installed",
-)
+
+@pytest.fixture(autouse=True)
+def _require_ffmpeg() -> None:
+    if shutil.which(envs.FASTVIDEO_FFMPEG_BIN.get()) is None:
+        pytest.skip("ffmpeg is not installed")
+
 
 _FPS = 24
 _NUM_FRAMES = 24
