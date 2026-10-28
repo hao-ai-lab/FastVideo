@@ -77,8 +77,9 @@ def check_adapter_file(adapter: LoRAAdapterConfig) -> None:
 def build_lora_runtime(serve_config: ServeConfig) -> LoraRuntime | None:
     """The runtime for the serve config's allow-list, or ``None`` without one; raises ``ValueError`` at startup.
 
-    Per-request adapters need side-branch layers: a merged dense layer keeps an earlier adapter's delta when a
-    later adapter does not cover it. Every adapter is checked here so that an unusable one stops the server.
+    Per-request adapters are served only where the quantized linears take adapters as side branches, so a switch
+    rewrites only the few linears a packed export leaves unquantized; the pipeline restores those from their original
+    weights. Every adapter is checked here so that an unusable one stops the server.
     """
     if serve_config.lora is None or not serve_config.lora.adapters:
         return None

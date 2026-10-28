@@ -720,6 +720,9 @@ class LoRAPipeline(ComposedPipelineBase):
                                     lora_path,
                                     name,
                                 )
+                            if not accumulate:
+                                # An earlier adapter may be merged here; disabling alone would keep its delta.
+                                layer.unmerge_lora_weights()
                             layer.disable_lora = True
                     # Repack inside the offload scope, while the block's parameters are resident.
                     repack_scope = [module] if module is not None else list(layers.values())

@@ -162,7 +162,9 @@ NVFP4 export (a `transformer/nvfp4_weights.safetensors` file with `transformer_q
 `FASTVIDEO_LORA_SIDE_BRANCH=1` is set. At startup it also checks that every adapter resolves to a safetensors file
 and is purely low-rank: adapters with dense replacement payloads (`.diff` and `.set_weight` tensors, as in the
 [FastH3 adapter](fasth3-distilled.md)) can only be applied when the model loads, and the server refuses to start with
-one. A side-branch layer holds one adapter at a time.
+one. A side-branch layer holds one adapter at a time. Linears that a packed export leaves unquantized still merge the
+adapter into their weights; switching to another adapter first restores each of them, including those the new
+adapter does not cover.
 
 ## Limitations
 
