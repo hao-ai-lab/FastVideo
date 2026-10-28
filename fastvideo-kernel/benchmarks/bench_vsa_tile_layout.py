@@ -71,7 +71,6 @@ def make_step(impl: VideoSparseAttentionImpl, qkvg: torch.Tensor, builder: Video
             return (impl.forward(q, k, v, gate, metadata), )
         if metadata.fused_layout_active:
             return q, k, v, gate
-        # Match forward(): only Q/K/V need contiguous copies; gate is a view.
         return (q.transpose(1, 2).contiguous(), k.transpose(1, 2).contiguous(), v.transpose(1, 2).contiguous(),
                 gate.transpose(1, 2))
 

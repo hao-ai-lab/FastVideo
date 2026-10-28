@@ -62,7 +62,6 @@ def test_layout_benchmark_matches_forward_preprocessing(monkeypatch, fused):
     original_gate = vsa._can_fuse_vsa64_layout
 
     def allow_test_device(x, metadata):
-        # Override only layout eligibility; kernel execution uses the real GPU.
         with monkeypatch.context() as gate_patch:
             gate_patch.setattr(torch.cuda, "get_device_capability", lambda *args: (10, 0))
             return original_gate(x, metadata)
@@ -91,7 +90,6 @@ def test_layout_benchmark_matches_forward_preprocessing(monkeypatch, fused):
         def reject_cat(*args, **kwargs):
             pytest.fail("The timed layout step must not concatenate its outputs")
 
-        # Metadata construction may concatenate indices; only guard the timed calls.
         with monkeypatch.context() as timed_patch:
             timed_patch.setattr(torch, "cat", reject_cat)
             layout = layout_step()
