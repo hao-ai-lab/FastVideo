@@ -125,9 +125,14 @@ cross-attention; key and value must have the same sequence length.
 |---|---|
 | SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split backward. Long equal-length sequences (at least 16,384 tokens) use 64x128 backward tiles with tuned launch parameters in every forward mode; in `fast` mode without exact-M they also use complete forward tiles without bounds masks and accumulator lifetime tuning. Other optimized cases use the masked forward loop and 64x64 backward. Optimized backward requires a 16-aligned KV length |
 | SM120, including RTX 5090 | Previous forward tiling with joined quantized/STE P@V operations and a shallower backward pipeline for long sequences |
+| SM121, including DGX Spark / GB10 | Previous forward tiling with split quantized/STE P@V operations and a shallower backward pipeline for long sequences |
 | Unsupported configurations | Previous Triton implementation |
 
-Warp specialization is disabled automatically on SM100 and SM120 because the
+On GB10, the joined P@V path does not preserve the split path's softmax
+statistics, outputs, or gradients. Joining is restricted to SM120, even when
+`FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=1` is set on GB10.
+
+Warp specialization is disabled automatically on SM100, SM120, and SM121 because the
 Triton 3.7 NVWS compiler pass aborts for this kernel on Blackwell. No user
 setting is required.
 
@@ -139,7 +144,7 @@ The available tuning and comparison controls are:
 | `FASTVIDEO_ATTN_QAT_FWD_EXACT_M` | `0` | Set to `1` to recompute reference-order softmax statistics and keep `dV` bitwise-compatible on the SM100 optimized route |
 | `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED` | `1` | Set to `0` to force the previous SM100 forward and backward for comparison |
 | `FASTVIDEO_ATTN_QAT_SM100_WIDE_BWD` | `1` | Set to `0` to retain 64x64 backward tiles for long equal-length SM100 attention. Applies in every forward mode, including `reference` and `FWD_EXACT_M=1` |
-| `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` | `1` | Set to `0` to compare SM120 against the split P@V path |
+| `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` | `1` | On SM120 only, set to `0` to compare against the split P@V path; GB10 always uses split P@V |
 
 The first invocation JIT-compiles the selected configuration; later calls reuse
 the Triton cache. To measure the production shape, run
