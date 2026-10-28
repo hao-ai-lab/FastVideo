@@ -150,14 +150,15 @@ is rejected. A bad selection gets HTTP 400 before any job is stored.
 Strength `0` is exactly the base model, with output identical to a request without `lora`. A request without `lora`
 sets the last-used adapter to strength 0 instead of unloading it, so one request never inherits another's
 adapter. The server applies the adapter under the same lock as the generation, so requests never interleave. If
-a change fails, that request fails with the loader's message, and the server restores the base model before the
-next request.
+a change fails, that request fails with the loader's message, and the server sets an adapter it already holds back
+to strength 0 before the next request; it never renders with an adapter the request did not select.
 
-Only pure low-rank adapters can change at runtime. `runtime_switching` in `model_info` is true when the adapter
-runs as a side branch: with `FASTVIDEO_LORA_SIDE_BRANCH=1`, or on a packed NVFP4 export (a
-`transformer/nvfp4_weights.safetensors` file with `transformer_quant: NVFP4`). Adapters with dense replacement
-payloads (`.diff` and `.set_weight` tensors, as in the [FastH3 adapter](fasth3-distilled.md)) cannot be swapped on a
-running server, and the pipeline rejects them with a clear error. A side-branch layer holds one adapter at a time.
+Per-request adapters need side-branch LoRA layers, so the server refuses an allow-list unless the model is a packed
+NVFP4 export (a `transformer/nvfp4_weights.safetensors` file with `transformer_quant: NVFP4`) or
+`FASTVIDEO_LORA_SIDE_BRANCH=1` is set. At startup it also checks that every adapter resolves to a safetensors file
+and is purely low-rank: adapters with dense replacement payloads (`.diff` and `.set_weight` tensors, as in the
+[FastH3 adapter](fasth3-distilled.md)) can only be applied when the model loads, and the server refuses to start with
+one. A side-branch layer holds one adapter at a time.
 
 ## Limitations
 

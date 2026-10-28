@@ -524,12 +524,12 @@ def test_serve_subcommand_forwards_lora_allow_list(tmp_path, monkeypatch):
         lambda config: SimpleNamespace(model_path=config.model_path),
     )
     monkeypatch.setattr(api_server, "run_server", fake_run_server)
+    monkeypatch.setattr("fastvideo.entrypoints.openai.lora.check_adapter_file", lambda adapter: None)
 
-    ServeSubcommand().cmd(args)
+    with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(True):
+        ServeSubcommand().cmd(args)
 
-    runtime = captured["lora_runtime"]
-    assert list(runtime.adapters) == ["realism"]
-    assert runtime.runtime_switching is False
+    assert list(captured["lora_runtime"].adapters) == ["realism"]
 
 
 def test_serve_cmd_refuses_allow_list_with_startup_adapter_override(tmp_path):

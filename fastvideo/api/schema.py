@@ -320,7 +320,6 @@ class LoRAAdapterConfig:
     default_strength: float = 0.8
     min_strength: float = 0.0
     max_strength: float = 2.0
-    # Optional metadata that model_info passes through to clients.
     description: str = ""
     license: str = ""
     source_url: str = ""

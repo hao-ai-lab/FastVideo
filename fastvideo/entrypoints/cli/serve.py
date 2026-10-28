@@ -60,13 +60,9 @@ class ServeSubcommand(CLISubcommand):
             serve_config.server.port,
         )
 
-        lora_kwargs = {}
-        if serve_config.lora is not None and serve_config.lora.adapters:
-            from fastvideo.entrypoints.openai.lora import LoraRuntime, adapters_attach_as_side_branch
-            lora_kwargs["lora_runtime"] = LoraRuntime(
-                serve_config.lora,
-                runtime_switching=adapters_attach_as_side_branch(serve_config.generator),
-            )
+        from fastvideo.entrypoints.openai.lora import build_lora_runtime
+        lora_runtime = build_lora_runtime(serve_config)
+        lora_kwargs = {} if lora_runtime is None else {"lora_runtime": lora_runtime}
 
         fastvideo_args = generator_config_to_fastvideo_args(serve_config.generator)
         run_server(

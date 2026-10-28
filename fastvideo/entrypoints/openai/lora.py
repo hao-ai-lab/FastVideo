@@ -8,14 +8,18 @@ one with it runs at strength 0.
 from __future__ import annotations
 
 import math
+import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from fastvideo import envs
-from fastvideo.api.schema import GeneratorConfig, LoRAAdapterConfig, ServeLoRAConfig
+from fastvideo.api.schema import GeneratorConfig, LoRAAdapterConfig, ServeConfig, ServeLoRAConfig
 from fastvideo.layers.quantization.nvfp4_config import H3_NVFP4_DIT_EXPORT_FILENAME
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.lora_patch import DenseLoRAPatch
+from fastvideo.utils import maybe_download_lora, maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -39,15 +43,52 @@ def adapters_attach_as_side_branch(generator: GeneratorConfig) -> bool:
     """Whether adapters attach beside the base weights, so a request can change them on the running server.
 
     That holds with ``FASTVIDEO_LORA_SIDE_BRANCH=1`` and for a packed NVFP4 export, whose linears have no dense
-    weight to merge into. Any other checkpoint merges the adapter into dense weights, or has them purged, and
-    rejects a change.
+    weight to merge into. A Hugging Face model id is resolved to its snapshot first, fetching only the packed
+    transformer file.
     """
     if envs.FASTVIDEO_LORA_SIDE_BRANCH.get():
         return True
     quantization = generator.engine.quantization
     if quantization is None or quantization.transformer_quant != "NVFP4":
         return False
-    return (Path(generator.model_path) / "transformer" / H3_NVFP4_DIT_EXPORT_FILENAME).is_file()
+    export = f"transformer/{H3_NVFP4_DIT_EXPORT_FILENAME}"
+    try:
+        model_dir = maybe_download_model(generator.model_path, allow_patterns=[export])
+    except ValueError:
+        logger.warning("Could not resolve %s to check for a packed NVFP4 export", generator.model_path, exc_info=True)
+        return False
+    return (Path(model_dir) / export).is_file()
+
+
+def check_adapter_file(adapter: LoRAAdapterConfig) -> None:
+    """Raise ``ValueError`` for an adapter the pipeline would refuse before changing any weight.
+
+    The adapter must resolve to a safetensors file, and must carry no dense payload, which can only be applied
+    when the model loads.
+    """
+    local_path = maybe_download_lora(adapter.path)
+    if not os.path.isfile(local_path):
+        raise ValueError(f"LoRA adapter {adapter.id!r} resolves to {local_path!r}, which is not a file")
+    if DenseLoRAPatch.from_adapter(local_path) is not None:
+        raise ValueError(f"LoRA adapter {adapter.id!r} carries dense replacement tensors; only low-rank adapters "
+                         "can change on a running server")
+
+
+def build_lora_runtime(serve_config: ServeConfig) -> LoraRuntime | None:
+    """The runtime for the serve config's allow-list, or ``None`` without one; raises ``ValueError`` at startup.
+
+    Per-request adapters need side-branch layers: a merged dense layer keeps an earlier adapter's delta when a
+    later adapter does not cover it. Every adapter is checked here so that an unusable one stops the server.
+    """
+    if serve_config.lora is None or not serve_config.lora.adapters:
+        return None
+    if not adapters_attach_as_side_branch(serve_config.generator):
+        raise ValueError("Per-request LoRA adapters need side-branch LoRA layers: serve a packed NVFP4 export "
+                         "(transformer_quant: NVFP4) or set FASTVIDEO_LORA_SIDE_BRANCH=1.")
+    runtime = LoraRuntime(serve_config.lora)
+    for adapter in serve_config.lora.adapters:
+        check_adapter_file(adapter)
+    return runtime
 
 
 def _first(body: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -72,12 +113,13 @@ def _adapter_info(adapter: LoRAAdapterConfig) -> dict[str, Any]:
 class LoraRuntime:
     """The adapters a request may select, and the adapter the generator currently carries."""
     config: ServeLoRAConfig
-    runtime_switching: bool = False
+    check_adapter: Callable[[LoRAAdapterConfig], None] = check_adapter_file
     current_id: str | None = None
     current_strength: float | None = None
     # Set when a failed change left the generator's adapter state unknown; cleared by the next successful change.
     unknown_state: bool = False
     adapters: dict[str, LoRAAdapterConfig] = field(init=False)
+    loaded: set[str] = field(init=False, default_factory=set)
 
     def __post_init__(self) -> None:
         self.adapters = {adapter.id: adapter for adapter in self.config.adapters}
@@ -86,7 +128,7 @@ class LoraRuntime:
         """The ``lora`` block of ``GET /v1/model_info``."""
         return {
             "supported": True,
-            "runtime_switching": self.runtime_switching,
+            "runtime_switching": True,
             "base_strength": 0.0,
             "adapters": [_adapter_info(adapter) for adapter in self.config.adapters],
         }
@@ -122,9 +164,9 @@ class LoraRuntime:
         """
         if selection is None:
             if self.unknown_state:
-                if not self._reset_to_base(generator, list(self.adapters)):
+                if not self._reset_to_base(generator, []):
                     raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and no "
-                                       "adapter could be set to strength 0 to restore the base model.")
+                                       "loaded adapter could be set to strength 0 to restore the base model.")
                 return
             if self.current_id is None or self.current_strength == 0.0:
                 return
@@ -135,6 +177,12 @@ class LoraRuntime:
         self._set(generator, selection.id, selection.strength)
 
     def _set(self, generator: Any, adapter_id: str, strength: float) -> None:
+        if adapter_id not in self.loaded:
+            try:
+                self.check_adapter(self.adapters[adapter_id])
+            except ValueError as error:
+                logger.warning("LoRA adapter %r failed its pre-load check: %s", adapter_id, error)
+                raise LoraRequestError(f"LoRA adapter {adapter_id!r} cannot be loaded on this server.") from error
         logger.info("OpenAI server applies LoRA adapter %r at strength %g", adapter_id, strength)
         previous_id = None if self.unknown_state else self.current_id
         try:
@@ -144,21 +192,27 @@ class LoraRuntime:
             self.current_id = None
             self.current_strength = None
             self.unknown_state = True
-            if previous_id is not None:
-                self._reset_to_base(generator, [previous_id])
+            self._reset_to_base(generator, [previous_id, adapter_id])
             raise LoraRequestError(f"LoRA adapter {adapter_id!r} could not be applied: {error}") from error
+        self.loaded.add(adapter_id)
         self.current_id = adapter_id
         self.current_strength = strength
         self.unknown_state = False
 
-    def _reset_to_base(self, generator: Any, candidates: list[str]) -> bool:
-        """Re-apply the first candidate that loads at strength 0, which is exactly the base model."""
+    def _reset_to_base(self, generator: Any, preferred: list[str | None]) -> bool:
+        """Set an adapter the pipeline holds to strength 0, which is exactly the base model.
+
+        ``lora_path=None`` re-applies the adapter from the pipeline's memory, so recovery never reads an adapter
+        file; an adapter the pipeline never loaded is refused before any weight changes.
+        """
+        candidates = dict.fromkeys(adapter_id for adapter_id in (*preferred, *self.loaded) if adapter_id is not None)
         for adapter_id in candidates:
             try:
-                generator.set_lora_adapter(adapter_id, self.adapters[adapter_id].path, strength=0.0)
+                generator.set_lora_adapter(adapter_id, None, strength=0.0)
             except Exception:
                 logger.exception("OpenAI server could not set LoRA adapter %r to strength 0", adapter_id)
                 continue
+            self.loaded.add(adapter_id)
             self.current_id = adapter_id
             self.current_strength = 0.0
             self.unknown_state = False
