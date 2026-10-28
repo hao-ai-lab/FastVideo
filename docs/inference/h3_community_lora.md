@@ -118,6 +118,10 @@ range in the serve config; see `examples/serving/openai_fasth3_nvfp4_lora_allowl
 ```yaml
 generator:
   model_path: /models/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer
+  engine:
+    quantization:
+      transformer_quant: NVFP4  # required: per-request adapters need the packed NVFP4 side-branch layers
+      layer_profile: h3_dit_vsa
 lora:
   adapters:
     - id: fal/MiniMax-H3-Realism-People-LoRA

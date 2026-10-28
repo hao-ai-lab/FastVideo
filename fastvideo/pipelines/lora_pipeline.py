@@ -41,6 +41,10 @@ def _merge_mode_modules(pipeline: Any, transformer_modules: dict[str, nn.Module]
     """
     lora_layers = getattr(pipeline, "lora_layers", None) or {}
     for transformer_name, transformer in transformer_modules.items():
+        if is_lazy_module(transformer) and not transformer.is_materialized:
+            # Nothing resident to rewrite, and touching the proxy would load it, or reload it from inside its own
+            # materialize transform. A reload re-applies the adapter to fresh layers.
+            continue
         transformer_layers = lora_layers.get(transformer_name)
         if transformer_layers is None:
             yield from transformer.modules()
@@ -221,6 +225,8 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_min_match_fraction: float = 0.5
     _constructor_dense_lora_path: str | None = None
     _setting_constructor_adapter: bool = False
+    # The adapter and strength last set at runtime; a released lazy transformer gets it back when it loads again.
+    _runtime_adapter: tuple[str, float] | None = None
     # Sequential load (the 32 GB and other cards that cannot hold the text encoder and the DiT at once) omits
     # the transformer from the first load. The adapter is applied when that module arrives.
     _constructor_adapter_pending: bool = False
@@ -452,6 +458,17 @@ class LoRAPipeline(ComposedPipelineBase):
         finally:
             self._setting_constructor_adapter = False
 
+    def _reapply_runtime_adapter(self) -> None:
+        """Apply the runtime adapter, from memory, to the fresh LoRA layers of a reloaded lazy transformer."""
+        if self._runtime_adapter is None:
+            return
+        name, strength = self._runtime_adapter
+        if name not in self.lora_adapters:
+            return
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self.set_lora_adapter(name, strength=strength)
+
     def _convert_one_transformer(self, transformer_name: str, transformer_module: nn.Module) -> None:
         excluded_lora_layers = self._exclude_lora_layers_for(transformer_name, transformer_module)
         # Fresh instance after a lazy rematerialize must not keep the previous
@@ -526,6 +543,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 def _lora_after_load(module: nn.Module, *, _name: str = transformer_name) -> nn.Module:
                     self._convert_one_transformer(_name, module)
                     self._apply_constructor_adapter()
+                    self._reapply_runtime_adapter()
                     return module
 
                 transformer_module.add_release_callback(_drop_lora_refs)
@@ -724,6 +742,8 @@ class LoRAPipeline(ComposedPipelineBase):
                                lora_path)
             if unmatched:
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
+        if not self._setting_constructor_adapter and not accumulate:
+            self._runtime_adapter = (lora_nickname, strength)
 
     def merge_lora_weights(self) -> None:
         """Merge LoRA weights, then repack the packed quantized buffers for the merged state.
