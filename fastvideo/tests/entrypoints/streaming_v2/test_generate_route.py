@@ -47,8 +47,8 @@ def _body(**overrides: Any) -> dict[str, Any]:
         "prompt": "a lighthouse at dusk",
         "references": [{"media_type": "image", "data": _png_base64()}],
         "width": 64,
-        "height": 48,
-        "num_frames": 4,
+        "height": 32,
+        "num_frames": 124,
         "seed": 7,
         "return_last_frame": True,
     }
@@ -123,7 +123,7 @@ def test_generate_streams_last_frame_video_and_done_in_order(fake_encoder: None)
 
     request = generator.requests[0]
     assert request.prompt == "a lighthouse at dusk"
-    assert (request.sampling.width, request.sampling.height, request.sampling.num_frames, request.sampling.seed) == (64, 48, 4, 7)
+    assert (request.sampling.width, request.sampling.height, request.sampling.num_frames, request.sampling.seed) == (64, 32, 124, 7)
     assert len(request.inputs.references) == 1 and request.inputs.references[0].media_type == "image"
     assert request.output.save_video is False and request.output.return_frames is True
 
@@ -154,7 +154,7 @@ def test_generate_hands_references_to_the_model_as_files_in_order(fake_encoder: 
     media_types = [reference.media_type for reference in generator.requests[0].inputs.references]
     assert media_types == ["video", "image", "audio"]
     assert generator.reference_bytes == [[b"video one", b"not decoded here", b"audio"]]
-    assert list(temp_root.iterdir()) == []  # the generation task removed the reference files
+    assert list(temp_root.iterdir()) == []
 
 
 def test_generate_omits_last_frame_unless_requested(fake_encoder: None) -> None:
@@ -169,6 +169,9 @@ def test_generate_omits_last_frame_unless_requested(fake_encoder: None) -> None:
     [
         b"not json",
         json.dumps(_body(width=None)).encode(),
+        json.dumps(_body(width=1, height=768)).encode(),
+        json.dumps(_body(num_frames=4)).encode(),
+        json.dumps(_body(num_frames=1000)).encode(),
         json.dumps({key: value for key, value in _body().items() if key != "num_frames"}).encode(),
         json.dumps(_body(prompt="")).encode(),
         json.dumps(_body(unknown_field=1)).encode(),
@@ -309,5 +312,30 @@ def test_lock_and_reference_files_stay_until_generation_returns_when_caller_is_c
             await asyncio.sleep(0.05)
         assert not state.lock.locked()
         assert not reference_dir.exists()
+
+    asyncio.run(scenario())
+
+
+def test_a_caller_cancelled_while_queued_never_generates(tmp_path: Path) -> None:
+    """A request abandoned while another holds the lock leaves the queue and removes its reference files."""
+    generator = _GatedGenerator()
+    queued_dir = tmp_path / "queued"
+    queued_dir.mkdir()
+
+    async def scenario() -> None:
+        state = ServerState(generator=generator)
+        running = asyncio.ensure_future(state.generate(GenerationRequest(prompt="p")))
+        await asyncio.to_thread(generator.started.acquire)
+        queued = asyncio.ensure_future(state.generate(GenerationRequest(prompt="p"), reference_dir=str(queued_dir)))
+        await asyncio.sleep(0.05)
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        assert not queued_dir.exists()
+        generator.release.set()
+        await asyncio.wait_for(running, timeout=10)
+        await asyncio.sleep(0.05)
+        assert generator.calls == 1
+        assert not state.lock.locked()
 
     asyncio.run(scenario())

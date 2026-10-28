@@ -32,7 +32,9 @@ from fastvideo.entrypoints.streaming_v2.messages import (
 )
 from fastvideo.entrypoints.streaming_v2.video_stream import encode_fmp4, video_mime
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_CANVAS_MULTIPLE
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3Reference, validate_references
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import resolve_target_num_frames
 
 if TYPE_CHECKING:
     from fastvideo.entrypoints.streaming_v2.server import ServerState
@@ -48,15 +50,24 @@ async def generate_segment(raw_request: Request) -> Response:
     state: ServerState = raw_request.app.state.streaming_v2
     try:
         body = GenerateRequest.model_validate(await raw_request.json())
+        _validate_geometry(body)
         references = _validate_request_references(body.references)
         state.validate_lora(body.lora)
-    except ValueError as error:  # malformed JSON, schema violations, bad references, unservable LoRA
+    except ValueError as error:  # malformed JSON, schema violations, bad geometry or references, unservable LoRA
         error_body = ErrorEvent(code="invalid_request", message=str(error))
         return JSONResponse(status_code=400, content=error_body.model_dump())
     return StreamingResponse(
         stream_segment(state, body, references, received),
         media_type="text/event-stream",
     )
+
+
+def _validate_geometry(body: GenerateRequest) -> None:
+    """Apply MiniMax-H3's canvas and duration rules before the response becomes a stream."""
+    if body.width % MINIMAX_H3_CANVAS_MULTIPLE or body.height % MINIMAX_H3_CANVAS_MULTIPLE:
+        raise ValueError(f"width and height must be multiples of {MINIMAX_H3_CANVAS_MULTIPLE}, "
+                         f"got {body.width}x{body.height}.")
+    resolve_target_num_frames(body.num_frames)
 
 
 def _validate_request_references(references: list[Reference]) -> list[MiniMaxH3Reference]:

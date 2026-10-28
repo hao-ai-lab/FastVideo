@@ -45,23 +45,28 @@ class ServerState:
     ) -> tuple[Any, float]:
         """Apply the LoRA selection, run one generation, and return its result and duration in milliseconds.
 
-        The call cannot be interrupted, so the lock stays held until it returns even when the caller is
-        cancelled; otherwise a second generation could start on the same pipeline. The generation task, not the
-        caller, removes ``reference_dir``, the directory of the reference files that ``request`` reads.
+        A caller cancelled while it waits for the lock leaves without generating. Once the lock is held, the
+        generation cannot be interrupted, so the lock stays held until it returns even when the caller is
+        cancelled; otherwise a second generation could start on the same pipeline. ``reference_dir``, the
+        directory of the reference files that ``request`` reads, is removed when the request ends either way.
         """
+        try:
+            await self.lock.acquire()
+        except BaseException:
+            _remove_reference_dir(reference_dir)
+            raise
 
         async def run_locked() -> tuple[Any, float]:
             try:
-                async with self.lock:
-                    self.validate_lora(lora)
-                    if self.lora is not None:
-                        await asyncio.to_thread(self.lora.apply, self.generator, lora)
-                    started = time.perf_counter()
-                    result = await asyncio.to_thread(self.generator.generate, request)
-                    return result, (time.perf_counter() - started) * 1000.0
+                self.validate_lora(lora)
+                if self.lora is not None:
+                    await asyncio.to_thread(self.lora.apply, self.generator, lora)
+                started = time.perf_counter()
+                result = await asyncio.to_thread(self.generator.generate, request)
+                return result, (time.perf_counter() - started) * 1000.0
             finally:
-                if reference_dir is not None:
-                    shutil.rmtree(reference_dir, ignore_errors=True)
+                self.lock.release()
+                _remove_reference_dir(reference_dir)
 
         task = asyncio.ensure_future(run_locked())
         task.add_done_callback(_retrieve_exception)
@@ -74,6 +79,11 @@ class ServerState:
         if self.lora is None:
             raise LoraRequestError("This server declares no LoRA adapter; omit the lora field.")
         self.lora.validate(lora)
+
+
+def _remove_reference_dir(reference_dir: str | None) -> None:
+    if reference_dir is not None:
+        shutil.rmtree(reference_dir, ignore_errors=True)
 
 
 def _retrieve_exception(task: asyncio.Future) -> None:
