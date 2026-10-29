@@ -50,7 +50,6 @@ from fastvideo.train.utils.moduleloader import load_module_from_path
 from fastvideo.train.utils.lora import finalize_lora_training, LoraConfig
 
 if TYPE_CHECKING:
-    from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.train.utils.training_config import TrainingConfig
 
 # Released H3 checkpoints map one shared denoising stage through these
