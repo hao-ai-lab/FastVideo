@@ -234,6 +234,18 @@ class _RaisingValidationCallback(_RecordingValidationCallback):
         raise RuntimeError("validation boom")
 
 
+class _RaisingInferenceCheckpointManager(_RecordingCheckpointManager):
+
+    def __init__(self, fail_step: int) -> None:
+        super().__init__()
+        self.fail_step = fail_step
+
+    def maybe_save_inference(self, step: int, *, validation_scheduled: bool) -> None:
+        if step == self.fail_step:
+            raise RuntimeError("inference boom")
+        super().maybe_save_inference(step, validation_scheduled=validation_scheduled)
+
+
 def test_trainer_saves_final_checkpoint_when_validation_raises(monkeypatch, ) -> None:
     """A crash in final-step validation must not discard the terminal save.
 
@@ -291,4 +303,62 @@ def test_trainer_saves_final_checkpoint_when_validation_raises(monkeypatch, ) ->
 
     assert checkpoint_manager.maybe_save_steps == [1, 2]
     assert checkpoint_manager.maybe_save_inference_steps == [3]
+    assert checkpoint_manager.save_final_steps == [3]
+
+
+def test_trainer_saves_final_checkpoint_when_inference_save_raises(monkeypatch, ) -> None:
+    """A crash in the final-step inference save must not discard the save.
+
+    The inference export runs inside the same guarded section as
+    validation. If it raises on the last step, the deferred terminal
+    ``save_final`` must still run before the error propagates.
+    """
+    tracker = _DummyTracker()
+    group = SimpleNamespace(rank=0, local_rank=0, rank_in_group=0, world_size=1)
+
+    monkeypatch.setattr("fastvideo.train.trainer.get_world_group", lambda: group)
+    monkeypatch.setattr("fastvideo.train.trainer.get_sp_group", lambda: group)
+    monkeypatch.setattr(
+        "fastvideo.train.callbacks.validation.get_world_group",
+        lambda: group,
+    )
+    monkeypatch.setattr(
+        "fastvideo.train.callbacks.validation.get_sp_group",
+        lambda: group,
+    )
+    monkeypatch.setattr(
+        "fastvideo.train.trainer.build_tracker",
+        lambda *args, **kwargs: tracker,
+    )
+
+    cfg = TrainingConfig()
+    cfg.tracker.project_name = ""
+    cfg.loop.gradient_accumulation_steps = 1
+    callback_configs = {
+        "validation": {
+            "_target_": f"{__name__}._RecordingValidationCallback",
+            "pipeline_target": "unused.pipeline.Target",
+            "dataset_file": "unused.json",
+            "every_steps": 3,
+            "run_at_start": False,
+        }
+    }
+    trainer = Trainer(
+        cfg,
+        callback_configs=callback_configs,
+    )
+    method = _DummyMethod()
+    checkpoint_manager = _RaisingInferenceCheckpointManager(fail_step=3)
+
+    with pytest.raises(RuntimeError, match="inference boom"):
+        trainer.run(
+            method,
+            dataloader=[{
+                "sample": "x"
+            }],
+            max_steps=3,
+            checkpoint_manager=checkpoint_manager,
+        )
+
+    assert checkpoint_manager.maybe_save_steps == [1, 2]
     assert checkpoint_manager.save_final_steps == [3]
