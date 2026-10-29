@@ -17,7 +17,7 @@ with its prompt and video guardrails by default, so install them first (see
 [Guardrails](../inference/pan2.md#guardrails)):
 
 ```bash
-pip install git+https://github.com/ifm-ai/pan2-guardrail
+pip install git+https://github.com/MBZUAI-IFM/PAN2-guardrail
 python examples/inference/basic/basic_pan2.py
 ```
 

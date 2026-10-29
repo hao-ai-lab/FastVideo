@@ -54,12 +54,12 @@ VAE into the first latent frame of the conditioning input.
 ## Guardrails
 
 PAN 2 runs with guardrails by default, as in its vLLM-Omni and Diffusers integrations. The
-[`pan2-guardrail`](https://github.com/ifm-ai/pan2-guardrail) package checks every prompt before any compute and every
+[`pan2-guardrail`](https://github.com/MBZUAI-IFM/PAN2-guardrail) package checks every prompt before any compute and every
 generated video after decoding. A blocked prompt or video raises `PAN2GuardrailViolationError`. Install the package
 before loading the pipeline:
 
 ```bash
-pip install git+https://github.com/ifm-ai/pan2-guardrail
+pip install git+https://github.com/MBZUAI-IFM/PAN2-guardrail
 ```
 
 | Setting | Default | What it does |

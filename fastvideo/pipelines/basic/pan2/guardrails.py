@@ -48,7 +48,7 @@ class PAN2Guardrails:
     def __init__(self, offload_to_cpu: bool = False) -> None:
         if importlib.util.find_spec("pan2_guardrail") is None:
             raise ImportError("PAN 2 runs with guardrails by default, but the pan2-guardrail package is not installed. "
-                              "Install it with `pip install git+https://github.com/ifm-ai/pan2-guardrail`, " +
+                              "Install it with `pip install git+https://github.com/MBZUAI-IFM/PAN2-guardrail`, " +
                               _DISABLE_HINT)
         self.offload_to_cpu = offload_to_cpu
         self.checker = None
