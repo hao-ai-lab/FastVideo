@@ -68,6 +68,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | matrixgame | `FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-Base-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Diffusers`<br />`mignonjia/mg_longtuning_distilled_zelda`<br />`mignonjia/mg_sf_distilled_zelda_1k_steps`<br />`mignonjia/mg_sf_distilled_zelda`<br />`mignonjia/mg_causal_zelda`<br />`mignonjia/mg_bidirectional_zelda` | I2V | [basic_matrixgame2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame2.py) |
 | matrixgame | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | I2V | [basic_matrixgame3.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame3.py) |
 | minimax_h3 | `MiniMaxAI/MiniMax-H3` | T2V, I2V | [T2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_t2v.py)<br />[FL2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_fl2va.py)<br />[Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_ref2va.py) |
+| open_h3_regenerate_2k | `Efficient-Large-Model/Open-H3-Regenerate-2K` | — | [basic_open_h3_regenerate_2k.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_open_h3_regenerate_2k.py) |
 | sd35 | `stabilityai/stable-diffusion-3.5-medium` | T2I | [basic_sd35_t2i.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_sd35_t2i.py) |
 | qwen_image21 | `Qwen/Qwen-Image-2.1` | T2I, I2I | [basic_qwen_image21.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_qwen_image21.py) |
 | stable_audio | `FastVideo/stable-audio-open-1.0-Diffusers` | T2V | [basic_stable_audio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio.py) |
@@ -120,6 +121,9 @@ see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-stude
 and distilled) generate video with audio from text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
 `kandinsky6_sr` IDs upscale an existing video (see the
 [Video SR guide](kandinsky6_sr.md)).
+
+**Note (Open-H3-Regenerate-2K)**: `open_h3_regenerate_2k` regenerates an existing 768P MiniMax-H3 draft video at
+2560x1440 (video to video, silent output); see the [Open-H3-Regenerate-2K guide](open_h3_regenerate_2k.md).
 
 **Note (LTX-2.5)**: T2V and I2V produce synchronized video and audio. The
 official `Lightricks/LTX-2.5` repository uses gated, split component files, so
