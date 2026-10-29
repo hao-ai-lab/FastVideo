@@ -40,6 +40,9 @@ models:
 
 method:
   _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  # No-warmup TDM baseline; the fixed recipe adds the regression warmup.
+  # The Wan default is 200 steps, which would consume this whole 100-step run.
+  warmup_steps: 0
   rollout_mode: simulate
   generator_update_interval: 1
   real_score_guidance_scale: 6.0

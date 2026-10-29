@@ -115,6 +115,7 @@ def test_wan_tdm_overfit_example_uses_four_gpu_text_only_diagnostic() -> None:
     assert cfg.training.loop.max_train_steps == 100
     assert cfg.training.checkpoint.training_state_checkpointing_steps == 25
     assert cfg.training.tracker.trackers == ["jsonl"]
+    assert cfg.method["warmup_steps"] == 0
     assert cfg.method["generator_update_interval"] == 1
     assert cfg.method["noise_interval_mode"] == "separate"
     assert cfg.method["use_randmid"] is False
