@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
+from collections.abc import Callable
+from typing import Any
+
 import torch  # type: ignore
 
 from fastvideo.distributed import get_local_torch_device
@@ -7,6 +10,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.wan.stages.causal_cuda_graph import CausalCudaGraphDispatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -114,6 +118,70 @@ class WanCausalDenoisingBase(DenoisingStage):
             })
         return crossattn_cache
 
+    def _make_graph_dispatch(self, args: FastVideoArgs, latents: torch.Tensor, *, boundary_timestep=None):
+        enabled = getattr(args, "enable_causal_cuda_graph", False)
+        reason = None
+        if enabled:
+            if latents.device.type != "cuda" or not torch.cuda.is_available():
+                reason = "CUDA inputs and an available CUDA device are required"
+            elif boundary_timestep is not None or self.transformer_2 is not None:
+                reason = "dual-transformer inference is unsupported"
+            elif getattr(args, "num_gpus", 1) != 1 or getattr(args, "sp_size", 1) != 1 or getattr(args, "tp_size",
+                                                                                                  1) != 1:
+                reason = "only single-GPU inference is supported"
+            elif getattr(args, "use_fsdp_inference", False):
+                reason = "FSDP inference is unsupported"
+            elif getattr(args, "dit_cpu_offload", False) or getattr(args, "dit_layerwise_offload", False):
+                reason = "disable both DiT CPU and layerwise offloading"
+            elif getattr(args, "enable_torch_compile", False) or getattr(args, "inference_torch_compile", False):
+                reason = "DiT torch.compile is unsupported"
+            elif self.local_attn_size < self.sink_size + self.num_frames_per_block:
+                reason = "the finite attention window must hold the sink and a complete chunk"
+            elif _get_transformer_attr(self.transformer, "rope_cache_policy", "absolute") != "relativistic":
+                reason = "relativistic RoPE is required"
+            elif not callable(getattr(self.transformer, "prepare_causal_cuda_graph", None)):
+                reason = "this transformer does not support causal Wan CUDA graphs"
+            if reason is not None:
+                enabled = False
+                logger.warning("Causal CUDA graphs disabled: %s", reason)
+        prepare = getattr(self.transformer, "prepare_causal_cuda_graph", None)
+        if callable(prepare):
+            prepare(enabled)
+        return CausalCudaGraphDispatch(self.transformer, enabled=enabled)
+
+    def _call_transformer(self,
+                          dispatch: CausalCudaGraphDispatch,
+                          transformer: Callable[..., Any],
+                          *args: Any,
+                          is_chunk_start: bool | None = None,
+                          is_context: bool = False,
+                          **kwargs: Any) -> Any:
+        cache = kwargs["kv_cache"]
+        capacity = cache[0]["k"].shape[1]
+        steady = (dispatch.enabled and kwargs["current_start"] >= capacity
+                  and all(entry["local_end_index"] == capacity for entry in cache))
+        output = dispatch.call(transformer,
+                               *args,
+                               is_chunk_start=is_chunk_start if dispatch.enabled else None,
+                               is_context=is_context,
+                               is_steady_state=steady,
+                               **kwargs)
+        if steady:
+            # Python assignments in a captured forward do not run on replay.
+            # Once full, both physical writes end at capacity. Logical progress
+            # still advances on every real call, including context refreshes.
+            current_end = kwargs["current_start"] + args[0].shape[2] * self.frame_seq_length
+            for entry in cache:
+                entry["global_end_index"] = current_end
+                entry["local_end_index"] = capacity
+        return output
+
+    @staticmethod
+    def _report_graph_statistics(batch: ForwardBatch, dispatch: CausalCudaGraphDispatch) -> None:
+        if dispatch.enabled:
+            batch.extra["causal_cuda_graph"] = dispatch.statistics()
+            logger.info("Causal CUDA graph statistics: %s", batch.extra["causal_cuda_graph"])
+
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
@@ -164,6 +232,8 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         else:
             boundary_timestep = None
             high_noise_timesteps = None
+
+        graph_dispatch = self._make_graph_dispatch(fastvideo_args, batch.latents, boundary_timestep=boundary_timestep)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
@@ -263,6 +333,8 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) * len(timesteps)) as progress_bar:
             for current_num_frames in block_sizes:
+                if getattr(self, "interrupt", False):
+                    break
                 current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
                 # use BTCHW for DMD conversion routines
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
@@ -313,7 +385,9 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                         # Run transformer; follow DMD stage pattern
                         t_expanded_noise = t_cur * torch.ones(
                             (latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
-                        pred_noise_btchw = current_model(
+                        pred_noise_btchw = self._call_transformer(
+                            graph_dispatch,
+                            current_model,
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
@@ -321,6 +395,7 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                             crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) * self.frame_seq_length,
                             start_frame=start_index,
+                            is_chunk_start=i == 0 if boundary_timestep is None else None,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
@@ -367,6 +442,8 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                     if progress_bar is not None:
                         progress_bar.update()
 
+                if getattr(self, "interrupt", False):
+                    break
                 # Write back and advance
                 latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
 
@@ -383,7 +460,9 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                     t_expanded_context = t_context.unsqueeze(1)
 
                     if boundary_timestep is not None:
-                        self.transformer_2(
+                        self._call_transformer(
+                            graph_dispatch,
+                            self.transformer_2,
                             context_bcthw,
                             prompt_embeds,
                             t_expanded_context,
@@ -391,11 +470,15 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                             crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) * self.frame_seq_length,
                             start_frame=start_index,
+                            is_chunk_start=None,
+                            is_context=True,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
 
-                    self.transformer(
+                    self._call_transformer(
+                        graph_dispatch,
+                        self.transformer,
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,
@@ -403,6 +486,8 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) * self.frame_seq_length,
                         start_frame=start_index,
+                        is_chunk_start=False if boundary_timestep is None else None,
+                        is_context=True,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
@@ -414,6 +499,7 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
             latents = latents[:, :, :-num_frames_to_remove, :, :]
 
         batch.latents = latents
+        self._report_graph_statistics(batch, graph_dispatch)
         return batch
 
 
@@ -467,6 +553,7 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
             dtype=target_dtype,
             device=latents.device,
         )
+        graph_dispatch = self._make_graph_dispatch(fastvideo_args, latents)
 
         # Determine block sizes
         if t % self.num_frames_per_block != 0:
@@ -485,6 +572,8 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
 
         with self.progress_bar(total=len(block_sizes) * num_inference_steps) as progress_bar:
             for current_num_frames in block_sizes:
+                if getattr(self, "interrupt", False):
+                    break
                 current_latents = latents[
                     :,
                     :,
@@ -527,7 +616,9 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                         # Transformer returns [B, C, T, H, W],
                         # permute to [B, T, C, H, W] then flatten
                         # B*T for the scheduler.
-                        noise_pred = self.transformer(
+                        noise_pred = self._call_transformer(
+                            graph_dispatch,
+                            self.transformer,
                             latent_model_input,
                             prompt_embeds,
                             t_expanded,
@@ -535,6 +626,7 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                             crossattn_cache=crossattn_cache,
                             current_start=((pos_start_base + start_index) * self.frame_seq_length),
                             start_frame=start_index,
+                            is_chunk_start=i == 0,
                             **pos_cond_kwargs,
                         )
 
@@ -554,6 +646,8 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                     if progress_bar is not None:
                         progress_bar.update()
 
+                if getattr(self, "interrupt", False):
+                    break
                 # Write denoised block back
                 latents[
                     :,
@@ -582,7 +676,9 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                             forward_batch=batch,
                         ),
                 ):
-                    self.transformer(
+                    self._call_transformer(
+                        graph_dispatch,
+                        self.transformer,
                         context_bcthw,
                         prompt_embeds,
                         t_context.unsqueeze(1),
@@ -590,10 +686,13 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                         crossattn_cache=crossattn_cache,
                         current_start=((pos_start_base + start_index) * self.frame_seq_length),
                         start_frame=start_index,
+                        is_chunk_start=False,
+                        is_context=True,
                         **pos_cond_kwargs,
                     )
 
                 start_index += current_num_frames
 
         batch.latents = latents
+        self._report_graph_statistics(batch, graph_dispatch)
         return batch
