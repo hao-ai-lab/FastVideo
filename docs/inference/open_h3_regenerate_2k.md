@@ -22,7 +22,7 @@ draft video -> H3 VAE encode -> latent upscaler (2x, 3D conv) -> 3 Euler refine 
 | Latent upscale | The author's 3D-conv upscaler (`fastvideo/models/upsamplers/minimax_h3_latent_upscaler.py`), BF16, to the 160x90 latent grid. |
 | Refine | Euler on sigmas `[0.909375, 0.857143, 0.666667, 0]`, CFG 1, model time `1 - sigma`, initial state `(1 - 0.909375) * upscaled + 0.909375 * noise`. `num_inference_steps: 2` uses `[0.7, 0.494118, 0]` (softer, about 30% faster). |
 | Transformer | The base MiniMax-H3 DiT (the same module as the other H3 pipelines) with the released merged LoRA (FP32, rank 576 on 312 linears, scale 1) and 50 LMS Sharp curve AdaLN branches. |
-| Decode | The released H3 VAE; the output is trimmed to 121 frames. |
+| Decode | The released H3 VAE, or an NVFP4 decoder on Blackwell (see below); the output is trimmed to 121 frames. |
 
 The merged LoRA loads through the standard H3 community-LoRA path as a constructor-time adapter: the pipeline sets
 `lora_path` to `<model>/lora/open_h3_regenerate_2k_lora.safetensors` when you do not pass one. The Sharp branches take an
@@ -87,6 +87,69 @@ The response headers carry `X-Request-Id`, `X-Model`, `X-Inference-Time-S` and `
 - `size`, `width` and `height` may be omitted or `2560x1440`; `num_frames` may be omitted or 124 (the frame count of the
   VAE grid; the video has 121 frames); `fps` must be 24. `seconds` is not accepted.
 - `num_inference_steps` is 3 (default) or 2; `seed` sets the refine noise.
+
+## NVFP4 video decoder
+
+On Blackwell GPUs the released 36-block video decoder can be replaced by a pre-packed NVFP4 one; the latent space is
+unchanged, so the draft encode, the upscale and the refine steps are the same and only the decode changes. Both tiers of
+[FastVideo/FastH3-NVFP4-VAE-Decoder](https://huggingface.co/FastVideo/FastH3-NVFP4-VAE-Decoder) apply here, because the
+release carries MiniMax-H3's full 36-block VAE (`base_model/vae`):
+
+| Tier | Decoder blocks | File | Pick it when |
+|---|---|---|---|
+| `quality-36L` | 36 | `quality-36L/decoder-nvfp4.safetensors` | you want the released detail back; the default choice |
+| `fast-8L` | 8 (evenly spaced; the load drops 28 blocks) | `fast-8L/decoder-nvfp4.safetensors` | decode time or memory dominate and some fine detail can go |
+
+```bash
+hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' \
+    'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae
+```
+
+Select it through the surface you drive the pipeline with; the field, the CLI flag and the environment variable all
+set `fastvideo_args.h3_vae_nvfp4_decoder`, and the serve-config field wins over the environment.
+
+```bash
+# example script
+python examples/inference/basic/basic_open_h3_regenerate_2k.py --video draft.mp4 --prompt "..." \
+    --vae-decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
+# `fastvideo generate` and the serve config use the same field
+fastvideo generate --model-path Efficient-Large-Model/Open-H3-Regenerate-2K --video draft.mp4 --prompt "..." \
+    --h3-vae-nvfp4-decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
+```
+
+```yaml
+generator:
+  pipeline:
+    experimental:
+      h3_vae_nvfp4_decoder: ./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
+```
+
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` stays as the fallback when neither the serve config nor the CLI sets the field. The
+swap happens in the VAE loader, so the dense decoder never reaches the GPU: it is replaced on the CPU by the exported
+checkpoint (2.0 GiB of packed weights instead of 9.7 GiB of FP32), moved to the device, and decoded under bf16 autocast.
+The decoder keeps the pipeline's tiling (at 2560x1440: 8x13 tiles of 256 px with 64 px overlap) and the fused Triton
+block kernels, which are on by default (`FASTVIDEO_H3_VAE_NVFP4_FUSED`); `FASTVIDEO_H3_VAE_TILE_BATCH` decodes several
+tiles per decoder call (4 is bit-identical and faster here), and `FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH` replays the small
+fused calls. The MP4 is unaffected: the same 121 frames are trimmed and written.
+
+Warm decode of one refined latent at 2560x1440 (124 frames) on one GB200, median of 3, with the released decode as the
+reference:
+
+| Decoder | Decode (s) | Peak GPU memory (GiB) | PSNR (dB) | SSIM |
+|---|---:|---:|---:|---:|
+| released H3 VAE (dense, fp16 autocast) | 23.3 | 18.4 | - | - |
+| `quality-36L` (fused) | 6.6 | 6.2 | 41.3 | 0.979 |
+| `quality-36L` (fused, tile batch 4) | 5.0 | 6.3 | 41.3 | 0.979 |
+| `quality-36L` (eager NVFP4 GEMM) | 67.0 | 6.2 | 41.3 | 0.979 |
+| `fast-8L` (fused) | 1.7 | 5.3 | 32.8 | 0.892 |
+| `fast-8L` (eager NVFP4 GEMM) | 16.1 | 5.2 | 32.8 | 0.892 |
+
+The fused kernels are an exact speedup: the eager and fused rows decode bit-identical frames, and so does batching
+tiles, so the PSNR/SSIM columns measure the tier and nothing else. The eager NVFP4 GEMM path loses to the dense fp16
+decoder at these tile sizes (67 s against 23 s), so keep `FASTVIDEO_H3_VAE_NVFP4_FUSED` on. PSNR against the released
+decode is bounded by the released decode itself: the refined latent already sits 45.2 dB from the NVlabs reference (see
+below), so 41.3 dB is a decoder-only difference of the same order. `fast-8L` softens fine texture (fur, foliage) while
+keeping structure; use it only when the decode budget is tight.
 
 ## Parity with the reference
 

@@ -258,3 +258,43 @@ def test_registry_resolves_the_release_to_the_regenerate_pipeline(tmp_path):
         assert get_model_info(path).pipeline_cls.__name__ == "OpenH3Regenerate2KPipeline"
     preset, family = get_preset_selection(hub_id)
     assert (preset, family) == ("open_h3_regenerate_2k", "open_h3_regenerate_2k")
+
+
+def test_serve_config_forwards_the_nvfp4_decoder_option(monkeypatch):
+    """`generator.pipeline.experimental.h3_vae_nvfp4_decoder` reaches FastVideoArgs through the serve path."""
+    from fastvideo import fastvideo_args as fva
+    from fastvideo.api import ComponentConfig, EngineConfig, GeneratorConfig, PipelineSelection
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+
+    captured = {}
+
+    class _Captured:
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _Captured(**kwargs)
+
+    monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
+    generator_config_to_fastvideo_args(
+        GeneratorConfig(model_path="Efficient-Large-Model/Open-H3-Regenerate-2K",
+                        engine=EngineConfig(num_gpus=1),
+                        pipeline=PipelineSelection(components=ComponentConfig(),
+                                                   experimental={
+                                                       "draft_size": "768p",
+                                                       "h3_vae_nvfp4_decoder": "/tmp/decoder-nvfp4.safetensors",
+                                                   })))
+    assert captured["h3_vae_nvfp4_decoder"] == "/tmp/decoder-nvfp4.safetensors"
+    assert captured["draft_size"] == "768p"
+
+
+def test_cli_flag_sets_the_nvfp4_decoder_option():
+    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.utils import FlexibleArgumentParser
+
+    args = FastVideoArgs.add_cli_args(FlexibleArgumentParser()).parse_args(
+        ["--h3-vae-nvfp4-decoder", "/tmp/decoder-nvfp4.safetensors"])
+    assert args.h3_vae_nvfp4_decoder == "/tmp/decoder-nvfp4.safetensors"
+    assert FastVideoArgs.add_cli_args(FlexibleArgumentParser()).parse_args([]).h3_vae_nvfp4_decoder is None

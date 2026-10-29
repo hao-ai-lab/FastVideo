@@ -882,6 +882,13 @@ class FastVideoArgs:
             help="TAEH3 latent frames per execution chunk.",
         )
         parser.add_argument(
+            "--h3-vae-nvfp4-decoder",
+            type=str,
+            default=FastVideoArgs.h3_vae_nvfp4_decoder,
+            help="Exported NVFP4 MiniMax-H3 decoder (decoder-nvfp4.safetensors) that replaces the VAE decoder at "
+            "load. Blackwell only. Overrides FASTVIDEO_H3_VAE_NVFP4_DECODER.",
+        )
+        parser.add_argument(
             "--vae-parallel-decode",
             action=StoreBoolean,
             help="With sequence parallelism, round-robin MiniMax-H3 VAE decode chunks across the SP ranks "
