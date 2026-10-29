@@ -82,10 +82,12 @@ def test_warmup_step_updates_student_only() -> None:
 
 def test_warmup_phase_gates_critic_out_of_optimizers_and_clip_targets() -> None:
     method, _, _, _ = _build_state({"warmup_steps": 4})
-    assert method.get_optimizers(0) == [method._student_optimizer]
-    assert method.get_lr_schedulers(0) == [method._student_lr_scheduler]
-    assert method.get_grad_clip_targets(0) == {"student": method.student.transformer}
-    optimizers = method.get_optimizers(4)
+    for iteration in (1, 4):
+        assert method.get_optimizers(iteration) == [method._student_optimizer]
+        assert method.get_lr_schedulers(iteration) == [method._student_lr_scheduler]
+        assert method.get_grad_clip_targets(iteration) == {"student": method.student.transformer}
+    assert not method._in_warmup(0)
+    optimizers = method.get_optimizers(5)
     assert method._critic_optimizer in optimizers
     assert method._student_optimizer in optimizers
 

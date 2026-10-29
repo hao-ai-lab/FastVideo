@@ -74,12 +74,14 @@ separate inference job.
 ## Warmup And Step Ladder
 
 For Wan-family students the method defaults to a **200-update regression
-warmup** (`method.warmup_steps`, set explicitly in the example config). During
-warmup the student's x0 at its own rollout states is regressed onto the
-guidance-combined teacher x0 at those same states; the critic is not updated,
-is excluded from `get_optimizers` / `get_lr_schedulers` / grad-clip targets,
-and its optimizer state stays empty. Other families default to no warmup
-(guidance-distilled bases already start inside the teacher's basin).
+warmup** (`method.warmup_steps`, set explicitly in the example config).
+`warmup_steps` counts 1-based training steps: the first `warmup_steps` steps
+are warmup and TDM starts on the next step. During warmup the student's x0 at
+its own rollout states is regressed onto the guidance-combined teacher x0 at
+those same states; the critic is not updated, is excluded from
+`get_optimizers` / `get_lr_schedulers` / grad-clip targets, and its optimizer
+state stays empty. Other families default to no warmup (guidance-distilled
+bases already start inside the teacher's basin).
 
 Empirically, on Wan, TDM alone drifts out of the teacher distribution and
 warmup alone collapses visually (blurry blobs on every seed), while warmup
@@ -88,8 +90,9 @@ puts the student's states on-manifold so the critic correction stops
 dominating the generator signal.
 
 A **progressive step ladder** is available through `method.tdm_step_ladder`
-(commented example in the shipped config). Stage step counts must strictly
-decrease (for example 8 steps then 4), only the final stage may omit
+(commented example in the shipped config). A stage applies through its
+`until_iteration` (inclusive, 1-based training step). Stage step counts must
+strictly decrease (for example 8 steps then 4), only the final stage may omit
 `until_iteration`, and validation/inference adopt the final stage's schedule
 because the loader writes `dmd_denoising_steps` from it.
 
