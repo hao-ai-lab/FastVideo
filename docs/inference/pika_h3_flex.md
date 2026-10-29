@@ -97,6 +97,47 @@ lossless switches:
 starts. Kernel work beyond the existing exact kernels is intentionally not part
 of this integration.
 
+## NVFP4 on Blackwell
+
+Pika can reuse FastVideo's existing H3 NVFP4 VAE decoder and NVFP4 Qwen3-VL
+text encoder. Both are weight formats, not new sampler paths; the six-forward
+Pika schedule is unchanged.
+
+```bash
+# 36-block quality decoder: needs the full 36-block H3 VAE
+python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
+    --prompt "a paper boat drifting down a rainy street" \
+    --nvfp4-decoder ./FastH3-NVFP4-VAE-Decoder/quality-36L/decoder-nvfp4.safetensors
+
+# 8-block fast decoder: depth-cuts any H3 VAE with at least 8 blocks
+python examples/inference/basic/basic_pika_h3_flex.py --task ref2va \
+    --reference image:person.png --reference video:dance.mp4 \
+    --prompt "the person dances to the music" \
+    --nvfp4-decoder ./FastH3-NVFP4-VAE-Decoder/fast-8L/decoder-nvfp4.safetensors \
+    --nvfp4-text-encoder ./fasth3-nvfp4-encoder/text_encoder
+```
+
+* `quality-36L` keeps the full decoder depth and is the closest match to Pika's
+  dense decoder. `fast-8L` is much smaller and faster but is a distilled
+  student; expect a visible quality drop. Pika's six-step re-noise latents are
+  not the student's original training distribution, so validate 8L on your
+  prompts before using it for delivery.
+* The NVFP4 decoder replaces only `vae.decoder`; keyframe and reference
+  encoding still use the FP32 VAE encoder.
+* The NVFP4 text encoder quantizes the Qwen3-VL language stack while keeping
+  the vision tower in bf16, so Ref2VA reference images/videos still work.
+* Do not select `taeh3` with an NVFP4 decoder; `h3-vae` is required.
+* Both options require Blackwell FP4 hardware. The fused decoder kernels and
+  CUDA graphs are already enabled by default; see
+  `FASTVIDEO_H3_VAE_NVFP4_FUSED` and `FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH`.
+* There is no NVFP4 **VAE encoder** path. The H3 video VAE encoder is a causal
+  3D CNN and stays FP32; quantizing it would need a separate convolution
+  kernel/quantization effort.
+
+If a process first loads the 8L decoder it depth-cuts the VAE to eight blocks;
+loading 36L afterwards in the same process is not supported. Choose one decoder
+tier per process.
+
 ## Hardware
 
 The selected H3 trunk plus Qwen3-VL does not fit comfortably on a 24 GB card

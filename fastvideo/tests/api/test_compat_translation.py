@@ -11,7 +11,7 @@ from fastvideo.api.compat import (
     request_to_sampling_param,
 )
 from fastvideo.api.parser import parse_config
-from fastvideo.api.schema import CompileConfig, GenerationRequest, GeneratorConfig
+from fastvideo.api.schema import CompileConfig, ComponentConfig, GenerationRequest, GeneratorConfig, PipelineSelection
 from fastvideo.api.sampling_param import SamplingParam
 
 
@@ -76,6 +76,37 @@ class TestCompileConfigRoundTrip:
         )
         args = generator_config_to_fastvideo_args(config)
         assert args.kwargs["torch_compile_kwargs"] == {}
+
+
+class TestH3Nvfp4ComponentTranslation:
+    """Pika/H3 NVFP4 decoder and text-encoder overrides stay on ComponentConfig."""
+
+    def test_decoder_and_text_encoder_translate(self, monkeypatch) -> None:
+        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        config = GeneratorConfig(
+            model_path="/models/pika",
+            pipeline=PipelineSelection(components=ComponentConfig(
+                h3_vae_nvfp4_decoder="/models/quality-36L/decoder-nvfp4.safetensors",
+                text_encoder_weights="/models/nvfp4-encoder/text_encoder",
+            )),
+        )
+        args = generator_config_to_fastvideo_args(config)
+        assert args.kwargs["h3_vae_nvfp4_decoder"] == "/models/quality-36L/decoder-nvfp4.safetensors"
+        assert args.kwargs["override_text_encoder_safetensors"] == "/models/nvfp4-encoder/text_encoder"
+
+    def test_legacy_flat_decoder_promotes_to_component(self) -> None:
+        config = legacy_from_pretrained_to_config(
+            "/models/pika",
+            {"h3_vae_nvfp4_decoder": "/models/fast-8L/decoder-nvfp4.safetensors"},
+        )
+        assert config.pipeline.components.h3_vae_nvfp4_decoder == (
+            "/models/fast-8L/decoder-nvfp4.safetensors")
+
+    def test_unset_fields_are_not_emitted(self, monkeypatch) -> None:
+        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        args = generator_config_to_fastvideo_args(GeneratorConfig(model_path="/models/pika"))
+        assert "h3_vae_nvfp4_decoder" not in args.kwargs
+        assert "override_text_encoder_safetensors" not in args.kwargs
 
 
 class TestLegacyLtx2VaeTilingTranslation:

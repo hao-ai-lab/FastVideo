@@ -12,7 +12,9 @@ Five task shapes share one model release:
 The six-forward ladder is part of the adapter contract; this script deliberately
 does not expose a step-count flag.  ``--lossless-accel`` turns on the existing
 training-free FastVideo switches (bit-identical kernels, reference memo,
-parallel VAE tiles) before the generator starts.  Kernel/VSA work is separate.
+parallel VAE tiles) before the generator starts.  ``--nvfp4-decoder`` and
+``--nvfp4-text-encoder`` opt into the existing Blackwell FP4 weight paths;
+they change weights, not the six-forward sampler.  Kernel/VSA work is separate.
 
 Examples:
     python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
@@ -90,6 +92,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compile", action="store_true", help="torch.compile the DiT")
     parser.add_argument("--lossless-accel", action="store_true", help="enable bit-identical speed-ups")
     parser.add_argument("--low-vram", action="store_true", help="stream the DiT layerwise")
+    parser.add_argument("--nvfp4-decoder",
+                        help="Blackwell-only NVFP4 H3 decoder (quality-36L or fast-8L decoder-nvfp4.safetensors)")
+    parser.add_argument("--nvfp4-text-encoder",
+                        help="Blackwell-only serialized NVFP4 Qwen3-VL text_encoder directory")
     parser.add_argument("--output", default="outputs/pika_h3_flex")
     args = parser.parse_args()
 
@@ -117,6 +123,10 @@ def _pipeline(args: argparse.Namespace) -> PipelineSelection:
     components = ComponentConfig()
     if args.task == "ref2va":
         components.override_pipeline_cls_name = "PikaH3FlexRef2VAModularPipeline"
+    if args.nvfp4_decoder:
+        components.h3_vae_nvfp4_decoder = args.nvfp4_decoder
+    if args.nvfp4_text_encoder:
+        components.text_encoder_weights = args.nvfp4_text_encoder
     return PipelineSelection(
         workload_type="t2v" if args.task == "t2va" else "i2v",
         components=components,
