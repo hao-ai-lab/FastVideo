@@ -59,7 +59,7 @@ python "$BENCH/lease.py" --devices 0,1,2,3 --run-dir "$RUN/sp4-lease" -- \
   python "$BENCH/launch_group.py" --suite contract --output "$RUN/sp4" --timeout 600
 python "$BENCH/lease.py" --devices 4 --run-dir "$RUN/pytest-sp1" -- \
   python -m pytest -q fastvideo/tests/attention/test_video_sparse_attn_npu.py
-VSA_RUN_SP4_TESTS=1 python "$BENCH/lease.py" --devices 0,1,2,3 --run-dir "$RUN/pytest-sp4" -- \
+FASTVIDEO_TEST_NPU_VSA_SP4=1 python "$BENCH/lease.py" --devices 0,1,2,3 --run-dir "$RUN/pytest-sp4" -- \
   python -m pytest -q fastvideo/tests/attention/test_video_sparse_attn_npu_sp.py
 ```
 

@@ -7,9 +7,15 @@ import subprocess
 import sys
 
 import pytest
+import fastvideo.envs as envs
 
-pytestmark=pytest.mark.skipif(os.environ.get('VSA_RUN_SP4_TESTS')!='1',reason='requires explicit four-NPU lease')
 REQUIRED_GPUS=4
+
+
+@pytest.fixture(autouse=True)
+def require_explicit_sp4_lease():
+    if not envs.FASTVIDEO_TEST_NPU_VSA_SP4.get():
+        pytest.skip('requires explicit four-NPU lease')
 
 
 def launch(tmp_path,fail=False):

@@ -51,6 +51,7 @@ DOC_TABLE_END = "<!-- END GENERATED ENV TABLE -->"
 # Variables that other tools own. Code may read them directly with a literal
 # name. A trailing "*" allows every name with that prefix.
 EXTERNAL_ALLOWLIST = {
+    "ASCEND_RT_VISIBLE_DEVICES": "Ascend runtime physical-device visibility set by the NPU lease launcher.",
     "CUDA_*": "CUDA runtime and device selection.",
     "NCCL_*": "NCCL communication library.",
     "TORCH_*": "PyTorch runtime settings.",

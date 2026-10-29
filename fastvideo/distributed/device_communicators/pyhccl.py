@@ -7,7 +7,6 @@ from fastvideo.distributed.device_communicators.pyhccl_wrapper import (HCCLLibra
                                                                        hcclUniqueId)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
-from torch.npu import current_stream
 
 logger = init_logger(__name__)
 
@@ -99,7 +98,7 @@ class PyHcclCommunicator:
         with torch.npu.device(device):
             self.comm: hcclComm_t = self.hccl.hcclCommInitRank(self.world_size, self.unique_id, self.rank)
 
-            stream = current_stream()
+            stream = torch.npu.current_stream()
             # A small all_reduce for warmup.
             data = torch.zeros(1, device=device)
             self.all_reduce(data)
@@ -118,7 +117,7 @@ class PyHcclCommunicator:
         out_tensor = torch.empty_like(in_tensor)
 
         if stream is None:
-            stream = current_stream()
+            stream = torch.npu.current_stream()
         self.hccl.hcclAllReduce(buffer_type(in_tensor.data_ptr()), buffer_type(out_tensor.data_ptr()),
                                 in_tensor.numel(), hcclDataTypeEnum.from_torch(in_tensor.dtype),
                                 hcclRedOpTypeEnum.from_torch(op), self.comm, aclrtStream_t(stream.npu_stream))
@@ -130,7 +129,7 @@ class PyHcclCommunicator:
         assert tensor.device == self.device, (f"this hccl communicator is created to work on {self.device}, "
                                               f"but the input tensor is on {tensor.device}")
         if stream is None:
-            stream = current_stream()
+            stream = torch.npu.current_stream()
         buffer = buffer_type(tensor.data_ptr())
         self.hccl.hcclBroadcast(buffer, tensor.numel(), hcclDataTypeEnum.from_torch(tensor.dtype), src, self.comm,
                                 aclrtStream_t(stream.npu_stream))
