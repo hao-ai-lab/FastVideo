@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.lora import sync_replicated_lora_gradients
 from fastvideo.train.utils.optimizer import (
@@ -21,6 +22,8 @@ from fastvideo.train.utils.optimizer import (
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
+
+logger = init_logger(__name__)
 
 
 class GradNormClipCallback(Callback):
