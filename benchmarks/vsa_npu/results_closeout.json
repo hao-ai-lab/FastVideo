@@ -1,0 +1,154 @@
+{
+  "execution_commit": "1beffa236f285a4fb8e4c983a797ae01c03bd566",
+  "upstream_base": "7203b4976eefcd70a52728ca1281797ce96734eb",
+  "measurements": {
+    "paired": {
+      "pairs": 12,
+      "reference_ms": 2022.3194214049727,
+      "candidate_ms": 301.2275623623282,
+      "elapsed_time_reduction": 0.8510484747493275,
+      "paired95": [
+        0.8507414554029152,
+        0.8514667368017919
+      ]
+    },
+    "operator_paired": {
+      "pairs": 12,
+      "reference_ms": 1740.4060950502753,
+      "candidate_ms": 216.9514016713947,
+      "elapsed_time_reduction": 0.8753443795167084,
+      "paired95": [
+        0.8749062514611333,
+        0.8755490541583755
+      ]
+    },
+    "dense_different_semantics": {
+      "pairs": 12,
+      "reference_ms": 44.79457484558225,
+      "candidate_ms": 301.2275623623282,
+      "elapsed_time_reduction": -5.724643852536442,
+      "paired95": [
+        -5.744526045901077,
+        -5.669623241377323
+      ]
+    },
+    "threshold_pass": true,
+    "sp4": {
+      "pairs": 12,
+      "reference_ms": 503.06564872153103,
+      "candidate_ms": 116.80648056790233,
+      "elapsed_time_reduction": 0.7678106607661461,
+      "paired95": [
+        0.7677059900134869,
+        0.7679826881584872
+      ],
+      "single_group_scaling": 2.5788600161376967
+    },
+    "four_sp4_replicas": {
+      "calls": 120,
+      "elapsed_s": 3.525815486907959,
+      "calls_per_s": 34.03467947928172
+    }
+  },
+  "numerical_counts": {
+    "sp1-contract": 37,
+    "sp1-magnitudes": 18,
+    "clean-pytest-sp4-ranks/test_sp4_global_selection_padd0/ranks": 148,
+    "sp4-magnitudes": 72,
+    "numerics.json": 15,
+    "phase1-contract.json": 21
+  },
+  "magnitude_metrics": {
+    "max_abs_error": 0.09375,
+    "max_rel_error": 244140.625,
+    "max_error_over_allowed_atol_rtol": 0.6172839506172839,
+    "cosine_similarity_fp64": 0.9999978141667575
+  },
+  "monitor_steps": 14,
+  "monitor_samples": 575,
+  "foreign_observed": false,
+  "injected_rank_failure_cleanup": "PASS",
+  "runtime": {
+    "torch": "2.9.0+cpu",
+    "torch_npu": "2.9.0.post1+gitdc51c2d",
+    "triton-ascend": "3.2.0.dev20260322"
+  },
+  "source_files_sha256": {
+    "benchmarks/vsa_npu/README.md": "a3ee3dbb88253a29d7cc717bc0c1502a4ec54d9a52857c6e99dac15a4d634c31",
+    "benchmarks/vsa_npu/RESULTS.md": "8be4be07ef8498456c6eb46c61bb2047b3e3725bfde27a6bcf97a757c6d7b7a7",
+    "benchmarks/vsa_npu/analyze.py": "d523ba98f701d91c797e2135393e0db190a7d4c1337f64832f39b96862e841ec",
+    "benchmarks/vsa_npu/generate_references.py": "c873d044dc35150ac13dfb45ca029e54b603777dfb1c890a96bb10b6aeecae70",
+    "benchmarks/vsa_npu/launch_group.py": "3833d3ff216a914178809591bcf397ffd689266ae40077a9d063079b0421c327",
+    "benchmarks/vsa_npu/lease.py": "228a2c5379812250d74c233a7536836bac1f236b758e7bb5b471e9dfff2df459",
+    "benchmarks/vsa_npu/measure.py": "903835123c3a66fbcf5f1029c22888f712fba8453f36cbfd556fe1a9609f591a",
+    "benchmarks/vsa_npu/numerics.py": "bf4f992d022ee563788377d155691ad690bdc26ed15077c88c9ef4c303b29aa5",
+    "benchmarks/vsa_npu/phase1_contract.py": "be6823853d903a1e1331a2844aa517d2df384c92c957fb85fd4e6306fa7a24e7",
+    "benchmarks/vsa_npu/primary_inputs.json": "971cf1c998625c49ea70a643848f2202cccb7bd6b5810625c4636a8cb394e588",
+    "benchmarks/vsa_npu/reference.py": "103a845634af92ad57fa41a82c11ab19b01850092cd7dbbac427f10f6a1c9aa1",
+    "benchmarks/vsa_npu/replica.py": "3a095b2d0ab81c2553c35cb377aca364b418cbd3a5f6aa718053a57ca44e86b9",
+    "benchmarks/vsa_npu/requirements.txt": "b78d66b19fb774c3b146fb3f2c4b080bce84c895bb466f50660a7f329dee223b",
+    "benchmarks/vsa_npu/run.py": "9f20cb7ba366a46b54714ece97162913e65f03528496161333461e1744243c28",
+    "benchmarks/vsa_npu/startup.py": "d86f2988f2e5f791d7635c7df3e02ad625d9822b4747f13550343f7810d7a2d2",
+    "benchmarks/vsa_npu/timing.py": "305b5766677983625a40a743bbd64046e2acc03c31ba317ff40d52b5886399d7",
+    "benchmarks/vsa_npu/validate.py": "88a802adf8e6cd87826ef0a6f3f8215d50c05579bfbaa0c3593e57ee1ab479c6",
+    "fastvideo/attention/backends/video_sparse_attn.py": "2dbf2e12c12da90c090cbb4bc17e128c4ff8543e4d9ef0765f7bbf8332f87f7f",
+    "fastvideo/attention/backends/video_sparse_attn_npu.py": "a1f559559c154c510aca8a18542188480a4698ea53f2693cf7a45c5d351fb1e3",
+    "fastvideo/attention/backends/video_sparse_attn_npu_kernels.py": "e96feb69c8caa049081f08386d6fa3d7a2900a47697dead0b41fac4bb1b768fe",
+    "fastvideo/distributed/device_communicators/pyhccl.py": "732b521adadc457c074e710756ab14074bf51aa6160641d3d2e234f7c5f7ece5",
+    "fastvideo/platforms/npu.py": "afe825461a8eb440e1d173558b4a9f09c5e5c9366400d2b224206cc4923aacdd",
+    "fastvideo/tests/attention/test_video_sparse_attn_npu.py": "ba3332ce38a92a25d1ed7bca37c6045f17ea1ed698ccae61c4701d237c8a2627",
+    "fastvideo/tests/attention/test_video_sparse_attn_npu_sp.py": "ba9075f0012b6da7f5d51de96a28f78e17933a2d4afda2e4f3aa6837feca0f61"
+  },
+  "historical_curves": "Original Phase2 revision only; 30 sampled SP1 and SP4 buckets, no crossing, no interpolation",
+  "limitations": [
+    "BF16 eager forward only",
+    "No learned/full-video quality",
+    "No FP16/backward/compile",
+    "Not a CUDA comparison or best-possible-native claim",
+    "Full project tests not run"
+  ],
+  "startup": {
+    "cold": {
+      "first_complete_wall_ms": 18052.637116983533,
+      "first_complete_event_ms": 18052.296875,
+      "compiler_api_wall_sum_ms": 5816.219123080373,
+      "jit_before_after": [
+        0,
+        3
+      ],
+      "peak_memory_bytes": 1943291392,
+      "shape_metadata_build_wall_ms": 150.52302181720734,
+      "backend_layer_init_wall_ms": 4.131833091378212,
+      "warm_wall_median_ms": 300.25104247033596,
+      "warm_event_median_ms": 300.13429260253906
+    },
+    "disk": {
+      "first_complete_wall_ms": 578.5772493109107,
+      "first_complete_event_ms": 578.4171752929688,
+      "compiler_api_wall_sum_ms": 128.01212817430496,
+      "jit_before_after": [
+        3,
+        3
+      ],
+      "peak_memory_bytes": 1943291392,
+      "shape_metadata_build_wall_ms": 149.70046747475863,
+      "backend_layer_init_wall_ms": 2.941993996500969,
+      "warm_wall_median_ms": 300.79883337020874,
+      "warm_event_median_ms": 300.6899719238281
+    }
+  },
+  "peak_allocator_bytes_with_live_harness_tensors": {
+    "reference_peak_bytes": 12868720128,
+    "candidate_peak_bytes": 2824224256,
+    "operator_reference_peak_bytes": 12350444032,
+    "operator_candidate_peak_bytes": 1536817664
+  },
+  "sp4_peak_allocator_bytes_with_live_harness_tensors": {
+    "reference": 3953364480,
+    "candidate": 1405084160
+  },
+  "sp4_30call_coordinator_wall_ms_median_including_cpu_reporting": {
+    "reference": 15111.759823281318,
+    "candidate": 3517.533882521093
+  }
+}

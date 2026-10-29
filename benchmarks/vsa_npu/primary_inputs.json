@@ -1,0 +1,8 @@
+{
+  "generation": "torch.Generator(device='cpu').manual_seed(seed); four sequential randn(1,32760,12,128) float32 tensors times 0.3, then BF16; SHA256 of concatenated uint16 bytes in Q,K,V,gate order",
+  "input_sha256": {
+    "1024": "ebacd15927e6bd6a14cb3c8a2aae0d4becb0a0af850d177d1c201c98ae0d383e",
+    "1025": "c9831b0520e023dd5f445e334ee53f2bf01a50d5958763897f6a1adaf3f51f26",
+    "1026": "e52b6d7c3359130d68a84d944898ecd71e73d4a79a9d468f76bd74319c7d8ce3"
+  }
+}

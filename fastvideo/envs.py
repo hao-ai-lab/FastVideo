@@ -836,6 +836,10 @@ FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR = EnvStr("data/hunyuan15_overfit_pre
 
 # Switches and paths that only tests read. Each old name stays readable, with a
 # warning, until the next minor release.
+FASTVIDEO_TEST_NPU_VSA_SP4 = EnvBool(False,
+                                     category="test",
+                                     doc="Run the Ascend VSA SP4 tests under an explicit four-NPU lease.",
+                                     deprecated_names=("VSA_RUN_SP4_TESTS", ))
 FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO = EnvStr("FastVideo/ssim-reference-videos",
                                                category="test",
                                                doc="Hugging Face repository that holds the SSIM reference videos.",
