@@ -41,6 +41,10 @@ class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
 
 
+OPEN_H3_REGENERATE_2K_FAMILY = "open_h3_regenerate_2k"
+OPEN_H3_REGENERATE_2K_SIZE = (2560, 1440)
+OPEN_H3_REGENERATE_2K_NUM_FRAMES = 124
+
 _VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"})
 
 
@@ -381,6 +385,13 @@ def _apply_reference_inputs(
     if request.task is not None and model_family != "minimax_h3":
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
 
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if len(videos) != 1 or images or audios:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K takes exactly one video_reference (the 768P draft) "
+                                         "and no image or audio references.")
+        kwargs["video_path"] = videos[0]
+        return
+
     if model_family == "minimax_h3" and (videos or audios):
         raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
                                      "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
@@ -521,6 +532,16 @@ def build_generation_request(
         raise RequestAdaptationError(f"width must be a positive integer, got {width!r}")
     if height is not None and (not isinstance(height, int) or height <= 0):
         raise RequestAdaptationError(f"height must be a positive integer, got {height!r}")
+
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if (width, height) not in ((None, None), OPEN_H3_REGENERATE_2K_SIZE):
+            raise RequestAdaptationError("Open-H3-Regenerate-2K always renders 2560x1440; omit size/width/height "
+                                         f"or pass 2560x1440, got {width}x{height}.")
+        if kwargs.get("num_frames", OPEN_H3_REGENERATE_2K_NUM_FRAMES) != OPEN_H3_REGENERATE_2K_NUM_FRAMES:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K regenerates the draft's first 121 frames (24 fps); "
+                                         "omit seconds and num_frames.")
+        if kwargs["fps"] != 24:
+            raise RequestAdaptationError(f"Open-H3-Regenerate-2K requires fps=24, got {kwargs['fps']}.")
 
     if model_family == "minimax_h3":
         from fastvideo.pipelines.basic.minimax_h3.packing import (

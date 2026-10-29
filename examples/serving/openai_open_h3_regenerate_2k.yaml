@@ -1,0 +1,43 @@
+# OpenAI-compatible Open-H3-Regenerate-2K server (one GPU with about 150 GB free, e.g. B200 / GB200).
+# POST /v1/videos/sync (or /v1/videos) with a 768P H3 draft as video_reference; the response is the 2560x1440 MP4.
+# Local draft paths are accepted only inside server.media_roots; http(s) URLs must resolve to public addresses unless
+# server.allow_private_media_urls is set. data: URLs are always refused. See docs/inference/open_h3_regenerate_2k.md.
+generator:
+  model_path: Efficient-Large-Model/Open-H3-Regenerate-2K
+  engine:
+    num_gpus: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      vae: false
+      pin_cpu_memory: true
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    experimental:
+      attention_backend: FLASH_ATTN
+      # 768p for MiniMax-H3 drafts; 576p encodes drafts from other video models at 1024x576.
+      draft_size: 768p
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_open_h3_regenerate_2k
+  served_model_name: open-h3-regenerate-2k
+  media_roots:
+    - /data/drafts
+  media_reference_max_bytes: 536870912
+
+default_request:
+  sampling:
+    height: 1440
+    width: 2560
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 3
+    guidance_scale: 1.0
+    seed: 1766580932
+  output:
+    return_frames: false
