@@ -49,7 +49,6 @@ export default function HardwarePicker({
   value,
   onChange,
   gpuCount = 1,
-  purpose = "target",
   reload,
 }: {
   backend: string;
@@ -59,7 +58,6 @@ export default function HardwarePicker({
   value: HardwareSelection;
   onChange: (selection: HardwareSelection) => void;
   gpuCount?: number;
-  purpose?: "target" | "filter";
   reload?: () => void;
 }) {
   const id = useId();
@@ -71,9 +69,9 @@ export default function HardwarePicker({
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(value.custom, backend));
   const record = resolveHardware(value, catalog);
-  const unknown = !!value.id && value.id !== "custom" && !record;
-  const candidates =
-    purpose === "filter" ? catalog : catalog.filter((item) => item.backend === (backend === "mlx" ? "mlx" : "cuda"));
+  const unknown = status === "ready" && !!value.id && value.id !== "custom" && !record;
+  const loading = status === "loading" && !!value.id && value.id !== "custom";
+  const candidates = catalog.filter((item) => item.backend === (backend === "mlx" ? "mlx" : "cuda"));
   const matches = searchHardware(candidates, query).slice(0, 20);
   const draftMemory = amount(draft.memory);
   const draftBudget = amount(draft.budget);
@@ -144,8 +142,7 @@ export default function HardwarePicker({
             </span>
             {record.usable_budget_gb ? (
               <span className="hardware-selected-meta">
-                {value.id === "custom" ? "Your budget" : "Usable budget"}: {record.usable_budget_gb}{" "}
-                {record.memory_unit}
+                Usable memory: {record.usable_budget_gb} {record.memory_unit}
               </span>
             ) : null}
             {record.host_ram_gb && record.memory_type !== "unified" ? (
@@ -155,20 +152,24 @@ export default function HardwarePicker({
             ) : null}
           </div>
           <button type="button" className="hardware-clear" onClick={() => onChange({ id: "" })}>
-            Clear hardware {purpose}
+            Clear hardware
           </button>
         </div>
       ) : value.id === "custom" ? (
         <p className="hardware-current" role="status">
           Add this device's memory to finish selecting it.
         </p>
+      ) : loading ? (
+        <p className="hardware-current" role="status">
+          Loading hardware catalog…
+        </p>
       ) : unknown ? (
         <p className="hardware-current" role="status">
-          Saved hardware target ({value.id}) is not in this catalog.
+          The saved device ({value.id}) is not in this catalog.
         </p>
       ) : (
         <p className="hardware-current" role="status">
-          No hardware {purpose} selected.
+          No hardware selected.
         </p>
       )}
       {record ? (
@@ -184,7 +185,7 @@ export default function HardwarePicker({
       <div className="hardware-picker-actions">
         {!record && value.id ? (
           <button type="button" className="hardware-clear" onClick={() => onChange({ id: "" })}>
-            Clear hardware {purpose}
+            Clear hardware
           </button>
         ) : null}
         <button
@@ -198,21 +199,11 @@ export default function HardwarePicker({
             setAdding(false);
           }}
         >
-          {record
-            ? "Change hardware"
-            : purpose === "filter"
-              ? "Choose hardware"
-              : backend === "mlx"
-                ? "+ Find or add a Mac"
-                : "+ Find or add a GPU"}
+          {record ? "Change hardware" : backend === "mlx" ? "+ Find or add a Mac" : "+ Find or add a GPU"}
         </button>
       </div>
       {record || open ? (
-        <p className="hardware-picker-caption">
-          {purpose === "filter"
-            ? "Filters by runtime. Memory fit is not estimated."
-            : "Single-GPU devices set GPU count to 1. Nothing else in the configuration changes."}
-        </p>
+        <p className="hardware-picker-caption">Used for the setup link and, on single-unit systems, the GPU count.</p>
       ) : null}
       {open ? (
         <div className="hardware-lookup" id={panelId} onKeyDown={(event) => event.key === "Escape" && close()}>
@@ -296,13 +287,13 @@ export default function HardwarePicker({
                     value={draft.memory_type}
                     onChange={(event) => setDraft({ ...draft, memory_type: event.target.value as MemoryType })}
                   >
-                    <option value="dedicated">Dedicated GPU memory (VRAM)</option>
-                    <option value="unified">Unified memory (CPU + GPU)</option>
-                    <option value="system">System memory (host RAM)</option>
+                    <option value="dedicated">GPU memory (VRAM)</option>
+                    <option value="unified">Unified memory</option>
+                    <option value="system">System memory (RAM)</option>
                   </select>
                 </label>
                 <label className="hardware-form-field">
-                  <span>Nominal memory</span>
+                  <span>Total memory</span>
                   <Input
                     type="number"
                     min="1"
@@ -323,7 +314,7 @@ export default function HardwarePicker({
                   </select>
                 </label>
                 <label className="hardware-form-field">
-                  <span>Usable budget (optional)</span>
+                  <span>Usable memory (optional)</span>
                   <Input
                     type="number"
                     min="1"
@@ -348,16 +339,14 @@ export default function HardwarePicker({
                   </label>
                 ) : null}
               </div>
-              {budgetTooLarge ? (
-                <p className="hardware-form-error">The usable budget cannot exceed the nominal memory.</p>
-              ) : null}
+              {budgetTooLarge ? <p className="hardware-form-error">Usable memory cannot exceed total memory.</p> : null}
               <p className="hardware-form-note">
-                Nominal memory is device capacity, not what FastVideo can use. A budget is your own limit and is not
-                verified. Unified memory is shared with the CPU; it is not dedicated VRAM.
+                Total memory is the device's capacity. Usable memory is the part FastVideo may use, such as a MIG slice
+                or a limit you set. Unified memory is shared with the CPU.
               </p>
               <div className="hardware-form-actions">
                 <button type="submit" disabled={!validDraft}>
-                  Use this device
+                  Save device
                 </button>
                 <button
                   type="button"

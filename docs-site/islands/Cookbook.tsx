@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { MotionConfig } from "motion/react";
 import { ArrowUpRight } from "lucide-react";
 import { Tabs } from "radix-ui";
-import { modelDirectory, recipePages, sitePath, type DirectoryModel } from "@/lib/cookbook-pages";
+import { modelDirectory, recipePages, recentlyAdded, sitePath, type DirectoryModel } from "@/lib/cookbook-pages";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import {
   CardCurtainRevealTitle,
 } from "@/components/ui/card-curtain-reveal";
 import RecipeFacts from "@/components/cookbook/RecipeFacts";
+import { assessRecipe, assessWeightsRecipe, useCapacityModel, weightsFor } from "@/lib/capacity";
 import { configAndLaunch, inferenceOutput, sdkCommand } from "@/lib/cookbook-commands";
 import {
   gpuCountFrom,
@@ -130,7 +131,7 @@ function FieldControl({
       </div>
       {choices ? (
         <div role="group" aria-label={label} className="option-chips">
-          {value === undefined && (
+          {value === undefined && !choices.some((choice) => choice === null) && (
             <button type="button" aria-pressed={!changed} onClick={() => update(field.path, undefined, field)}>
               Default
             </button>
@@ -142,18 +143,9 @@ function FieldControl({
               aria-pressed={value === choice}
               onClick={() => update(field.path, JSON.stringify(choice), field)}
             >
-              {choiceLabel(field.path, choice)}
+              {choice === null ? "Default" : choiceLabel(field.path, choice)}
             </button>
           ))}
-          {nullable && !choices.includes(null) && (
-            <button
-              type="button"
-              aria-pressed={value === null}
-              onClick={() => update(field.path, "null", { ...field, schema: { ...field.schema, enum: [null] } })}
-            >
-              null
-            </button>
-          )}
         </div>
       ) : kind.includes("object") || kind.includes("array") ? (
         <Textarea
@@ -313,6 +305,41 @@ function Editor({
   const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
   const gpuCount = gpuCountFrom(result?.config);
   const model = modelDirectory.find((model) => model.id === catalog.id.split("/")[0])!;
+  const capacityModel = useCapacityModel(model.id);
+  const weights = weightsFor(model.id);
+  const memory =
+    result && !failure
+      ? hardwareRecord
+        ? capacityModel.model
+          ? assessRecipe({
+              model: capacityModel.model,
+              example: { workload: catalog.workload, env: catalog.env },
+              hardware: hardwareRecord,
+              config: result.config,
+              budgetGb: hardwareRecord.usable_budget_gb,
+              hostGb: hardwareRecord.host_ram_gb,
+            })
+          : catalog.runtime.backend === "mlx" && capacityModel.status !== "loading"
+            ? {
+                status: "unknown" as const,
+                reason: "MLX checkpoints use a different precision and load pattern; memory is not estimated.",
+              }
+            : capacityModel.status !== "loading" && weights
+              ? assessWeightsRecipe({
+                  weights,
+                  config: result.config,
+                  hardware: hardwareRecord,
+                  budgetGb: hardwareRecord.usable_budget_gb,
+                })
+              : {
+                  status: "unknown" as const,
+                  reason:
+                    capacityModel.status === "loading"
+                      ? "Loading the memory estimate."
+                      : "No capacity model ships for this checkpoint.",
+                }
+        : { status: "unknown" as const, reason: "Select a device to estimate memory for this recipe." }
+      : undefined;
   const renderField = (field: Field) => (
     <FieldControl
       key={`${reset}-${field.path}`}
@@ -560,7 +587,7 @@ function Editor({
               </a>
             </div>
           </div>
-          <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} fit="unknown" evidence="none" />
+          <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} memory={memory} />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (
           <MatrixRow title="Inputs">
@@ -581,7 +608,7 @@ function Editor({
                 }}
               />
               <p id={`${sourceImageId}-hint`} className="matrix-note">
-                Path to an image on the machine running FastVideo. Included as request.inputs.image_path.
+                Local path to the first frame. FastVideo reads it on the machine that runs the command.
               </p>
             </div>
           </MatrixRow>
@@ -806,11 +833,8 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
 }
 
 const GPU_COUNT_PATH = "generator.engine.num_gpus";
-const SINGLE_GPU_FORM_FACTOR = /desktop|laptop|workstation|system|soc/;
-
-/** Desktop and workstation cards, DGX Spark, and Macs are one-GPU machines; datacenter parts keep the recipe default. */
-function singleGpuDevice(record: { form_factor?: string }) {
-  return SINGLE_GPU_FORM_FACTOR.test(record.form_factor ?? "");
+function singleGpuDevice(record: { form_factor?: string; kind?: string }) {
+  return record.kind === "system" || record.form_factor === "soc" || record.form_factor === "laptop";
 }
 
 /** Returns new edits where every fixed parallel size that no longer divides `gpus` becomes automatic. */
@@ -833,6 +857,13 @@ function deploymentLabel(deployment: DeploymentChoice, deployments: DeploymentCh
 }
 
 /** Mirrors the editor: MLX and WebSocket deployments offer serving only. */
+function modelModes(index: Index | undefined, model: DirectoryModel): string[] | undefined {
+  const modes = model.configurable ? configurableModes(index, model.id) : exampleModes(model);
+  const hasMlx = model.recipes.some((recipe) => recipe.gpu_types.includes("Apple Silicon"));
+  if (hasMlx && modes && !modes.some((mode) => /mlx/i.test(mode))) return [...modes, "MLX"];
+  return modes;
+}
+
 function configurableModes(index: Index | undefined, modelId: string): string[] | undefined {
   const deployments = index?.models.find((model) => model.id === modelId)?.deployments;
   if (!deployments?.length) return undefined;
@@ -847,8 +878,20 @@ function exampleModes(model: DirectoryModel): string[] {
   return ["Python SDK", "CLI", ...(model.recipes.some((recipe) => recipe.serving) ? ["Serving"] : [])];
 }
 
+const FASTH3_SECTION = new Set(["fasth3-omniref", "fasth3-8step", "fasth3-4step", "fasth3-trim"]);
+
 /** Rest state shows identity only; hover or keyboard focus opens a curtain over the details. */
-function RecipeCard({ model, href, modes }: { model: DirectoryModel; href: string; modes?: string[] }) {
+function RecipeCard({
+  model,
+  href,
+  modes,
+  badge,
+}: {
+  model: DirectoryModel;
+  href: string;
+  modes?: string[];
+  badge?: string;
+}) {
   const [focused, setFocused] = useState(false);
   const details = useRef<HTMLDivElement>(null);
   const [restOffset, setRestOffset] = useState(72);
@@ -869,6 +912,7 @@ function RecipeCard({ model, href, modes }: { model: DirectoryModel; href: strin
             <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
             <span className="recipe-card-kicker">{model.provider}</span>
             {model.featured ? <span className="recipe-featured">Featured</span> : null}
+            {badge ? <span className="recipe-featured recipe-new">{badge}</span> : null}
           </div>
           <CardCurtainRevealTitle
             as={model.configurable ? "h3" : "h4"}
@@ -947,9 +991,10 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     setRuntime("all");
     setTask("All tasks");
   }
-  const configurable = visible.filter((model) => model.configurable);
-  const examples = visible.filter((model) => !model.configurable);
-  const exampleFamilies = [...new Set(examples.map((model) => model.family))];
+  const fastH3 = visible.filter((model) => FASTH3_SECTION.has(model.id));
+  const recent = visible.filter((model) => !FASTH3_SECTION.has(model.id) && recentlyAdded(model.model));
+  const rest = visible.filter((model) => !FASTH3_SECTION.has(model.id) && !recentlyAdded(model.model));
+  const families = [...new Set(rest.map((model) => model.family))];
   const filtered =
     !!query.trim() ||
     category !== "All models" ||
@@ -991,7 +1036,6 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
         <div className="recipe-directory-subbar">
           <p role="status">
             {visible.length} {visible.length === 1 ? "model" : "models"}
-            {configurable.length ? ` · ${configurable.length} configurable` : ""}
             {runtime !== "all" ? ` · ${runtime === "mlx" ? "MLX" : "CUDA"} only` : ""}
             {task !== "All tasks" ? ` · ${task}` : ""}
             {filtered && visible.length ? (
@@ -1043,59 +1087,62 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
             </Button>
           </div>
         ) : null}
-        {configurable.length ? (
-          <section className="recipe-section" aria-labelledby="recipe-configurable-heading">
+        {fastH3.length ? (
+          <section className="recipe-section" aria-labelledby="recipe-fasth3-heading">
             <header className="recipe-section-head">
-              <h2 id="recipe-configurable-heading">Configurable recipes</h2>
-              <p>Edit settings, then copy one config for the Python SDK, the CLI, or an OpenAI-compatible server.</p>
+              <h2 id="recipe-fasth3-heading">FastVideo FastH3</h2>
             </header>
             <div className="recipe-card-grid recipe-card-grid-configurable">
-              {configurable.map((model) => (
+              {fastH3.map((model) => (
+                <RecipeCard key={model.id} model={model} href={sitePath(model.path)} modes={modelModes(index, model)} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {recent.length ? (
+          <section className="recipe-section" aria-labelledby="recipe-new-heading">
+            <header className="recipe-section-head">
+              <h2 id="recipe-new-heading">New</h2>
+            </header>
+            <div className="recipe-card-grid recipe-card-grid-configurable">
+              {recent.map((model) => (
                 <RecipeCard
                   key={model.id}
                   model={model}
                   href={sitePath(model.path)}
-                  modes={configurableModes(index, model.id)}
+                  modes={modelModes(index, model)}
+                  badge="New"
                 />
               ))}
             </div>
           </section>
         ) : null}
-        {examples.length ? (
-          <section className="recipe-section" aria-labelledby="recipe-examples-heading">
-            <header className="recipe-section-head">
-              <h2 id="recipe-examples-heading">Example recipes</h2>
-              <p>
-                Maintained example scripts, grouped by model family. Adjust their documented settings and run them as
-                written.
-              </p>
-            </header>
-            {exampleFamilies.map((name) => {
-              const members = examples.filter((model) => model.family === name);
-              return (
-                <div className="recipe-family-group" key={name}>
-                  <div className="recipe-family-head">
-                    <h3>{name}</h3>
-                    <span>
-                      {members.length} {members.length === 1 ? "recipe" : "recipes"}
-                    </span>
-                    <a href={sitePath(members[0].familyPath)}>Family guide →</a>
-                  </div>
-                  <div className="recipe-card-grid">
-                    {members.map((model) => (
-                      <RecipeCard
-                        key={model.id}
-                        model={model}
-                        href={sitePath(model.path)}
-                        modes={exampleModes(model)}
-                      />
-                    ))}
-                  </div>
+        {families.map((name) => {
+          const members = rest.filter((model) => model.family === name);
+          return (
+            <section className="recipe-section" key={name} aria-label={name}>
+              <div className="recipe-family-group">
+                <div className="recipe-family-head">
+                  <h3>{name}</h3>
+                  <span>
+                    {members.length} {members.length === 1 ? "recipe" : "recipes"}
+                  </span>
+                  <a href={sitePath(members[0].familyPath)}>Family guide →</a>
                 </div>
-              );
-            })}
-          </section>
-        ) : null}
+                <div className="recipe-card-grid">
+                  {members.map((model) => (
+                    <RecipeCard
+                      key={model.id}
+                      model={model}
+                      href={sitePath(model.path)}
+                      modes={modelModes(index, model)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
+          );
+        })}
         {!visible.length ? (
           <div className="recipe-empty">
             <h2>No matching recipes</h2>

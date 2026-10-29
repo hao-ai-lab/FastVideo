@@ -10,11 +10,11 @@ export default function RecipeFamily({ family }: { family: string }) {
   return (
     <div className="recipe-directory not-prose">
       <a className="recipe-back" href={sitePath("/cookbook")}>
-        ← All models
+        ← All recipes
       </a>
       <div className="recipe-card-grid">
         {models.map((model) => (
-          <a className="recipe-card" key={model.id} href={sitePath(model.path)}>
+          <a className="recipe-card recipe-card-static" key={model.id} href={sitePath(model.path)}>
             <div className="recipe-card-top">
               <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
               <span className="recipe-card-kicker">{model.provider}</span>

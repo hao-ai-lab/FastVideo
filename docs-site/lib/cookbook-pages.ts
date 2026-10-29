@@ -21,15 +21,6 @@ export const recipePages = [
     tags: ["Text to video", "Audio", "NVFP4", "8-step"],
   },
   {
-    id: "fasth3-preview",
-    family: "MiniMax H3",
-    title: "FastH3 Preview V0.2",
-    mark: "H3",
-    path: "/cookbook/minimax-h3/fasth3-preview",
-    description: "The few-step FastH3 preview checkpoint on CUDA or native Apple Silicon MLX.",
-    tags: ["Text to video", "Audio", "4-step"],
-  },
-  {
     id: "fasth3-4step",
     family: "MiniMax H3",
     title: "FastH3 4-Step V1",
@@ -41,7 +32,7 @@ export const recipePages = [
   {
     id: "fasth3-omniref",
     family: "MiniMax H3",
-    title: "FastH3 OmniRef",
+    title: "FastH3 Omni v1",
     mark: "H3",
     path: "/cookbook/minimax-h3/fasth3-omniref",
     description: "Video and audio from a prompt plus ordered image, video, and audio references.",
@@ -124,10 +115,21 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
+  "FastVideo/FastVideo-FastH3-Omni-8-Step-V1": "fasth3-omniref",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
 };
+const hiddenBackends = new Set(["fasth3-preview"]);
+
+const modelAddedOn: Record<string, string> = {
+  "Qwen/Qwen-Image-2.1": "2026-10-25",
+};
+export function recentlyAdded(model: string) {
+  const added = modelAddedOn[model];
+  return !!added && Date.now() - Date.parse(added) < 30 * 86_400_000;
+}
+
 const TASK_GROUPS: Array<[RegExp, string]> = [
   [/world/, "Text to world"],
   [/video\/text to audio|video.*to audio/, "Video to audio"],
@@ -147,7 +149,8 @@ export function taskLabel(value: string): string {
   return TASK_GROUPS.find(([pattern]) => pattern.test(normalized))?.[1] ?? "Text to video";
 }
 
-export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.model))]
+const mappedModels = [...new Set(sourceRecipes.map((recipe) => recipe.model))]
+  .filter((model) => !hiddenBackends.has(backendModels[model]))
   .map((model) => {
     const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
     const first = recipes[0];
@@ -193,11 +196,23 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       configurable: !!backend,
       featured: backend?.featured ?? false,
     };
-  })
-  .sort(
-    (a, b) =>
-      Number(b.featured) - Number(a.featured) ||
-      Number(b.family === "MiniMax H3") - Number(a.family === "MiniMax H3") ||
-      Number(b.configurable) - Number(a.configurable),
-  );
+  });
+
+const byPage = new Map<string, (typeof mappedModels)[number]>();
+for (const entry of mappedModels) {
+  const existing = byPage.get(entry.id);
+  if (!existing) {
+    byPage.set(entry.id, entry);
+    continue;
+  }
+  existing.recipes.push(...entry.recipes.filter((recipe) => !existing.recipes.some((seen) => seen.id === recipe.id)));
+  existing.platforms = [...new Set([...existing.platforms, ...entry.platforms])];
+}
+
+export const modelDirectory = [...byPage.values()].sort(
+  (a, b) =>
+    Number(b.featured) - Number(a.featured) ||
+    Number(b.family === "MiniMax H3") - Number(a.family === "MiniMax H3") ||
+    Number(b.configurable) - Number(a.configurable),
+);
 export type DirectoryModel = (typeof modelDirectory)[number];

@@ -1,0 +1,106 @@
+---
+title: Weights and quantization
+description: Measured checkpoint sizes for every cookbook model, plus the FastH3 quantized variants and which one fits a given GPU.
+mode: wide
+---
+
+Every number here is the size of the safetensors files in the model repository,
+measured on 2026-10-27 with the Hugging Face tree API. Treat it as the weight
+floor. A run also needs activations, VSA workspace, and decode buffers, so
+weights that fit do not guarantee a run that fits.
+
+The cookbook editor still starts from the maintained BF16 deployment. Use this
+page to pick a checkpoint before you open a recipe.
+
+## Catalog weights
+
+Sizes are GiB at the checkpoint's runtime precision. Repositories that store
+F32 weights are converted to BF16 here, which is what the loader uses.
+
+| Model                   | Weights | Transformer | Text encoder | VAE  |
+| ----------------------- | ------- | ----------- | ------------ | ---- |
+| FastH3 8-Step V2        | 137.7   | 65.3        | 62.1         | 10.3 |
+| FastH3 4-Step V1        | 137.7   | 65.3        | 62.1         | 10.3 |
+| FastH3 Trim             | 56.8    | 34.9        | 15.3         | 6.5  |
+| FastH3 Omni v1          | 92.5    | 65.3        | 15.3         | 11.9 |
+| FastWan2.1 1.3B         | 13.6    | 2.8         | 10.6         | 0.3  |
+| Wan2.1 T2V 14B          | 37.4    | 26.6        | 10.6         | 0.3  |
+| Wan2.1 I2V 14B          | 41.9    | 30.5        | 10.6         | 0.3  |
+| Wan2.2 I2V A14B         | 58.8    | 53.2        | 5.3          | 0.3  |
+| Hunyuan 1.5 I2V 480p    | 32.2    | 15.5        | 13.6         | 2.3  |
+| Hunyuan 1.5 T2V 480p    | 24.9    | 15.5        | 7.0          | 2.4  |
+| Kandinsky 5 Lite        | 11.1    | 2.2         | 8.5          | 0.5  |
+| Kandinsky 6 Pro         | 41.9    | 32.5        | 8.0          | 1.4  |
+| Kandinsky 6 Pro distill | 37.5    | 28.1        | 8.0          | 1.4  |
+| LTX2 Distilled          | 66.9    | 35.2        | 25.4         | 3.6  |
+
+The FastVideo organization publishes the same FastH3 model at several
+precisions. The transformer shrinks with precision; the text encoder and VAE
+only shrink when the repository ships them quantized too.
+
+| Checkpoint        | Variant        | Weights | Transformer | Text encoder | VAE  |
+| ----------------- | -------------- | ------- | ----------- | ------------ | ---- |
+| 8-Step V2         | BF16           | 137.7   | 65.3        | 62.1         | 10.3 |
+| 8-Step V2         | FP8            | 69.2    | 47.4        | 15.3         | 6.5  |
+| 8-Step V2         | NVFP4          | 114.5   | 49.8        | 62.1         | 2.5  |
+| 8-Step V2         | NVFP4 Consumer | 58.7    | 36.9        | 15.3         | 6.5  |
+| Trim              | BF16           | 56.8    | 34.9        | 15.3         | 6.5  |
+| Trim              | FP8            | 41.7    | 19.9        | 15.3         | 6.5  |
+| Trim              | NVFP4          | 32.9    | 11.1        | 15.3         | 6.5  |
+| Trim              | MLX INT6       | 33.0    | 14.3        | 14.2         | 4.5  |
+| 4-Step V1         | BF16           | 137.7   | 65.3        | 62.1         | 10.3 |
+| 4-Step V1         | NVFP4          | 114.5   | 49.8        | 62.1         | 2.5  |
+| Omni v1           | BF16 DiT       | 65.3    | 65.3        | n/a          | n/a  |
+| Omni v1           | FP8            | 114.6   | 47.4        | 15.3         | 4.5  |
+| Omni v1           | NVFP4 QAD      | 101.1   | 37.0        | 15.3         | 11.0 |
+| NVFP4 VAE decoder | quality        | 5.8     | n/a         | n/a          | 5.8  |
+| NVFP4 VAE decoder | fast           | 1.3     | n/a         | n/a          | 1.3  |
+
+The NVFP4 checkpoint keeps the BF16 text encoder, which is why it is larger
+than FP8. The Consumer variant pairs the smaller NVFP4 transformer with the
+FP8 text encoder and VAE, which brings the total to 58.7 GiB. That needs a
+64 GB card. Offload the text encoder and it drops to 43.4 GiB, which fits
+48 GB. On 32 GB the 8-Step DiT alone is 36.9 GiB, so use Trim NVFP4 with the
+encoder offloaded: 32.9 GiB in total, 17.6 GiB resident.
+
+## Pick by GPU
+
+| GPU family       | Examples                            | Use                                                                                                    | Why                                                               |
+| ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Blackwell        | RTX 5090, RTX PRO 6000, B200, GB200 | NVFP4, Consumer with encoder offload on 48 GB, Trim NVFP4 with encoder offload on 32 GB, NVFP4 decoder | Native FP4 tensor cores cut the transformer to about half of BF16 |
+| Hopper           | H100, H200                          | FP8                                                                                                    | FP8 tensor cores, NVFP4 falls back to slower paths                |
+| Ada              | RTX 4090, L40S                      | FP8                                                                                                    | FP8 works, NVFP4 does not                                         |
+| Ampere and older | A100, RTX 3090                      | BF16                                                                                                   | No FP8 or FP4 hardware                                            |
+| Apple silicon    | M-series                            | MLX INT6 or INT8                                                                                       | The MLX conversions are INT6 and INT8, not FP4                    |
+| DGX Spark        | GB10                                | NVFP4 with sequential load                                                                             | Unified memory, so the host RAM counts toward the budget          |
+
+## What the cookbook does now
+
+FastH3 pages compare resident checkpoint weights with the selected device and
+say whether the weights fit. The comparison follows the controls above it:
+offloading the text encoder removes its 62.1 GiB, an NVFP4 transformer sets
+36.9 GiB, and the NVFP4 decoder replaces the 9.7 GiB VAE. The result is a
+weights check, not a request peak, and the page says so.
+
+The transformer quantization control writes
+`generator.engine.quantization.transformer_quant`, so the copied YAML names the
+precision. Encoder and decoder choices use component paths and stay visible in
+the YAML too.
+
+## Automatic selection
+
+The editor does not pick a precision from the device yet. When it does, the
+rule is:
+
+1. Read the device architecture and memory from the hardware catalog.
+2. Prefer the smallest variant the architecture accelerates: NVFP4 on
+   Blackwell, FP8 on Hopper and Ada, INT6 on Apple, BF16 everywhere else.
+3. Keep the BF16 text encoder when the quantized checkpoint ships one, and
+   switch the decoder to NVFP4 only on Blackwell.
+4. Expose the choice as a deployment setting, not a hidden default, so the
+   copied command still shows which checkpoint runs.
+
+That needs one deployment per variant in
+[`docs/cookbook/recipes`](https://github.com/hao-ai-lab/FastVideo/tree/main/docs/cookbook/recipes)
+and a match rule in the editor. Until then, select the precision by hand and
+read the weights fact.

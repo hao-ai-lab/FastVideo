@@ -30,6 +30,7 @@ deployments:
       - generator.engine.offload.vae
       - generator.pipeline.experimental.video_decode_backend
       - generator.pipeline.experimental.h3_vae_nvfp4_decoder
+      - generator.pipeline.components.text_encoder_weights
       - default_request.prompt
       - default_request.sampling.num_frames
       - default_request.sampling.height

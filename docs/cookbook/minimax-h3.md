@@ -59,7 +59,7 @@
           </tr>
           <tr>
             <td>DGX Spark</td>
-            <td>FastH3 V1 on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
+            <td>FastH3 V1 on one GB10. Two Sparks run one clip faster over QSFP RoCE (<code>sp_size=2</code>), but this page configures one Spark.</td>
             <td>Not wired</td>
           </tr>
           <tr>
@@ -100,7 +100,7 @@ cd FastVideo</code></pre>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
         <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
-        <li>DGX Spark is a runtime on FastH3 V1, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
+        <li>DGX Spark is a runtime on FastH3 V1, not a separate family card. This page configures one Spark. For two Sparks, run <code>examples/inference/basic/basic_fasth3_spark_pair.yaml</code>; there is no serving baseline. The CUDA GPU-count knob does not apply to Spark.</li>
         <li>CompactH3 NVFP4 is one Blackwell GPU. RTX 5090 (32 GB) parks the encoder in pinned host RAM. RTX PRO 6000 Blackwell (96 GB) keeps encoder, DiT, and VAE resident. Keep <code>FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER</code>, <code>FASTVIDEO_FA4=0</code>, <code>FASTVIDEO_VSA_PTX_BLACKWELL=0</code>, and <code>FLASHINFER_CUDA_ARCH_LIST=12.0a</code>. On PRO 6000 enable VAE compile and leave DiT <code>inference_torch_compile</code> off. CompactH3 is a dense prune; do not enable <code>VIDEO_SPARSE_ATTN_H3</code> until a VSA-trained student exists.</li>
         <li>GB10 has no FA4 / ptx_blackwell VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_PTX_BLACKWELL=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM. Native 16:9 sizes include 832×480 and 1344×768.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
@@ -111,6 +111,6 @@ cd FastVideo</code></pre>
 <details  id="cookbook-evidence">
   <summary>Evidence status</summary>
   <div >
-      <p>Every command, model ID, and flag on this page maps to a checked-in FastVideo source. Recipes marked <strong>Verified</strong> also have a recorded hardware path in linked FastVideo evidence. The full H3 CUDA examples remain <strong>Source-backed</strong> where the source records a GPU count but no GPU model or memory requirement. Unlisted hardware is unknown, not unsupported.</p>
+      <p>Every command, model ID, and flag on this page maps to a checked-in FastVideo source. No recipe here carries a recorded run for a specific device, so the editor does not claim one. The full H3 CUDA examples remain <strong>Source-backed</strong> where the source records a GPU count but no GPU model or memory requirement. Unlisted hardware is unknown, not unsupported.</p>
   </div>
 </details>

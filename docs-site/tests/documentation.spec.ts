@@ -159,6 +159,12 @@ test("the model catalog filters by family and checkpoint name", async ({ page })
   await expect(catalog.getByRole("status")).toHaveText("3 checkpoints");
   await page.getByRole("searchbox", { name: "Search checkpoints", exact: true }).fill("14B");
   await expect(catalog.getByRole("status")).toHaveText("1 checkpoint");
+  await page.getByRole("button", { name: "All models", exact: true }).click();
+  await page.getByRole("searchbox").fill("NVFP4");
+  const codes = await catalog.locator(".model-checkpoints code").allInnerTexts();
+  expect(codes.length).toBeGreaterThan(0);
+  expect(codes.every((text) => text.includes("NVFP4"))).toBe(true);
+  await expect(catalog.getByText("FastVideo/FastVideo-FastH3-8-Step-V2-FP8", { exact: true })).toHaveCount(0);
   await page.getByRole("searchbox").fill("no-such-model");
   await expect(catalog.getByRole("status")).toHaveText("0 checkpoints");
   await page.getByRole("button", { name: "Clear filters", exact: true }).click();
@@ -178,7 +184,7 @@ test("family runbooks use React model cards without the old cookbook runtime", a
   await page.goto("/FastVideo/cookbook/wan/");
   await expect(page.locator(".recipe-card").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "← All models", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "← All recipes", exact: true })).toHaveAttribute(
     "href",
     /\/FastVideo\/cookbook$/,
   );

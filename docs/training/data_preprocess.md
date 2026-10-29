@@ -56,7 +56,7 @@ torchrun --nproc_per_node=$GPU_NUM \
 | `--preprocess.dataset_path` | Path to dataset (HF repo ID or local folder) |
 | `--preprocess.dataset_output_dir` | Output directory for Parquet files |
 | `--preprocess.video_loader_type` | Video decoder: `torchcodec` or `torchvision` |
-| `--preprocess.max_height` / `max_width` | Target resolution for videos |
+| `--preprocess.max_height` / `--preprocess.max_width` | Target resolution for videos |
 | `--preprocess.num_frames` | Number of frames to extract per video |
 | `--preprocess.train_fps` | Target FPS for frame extraction |
 
