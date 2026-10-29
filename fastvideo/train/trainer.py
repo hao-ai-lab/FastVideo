@@ -318,19 +318,23 @@ class Trainer:
                 iteration=step,
             )
 
-            if checkpoint_manager is not None:
-                if step != max_steps:
-                    # The final resumable checkpoint is saved by ``save_final``
-                    # after validation so the terminal checkpoint captures the
-                    # post-validation callback RNG state instead of being
-                    # deduped against a pre-validation interval save at the
-                    # same step. The model-only inference save restores the RNG
-                    # and stays on the normal per-step path.
-                    checkpoint_manager.maybe_save(step)
-                checkpoint_manager.maybe_save_inference(step,
-                                                        validation_scheduled=self.callbacks.will_run_validation(step))
+            if checkpoint_manager is not None and step != max_steps:
+                # The final resumable checkpoint is saved by ``save_final``
+                # after validation so the terminal checkpoint captures the
+                # post-validation callback RNG state instead of being
+                # deduped against a pre-validation interval save at the
+                # same step.
+                checkpoint_manager.maybe_save(step)
 
             try:
+                if checkpoint_manager is not None:
+                    # The model-only inference save restores the RNG and
+                    # stays on the normal per-step path, including the final
+                    # step.
+                    checkpoint_manager.maybe_save_inference(
+                        step,
+                        validation_scheduled=self.callbacks.will_run_validation(step),
+                    )
                 self.callbacks.on_validation_begin(
                     method,
                     iteration=step,
@@ -342,9 +346,9 @@ class Trainer:
                 )
             except BaseException:
                 # The final-step interval save was deferred to ``save_final``
-                # after validation; if validation aborts, still persist the
-                # terminal state so a crash (or Ctrl-C) at the last step does
-                # not discard the final unsaved interval.
+                # after the inference save and validation; if either aborts,
+                # still persist the terminal state so a crash (or Ctrl-C) at
+                # the last step does not discard the final unsaved interval.
                 if checkpoint_manager is not None and step == max_steps:
                     checkpoint_manager.save_final(max_steps)
                 raise
