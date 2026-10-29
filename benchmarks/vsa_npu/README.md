@@ -26,7 +26,7 @@ Threshold ties, FP32 accumulation and the BF16 probability operand cast remain.
 
 Validated: Python 3.11.14, torch 2.9.0+cpu,
 torch_npu 2.9.0.post1+gitdc51c2d, triton-ascend 3.2.0.dev20260322,
-Ascend SDK 8.5.1, driver 25.0.rc1.1, 910B2C with 64 GiB HBM.
+Ascend SDK 8.5.1, driver 25.0.rc1.1, 910B2C with 64 GB HBM per card.
 Provide a compatible NPU PyTorch/Triton environment independently. Do not install
 drivers or the full CUDA dependency bundle for this standalone experiment.
 `requirements.txt` records the additional standalone import/test packages.
