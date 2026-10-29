@@ -258,3 +258,68 @@ def test_registry_resolves_the_release_to_the_regenerate_pipeline(tmp_path):
         assert get_model_info(path).pipeline_cls.__name__ == "OpenH3Regenerate2KPipeline"
     preset, family = get_preset_selection(hub_id)
     assert (preset, family) == ("open_h3_regenerate_2k", "open_h3_regenerate_2k")
+
+
+def test_refine_transformer_dir_accepts_a_component_dir_or_its_checkpoint_parent(tmp_path):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.open_h3_regenerate_2k_pipeline import (
+        resolve_refine_transformer_dir,
+    )
+
+    assert resolve_refine_transformer_dir(None) is None
+    component = tmp_path / "transformer"
+    component.mkdir()
+    (component / "config.json").write_text("{}")
+    assert resolve_refine_transformer_dir(str(component)) == str(component)
+    assert resolve_refine_transformer_dir(str(tmp_path)) == str(component)
+    with pytest.raises(ValueError, match="config.json"):
+        resolve_refine_transformer_dir(str(tmp_path / "missing"))
+
+
+def _preparation_stage(tmp_path, draft_latent_path=None):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.latent_preparation import (
+        Regenerate2KLatentPreparationStage,
+    )
+
+    return Regenerate2KLatentPreparationStage(None,
+                                              None,
+                                              None,
+                                              load_upscaler=lambda: None,
+                                              draft_size="768p",
+                                              start_sigma=None,
+                                              draft_latent_path=draft_latent_path)
+
+
+def _preparation_batch():
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import MINIMAX_H3_TEXT_TOKEN_TAGS_KEY
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    batch = ForwardBatch(data_type="video")
+    batch.prompt_embeds = [torch.zeros(1, 3, 4)]
+    batch.raw_latent_shape = (1, 24, 31, 90, 160)
+    batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = torch.zeros(3, dtype=torch.long)
+    return batch
+
+
+def test_draft_latent_input_removes_the_draft_video_requirement(tmp_path):
+    video_batch = _preparation_batch()
+    assert not _preparation_stage(tmp_path).verify_input(video_batch, None).is_valid()
+
+    latent_path = tmp_path / "draft_latent.pt"
+    torch.save(torch.zeros(24, 31, 48, 84), latent_path)
+    assert _preparation_stage(tmp_path, str(latent_path)).verify_input(_preparation_batch(), None).is_valid()
+
+
+@pytest.mark.parametrize("shape", [(24, 31, 48, 84), (1, 24, 31, 48, 84)])
+def test_saved_draft_latent_loads_as_a_native_four_dimensional_latent(tmp_path, shape):
+    path = tmp_path / "draft_latent.pt"
+    torch.save(torch.full(shape, 0.5), path)
+    loaded = _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+    assert loaded.shape == (24, 31, 48, 84) and loaded.dtype == torch.float32
+    assert torch.all(loaded == 0.5)
+
+
+def test_saved_draft_latent_rejects_the_wrong_rank(tmp_path):
+    path = tmp_path / "draft_latent.pt"
+    torch.save(torch.zeros(24, 31, 48), path)
+    with pytest.raises(ValueError, match=r"\[C, T, h, w\]"):
+        _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))

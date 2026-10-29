@@ -36,6 +36,18 @@ _BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae"
                     "audio_scheduler")
 
 
+def resolve_refine_transformer_dir(configured: str | None) -> str | None:
+    """Absolute DiT component directory for ``refine_transformer_dir``; ``None`` keeps the release's own."""
+    if configured is None:
+        return None
+    root = os.path.abspath(os.path.expanduser(configured))
+    nested = os.path.join(root, "transformer")
+    path = nested if os.path.isfile(os.path.join(nested, "config.json")) else root
+    if not os.path.isfile(os.path.join(path, "config.json")):
+        raise ValueError(f"refine_transformer_dir {configured!r} holds no MiniMax-H3 transformer config.json.")
+    return path
+
+
 class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
     """MiniMax-H3 T2VA layout with a draft-latent start, fixed sigmas and a silent output."""
 
@@ -50,12 +62,17 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         revision = getattr(self.fastvideo_args, "revision", None)
+        config = self.fastvideo_args.pipeline_config
         self.model_path = maybe_download_model(model_path,
                                                revision=revision,
                                                allow_patterns=self.get_hf_download_allow_patterns())
         if self.fastvideo_args.lora_path is None:
             # The merged refine LoRA is part of the release; it is a constructor-time adapter like any H3 LoRA.
             self.fastvideo_args.lora_path = os.path.join(self.model_path, LORA_FILE)
+        refine_transformer_dir = resolve_refine_transformer_dir(config.refine_transformer_dir)
+        if refine_transformer_dir is not None:
+            logger.info("Refining on the configured DiT at %s", refine_transformer_dir)
+            self._extra_config_module_map = {**self._extra_config_module_map, "transformer": refine_transformer_dir}
         return verify_model_config_and_directory(os.path.join(self.model_path, BASE_MODEL_DIR),
                                                  required_component_dirs=())
 
@@ -89,7 +106,8 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
                                                self.get_module("scheduler"),
                                                load_upscaler=self._load_upscaler,
                                                draft_size=config.draft_size,
-                                               start_sigma=config.refine_start_sigma))
+                                               start_sigma=config.refine_start_sigma,
+                                               draft_latent_path=config.draft_latent_path))
         self.add_stage("denoising_stage",
                        Regenerate2KDenoisingStage(transformer, self._load_curve(), config.refine_start_sigma))
         self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=vae))
@@ -99,4 +117,4 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
 
 EntryClass = OpenH3Regenerate2KPipeline
 
-__all__ = ["EntryClass", "OpenH3Regenerate2KPipeline"]
+__all__ = ["EntryClass", "OpenH3Regenerate2KPipeline", "resolve_refine_transformer_dir"]
