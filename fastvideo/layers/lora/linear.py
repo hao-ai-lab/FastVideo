@@ -277,12 +277,14 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
+            # Apply LoRA with alpha scaling. An adapter stored wider than the base (an FP32 adapter on a BF16 DiT)
+            # is multiplied and added at its own precision and rounded once, as a merge-then-cast reference does.
+            accumulate_dtype = torch.promote_types(data.dtype, self.lora_A.dtype)
+            lora_delta = (self.slice_lora_b_weights(self.lora_B.to(accumulate_dtype)) @ self.slice_lora_a_weights(
+                self.lora_A.to(accumulate_dtype)))
             scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
             lora_delta *= scale * self.lora_strength
-            data += lora_delta
+            data = (data.to(accumulate_dtype) + lora_delta).to(data.dtype)
             self.base_layer.weight.data = data.to(current_device, non_blocking=True)
 
         self.merged = True
