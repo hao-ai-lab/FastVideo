@@ -22,6 +22,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_FRAMES_PER_CHUNK,
     MINIMAX_H3_LATENTS_PER_CHUNK,
     MINIMAX_H3_MAX_DURATION,
+    MINIMAX_H3_MAX_PIXELS,
+    MINIMAX_H3_SHORT_EDGE,
     resolve_canvas_size,
 )
 
@@ -180,13 +182,20 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
     return result, float(rate), soundtrack
 
 
-def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
-    """Resolve the released 2048-short-edge reference-image canvas."""
+def resolve_reference_image_size(
+    width: int,
+    height: int,
+    *,
+    short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
+) -> tuple[int, int]:
+    """Resolve the released reference-image canvas at ``short_edge``."""
     if width <= 0 or height <= 0:
         raise ValueError(f"A reference image must have a positive size, got {width}x{height}.")
     if width > 4 * height or height > 4 * width:
         raise ValueError(f"A reference image must be within 1:4 and 4:1, got {width}x{height}.")
-    scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+    if short_edge <= 0:
+        raise ValueError(f"A reference-image short edge must be positive, got {short_edge}.")
+    scale = short_edge / min(width, height)
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return (
         max(multiple,
@@ -231,12 +240,23 @@ def resample_reference_frames(frames: np.ndarray, fps: float) -> np.ndarray:
     return np.repeat(frames, repeats, axis=0)
 
 
-def prepare_reference_frames(frames: np.ndarray, num_frames: int) -> np.ndarray:
+def prepare_reference_frames(
+    frames: np.ndarray,
+    num_frames: int,
+    *,
+    short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    max_pixels: int = MINIMAX_H3_MAX_PIXELS,
+) -> np.ndarray:
     """Trim a reference video to the request and resize every RGB frame."""
     if frames.ndim != 4 or frames.shape[-1] != 3 or frames.shape[0] == 0:
         raise ValueError(f"A reference video must be non-empty RGB frames, got {tuple(frames.shape)}.")
     frames = frames[:num_frames]
-    height, width = resolve_canvas_size(frames.shape[2], frames.shape[1])
+    height, width = resolve_canvas_size(
+        frames.shape[2],
+        frames.shape[1],
+        short_edge=short_edge,
+        max_pixels=max_pixels,
+    )
     if frames.shape[1:3] == (height, width):
         return frames
     return np.stack(
@@ -319,8 +339,17 @@ def prepare_reference(
     reference: MiniMaxH3Reference,
     num_frames: int,
     target_sample_rate: int,
+    *,
+    reference_short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
+    reference_canvas_short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    reference_canvas_max_pixels: int = MINIMAX_H3_MAX_PIXELS,
 ) -> MiniMaxH3PreparedReference:
-    """Decode and normalize one deferred Ref2VA medium."""
+    """Decode and normalize one deferred Ref2VA medium.
+
+    The keyword arguments let a family use its own tier's reference-image short
+    edge and reference-video canvas rule.  MiniMax-H3's released values are the
+    defaults; Pika H3 Flex passes its 480p/768p tier values.
+    """
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
         source = reference.source
@@ -331,7 +360,7 @@ def prepare_reference(
                 raise ValueError(f"An image reference must be RGB, got {tuple(pixels.shape)}.")
             image = Image.fromarray(pixels)
         image = ImageOps.exif_transpose(image).convert("RGB")
-        height, width = resolve_reference_image_size(*image.size)
+        height, width = resolve_reference_image_size(*image.size, short_edge=reference_short_edge)
         prepared.image = prepare_reference_image(image, height, width)
         return prepared
 
@@ -346,7 +375,12 @@ def prepare_reference(
             frames = reference_media_to_uint8(reference.source)
             decoded_fps = float(MINIMAX_H3_FPS)
         fps = float(reference.fps if reference.fps is not None else decoded_fps)
-        prepared.frames = prepare_reference_frames(resample_reference_frames(frames, fps), num_frames)
+        prepared.frames = prepare_reference_frames(
+            resample_reference_frames(frames, fps),
+            num_frames,
+            short_edge=reference_canvas_short_edge,
+            max_pixels=reference_canvas_max_pixels,
+        )
 
         if reference.soundtrack is not None:
             waveform, source_rate = _resolve_audio_source(reference.soundtrack)

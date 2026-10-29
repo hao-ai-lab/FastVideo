@@ -21,19 +21,49 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
     order = 1
 
     @register_to_config
-    def __init__(self, shift: float = 12.0) -> None:
+    def __init__(
+        self,
+        shift: float = 12.0,
+        stochastic_sampling: bool = False,
+        shift_provided_sigmas: bool = False,
+    ) -> None:
+        """H3's rectified-flow scheduler, with Pika's re-noise step as an option.
+
+        ``stochastic_sampling`` switches the Euler update to the re-noise
+        contract: draw fresh Gaussian noise at the next sigma and form
+        ``(1 - sigma_next) * x0 + sigma_next * noise``.  The terminal sigma
+        always returns ``x0`` without drawing noise.  ``shift_provided_sigmas``
+        records that explicit sigmas are already shifted (Pika's release uses
+        it); FastVideo always treats explicit ``set_timesteps(sigmas=...)``
+        values that way, so it is informational.
+        """
         if shift <= 0:
             raise ValueError(f"`shift` must be positive, got {shift}.")
         self.num_inference_steps: int | None = None
         self.sigmas: torch.Tensor | None = None
         self.timesteps: torch.Tensor | None = None
         self._shift = float(shift)
+        self._stochastic_sampling = bool(stochastic_sampling)
+        self._shift_provided_sigmas = bool(shift_provided_sigmas)
+        self._noise_generator: torch.Generator | None = None
         self._step_index: int | None = None
         self._begin_index: int | None = None
 
     @property
     def shift(self) -> float:
         return self._shift
+
+    @property
+    def stochastic_sampling(self) -> bool:
+        return self._stochastic_sampling
+
+    @property
+    def shift_provided_sigmas(self) -> bool:
+        return self._shift_provided_sigmas
+
+    def set_noise_generator(self, generator: torch.Generator | None) -> None:
+        """Set the generator used by stochastic (re-noise) steps."""
+        self._noise_generator = generator
 
     @property
     def step_index(self) -> int | None:
@@ -127,11 +157,29 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
         denoised = sample + sigma_from_timestep * model_output
 
         compute_dtype = torch.float32 if sample.dtype in (torch.float16, torch.bfloat16) else sample.dtype
-        sigma = self.sigmas[self._step_index].to(device=sample.device, dtype=compute_dtype)
         sigma_next = self.sigmas[self._step_index + 1].to(device=sample.device, dtype=compute_dtype)
-        ratio = sigma_next / sigma
-        prev_sample = ratio * sample.to(compute_dtype) + (1.0 - ratio) * denoised.to(compute_dtype)
-        prev_sample = prev_sample.to(sample.dtype)
+        if self._stochastic_sampling:
+            if self._noise_generator is None:
+                raise ValueError("Stochastic MiniMax-H3 sampling needs a noise generator; call "
+                                 "`set_noise_generator` before `step`.")
+            if float(sigma_next) == 0.0:
+                # The terminal ladder point is the generated sample. Pika's
+                # sampler returns x0 here instead of drawing a final noise.
+                prev_sample = denoised.to(sample.dtype)
+            else:
+                noise = torch.randn(
+                    sample.shape,
+                    generator=self._noise_generator,
+                    device=sample.device,
+                    dtype=torch.float32,
+                )
+                prev_sample = ((1.0 - sigma_next) * denoised.to(compute_dtype) +
+                               sigma_next * noise).to(sample.dtype)
+        else:
+            sigma = self.sigmas[self._step_index].to(device=sample.device, dtype=compute_dtype)
+            ratio = sigma_next / sigma
+            prev_sample = ratio * sample.to(compute_dtype) + (1.0 - ratio) * denoised.to(compute_dtype)
+            prev_sample = prev_sample.to(sample.dtype)
         self._step_index += 1
 
         if not return_dict:
