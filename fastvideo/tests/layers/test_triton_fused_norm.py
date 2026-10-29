@@ -7,9 +7,11 @@ pin that claim: outputs must match eager to within a bf16 ulp everywhere, with
 the overwhelming majority of elements bit-identical.
 """
 import os
+from unittest.mock import patch
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from fastvideo.layers.layernorm import ScaleResidualLayerNormScaleShift
 import fastvideo.envs as envs
@@ -214,3 +216,50 @@ def test_default_module_never_fuses():
         out, res = eager(residual, x, gate, None, None)
     assert out.dtype == torch.float32
     assert res.dtype == torch.float32
+
+
+class _Tanh(torch.nn.Module):
+    """Sub-layer stand-in: the Kandinsky tests only exercise the norm wiring."""
+
+    def forward(self, x, **kwargs):
+        return torch.tanh(x)
+
+
+@cuda_only
+@pytest.mark.parametrize("decoder", [False, True], ids=["encoder", "decoder"])
+def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
+    """Every post-residual norm of a Kandinsky-5 block takes the fused path, and the
+    block output matches main's unfused forward (bf16-rounded residual, then norm)."""
+    import fastvideo.layers.triton_fused_norm as tfn
+    from fastvideo.models.dits import kandinsky5 as k5
+    from fastvideo.platforms import AttentionBackendEnum
+
+    D, T = 512, 128
+    torch.manual_seed(0)
+    cls = k5.Kandinsky5TransformerDecoderBlock if decoder else k5.Kandinsky5TransformerEncoderBlock
+    block = cls(D, T, 4 * D, 64, supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ))
+    block.self_attention, block.feed_forward = _Tanh(), _Tanh()
+    if decoder:
+        block.cross_attention = _Tanh()
+    mod = block.visual_modulation if decoder else block.text_modulation
+    torch.nn.init.normal_(mod.out_layer.weight, std=0.1)  # zero-initialised by default
+    block = block.cuda().to(torch.bfloat16)
+    x = torch.randn(2, 256, D, device="cuda", dtype=torch.bfloat16)
+    t = torch.randn(2, T, device="cuda", dtype=torch.bfloat16)
+
+    with torch.no_grad():
+        params = [torch.chunk(p, 3, dim=-1) for p in torch.chunk(mod(t).unsqueeze(1), 3 if decoder else 2, dim=-1)]
+        shift, scale, gate = params[0]
+        out = block.self_attention_norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
+        ref = x
+        for shift, scale, next_gate in params[1:]:
+            ref = (ref.float() + gate.float() * torch.tanh(out).float()).type_as(x)
+            out = (F.layer_norm(ref.float(), (D, ), eps=1e-5) * (1 + scale) + shift).type_as(x)
+            gate = next_gate
+        ref = (ref.float() + gate.float() * torch.tanh(out).float()).type_as(x)
+
+        with patch.object(tfn, "fused_residual_norm_mod", wraps=tfn.fused_residual_norm_mod) as spy:
+            actual = block(x, x, t, None, None) if decoder else block(x, t, None)
+
+    assert spy.call_count == len(params) - 1
+    torch.testing.assert_close(actual, ref, rtol=2e-2, atol=2e-2)

@@ -468,14 +468,14 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
 FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
     False,
     category="performance",
-    doc="Opt into Wan's inference-only Triton residual + LayerNorm + modulation fusion. "
+    doc="Opt into the Wan and Kandinsky-5 inference-only Triton residual + LayerNorm + modulation fusion. "
     "Its reduction order changes numerical outputs; the default keeps eager reference compatibility.")
 # Global kill switch for the opt-in, inference-only Triton fusion in
 # fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
 FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
                                        category="performance",
                                        doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
-                                       "path that Wan blocks opt into, and use the eager path.")
+                                       "path that Wan and Kandinsky-5 blocks opt into, and use the eager path.")
 
 # ================== Output encoding ==================
 

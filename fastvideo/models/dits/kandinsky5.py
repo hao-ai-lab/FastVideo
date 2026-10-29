@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN, flex_attention, nablaT_v2
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
-from fastvideo.layers.layernorm import LayerNormScaleShift
+from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidualLayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
@@ -459,12 +459,13 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
                                                   prefix=f"{prefix}.self_attention",
                                                   quant_config=quant_config)
 
-        self.feed_forward_norm = LayerNormScaleShift(model_dim,
-                                                     norm_type="layer",
-                                                     eps=1e-5,
-                                                     elementwise_affine=False,
-                                                     dtype=torch.float32,
-                                                     compute_dtype=torch.float32)
+        self.feed_forward_norm = ScaleResidualLayerNormScaleShift(model_dim,
+                                                                  norm_type="layer",
+                                                                  eps=1e-5,
+                                                                  elementwise_affine=False,
+                                                                  dtype=torch.float32,
+                                                                  compute_dtype=torch.float32,
+                                                                  fuse_inference=True)
         self.feed_forward = Kandinsky5FeedForward(model_dim,
                                                   ff_dim,
                                                   prefix=f"{prefix}.feed_forward",
@@ -475,11 +476,10 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
         out = self.self_attention_norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
         out = self.self_attention(out, rotary_emb=rope)
-        x = (x.float() + gate.float() * out.float()).type_as(x)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        out = self.feed_forward_norm(x.float(), shift=ff_shift, scale=ff_scale,
-                                     convert_modulation_dtype=True).type_as(x)
+        out, residual = self.feed_forward_norm(x, out, gate, ff_shift, ff_scale, convert_modulation_dtype=True)
+        out, x = out.type_as(x), residual.type_as(x)
         out = self.feed_forward(out)
         x = (x.float() + ff_gate.float() * out.float()).type_as(x)
 
@@ -514,24 +514,26 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
                                                   use_nabla=use_nabla,
                                                   quant_config=quant_config)
 
-        self.cross_attention_norm = LayerNormScaleShift(model_dim,
-                                                        norm_type="layer",
-                                                        eps=1e-5,
-                                                        elementwise_affine=False,
-                                                        dtype=torch.float32,
-                                                        compute_dtype=torch.float32)
+        self.cross_attention_norm = ScaleResidualLayerNormScaleShift(model_dim,
+                                                                     norm_type="layer",
+                                                                     eps=1e-5,
+                                                                     elementwise_affine=False,
+                                                                     dtype=torch.float32,
+                                                                     compute_dtype=torch.float32,
+                                                                     fuse_inference=True)
         self.cross_attention = Kandinsky5Attention(model_dim,
                                                    head_dim,
                                                    supported_attention_backends=supported_attention_backends,
                                                    prefix=f"{prefix}.cross_attention",
                                                    quant_config=quant_config)
 
-        self.feed_forward_norm = LayerNormScaleShift(model_dim,
-                                                     norm_type="layer",
-                                                     eps=1e-5,
-                                                     elementwise_affine=False,
-                                                     dtype=torch.float32,
-                                                     compute_dtype=torch.float32)
+        self.feed_forward_norm = ScaleResidualLayerNormScaleShift(model_dim,
+                                                                  norm_type="layer",
+                                                                  eps=1e-5,
+                                                                  elementwise_affine=False,
+                                                                  dtype=torch.float32,
+                                                                  compute_dtype=torch.float32,
+                                                                  fuse_inference=True)
         self.feed_forward = Kandinsky5FeedForward(model_dim,
                                                   ff_dim,
                                                   prefix=f"{prefix}.feed_forward",
@@ -550,25 +552,25 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
         visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params)
-        visual_embed = (visual_embed.float() + self_gate.float() * visual_out.float()).type_as(visual_embed)
 
         cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params, 3, dim=-1)
-        visual_out = self.cross_attention_norm(
-            visual_embed.float(),
-            shift=cross_shift,
-            scale=cross_scale,
-            convert_modulation_dtype=True,
-        ).type_as(visual_embed)
+        visual_out, residual = self.cross_attention_norm(visual_embed,
+                                                         visual_out,
+                                                         self_gate,
+                                                         cross_shift,
+                                                         cross_scale,
+                                                         convert_modulation_dtype=True)
+        visual_out, visual_embed = visual_out.type_as(visual_embed), residual.type_as(visual_embed)
         visual_out = self.cross_attention(visual_out, encoder_hidden_states=text_embed)
-        visual_embed = (visual_embed.float() + cross_gate.float() * visual_out.float()).type_as(visual_embed)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        visual_out = self.feed_forward_norm(
-            visual_embed.float(),
-            shift=ff_shift,
-            scale=ff_scale,
-            convert_modulation_dtype=True,
-        ).type_as(visual_embed)
+        visual_out, residual = self.feed_forward_norm(visual_embed,
+                                                      visual_out,
+                                                      cross_gate,
+                                                      ff_shift,
+                                                      ff_scale,
+                                                      convert_modulation_dtype=True)
+        visual_out, visual_embed = visual_out.type_as(visual_embed), residual.type_as(visual_embed)
         visual_out = self.feed_forward(visual_out)
         visual_embed = (visual_embed.float() + ff_gate.float() * visual_out.float()).type_as(visual_embed)
 
