@@ -49,6 +49,7 @@ def _make_manager(
     *,
     save_steps: int = 0,
     keep_last: int = 0,
+    save_inference_on_validation: bool = False,
     raw_config: dict[str, Any] | None = None,
 ) -> CheckpointManager:
     """Build a minimal ``CheckpointManager`` for tests that don't touch DCP."""
@@ -56,7 +57,11 @@ def _make_manager(
         method=None,
         dataloader=None,
         output_dir=str(tmp_path),
-        config=CheckpointConfig(save_steps=save_steps, keep_last=keep_last),
+        config=CheckpointConfig(
+            save_steps=save_steps,
+            keep_last=keep_last,
+            save_inference_on_validation=save_inference_on_validation,
+        ),
         raw_config=raw_config,
     )
 
@@ -354,3 +359,44 @@ def test_maybe_save_triggers_on_each_interval(tmp_path: Path) -> None:
     for step in range(1, 41):
         mgr.maybe_save(step=step)
     assert calls == [10, 20, 30, 40]
+
+
+# ---------------------------------------------------------------------------
+# H. maybe_save_inference gating logic
+# ---------------------------------------------------------------------------
+
+
+def _record_inference_save_calls(mgr: CheckpointManager) -> list[int]:
+    """Replace ``mgr.save_inference`` with a recorder that mimics the
+    side effect of advancing ``_last_inference_saved_step``."""
+    calls: list[int] = []
+
+    def fake_save_inference(step: int) -> None:
+        calls.append(step)
+        mgr._last_inference_saved_step = step
+
+    mgr.save_inference = fake_save_inference  # type: ignore[method-assign]
+    return calls
+
+
+def test_maybe_save_inference_requires_scheduled_validation(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path, save_inference_on_validation=True)
+    calls = _record_inference_save_calls(mgr)
+    mgr.maybe_save_inference(step=10, validation_scheduled=False)
+    assert calls == []
+
+
+def test_maybe_save_inference_requires_config_opt_in(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path, save_inference_on_validation=False)
+    calls = _record_inference_save_calls(mgr)
+    mgr.maybe_save_inference(step=10, validation_scheduled=True)
+    assert calls == []
+
+
+def test_maybe_save_inference_dedupes_on_repeated_call(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path, save_inference_on_validation=True)
+    calls = _record_inference_save_calls(mgr)
+    mgr.maybe_save_inference(step=10, validation_scheduled=True)
+    mgr.maybe_save_inference(step=10, validation_scheduled=True)
+    mgr.maybe_save_inference(step=20, validation_scheduled=True)
+    assert calls == [10, 20]
