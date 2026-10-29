@@ -12,9 +12,12 @@ for the model, sampler and parallelism details.
 
 Follow the [CUDA installation guide](../getting_started/installation/gpu.md), then run
 from the repository root. The full `IFM/PAN2` checkpoint is not public yet; pass a
-local directory or private repo you can access with `PAN2_MODEL_PATH`.
+local directory or private repo you can access with `PAN2_MODEL_PATH`. PAN 2 runs
+with its prompt and video guardrails by default, so install them first (see
+[Guardrails](../inference/pan2.md#guardrails)):
 
 ```bash
+pip install git+https://github.com/ifm-ai/pan2-guardrail
 python examples/inference/basic/basic_pan2.py
 ```
 

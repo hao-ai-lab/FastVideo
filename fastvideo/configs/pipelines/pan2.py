@@ -44,6 +44,13 @@ class PAN2PipelineConfig(PipelineConfig):
     # PAN2 samples on fp32 latents; keep the Euler update out of autocast.
     scheduler_step_in_fp32: bool = True
 
+    # Check the prompt and every generated video with the PAN 2 guardrails (the `pan2-guardrail` package), as the
+    # vLLM-Omni and Diffusers integrations do by default. A blocked prompt or video raises
+    # `PAN2GuardrailViolationError`. False turns both checks off, at your own risk.
+    enable_guardrails: bool = True
+    # Keep the guard models on CPU and move each to the GPU only for its check.
+    offload_guardrail_models: bool = False
+
     # Prompt encoding: PAN2 conditions on the tokens after the chat template's user header, taken from the text
     # encoder's hidden states with its last two layers skipped (``hidden_states[-3]``).
     text_system_prompt: str = PAN2_SYSTEM_PROMPT

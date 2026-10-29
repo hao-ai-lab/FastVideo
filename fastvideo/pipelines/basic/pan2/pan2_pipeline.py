@@ -4,6 +4,11 @@
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.basic.pan2.guardrails import (
+    PAN2Guardrails,
+    PAN2PromptGuardrailStage,
+    PAN2VideoGuardrailStage,
+)
 from fastvideo.pipelines.basic.pan2.stages import (
     PAN2ConditioningStage,
     PAN2DenoisingStage,
@@ -22,7 +27,16 @@ class PAN2Pipeline(ComposedPipelineBase):
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+        # The guardrails are on unless the config turns them off.
+        guardrails = None
+        if getattr(pipeline_config, "enable_guardrails", True):
+            offload = bool(getattr(pipeline_config, "offload_guardrail_models", False))
+            guardrails = PAN2Guardrails(offload_to_cpu=offload)
+
         self.add_stage(stage_name="input_validation_stage", stage=PAN2InputValidationStage())
+        if guardrails is not None:
+            self.add_stage(stage_name="prompt_guardrail_stage", stage=PAN2PromptGuardrailStage(guardrails))
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=PAN2TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
@@ -40,7 +54,6 @@ class PAN2Pipeline(ComposedPipelineBase):
                                                 scheduler=self.get_module("scheduler"),
                                                 pipeline=self))
         # The performance switches of PAN2PipelineConfig: the DiT's fused kernels and the VAE's decode kernel.
-        pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
         transformer = self.get_module("transformer")
         if hasattr(transformer, "set_fused_kernels"):
             transformer.set_fused_kernels(bool(getattr(pipeline_config, "dit_fused_kernels", False)))
@@ -50,6 +63,8 @@ class PAN2Pipeline(ComposedPipelineBase):
             vae_config.decode_kernel = bool(getattr(pipeline_config, "vae_decode_kernel", False))
             vae_config.decode_kernel_parallel = bool(getattr(pipeline_config, "vae_decode_kernel_parallel", False))
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=vae, pipeline=self))
+        if guardrails is not None:
+            self.add_stage(stage_name="video_guardrail_stage", stage=PAN2VideoGuardrailStage(guardrails))
 
 
 class PAN2ModularPipeline(PAN2Pipeline):
