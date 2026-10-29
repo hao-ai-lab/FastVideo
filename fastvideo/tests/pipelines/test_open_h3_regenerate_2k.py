@@ -186,9 +186,13 @@ class _ConstantVelocityTransformer:
     def __init__(self, velocity):
         self.velocity = velocity
         self.calls = []
+        self.attn_metadata = []
 
     def __call__(self, **kwargs):
+        from fastvideo.forward_context import get_forward_context
+
         self.calls.append(kwargs)
+        self.attn_metadata.append(get_forward_context().attn_metadata)
         rows = kwargs["hidden_states"].shape[1]
         audio_rows = kwargs["audio_hidden_states"].shape[1]
         return torch.full((1, rows, 8), self.velocity), torch.zeros(1, audio_rows, 4)
@@ -207,13 +211,24 @@ class _RecordingCurve:
         self.timesteps.append(unique.clone())
 
 
-def _denoise(monkeypatch, steps, velocity=0.5):
+def _refine_args(vsa_builder=None):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 2, 2))),
+                           VSA_sparsity=0.8,
+                           VSA_tile_size=64,
+                           vsa_builder=vsa_builder)
+
+
+def _denoise(monkeypatch, steps, velocity=0.5, vsa_builder=None):
     from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
     from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
     from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import denoising
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     monkeypatch.setattr(denoising, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(denoising, "_h3_vsa_metadata_builder", lambda *args: vsa_builder)
+    monkeypatch.setattr(denoising, "_h3_vsa_single_region_segments", lambda layout, patch: ("segments", ))
     layout = build_packed_sequence(torch.ones(3, dtype=torch.long), 2, 2, 2, 2, (1, 2, 2))
     batch = ForwardBatch(data_type="video")
     batch.num_inference_steps = steps
@@ -223,7 +238,7 @@ def _denoise(monkeypatch, steps, velocity=0.5):
     batch.extra[MINIMAX_H3_LAYOUT_KEY] = layout
     transformer, curve = _ConstantVelocityTransformer(velocity), _RecordingCurve()
     stage = denoising.Regenerate2KDenoisingStage(transformer, curve, None)
-    return stage.forward(batch, None), transformer, curve
+    return stage.forward(batch, _refine_args(vsa_builder)), transformer, curve
 
 
 def test_euler_steps_integrate_the_constant_velocity_over_sigma_zero_to_start(monkeypatch):
@@ -323,3 +338,27 @@ def test_saved_draft_latent_rejects_the_wrong_rank(tmp_path):
     torch.save(torch.zeros(24, 31, 48), path)
     with pytest.raises(ValueError, match=r"\[C, T, h, w\]"):
         _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+
+
+class _RecordingVSABuilder:
+
+    def __init__(self):
+        self.builds = []
+
+    def build(self, **kwargs):
+        self.builds.append(kwargs)
+        return f"metadata-{len(self.builds)}"
+
+
+def test_vsa_backend_builds_one_sparse_metadata_per_refine_step(monkeypatch):
+    builder = _RecordingVSABuilder()
+    _, transformer, _ = _denoise(monkeypatch, steps=3, vsa_builder=builder)
+    assert [build["VSA_sparsity"] for build in builder.builds] == [0.8, 0.8, 0.8]
+    assert all(build["tile_size"] == 64 and build["exempt"] for build in builder.builds)
+    assert [build["current_timestep"] for build in builder.builds] == [0, 1, 2]
+    assert transformer.attn_metadata == ["metadata-1", "metadata-2", "metadata-3"]
+
+
+def test_dense_backend_passes_no_attention_metadata(monkeypatch):
+    _, transformer, _ = _denoise(monkeypatch, steps=3)
+    assert transformer.attn_metadata == [None, None, None]

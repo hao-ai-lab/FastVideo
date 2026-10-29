@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 
 
-def gaussian_window(size: int = 11, sigma: float = 1.5, device: str = "cuda") -> torch.Tensor:
+def gaussian_window(size: int = 11, sigma: float = 1.5, device: str = "cpu") -> torch.Tensor:
     coords = torch.arange(size, dtype=torch.float32, device=device) - size // 2
     kernel = torch.exp(-(coords**2) / (2 * sigma**2))
     kernel = kernel / kernel.sum()
@@ -29,8 +29,8 @@ def psnr(x: torch.Tensor, y: torch.Tensor) -> float:
 
 
 def ssim(x: torch.Tensor, y: torch.Tensor, window: torch.Tensor) -> float:
-    x = x.float().mean(-1)[None, None].cuda()
-    y = y.float().mean(-1)[None, None].cuda()
+    x = x.float().mean(-1)[None, None]
+    y = y.float().mean(-1)[None, None]
     c1, c2 = (0.01 * 255)**2, (0.03 * 255)**2
     mu_x, mu_y = F.conv2d(x, window), F.conv2d(y, window)
     sxx = F.conv2d(x * x, window) - mu_x * mu_x

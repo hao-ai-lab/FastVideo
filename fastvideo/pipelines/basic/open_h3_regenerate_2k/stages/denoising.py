@@ -14,6 +14,10 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.minimax_h3.packing import MiniMaxH3PackedLayout, build_row_timesteps
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import (
+    _h3_vsa_metadata_builder,
+    _h3_vsa_single_region_segments,
+)
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.sampling import refine_sigmas
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.sharp_curve import SharpCurveBranches
@@ -62,10 +66,30 @@ class Regenerate2KDenoisingStage(PipelineStage):
         device = get_local_torch_device()
         sigmas = refine_sigmas(batch.num_inference_steps, self.start_sigma)
         state = batch.latents.to(device)
+        vsa = self._vsa_plan(batch, layout, transformer, fastvideo_args, device)
         with self._attention_kernel(device):
-            state = self._euler_loop(batch, layout, state, sigmas, device, transformer)
+            state = self._euler_loop(batch, layout, state, sigmas, device, transformer, vsa)
         batch.latents = state
         return batch
+
+    @staticmethod
+    def _vsa_plan(batch: ForwardBatch, layout: MiniMaxH3PackedLayout, transformer: Any, fastvideo_args: FastVideoArgs,
+                  device: torch.device) -> tuple[Any, ...] | None:
+        """Per-step VSA metadata inputs, or None for a dense backend.
+
+        The builder and the packed segments come from MiniMax-H3's own denoising stage so the refine sees the same
+        sparse layout its t2v runs do; the refine layout is a single generated-video region (no reference rows).
+        """
+        builder = _h3_vsa_metadata_builder(transformer, fastvideo_args)
+        if builder is None:
+            return None
+        patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+        sparsity = fastvideo_args.VSA_sparsity
+        if sparsity is None:
+            sparsity = getattr(batch, "VSA_sparsity", 0.0)
+        tile_size = fastvideo_args.VSA_tile_size
+        return (builder, patch_size, _h3_vsa_single_region_segments(layout,
+                                                                    patch_size), float(sparsity), tile_size, device)
 
     @staticmethod
     def _attention_kernel(device: torch.device) -> contextlib.AbstractContextManager[None]:
@@ -73,7 +97,7 @@ class Regenerate2KDenoisingStage(PipelineStage):
         return sdpa_kernel(SDPBackend.CUDNN_ATTENTION) if device.type == "cuda" else contextlib.nullcontext()
 
     def _euler_loop(self, batch: ForwardBatch, layout: MiniMaxH3PackedLayout, state: torch.Tensor, sigmas: list[float],
-                    device: torch.device, transformer: Any) -> torch.Tensor:
+                    device: torch.device, transformer: Any, vsa: Any) -> torch.Tensor:
         position_ids = layout.position_ids.to(device)
         token_tags = layout.token_tags.to(device)
         video_indices = layout.video_indices.to(device)
@@ -89,8 +113,19 @@ class Regenerate2KDenoisingStage(PipelineStage):
                                                   condition_audio_timestep=1.0)
             unique, inverse = unique.to(device), inverse.to(device)
             self.curve.set_timesteps(unique)
+            attn_metadata = None
+            if vsa is not None:
+                builder, patch_size, segments, sparsity, tile_size, vsa_device = vsa
+                attn_metadata = builder.build(current_timestep=index,
+                                              patch_size=patch_size,
+                                              VSA_sparsity=sparsity,
+                                              packed_segments=segments,
+                                              device=vsa_device,
+                                              exempt=True,
+                                              dense_layers=(),
+                                              tile_size=tile_size)
             torch.compiler.cudagraph_mark_step_begin()
-            with set_forward_context(current_timestep=index, attn_metadata=None, forward_batch=batch):
+            with set_forward_context(current_timestep=index, attn_metadata=attn_metadata, forward_batch=batch):
                 velocity, _ = transformer(hidden_states=state.to(torch.bfloat16)[None],
                                           audio_hidden_states=audio,
                                           encoder_hidden_states=prompt_embeds,
