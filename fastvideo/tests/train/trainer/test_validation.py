@@ -155,7 +155,8 @@ class _RecordingCheckpointManager:
         self.maybe_save_steps.append(step)
 
     def maybe_save_inference(self, step: int, *, validation_scheduled: bool) -> None:
-        del validation_scheduled
+        if not validation_scheduled:
+            return
         self.maybe_save_inference_steps.append(step)
 
     def save_final(self, step: int) -> None:
