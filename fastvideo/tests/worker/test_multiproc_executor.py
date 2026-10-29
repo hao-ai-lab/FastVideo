@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from fastvideo import envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.multiproc_executor import (
@@ -144,6 +145,59 @@ def test_worker_rpc_error_does_not_exit_busy_loop(monkeypatch) -> None:
 def test_parent_raises_worker_rpc_error() -> None:
     with pytest.raises(RuntimeError, match="worker 0: ValueError: bad request"):
         _raise_for_rpc_errors("execute_forward", [{_RPC_ERROR_KEY: True, "error": "ValueError: bad request"}])
+
+
+@pytest.mark.parametrize("worker_extras, expected_peak", [
+    pytest.param([{"peak_memory_mb": 100.0}, {"peak_memory_mb": 900.0}, {"peak_memory_mb": 200.0}],
+                 900.0, id="nonzero-rank-maximum"),
+    pytest.param([{"peak_memory_mb": 900.0}, {"peak_memory_mb": 100.0}], 900.0, id="rank-zero-maximum"),
+    pytest.param([{"peak_memory_mb": 42.0}], 42.0, id="single-worker"),
+    pytest.param([{"peak_memory_mb": 0.0}, {"peak_memory_mb": 0.0}], 0.0, id="zero-peaks"),
+    pytest.param([{}, {"peak_memory_mb": 900.0}], 900.0, id="missing-rank-zero-peak"),
+    pytest.param([{"peak_memory_mb": 42.0}, {}, {"peak_memory_mb": None}], 42.0, id="missing-peer-peaks"),
+    pytest.param([{}, {}], None, id="no-peaks"),
+    pytest.param([{"peak_memory_mb": None}, {}], None, id="unavailable-peaks"),
+])
+def test_execute_forward_aggregates_peak_memory_preserving_rank_zero_data(worker_extras, expected_peak):
+    audio = object()
+    responses = [
+        {
+            "output_batch": torch.empty(0),
+            "logging_info": object(),
+            "extra": {**extra, "audio": audio if rank == 0 else object(), "origin_rank": rank},
+            "trajectory_latents": [],
+            "trajectory_timesteps": [],
+        }
+        for rank, extra in enumerate(worker_extras)
+    ]
+    original_extras = [response["extra"].copy() for response in responses]
+    pipes = [_ScriptedPipe([response]) for response in responses]
+    executor = MultiprocExecutor.__new__(MultiprocExecutor)
+    executor.shutting_down = True  # Scripted handles have no live processes to shut down.
+    executor.workers = [SimpleNamespace(pipe=pipe) for pipe in pipes]
+    batch = ForwardBatch(data_type="video")
+    args = SimpleNamespace()
+
+    with envs.FASTVIDEO_STAGE_LOGGING.override(True):
+        result = executor.execute_forward(batch, args)
+
+    expected_extra = original_extras[0].copy()
+    if expected_peak is not None:
+        expected_extra["peak_memory_mb"] = expected_peak
+    assert result.extra == expected_extra
+    assert result.extra["audio"] is audio
+    assert result.output is responses[0]["output_batch"]
+    assert result.logging_info is responses[0]["logging_info"]
+    assert result.trajectory_latents is responses[0]["trajectory_latents"]
+    assert result.trajectory_timesteps is responses[0]["trajectory_timesteps"]
+    assert [response["extra"] for response in responses] == original_extras
+    for pipe in pipes:
+        assert not pipe.messages
+        assert pipe.responses == [{
+            "method": "execute_forward",
+            "args": (),
+            "kwargs": {"forward_batch": batch, "fastvideo_args": args},
+        }]
 
 
 def test_worker_shutdown_closes_worker_and_compile_pool_once(monkeypatch) -> None:
