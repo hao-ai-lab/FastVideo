@@ -45,6 +45,7 @@ from fastvideo.api import (
     PipelineSelection,
     SamplingConfig,
 )
+from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 # Training-free switches FastVideo already exposes. Workers inherit the
@@ -106,7 +107,10 @@ def parse_args() -> argparse.Namespace:
 def _inputs(args: argparse.Namespace) -> InputConfig:
     if args.task == "ref2va":
         return InputConfig(references=args.reference)
-    return InputConfig(image_path=args.image, last_image=args.last_image)
+    # The request adapter copies image fields verbatim; the stage loads
+    # ``image_path`` itself but requires ``last_image`` to already be a PIL image.
+    last_image = load_image(args.last_image) if args.last_image else None
+    return InputConfig(image_path=args.image, last_image=last_image)
 
 
 def _pipeline(args: argparse.Namespace) -> PipelineSelection:
@@ -115,7 +119,6 @@ def _pipeline(args: argparse.Namespace) -> PipelineSelection:
         components.override_pipeline_cls_name = "PikaH3FlexRef2VAModularPipeline"
     return PipelineSelection(
         workload_type="t2v" if args.task == "t2va" else "i2v",
-        preset=f"pika_h3_flex_{args.task}",
         components=components,
         vae_tiling=True,
     )

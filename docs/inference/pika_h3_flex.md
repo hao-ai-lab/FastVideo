@@ -48,11 +48,17 @@ python examples/inference/basic/basic_pika_h3_flex.py --task ref2va \
     --reference audio:voice.wav --prompt "the person dances to the music"
 ```
 
-Ref2VA accepts up to 12 references: 9 images, 3 videos, and 3 audio. Each video
-and audio reference is 2–15 s; video/audio totals are capped at 15 s per
-modality. A video reference needs at least 22 decoded frames at 24 fps. At
-least one image or video is required, and the Ref2VA pipeline must be selected
-with `PikaH3FlexRef2VAModularPipeline` (the example does this).
+Ref2VA accepts up to 12 references: 9 images, 3 videos, and 3 audio. These
+counts are enforced locally, as is the rule that audio-only requests are
+invalid. A video reference needs at least 22 decoded frames at 24 fps. At least
+one image or video is required, and the Ref2VA pipeline must be selected with
+`PikaH3FlexRef2VAModularPipeline` (the example does this).
+
+Pika's hosted API also documents a 2–15 s limit per video/audio reference and a
+15 s total per modality. **The local path does not currently enforce those
+duration caps**; it trims each reference to the requested output duration. Treat
+the per-reference and per-modality limits as recommendations until the checks
+are added.
 
 ## Canvas and frames
 
