@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai import media_policy, request_adapter
 from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.protocol import UrlAudioReference, VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
@@ -293,11 +294,17 @@ def test_inline_video_and_audio_references_are_decoded_in_order(tmp_path: Path) 
     assert not _uploads(tmp_path)
 
 
-def test_inline_reference_payload_may_be_wrapped_and_percent_escaped(tmp_path: Path) -> None:
-    track = b"wrapped-track" * 8
-    encoded = base64.b64encode(track).decode().replace("=", "%3D")
-    wrapped = "\n".join(encoded[start:start + 16] for start in range(0, len(encoded), 16))
-    request = VideoGenerationRequest(prompt="waves", audio_reference={"audio_url": f"data:audio/flac;base64,{wrapped}"})
+@pytest.mark.parametrize("chunk_chars", [media_policy.DATA_URL_CHUNK_CHARS, 3, 4, 5, 7])
+def test_inline_reference_payload_may_be_wrapped_and_percent_escaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                    chunk_chars: int) -> None:
+    # Small chunks put chunk boundaries inside percent escapes and line breaks.
+    monkeypatch.setattr(media_policy, "DATA_URL_CHUNK_CHARS", chunk_chars)
+    track = bytes(range(256)) * 2
+    encoded = base64.b64encode(track).decode()
+    lines = [encoded[start:start + 16] for start in range(0, len(encoded), 16)]
+    wrapped = "".join(line + ("%0A" if number % 2 else "\r\n") for number, line in enumerate(lines))
+    escaped = wrapped.replace("+", "%2B").replace("/", "%2f").replace("=", "%3D")
+    request = VideoGenerationRequest(prompt="waves", audio_reference={"audio_url": f"data:audio/flac;base64,{escaped}"})
     created = asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
     assert Path(created[0]).read_bytes() == track
     assert created[0].endswith(".flac")
@@ -333,6 +340,24 @@ def test_inline_reference_over_the_media_limit_is_refused(tmp_path: Path) -> Non
     assert Path(created[0]).read_bytes() == b"1234"
 
 
+def test_oversized_inline_payload_is_refused_before_it_is_all_read(tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_policy, "DATA_URL_CHUNK_CHARS", 8)
+    unescaped: list[int] = []
+    original_unquote = media_policy.unquote
+
+    def counting_unquote(chunk: str) -> str:
+        unescaped.append(len(chunk))
+        return original_unquote(chunk)
+
+    monkeypatch.setattr(media_policy, "unquote", counting_unquote)
+    source = "data:video/mp4;base64," + "QU%4AB\n" * 10_000
+    with pytest.raises(media_policy.MediaPolicyError, match="4-byte limit"):
+        media_policy.decode_data_url(source, str(tmp_path / "clip.mp4"), max_bytes=4)
+    assert max(unescaped) <= 8 and sum(unescaped) < 64
+    assert not (tmp_path / "clip.mp4").exists()
+
+
 def test_decoded_references_are_removed_when_a_later_reference_fails(tmp_path: Path) -> None:
     request = VideoGenerationRequest(
         prompt="waves",
@@ -341,6 +366,41 @@ def test_decoded_references_are_removed_when_a_later_reference_fails(tmp_path: P
     )
     with pytest.raises(RequestAdaptationError, match="not valid base64"):
         asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert not _uploads(tmp_path)
+
+
+def test_cancelled_decoding_removes_its_file_once_the_thread_finishes(tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    asyncio.run(_assert_cancelled_decoding_removes_its_file(tmp_path, monkeypatch))
+
+
+async def _assert_cancelled_decoding_removes_its_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    written: list[bool] = []
+
+    def decode_after_release(source: str, target: str, *, max_bytes: int) -> None:
+        started.set()
+        release.wait(timeout=5)
+        try:
+            media_policy.decode_data_url(source, target, max_bytes=max_bytes)
+            written.append(os.path.exists(target))
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(request_adapter, "decode_data_url", decode_after_release)
+    request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": _data_url("video/mp4", b"clip")})
+    preparing = asyncio.create_task(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert await asyncio.to_thread(started.wait, 5)
+    preparing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await preparing
+    # The thread writes its file only after the request is gone, so cleanup has to wait for the thread.
+    release.set()
+    assert await asyncio.to_thread(finished.wait, 5)
+    assert written == [True]
+    deadline = time.monotonic() + 5
+    while _uploads(tmp_path) and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
     assert not _uploads(tmp_path)
 
 

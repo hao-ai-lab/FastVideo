@@ -152,7 +152,8 @@ async def _materialize_media(source: str,
     source = source.strip()
     if not source:
         raise RequestAdaptationError(f"{kind.capitalize()} references must not be empty.")
-    if source.lower().startswith(("http://", "https://")):
+    # Only the scheme is lower-cased: copying a whole data: URL would double its memory.
+    if source[:8].lower().startswith(("http://", "https://")):
         suffix = os.path.splitext(urlparse(source).path)[1].lower()
         if suffix not in _MEDIA_SUFFIXES[kind]:
             suffix = _DEFAULT_SUFFIXES[kind]
@@ -164,7 +165,7 @@ async def _materialize_media(source: str,
         except Exception as error:
             raise RequestAdaptationError(f"Unable to fetch {kind} reference: {error}") from error
         return target, True
-    if source.lower().startswith("data:"):
+    if source[:5].lower() == "data:":
         return await _decode_data_media(source, target_base, kind, max_bytes=max_bytes), True
     return _local_media(source, policy), False
 
@@ -213,7 +214,7 @@ async def prepare_reference_media(
                 local_path = track(await save_base64_image_to_path(source, target))
             except Exception as error:
                 raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
-        elif source.lower().startswith("data:"):
+        elif source[:5].lower() == "data:":
             raise RequestAdaptationError("Image references need a data:image/... URL.")
         elif is_remote(source):
             local_path = track(await _materialize_image_url(source, target, max_bytes=max_bytes, policy=policy))
