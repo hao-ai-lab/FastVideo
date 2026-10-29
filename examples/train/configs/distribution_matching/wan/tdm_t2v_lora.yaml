@@ -67,9 +67,10 @@ method:
   warmup_steps: 200
 
   # Optional progressive step ladder: train at high step counts first and
-  # finish at the deployment count. Stage step counts must strictly
-  # decrease; only the final stage may omit until_iteration. Validation
-  # and inference follow the final stage's schedule.
+  # finish at the deployment count. Each stage applies through its
+  # `until_iteration` (inclusive, 1-based step). Stage step counts must
+  # strictly decrease; only the final stage may omit until_iteration.
+  # Validation and inference follow the final stage's schedule.
   # tdm_step_ladder:
   #   - denoising_steps: [1000, 875, 750, 625, 500, 375, 250, 125]
   #     until_iteration: 200

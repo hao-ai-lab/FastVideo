@@ -406,6 +406,7 @@ class TDMMethod(DMD2Method):
         data_stream: Iterator[dict[str, Any]],
         iteration: int,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        """Run one 1-based training step in warmup or TDM mode."""
         grad_accum = max(1, int(self.training_config.loop.gradient_accumulation_steps or 1))
         self._select_schedule_stage(iteration)
         if self._in_warmup(iteration):
@@ -705,7 +706,14 @@ class TDMMethod(DMD2Method):
         return warmup_steps
 
     def _in_warmup(self, iteration: int) -> bool:
-        return iteration < self._warmup_steps
+        """Cover exactly the first ``warmup_steps`` 1-based training steps.
+
+        The trainer's step counter starts at one, so ``warmup_steps`` is a
+        count of updates: step ``warmup_steps`` is still warmup and the first
+        TDM update is ``warmup_steps + 1``. Step zero is pre-loop, never
+        warmup.
+        """
+        return 1 <= iteration <= self._warmup_steps
 
     def _real_score_guidance(self) -> float:
         guidance = get_optional_float(
@@ -720,9 +728,10 @@ class TDMMethod(DMD2Method):
 
         ``method.tdm_step_ladder`` is a list of stages
         ``{denoising_steps: [...], until_iteration: int}``; the final
-        stage omits ``until_iteration``. Stage step counts must strictly
-        decrease (the validated curriculum direction: high step counts
-        first, deployment count last).
+        stage omits ``until_iteration``. ``until_iteration`` is inclusive:
+        the stage applies through that 1-based training step. Stage step
+        counts must strictly decrease (the validated curriculum direction:
+        high step counts first, deployment count last).
         Without a ladder the single schedule comes from
         ``method.tdm_denoising_steps`` (or ``dmd_denoising_steps``).
         """
@@ -765,7 +774,7 @@ class TDMMethod(DMD2Method):
 
     def _select_schedule_stage(self, iteration: int) -> None:
         for index, (_, until) in enumerate(self._step_schedules):
-            if until is None or iteration < until:
+            if until is None or iteration <= until:
                 self._active_schedule_index = index
                 return
         self._active_schedule_index = len(self._step_schedules) - 1

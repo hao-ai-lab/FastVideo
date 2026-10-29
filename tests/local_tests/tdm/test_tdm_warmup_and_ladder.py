@@ -66,7 +66,7 @@ def test_warmup_step_updates_student_only() -> None:
         "tdm_denoising_steps": [1000, 750, 500, 250],
     })
     data_stream = iter([{} for _ in range(8)])
-    loss_map, outputs, metrics = method.managed_train_step(data_stream, iteration=0)
+    loss_map, outputs, metrics = method.managed_train_step(data_stream, iteration=1)
 
     assert metrics["tdm/warmup"] == 1.0
     assert metrics["tdm/warmup_steps"] == float(warmup_steps)
@@ -176,12 +176,12 @@ LADDER_STAGES = [
 def test_step_ladder_selects_stages_and_recomputes_sigmas() -> None:
     method, student, _, batch = _build_state({"tdm_step_ladder": LADDER_STAGES})
 
-    expectations = [(0, 0), (4, 0), (5, 1), (9, 1), (10, 2), (99, 2)]
+    expectations = [(1, 0), (5, 0), (6, 1), (10, 1), (11, 2), (99, 2)]
     for iteration, expected_index in expectations:
         method._select_schedule_stage(iteration)
         assert method._active_schedule_index == expected_index
 
-    for iteration, expected_index, expected_steps in ((0, 0, 8), (6, 1, 4), (20, 2, 2)):
+    for iteration, expected_index, expected_steps in ((1, 0, 8), (6, 1, 4), (20, 2, 2)):
         method._select_schedule_stage(iteration)
         steps = method._get_denoising_step_list(torch.device("cpu"))
         assert steps.shape[0] == expected_steps
@@ -232,7 +232,7 @@ def test_warmup_only_control_never_touches_the_critic() -> None:
     """The warmup-only control: no critic updates at all."""
     method, _, _, _ = _build_state({"warmup_steps": 3})
     data_stream = iter([{} for _ in range(6)])
-    for iteration in range(3):
+    for iteration in range(1, 4):
         metrics = method.managed_train_step(data_stream, iteration=iteration)[2]
         assert metrics["tdm/warmup"] == 1.0
     assert len(method._critic_optimizer.state) == 0
@@ -242,7 +242,44 @@ def test_warmup_only_control_never_touches_the_critic() -> None:
 def test_tdm_phase_updates_both_roles() -> None:
     method, _, _, _ = _build_state({"warmup_steps": 0})
     data_stream = iter([{} for _ in range(6)])
-    metrics = method.managed_train_step(data_stream, iteration=0)[2]
+    metrics = method.managed_train_step(data_stream, iteration=1)[2]
     assert metrics["tdm/warmup"] == 0.0
     assert len(method._critic_optimizer.state) > 0
     assert len(method._student_optimizer.state) > 0
+
+
+def test_warmup_covers_exactly_warmup_steps_updates() -> None:
+    """``warmup_steps`` counts 1-based updates, not the switch step.
+
+    The trainer starts at step 1, so a warmup of three must produce warmup
+    updates on steps 1-3 and the first TDM update on step 4.
+    """
+    method, _, _, _ = _build_state({"warmup_steps": 3})
+    data_stream = iter([{} for _ in range(8)])
+    warmup_flags = [
+        method.managed_train_step(data_stream, iteration=step)[2]["tdm/warmup"] for step in range(1, 5)
+    ]
+    assert warmup_flags == [1.0, 1.0, 1.0, 0.0]
+
+
+def test_ladder_until_iteration_is_inclusive_and_aligns_with_warmup() -> None:
+    """A ladder boundary of N keeps its stage active through step N.
+
+    With ``warmup_steps`` equal to the first stage's boundary, the whole
+    warmup runs on the first stage's step count and TDM starts on the next
+    stage, matching the documented 100-update warmup recipe.
+    """
+    method, _, _, _ = _build_state({
+        "warmup_steps": 4,
+        "tdm_step_ladder": [
+            {"denoising_steps": [1000, 750, 500, 250], "until_iteration": 4},
+            {"denoising_steps": [1000, 500]},
+        ],
+    })
+
+    assert [method._in_warmup(step) for step in range(1, 6)] == [True, True, True, True, False]
+    for step in range(1, 5):
+        method._select_schedule_stage(step)
+        assert method._active_schedule_index == 0
+    method._select_schedule_stage(5)
+    assert method._active_schedule_index == 1
