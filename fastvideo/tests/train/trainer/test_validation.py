@@ -144,6 +144,7 @@ class _RecordingCheckpointManager:
 
     def __init__(self) -> None:
         self.maybe_save_steps: list[int] = []
+        self.maybe_save_inference_steps: list[int] = []
         self.save_final_steps: list[int] = []
 
     def maybe_resume(self, *, resume_from_checkpoint: str | None) -> None:
@@ -152,6 +153,10 @@ class _RecordingCheckpointManager:
 
     def maybe_save(self, step: int) -> None:
         self.maybe_save_steps.append(step)
+
+    def maybe_save_inference(self, step: int, *, validation_scheduled: bool) -> None:
+        del validation_scheduled
+        self.maybe_save_inference_steps.append(step)
 
     def save_final(self, step: int) -> None:
         self.save_final_steps.append(step)
@@ -213,6 +218,7 @@ def test_trainer_defers_final_step_interval_save_to_save_final(monkeypatch, ) ->
     )
 
     assert checkpoint_manager.maybe_save_steps == [1, 2]
+    assert checkpoint_manager.maybe_save_inference_steps == [0, 3]
     assert checkpoint_manager.save_final_steps == [3]
     validation = trainer.callbacks._callbacks["validation"]
     assert isinstance(validation, _RecordingValidationCallback)
@@ -283,4 +289,5 @@ def test_trainer_saves_final_checkpoint_when_validation_raises(monkeypatch, ) ->
         )
 
     assert checkpoint_manager.maybe_save_steps == [1, 2]
+    assert checkpoint_manager.maybe_save_inference_steps == [3]
     assert checkpoint_manager.save_final_steps == [3]
