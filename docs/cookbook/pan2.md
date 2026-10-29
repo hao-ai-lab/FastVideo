@@ -5,7 +5,7 @@
 Generate a video from text, or from a first frame, with `IFM/PAN2`. One pipeline
 serves both modes: leave out the first frame for text-to-video and supply one
 for image-to-video. The defaults are 704×1248, 313 frames (13 s at 24 fps),
-50 steps and guidance 3.0. See [PAN 2 Text/Image to Video](../inference/pan2.md)
+50 steps, guidance 2.5 and PAN 2's default negative prompt. See [PAN 2 Text/Image to Video](../inference/pan2.md)
 for the model, sampler and parallelism details.
 
 ## Run on a GPU

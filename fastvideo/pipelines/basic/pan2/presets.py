@@ -11,9 +11,8 @@ _DENOISE_STAGE = PresetStageSpec(
 )
 
 # 704x1248, 313 frames (13 s at 24 fps), 50 steps, CFG 2.5 (the release launcher's default since ifm-ai/PAN2
-# 86d5023, 2026-10-23; 3 before). The preset sends no negative prompt (an empty one is encoded
-# as a single space); the reference sampler sends the release's structured negative caption, so pass it as the
-# request's ``negative_prompt`` to follow that recipe.
+# 86d5023, 2026-10-23; 3 before). The empty negative prompt selects the release's structured negative caption,
+# rendered for the clip's duration by ``PAN2TextEncodingStage`` as in the reference sampler.
 _SHARED_DEFAULTS = {
     "height": 704,
     "width": 1248,
