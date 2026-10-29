@@ -21,14 +21,34 @@ def test_npu_vsa_explicit_dispatch_and_unsupported_domains():
     assert NPUPlatform.get_attn_backend_cls(None,128,torch.bfloat16).endswith('SDPABackend')
 
 
-def test_npu_vsa_module_does_not_load_kernel_packages():
+@pytest.mark.parametrize('preloaded_kernel', [False, True])
+def test_npu_vsa_module_does_not_load_kernel_packages(preloaded_kernel):
     code='''
+import builtins
 import sys
-import fastvideo.attention.backends.video_sparse_attn_npu
-assert 'fastvideo_kernel' not in sys.modules
+import types
+# FastVideo's normal CUDA startup may load its existing optional kernels.
+import fastvideo.attention.backends.video_sparse_attn
+if sys.argv[1] == 'preloaded':
+    sys.modules.setdefault('fastvideo_kernel', types.ModuleType('fastvideo_kernel'))
+extensions = {'torch_npu', 'triton', 'fastvideo_kernel'}
+before = {name for name in sys.modules if name.split('.')[0] in extensions}
+real_import = builtins.__import__
+def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name.split('.')[0] in extensions or name.rsplit('.', 1)[-1] == 'video_sparse_attn_npu_kernels':
+        raise AssertionError('NPU backend eagerly imports ' + name)
+    return real_import(name, globals, locals, fromlist, level)
+builtins.__import__ = guarded_import
+try:
+    import fastvideo.attention.backends.video_sparse_attn_npu
+finally:
+    builtins.__import__ = real_import
+assert {name for name in sys.modules if name.split('.')[0] in extensions} == before
 assert 'fastvideo.attention.backends.video_sparse_attn_npu_kernels' not in sys.modules
 '''
-    subprocess.run([sys.executable,'-c',code],check=True)
+    result = subprocess.run([sys.executable,'-c',code,'preloaded' if preloaded_kernel else 'default'],
+                            capture_output=True,text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_npu_vsa_constructor_rejects_unsupported_metadata(monkeypatch):
