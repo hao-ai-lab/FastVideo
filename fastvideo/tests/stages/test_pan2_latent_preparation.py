@@ -57,6 +57,7 @@ def test_pan2_pipeline_requests_fp32_latents(monkeypatch):
                  "PAN2ConditioningStage", "PAN2DenoisingStage", "DecodingStage"):
         monkeypatch.setattr(pan2_pipeline, name, _Stage)
     monkeypatch.setattr(pan2_pipeline, "LatentPreparationStage", _Stage)
+    monkeypatch.setattr(pan2_pipeline, "PAN2Guardrails", lambda **kwargs: None)
     pipeline = pan2_pipeline.PAN2Pipeline.__new__(pan2_pipeline.PAN2Pipeline)
     stages = {}
     pipeline.add_stage = lambda stage_name, stage: stages.__setitem__(stage_name, stage)
@@ -71,6 +72,7 @@ def test_pan2_pipeline_applies_its_performance_switches(monkeypatch):
     for name in ("PAN2InputValidationStage", "PAN2TextEncodingStage", "PAN2TimestepPreparationStage",
                  "PAN2ConditioningStage", "PAN2DenoisingStage", "DecodingStage", "LatentPreparationStage"):
         monkeypatch.setattr(pan2_pipeline, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(pan2_pipeline, "PAN2Guardrails", lambda **kwargs: None)
 
     class _Transformer:
         fused = None

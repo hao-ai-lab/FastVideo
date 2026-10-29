@@ -46,7 +46,7 @@
 | ID | Question | Owner | Needed By Phase | Status | Resolution |
 |---|---|---|---|---|---|
 | Q001 | Which reference, with the diffusers integration private? | orchestrator | 2 | resolved | vLLM-Omni #8602, rebuilt from diffusers/transformers blocks in `reference.py` |
-| Q002 | Port the `pan2-guardrail` prompt/video guardrails? | orchestrator | 7 | resolved | Not ported: FastVideo has no guardrail stage. |
+| Q002 | Port the `pan2-guardrail` prompt/video guardrails? | orchestrator | 7 | resolved | Ported: `PAN2PromptGuardrailStage` and `PAN2VideoGuardrailStage` (`guardrails.py`), on by default (`enable_guardrails`). |
 | Q003 | Port Cache-DiT `quality` and CFG-parallel? | orchestrator | 7 | resolved | Not ported: vLLM-Omni serving features. Ulysses SP is supported through `DistributedAttention`. |
 
 ## Issues And Blockers

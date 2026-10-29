@@ -65,9 +65,11 @@ def pan2_runtime():
         stack.callback(cleanup_dist_env_and_memory)
         maybe_init_distributed_environment_and_model_parallel(1, 1)
 
+        # The parity checkpoint has random weights, so its videos are noise: compare without the guardrails.
         pipeline_config = PAN2PipelineConfig(dit_precision="bf16",
                                              vae_precision="fp32",
-                                             text_encoder_precisions=("fp32", ))
+                                             text_encoder_precisions=("fp32", ),
+                                             enable_guardrails=False)
         args = FastVideoArgs(model_path=str(model_dir),
                              num_gpus=1,
                              pipeline_config=pipeline_config,

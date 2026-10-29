@@ -51,6 +51,26 @@ generator.generate_video(
 For image-to-video, the first frame is scaled to cover the requested resolution and center cropped, then encoded by the
 VAE into the first latent frame of the conditioning input.
 
+## Guardrails
+
+PAN 2 runs with guardrails by default, as in its vLLM-Omni and Diffusers integrations. The
+[`pan2-guardrail`](https://github.com/ifm-ai/pan2-guardrail) package checks every prompt before any compute and every
+generated video after decoding. A blocked prompt or video raises `PAN2GuardrailViolationError`. Install the package
+before loading the pipeline:
+
+```bash
+pip install git+https://github.com/ifm-ai/pan2-guardrail
+```
+
+| Setting | Default | What it does |
+|---|---|---|
+| `enable_guardrails` | `True` | Pass `False` to `VideoGenerator.from_pretrained` to turn both checks off, at your own risk. Without the package, loading fails unless the guardrails are off. |
+| `offload_guardrail_models` | `False` | Keeps the guard models on CPU and moves each one to the GPU only for its check. |
+
+With sequence parallelism, the first GPU of the group loads the guard models and runs the checks, and every rank
+raises on its verdict. The video check reads the decoded pixels, so `output_type="latent"` is refused while the
+guardrails are on.
+
 ## Parallelism
 
 With `num_gpus > 1`, FastVideo runs Ulysses sequence parallelism: the video tokens are sharded across ranks and the
@@ -94,7 +114,6 @@ The full `IFM/PAN2` checkpoint is not public yet. Local parity tests use the pub
 
 ## Differences from the vLLM-Omni integration
 
-- The optional prompt and video guardrails (`pan2-guardrail`) are not included.
 - The Cache-DiT `quality` policy and CFG-parallel execution are vLLM-Omni serving features and are not ported.
 - The text encoder is a FastVideo-native Qwen3.5 port. Its Gated DeltaNet layers use a PyTorch chunked delta rule
   instead of the `fla` kernels.
