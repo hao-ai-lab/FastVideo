@@ -7,7 +7,7 @@ from fastvideo.distributed.device_communicators.pyhccl_wrapper import (HCCLLibra
                                                                        hcclUniqueId)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
-from fastvideo.utils import current_stream
+from torch.npu import current_stream
 
 logger = init_logger(__name__)
 

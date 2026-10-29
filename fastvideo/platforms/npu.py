@@ -67,6 +67,10 @@ class NPUPlatform(Platform):
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
+        if selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            if dtype != torch.bfloat16 or head_size not in (64, 128):
+                raise NotImplementedError("Ascend VSA supports BF16 D=64/128 inference only")
+            return "fastvideo.attention.backends.video_sparse_attn_npu.NPUVideoSparseAttentionBackend"
         if envs.FASTVIDEO_ATTENTION_BACKEND.get() != "TORCH_SDPA":
             logger.info("Ascend NPU only supports the Torch SDPA backend.")
         else:
