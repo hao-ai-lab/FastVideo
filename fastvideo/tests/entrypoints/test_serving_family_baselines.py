@@ -122,6 +122,7 @@ def test_pan2_serving_matches_its_preset_and_runs_image_to_video_from_a_referenc
     assert config.generator.engine.offload.dit_layerwise is False
     for field in ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale"):
         assert getattr(sampling, field) == PAN2_T2V.defaults[field], field
+    assert config.default_request.negative_prompt == PAN2_T2V.defaults["negative_prompt"]
 
     image = tmp_path / "first-frame.png"
     image.write_bytes(b"not-decoded-at-admission")

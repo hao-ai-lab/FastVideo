@@ -15,6 +15,7 @@ from torch.distributed.tensor import DTensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.pipelines.basic.pan2.negative_prompt import render_pan2_default_negative_prompt
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -52,7 +53,17 @@ class PAN2TextEncodingStage(TextEncodingStage):
 
     PAN2 conditions on the tokens after the ``<|im_start|>user\\n`` header (the prompt and the assistant header),
     read from the text encoder's hidden states with its last ``text_encoder_skip_layers`` layers skipped.
+
+    An empty or missing negative prompt is replaced by the release's default one, its time ranges set to the clip's
+    duration, as in the reference sampler. A single space encodes the empty unconditional prompt PAN2 trained with.
     """
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if batch.do_classifier_free_guidance and not batch.negative_prompt:
+            num_frames = batch.num_frames[0] if isinstance(batch.num_frames, list) else batch.num_frames
+            fps = batch.fps[0] if isinstance(batch.fps, list) else batch.fps
+            batch.negative_prompt = render_pan2_default_negative_prompt(num_frames, fps or 24)
+        return super().forward(batch, fastvideo_args)
 
     @staticmethod
     def tokenize(tokenizer: Any, prompt: str, system_prompt: str, max_length: int) -> tuple[torch.Tensor, int]:
