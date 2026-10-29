@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Reference-free multi-prompt diversity report for TDM validation videos.
 
-Phase 3 acceptance only had one prompt, so it could show coherence and
-sharpness but not whether the student recovers sample diversity. This tool
-covers the missing axis on the modular validation layout.
+The earlier acceptance check only had one prompt, so it could show coherence
+and sharpness but not whether the student recovers sample diversity. This
+tool covers the missing axis on the modular validation layout.
 
 The validation callback shards the caption list across sequence-parallel
 groups and pads the list to a multiple of that degree (see
@@ -19,16 +19,16 @@ validation step and per caption:
 
 Spread is the mean pairwise L2 distance between per-video descriptors: the
 temporal-mean frame pooled to ``--descriptor-size`` squared and flattened.
-It is reference-free, matching the Phase 2 measurement policy that never
+It is reference-free, matching the measurement policy that never
 asserts paired metrics. A regression-only (conditional-mean) student
 tightens within-caption spread toward zero, while a distribution-matched
 student keeps the seeds apart; the cross-caption spread is the control for
 "the samples merely differ by prompt".
 
-Example (on a GPU pod, from the repo root):
+Example (from the repo root):
 
     PYTHONPATH=. python tests/local_tests/tdm/tools/tdm_multiprompt_report.py \
-        --run-dir /workspace/run/tdm-port/wan-tdm-multiprompt/treatment/output \
+        --run-dir <run-dir> \
         --captions-json examples/train/configs/distribution_matching/wan/tdm_multiprompt_validation.json \
         --out /tmp/multiprompt-treatment.json
 """

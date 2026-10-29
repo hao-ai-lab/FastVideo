@@ -1,9 +1,8 @@
 """Warmup phase and step-ladder tests for the modular TDM method.
 
-The standalone experiments established the winning recipe: a regression
-warmup to the CFG-combined teacher x0 at the student's own rollout
-states, followed by TDM at progressively smaller step counts. These
-tests pin the modular wiring: the Wan-family default, the
+The working recipe is a regression warmup to the CFG-combined teacher x0 at
+the student's own rollout states, followed by TDM at progressively smaller
+step counts. These tests pin the modular wiring: the Wan-family default, the
 student-only optimizer gating, the warmup target/backward composition
 (with gradients), and ladder stage resolution.
 """
@@ -230,7 +229,7 @@ def test_step_ladder_validation(ladder: Any, message: str) -> None:
 
 
 def test_warmup_only_control_never_touches_the_critic() -> None:
-    """The standalone warmup-only control: no critic updates at all."""
+    """The warmup-only control: no critic updates at all."""
     method, _, _, _ = _build_state({"warmup_steps": 3})
     data_stream = iter([{} for _ in range(6)])
     for iteration in range(3):

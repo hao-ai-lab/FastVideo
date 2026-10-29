@@ -1,9 +1,9 @@
 # TDM distillation: Wan 2.1 T2V 1.3B LoRA adaptation.
 #
 # Production-shaped baseline, NOT the validated TDM recipe: it keeps the
-# DMD2-inherited learning rates below, which Phase 3 measured to be a no-op
-# regime for TDM. The validated rates (student 1e-4 / fake score 1e-4) and the
-# regression warmup + step ladder live in
+# DMD2-inherited learning rates below, which diagnostics measured to be a
+# no-op regime for TDM. The validated rates (student 1e-4 / fake score 1e-4)
+# and the regression warmup + step ladder live in
 # examples/train/configs/distribution_matching/wan/tdm_t2v_lora_fixed_recipe.yaml.
 #
 # This ports the Trajectory Distribution Matching objective from the
@@ -60,7 +60,7 @@ method:
 
   # Regression warmup: for the first `warmup_steps` updates the student
   # regresses onto the guidance-combined teacher x0 at its own rollout
-  # states, with no critic updates. The standalone Wan experiments showed
+  # states, with no critic updates. Diagnostic Wan runs showed
   # that TDM alone drifts out of the teacher distribution while warmup
   # alone collapses visually; warmup followed by TDM is the validated
   # recipe. Default: 200 for Wan-family students, 0 otherwise.
@@ -129,7 +129,7 @@ training:
 
   optimizer:
     # NOTE: 2e-6 is inherited from the DMD2 recipes and is a no-op regime
-    # for TDM (Phase 3 measured ~1e-4 adapter movement over 200 steps and
+    # for TDM (diagnostics measured ~1e-4 adapter movement over 200 steps and
     # no visual change). The validated diagnostic range is student 1e-4 /
     # fake score 1e-4; see tdm_t2v_lora_fixed_recipe.yaml. This
     # production-shaped config has not been re-validated at that LR.

@@ -2,8 +2,8 @@
 """Reference-free and forensic metrics for TDM video distillation.
 
 Paired same-noise metrics (latent nearest-neighbour relative MSE / MMD and
-paired pixel MS-SSIM) must not be used as quality gates for TDM. In the
-standalone experiments the blurry no-guidance student ranked *above* the
+paired pixel MS-SSIM) must not be used as quality gates for TDM. In
+diagnostics the blurry no-guidance student ranked *above* the
 coherent distilled student on every paired metric, because those metrics
 reward low-variance samples and penalize the paired drift that
 distribution-matching objectives produce by design.
@@ -44,7 +44,7 @@ def frame_statistics(frames: Any) -> dict[str, float]:
     ``sharpness`` is the mean squared luminance gradient in the frames'
     own scale (8-bit units for uint8 input). It separates a blurry
     no-guidance ghost from a coherent distilled sample with a much larger
-    margin than the plain pixel std that the standalone runs recorded.
+    margin than the plain pixel std that earlier runs recorded.
     """
     tensor = _frames_to_chw(frames)
     luminance = 0.299 * tensor[:, 0] + 0.587 * tensor[:, 1] + 0.114 * tensor[:, 2]
@@ -63,7 +63,7 @@ def latent_cloud_statistics(cloud: torch.Tensor) -> dict[str, float]:
 
     A mode-tightened student shows up as a smaller median pairwise
     distance and a higher mean off-diagonal cosine than the teacher
-    cloud; the standalone runs measured a ~0.78 median-distance ratio and
+    cloud; diagnostic runs measured a ~0.78 median-distance ratio and
     0.46 versus 0.16 cosine for the single-prompt Wan ladder.
     """
     cloud = cloud.double()
@@ -84,7 +84,7 @@ def latent_cloud_statistics(cloud: torch.Tensor) -> dict[str, float]:
 
 def teacher_cloud_bandwidth(teacher_cloud: torch.Tensor) -> float:
     """Median squared pairwise distance, the RBF bandwidth convention from
-    the standalone cloud reports."""
+    the earlier cloud reports."""
     distances = torch.pdist(teacher_cloud.double(), p=2)
     return float(distances.square().median())
 

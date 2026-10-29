@@ -84,7 +84,7 @@ training:
   optimizer:
     # Use the validated TDM range (student 1e-4, fake score 1e-4 below).
     # The DMD2-inherited 2e-6 is a no-op regime for this objective: the
-    # Phase 3 diagnostic measured ~1e-4 adapter movement over 200 steps
+    # diagnostic run measured ~1e-4 adapter movement over 200 steps
     # and identical blurred outputs for the treatment and the
     # regression-only control.
     learning_rate: 1.0e-4

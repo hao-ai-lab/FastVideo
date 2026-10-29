@@ -8,10 +8,10 @@ paired MS-SSIM between student and teacher videos of the same sample.
 Paired MS-SSIM is recorded, never asserted: it rewards blur and penalizes
 the paired drift that distribution matching produces by design.
 
-Example (on a GPU pod, from the repo root):
+Example (from the repo root):
 
     PYTHONPATH=. python tests/local_tests/tdm/tools/tdm_video_report.py \
-        --run-dir /workspace/run/tdm-standalone/wan-ladder \
+        --run-dir <run-dir> \
         --out /tmp/video_report.json
 """
 
@@ -41,7 +41,7 @@ def _load_video(path: Path) -> np.ndarray:
 
 
 def _iter_videos(run_dir: Path) -> list[dict[str, Any]]:
-    """Match both validation layouts: the standalone ``samples/step-*``
+    """Match both validation layouts: the ``samples/step-*``
     tree and the modular trainer's flat ``validation_step_*`` files."""
     found: list[dict[str, Any]] = []
     for path in sorted(run_dir.glob("**/*.mp4")):

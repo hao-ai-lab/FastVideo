@@ -81,11 +81,11 @@ is excluded from `get_optimizers` / `get_lr_schedulers` / grad-clip targets,
 and its optimizer state stays empty. Other families default to no warmup
 (guidance-distilled bases already start inside the teacher's basin).
 
-The reason is empirical, from the standalone TDM experiments: on Wan, TDM
-alone drifts out of the teacher distribution and warmup alone collapses
-visually (blurry blobs on every seed), while warmup followed by TDM produces
-coherent, sharp 4-step samples. The warmup is what puts the student's states
-on-manifold so the critic correction stops dominating the generator signal.
+Empirically, on Wan, TDM alone drifts out of the teacher distribution and
+warmup alone collapses visually (blurry blobs on every seed), while warmup
+followed by TDM produces coherent, sharp 4-step samples. The warmup is what
+puts the student's states on-manifold so the critic correction stops
+dominating the generator signal.
 
 A **progressive step ladder** is available through `method.tdm_step_ladder`
 (commented example in the shipped config). Stage step counts must strictly
@@ -94,7 +94,7 @@ decrease (for example 8 steps then 4), only the final stage may omit
 because the loader writes `dmd_denoising_steps` from it.
 
 Learning rates matter as much as the phase split. The DMD2-inherited student
-LR of `2e-6` is a no-op regime for TDM: the Phase 3 diagnostic measured only
+LR of `2e-6` is a no-op regime for TDM: a diagnostic run measured only
 about `1e-4` of adapter movement over 200 updates, and the treatment and the
 regression-only control produced visually identical blurred samples. At
 student `1e-4` with fake-score `1e-4` the warmup bakes guidance in and TDM
@@ -104,12 +104,12 @@ validated diagnostic configs (`tdm_t2v_lora_fixed_recipe.yaml`,
 `tdm_t2v_lora.yaml` keeps the DMD2 value with a warning comment because it has
 not been re-validated at the higher rate.
 
-Two measurement caveats carried over from the standalone work: paired
-same-noise metrics (latent nearest-neighbour / MMD) and paired pixel MS-SSIM
-rank blurry no-guidance samples above coherent distilled ones, so they must
-not be used as quality gates for TDM; use reference-free signals (visual
-coherence, frame sharpness, sample diversity, cross-prompt behaviour) and keep
-the cloud metrics as diagnostics only.
+Two measurement caveats: paired same-noise metrics (latent
+nearest-neighbour / MMD) and paired pixel MS-SSIM rank blurry no-guidance
+samples above coherent distilled ones, so they must not be used as quality
+gates for TDM; use reference-free signals (visual coherence, frame sharpness,
+sample diversity, cross-prompt behaviour) and keep the cloud metrics as
+diagnostics only.
 
 ## Acceptance And Diagnostics
 
@@ -128,16 +128,12 @@ PYTHONPATH=. python tests/local_tests/tdm/tools/tdm_video_report.py \
     --run-dir <run root> --out /tmp/video_report.json [--paired-ms-ssim]
 ```
 
-It reproduces the standalone numbers on the same videos: the warmup-only
-step-400 student reads std `88.27` (identical to the standalone
-`frame_stats.json`), and the sharpness axis separates the arms the way the
-frames do - warmup-only 22-64, teacher 90.5, TDM ladder 192-401 - which is the
-exact inverse of the paired-metric ranking (warmup-only `nn_rel_mse 0.606` "in
+On the reference videos it reproduces the recorded numbers: the warmup-only
+step-400 student reads std `88.27`, and the sharpness axis separates the arms
+the way the frames do - warmup-only 22-64, teacher 90.5, TDM ladder 192-401 -
+which is the exact inverse of the paired-metric ranking (warmup-only
+`nn_rel_mse 0.606` "in
 bounds" versus TDM `1.350` "out").
-
-The step-count preflight sampler and a checkpoint rescorer are deferred to the
-first modular Wan validation run, because both need real checkpoints and the
-modular LoRA export path resolved.
 
 ## Test Scope
 
@@ -158,21 +154,15 @@ pytest tests/local_tests/tdm/ -v -s
 
 ## GPU Validation
 
-Runtime validation runs on Slurm (one node, four GB200 GPUs). Launch jobs from
-the Slinky login node through
-`tests/local_tests/tdm/slurm/launch_h3_tdm_vsa.sh`; `sbatch` is unusable on
-this site, so the launcher uses a detached `srun`. The older Kubernetes
-runners under `tests/local_tests/tdm/k8s/` are kept for the Wan recipes. Run
-outputs belong under an account-writable Lustre directory, not the shared
-`/workspace/run` tree.
-
-Suggested local-test command:
+Runtime validation needs one node with four GPUs. The recipes and report
+tools are scheduler-agnostic: run the local tests, then launch the example
+config on your own four-GPU node.
 
 ```bash
 pytest tests/local_tests/tdm/ -v -s
 ```
 
-Suggested checkpoint smoke command:
+Checkpoint smoke:
 
 ```bash
 python fastvideo/train/entrypoint/train.py \
@@ -182,6 +172,4 @@ python fastvideo/train/entrypoint/train.py \
 ```
 
 For the checkpoint smoke, request the GPU count expected by the config or
-override the distributed settings for a smaller smoke. Record run roots,
-command output, loss keys, and blockers in the active handoff rather
-than in this durable README.
+override the distributed settings for a smaller smoke.

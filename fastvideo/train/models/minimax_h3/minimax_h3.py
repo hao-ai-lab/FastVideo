@@ -1143,7 +1143,7 @@ class MiniMaxH3Model(ModelBase):
         """H3's trajectory grid runs over integer labels ``0..1000``.
 
         The released scheduler exposes no training horizon, so the joint TDM
-        grid (the same range the standalone H3 recipe uses) supplies it.
+        grid (the range used by the H3 TDM recipe) supplies it.
         """
         return _H3_TRAJECTORY_TIMESTEPS
 

@@ -219,8 +219,8 @@ class TDMMethod(DMD2Method):
             default=False,
             where="method.use_randmid",
         )
-        # Sparse-attention scope for the roles TDM drives. The standalone H3
-        # recipe validated sparse attention on the student only; "all" runs the
+        # Sparse-attention scope for the roles TDM drives. The validated H3
+        # recipe runs sparse attention on the student only; "all" runs the
         # critic and teacher through the sparse metadata too (their attention
         # backends must then be the matching sparse backend).
         self._vsa_apply_to: Literal["student", "all"] = require_choice(
@@ -524,13 +524,13 @@ class TDMMethod(DMD2Method):
     ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
         """Regression warmup step toward the CFG-combined teacher x0.
 
-        The standalone-validated warmup: the student's x0 at its own
+        The validated warmup: the student's x0 at its own
         rollout states is regressed onto the guidance-combined teacher x0
         at those same states, with no critic update. This bakes CFG
         sharpness into the unguided student and puts it inside the
         teacher's basin before the TDM correction is enabled. Each
         modality contributes its own squared error and the losses are
-        summed, matching the standalone joint warmup.
+        summed.
         """
         noisy_source, sigma_source, trajectory_indices = self._sample_warmup_source(trajectories)
         guidance = self._real_score_guidance()
@@ -686,7 +686,7 @@ class TDMMethod(DMD2Method):
     def _default_warmup_steps(self) -> int:
         """Regression-warmup length defaults by family.
 
-        The standalone TDM experiments showed that TDM alone drifts out of
+        Empirically, TDM alone drifts out of
         the teacher distribution on Wan while warmup alone collapses
         visually; the working recipe is a regression warmup to the
         CFG-combined teacher followed by TDM. Wan therefore defaults to
@@ -721,8 +721,8 @@ class TDMMethod(DMD2Method):
         ``method.tdm_step_ladder`` is a list of stages
         ``{denoising_steps: [...], until_iteration: int}``; the final
         stage omits ``until_iteration``. Stage step counts must strictly
-        decrease (the curriculum direction validated by the standalone
-        experiments: high step counts first, deployment count last).
+        decrease (the validated curriculum direction: high step counts
+        first, deployment count last).
         Without a ladder the single schedule comes from
         ``method.tdm_denoising_steps`` (or ``dmd_denoising_steps``).
         """

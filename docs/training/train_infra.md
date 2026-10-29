@@ -565,8 +565,8 @@ labels only match a student flow shift of `1.0`.
 
 See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a
 complete Wan LoRA config. That production-shaped example keeps the
-DMD2-inherited learning rates (student `2e-6`, fake score `8e-6`), which the
-Phase 3 diagnostics measured to be a no-op regime for TDM; the validated TDM
+DMD2-inherited learning rates (student `2e-6`, fake score `8e-6`), which
+diagnostics measured to be a no-op regime for TDM; the validated TDM
 rates (student `1e-4`, fake score `1e-4`) ship in the fixed-recipe examples
 (`tdm_t2v_lora_fixed_recipe.yaml`, `tdm_t2v_lora_overfit.yaml`). Treat this as
 a Wan adaptation of TDM, not exact CogVideoX reference parity. TDM follows the
@@ -643,7 +643,7 @@ method:
 
 The shipped example is
 `examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml`.
-The standalone H3 recipe used critic `1e-4` and generator `2e-5` (the critic
+The H3 TDM recipe used critic `1e-4` and generator `2e-5` (the critic
 rate times a `0.2` generator scale), which the example encodes as the training
 optimizer LR `2e-5` plus `fake_score_learning_rate: 1e-4`.
 
@@ -662,7 +662,7 @@ for this loader (`sp_size: 2` fails in FSDP device-mesh setup).
 
 Set `models.student.attention_backend: VIDEO_SPARSE_ATTN_H3` and
 `vsa.sparsity` to run the student through H3's tile-64 Triton block-sparse
-kernels. The TDM call sites already produce the standalone-validated
+kernels. The TDM call sites already produce the validated
 student-only split (the student uses `attn_kind="vsa"` while the critic and
 teacher stay dense), so that recipe needs no extra knob. The kernel requires
 bf16 Q/K/V, and the H3 VSA backend casts at the kernel boundary because the
@@ -890,8 +890,8 @@ python -m fastvideo.train.entrypoint.dcp_to_diffusers \
 The model plugin selects the physical transformer component. In particular,
 MiniMax H3 Ref2VA exports `transformer_ref/`, while T2VA exports
 `transformer/`. Training LoRA wrappers are merged into native transformer
-weights because the H3 inference pipeline does not load a standalone training
-adapter. The export records this choice in `fastvideo_training_export.json`.
+weights because the H3 inference pipeline does not load training-time LoRA
+adapters. The export records this choice in `fastvideo_training_export.json`.
 
 H3 opts into Diffusers' conventional
 `diffusion_pytorch_model.safetensors` naming (or numbered 5 GB shards plus

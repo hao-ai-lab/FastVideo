@@ -1,15 +1,12 @@
 """Cross-implementation parity against the upstream-verified TDM math.
 
-The standalone TDM port pins its assembled critic and generator updates
-against an independent transcription of the official ``Luo-Yihong/TDM``
-``train_tdm_demo.py`` expressions
-(``feat/tdm-standalone-wan-port:tdm_standalone/tests/test_upstream_parity.py``).
-This file ports that guard to the modular ``TDMMethod``: the assembled
-context's noise identities, the critic composition
-(clipped-SNR and importance weights), and the generator composition
-(stop-gradient boundaries, CFG teacher target, per-sample delta
-normalization) are compared against upstream formulas computed directly
-from the method's own context tensors and the same tiny role models.
+The official ``Luo-Yihong/TDM`` ``train_tdm_demo.py`` expressions are
+transcribed independently for this guard. It checks the modular ``TDMMethod``
+against those upstream formulas: the assembled context's noise identities,
+the critic composition (clipped-SNR and importance weights), and the
+generator composition (stop-gradient boundaries, CFG teacher target,
+per-sample delta normalization) are compared directly from the method's own
+context tensors and the same tiny role models.
 
 Reference configuration (upstream default): ``separate`` noise
 intervals, no randomized midpoint, MSE with delta normalization, no

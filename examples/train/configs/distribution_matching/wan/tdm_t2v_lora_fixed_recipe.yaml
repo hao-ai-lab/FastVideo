@@ -1,7 +1,7 @@
 # Wan 2.1 T2V 1.3B TDM single-prompt overfit with the fixed recipe.
 #
 # The same protocol and assets as `tdm_t2v_lora_overfit.yaml`, plus the
-# two pieces the standalone experiments found load-bearing:
+# two pieces that proved load-bearing:
 #   - a regression warmup (method.warmup_steps: 100) that regresses the
 #     student onto the CFG-combined teacher x0 at its own rollout states
 #     with no critic updates, and
@@ -53,7 +53,7 @@ method:
   rollout_mode: simulate
   generator_update_interval: 1
   real_score_guidance_scale: 6.0
-  # Regression warmup (standalone-validated recipe): 200 updates for Wan
+  # Regression warmup (validated recipe): 200 updates for Wan
   # by default, 100 here to fit the short overfit protocol.
   warmup_steps: 100
   # Progressive ladder: 8 student steps during the warmup stage, then the
@@ -102,7 +102,7 @@ training:
 
   optimizer:
     # Validated TDM range. The DMD2-inherited 2e-6 student LR is a no-op
-    # regime for this objective (Phase 3 measured ~1e-4 total adapter
+    # regime for this objective (diagnostics measured ~1e-4 total adapter
     # movement over 200 steps and no visual change in either arm); at
     # 1e-4 the warmup bakes guidance in and TDM sharpens to a coherent
     # sample while the regression-only control stays blurred.
