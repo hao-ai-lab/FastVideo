@@ -321,3 +321,71 @@ def test_builder_plan_retiers_only_480p_and_keeps_ids():
     specs = builder.plan_rows(v4, {(first["id"], "480p"), (hi["id"], "768p")}, {}, 0, set(), lambda _: 1)
     assert len(specs) == 1 and specs[0]["id"] == first["id"] and specs[0]["case"] == "first_frame"
     assert specs[0]["references"] == [{"kind": "stored", "parquet": "a.pq", "index": 0, "audio": True}]
+
+
+class _ToyBlock(torch.nn.Module):
+
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.linear = torch.nn.Linear(dim, dim)
+
+    def forward(self, hidden: torch.Tensor, shift: torch.Tensor) -> torch.Tensor:
+        return hidden + torch.tanh(self.linear(hidden)) + shift
+
+
+class _ToyStack(torch.nn.Module):
+
+    def __init__(self, blocks: int, dim: int = 4) -> None:
+        super().__init__()
+        self.transformer_blocks = torch.nn.ModuleList(_ToyBlock(dim) for _ in range(blocks))
+
+    def forward(self, hidden: torch.Tensor, shift: torch.Tensor) -> torch.Tensor:
+        for block in self.transformer_blocks:
+            hidden = block(hidden, shift)
+        return hidden
+
+
+def test_theseus_schedule_widens_short_to_long():
+    from fastvideo.train.methods.knowledge_distillation.pdd_qad_recon import theseus_schedule, theseus_widths
+    assert theseus_widths(50) == (1, 2, 4, 8, 16, 32, 50)
+    assert theseus_widths(28) == (1, 2, 4, 8, 16, 28)
+    plan = theseus_schedule(40, theseus_widths(50), 2.0)
+    assert len(plan) == 40 and plan == sorted(plan) and set(plan) == {1, 2, 4, 8, 16, 32, 50}
+    assert plan.count(50) > plan.count(32) > plan.count(4)
+    assert theseus_schedule(7, (1, 2, 4, 8, 16, 32, 50), 2.0) == [1, 2, 4, 8, 16, 32, 50]
+    with pytest.raises(ValueError):
+        theseus_schedule(3, (1, 2, 4, 8), 2.0)
+
+
+@pytest.mark.parametrize("width", [1, 3, 5])
+def test_segment_reconstruction_is_zero_at_identity_and_covers_every_block(width):
+    import copy
+    from fastvideo.train.methods.knowledge_distillation.pdd_qad_recon import SegmentReconstruction
+    torch.manual_seed(0)
+    teacher = _ToyStack(5)
+    student = copy.deepcopy(teacher)
+    hidden, shift = torch.randn(3, 4), torch.randn(4)
+    with torch.no_grad(), SegmentReconstruction(teacher, student, width, 1.0) as segments:
+        teacher(hidden, shift)
+    assert len(segments.rel) == -(-5 // width)
+    assert float(segments.loss()) == 0.0
+    assert all(p.grad is None or float(p.grad.abs().max()) == 0.0 for p in student.parameters())
+
+
+def test_segment_reconstruction_trains_from_teacher_segment_inputs():
+    import copy
+    from fastvideo.train.methods.knowledge_distillation.pdd_qad_recon import SegmentReconstruction
+    torch.manual_seed(0)
+    teacher = _ToyStack(4)
+    student = copy.deepcopy(teacher)
+    with torch.no_grad():
+        student.transformer_blocks[0].linear.weight.add_(0.5)  # only block 0 differs
+    hidden, shift = torch.randn(3, 4), torch.randn(4)
+    with torch.no_grad(), SegmentReconstruction(teacher, student, 2, 1.0) as segments:
+        teacher(hidden, shift)
+    # Segment [0, 1] carries block 0's error; segment [2, 3] starts from the teacher's block-2 input, so it is exact.
+    assert float(segments.rel[0]) > 0.0 and float(segments.rel[1]) == 0.0
+    assert float(student.transformer_blocks[0].linear.weight.grad.abs().max()) > 0.0
+    assert float(student.transformer_blocks[1].linear.weight.grad.abs().max()) > 0.0
+    assert student.transformer_blocks[2].linear.weight.grad is None or \
+        float(student.transformer_blocks[2].linear.weight.grad.abs().max()) == 0.0

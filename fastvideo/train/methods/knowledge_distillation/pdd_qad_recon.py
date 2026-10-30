@@ -246,4 +246,128 @@ class BlockReconstruction:
         }
 
 
-__all__ = ["BlockReconstruction", "GROUPS", "GroupedRelError", "local_row_groups", "packed_row_groups"]
+def theseus_widths(num_blocks: int) -> tuple[int, ...]:
+    """Binary-merge segment widths ``1, 2, 4, ...`` below ``num_blocks``, then the whole stack."""
+    widths, width = [], 1
+    while width < num_blocks:
+        widths.append(width)
+        width *= 2
+    return (*widths, num_blocks)
+
+
+def theseus_schedule(total_steps: int, widths: tuple[int, ...], gamma: float) -> list[int]:
+    """Segment width of each warm-up step: level ``k`` gets ``~gamma**k`` of ``total_steps`` (at least one each).
+
+    Short-to-long, as JustQuant's Theseus QAD (arXiv:2609.33601): narrow, teacher-forced targets first, then
+    progressively longer student paths, ending on the whole stack.
+    """
+    if total_steps < len(widths):
+        raise ValueError(f"{total_steps} warm-up steps cannot cover {len(widths)} segment widths {widths}")
+    weights = [gamma**k for k in range(len(widths))]
+    raw = [total_steps * w / sum(weights) for w in weights]
+    steps = [max(1, int(r)) for r in raw]
+    # Hand out what flooring lost to the levels with the largest remainders (the long ones on ties).
+    for index in sorted(range(len(widths)), key=lambda i: (raw[i] - int(raw[i]), i), reverse=True):
+        if sum(steps) >= total_steps:
+            break
+        steps[index] += 1
+    while sum(steps) > total_steps:  # the at-least-one floor overshot: shave the longest levels
+        index = max(i for i in range(len(steps)) if steps[i] > 1)
+        steps[index] -= 1
+    return [width for width, count in zip(widths, steps, strict=True) for _ in range(count)]
+
+
+class SegmentReconstruction:
+    """Theseus warm-up: segments of ``width`` consecutive blocks, each from the teacher's input, during one forward.
+
+    When teacher block ``g + width - 1`` finishes, student blocks ``g .. g + width - 1`` run chained from the
+    teacher's (stop-gradient) input to block ``g`` with the teacher's block arguments, match the teacher's output of
+    the segment's last block, and are backpropagated at once. Segments are teacher-forced at their boundaries, so a
+    width-1 segment is block-wise distillation and the full width is the whole stack. ``scale`` multiplies each
+    segment's loss before its backward. Use around the teacher's ``forward_rung`` with grad disabled.
+    """
+
+    def __init__(self,
+                 teacher: torch.nn.Module,
+                 student: torch.nn.Module,
+                 width: int,
+                 scale: float,
+                 criterion: GroupedRelError | None = None) -> None:
+        ensure_fsdp_root_initialized(teacher)
+        ensure_fsdp_root_initialized(student)
+        self.teacher_blocks = list(teacher.transformer_blocks)
+        self.student_blocks = list(student.transformer_blocks)
+        if len(self.teacher_blocks) != len(self.student_blocks):
+            raise ValueError("teacher and student block counts differ")
+        if not 1 <= width <= len(self.teacher_blocks):
+            raise ValueError(f"segment width {width} outside 1..{len(self.teacher_blocks)}")
+        self.width = width
+        self.scale = scale
+        self.criterion = criterion
+        self.rel: list[torch.Tensor] = []
+        self.group_rel: list[torch.Tensor] = []
+        self._start: torch.Tensor | None = None
+        self._args: list[tuple[Any, ...]] = []
+        self._handles: list[Any] = []
+
+    @property
+    def num_segments(self) -> int:
+        return -(-len(self.teacher_blocks) // self.width)
+
+    def __enter__(self) -> SegmentReconstruction:
+        for index, block in enumerate(self.teacher_blocks):
+            self._handles.append(block.register_forward_hook(self._after_block(index)))
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+        self._start, self._args = None, []
+
+    def _after_block(self, index: int):
+
+        def hook(module: torch.nn.Module, args: tuple[Any, ...], output: Any) -> None:
+            if index % self.width == 0:
+                self._start, self._args = args[0], []
+            self._args.append(args[1:])
+            if index % self.width == self.width - 1 or index == len(self.teacher_blocks) - 1:
+                self._student_segment(index - len(self._args) + 1, output)
+                self._start, self._args = None, []
+
+        return hook
+
+    def _student_segment(self, first: int, teacher_out: torch.Tensor) -> None:
+        assert self._start is not None
+        with torch.set_grad_enabled(True):
+            hidden = self._start.detach()
+            for offset, block_args in enumerate(self._args):
+                hidden = self.student_blocks[first + offset](hidden, *block_args)
+            if self.criterion is None:
+                target = teacher_out.float()
+                loss = (hidden.float() - target).pow(2).mean() / target.pow(2).mean().clamp_min(1e-20)
+                rel = loss.detach()
+            else:
+                loss, per_group = self.criterion(hidden, teacher_out)
+                self.group_rel.append(per_group)
+                weights = self.criterion.weights * (~per_group.isnan())
+                rel = (weights * per_group.nan_to_num()).sum() / weights.sum().clamp_min(1e-30)
+            (loss * self.scale).backward()
+        self.rel.append(rel)
+
+    def loss(self) -> torch.Tensor:
+        """Mean (group-weighted) relative error over this forward's segments, sequence-parallel-global, detached."""
+        return torch.stack(self.rel).mean()
+
+    def metrics(self, prefix: str) -> dict[str, torch.Tensor]:
+        out = {f"{prefix}/rel": self.loss(), f"{prefix}/last_segment_rel": self.rel[-1]}
+        if self.group_rel:
+            per_group = torch.stack(self.group_rel).nanmean(dim=0)
+            out.update({f"{prefix}/{name}_rel": per_group[i] for i, name in enumerate(GROUPS)})
+        return out
+
+
+__all__ = [
+    "BlockReconstruction", "GROUPS", "GroupedRelError", "SegmentReconstruction", "local_row_groups",
+    "packed_row_groups", "theseus_schedule", "theseus_widths"
+]

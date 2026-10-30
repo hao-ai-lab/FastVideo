@@ -132,6 +132,18 @@ class OmniRefPDDQADMethod(TrainingMethod):
             raise ValueError(f"recon_normalize must be none or step0, got {self.recon_normalize!r}")
         self.recon_norm_rows = int(mc.get("recon_norm_rows", 4))
         self.recon_norm: list[float] | None = None
+        # Optional Theseus warm-up (JustQuant, arXiv:2609.33601): the first ``theseus_steps`` steps train only
+        # teacher-forced segment reconstruction, widening from single blocks to the whole stack (level k gets
+        # ~theseus_gamma**k of the steps); the configured objective takes over afterwards.
+        self.theseus_steps = int(mc.get("theseus_steps", 0))
+        self.theseus_gamma = float(mc.get("theseus_gamma", 2.0))
+        self._theseus_plan: list[int] = []
+        if self.theseus_steps > 0:
+            from fastvideo.train.methods.knowledge_distillation.pdd_qad_recon import (theseus_schedule, theseus_widths)
+            widths = tuple(
+                int(w)
+                for w in (mc.get("theseus_widths") or theseus_widths(len(self.student.transformer.transformer_blocks))))
+            self._theseus_plan = theseus_schedule(self.theseus_steps, widths, self.theseus_gamma)
         # Full evaluations roll out (8 more student forwards) on at most this many rows; others are teacher-forced.
         self.max_rollout_rows = int(mc.get("max_rollout_rows", 0))
         # A checkpoint is "best" only if these full-eval metrics stay <= step0 * (1 + tolerance). With
@@ -274,6 +286,8 @@ class OmniRefPDDQADMethod(TrainingMethod):
             raise RuntimeError("step-0 evaluation must run before training (it sets the loss normalizers)")
         spec = batch["row"]
         prepared = self._row(spec)
+        if iteration <= len(self._theseus_plan):
+            return self._theseus_step(spec, prepared, iteration)
         rollout = self._use_rollout(spec.id, iteration)
         schedulers = self.student.schedulers(prepared)
         timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
@@ -333,6 +347,47 @@ class OmniRefPDDQADMethod(TrainingMethod):
         if get_world_group().rank == 0:
             logger.info("QAD step %d row %s (%s, %d tokens, rollout=%s): loss %.5f in %.1fs", iteration, spec.id,
                         spec.case, prepared.layout.sequence_length, rollout, float(total), metrics["train/row_seconds"])
+        return {"total_loss": total}, {}, metrics
+
+    def _theseus_step(self, spec: Any, prepared: Any, iteration: int) -> tuple[dict, dict, dict[str, LogScalar]]:
+        """One warm-up step: teacher-forced segment reconstruction only, on this row's trained rungs."""
+        from fastvideo.train.methods.knowledge_distillation.pdd_qad_recon import SegmentReconstruction
+
+        width = self._theseus_plan[iteration - 1]
+        schedulers = self.student.schedulers(prepared)
+        timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
+        accum = max(1, int(self.training_config.loop.gradient_accumulation_steps or 1))
+        num_rungs = self.student.num_rungs
+        trained = self._trained_rungs(spec.id, iteration, num_rungs)
+        num_segments = -(-len(self.student.transformer.transformer_blocks) // width)
+        video, audio = prepared.video, prepared.audio
+        total = torch.zeros((), device=self.student.device)
+        metrics: dict[str, LogScalar] = {
+            "train/theseus_width": float(width),
+            "train/tokens": float(prepared.layout.sequence_length)
+        }
+        started = time.perf_counter()
+        for rung in range(num_rungs):
+            with torch.no_grad(), self.teacher.rung_scope(prepared, rung, timesteps) as rt:
+                if rung in trained:
+                    scale = 1.0 / (num_segments * len(trained) * accum)
+                    with SegmentReconstruction(self.teacher.transformer, self.student.transformer, width, scale,
+                                               self._recon_criterion(prepared)) as segments:
+                        teacher_out = self.teacher.forward_rung(prepared, video, audio, rt)
+                    rel = segments.loss()
+                    if not torch.isfinite(rel):
+                        raise FloatingPointError(f"non-finite Theseus loss at step {iteration}, rung {rung}")
+                    total += rel / len(trained)
+                    for key, value in segments.metrics("train/theseus").items():
+                        metrics[f"{key}/rung{rung}"] = value
+                else:
+                    teacher_out = self.teacher.forward_rung(prepared, video, audio, rt)
+            video, audio = step_packed(schedulers, prepared, rung, video, audio, *teacher_out)
+        metrics["train/row_seconds"] = time.perf_counter() - started
+        if get_world_group().rank == 0:
+            logger.info("Theseus warm-up step %d (width %d) row %s (%s, %d tokens): rel %.5f in %.1fs", iteration,
+                        width, spec.id, spec.case, prepared.layout.sequence_length, float(total),
+                        metrics["train/row_seconds"])
         return {"total_loss": total}, {}, metrics
 
     def _recon_criterion(self, prepared: Any) -> Any:
