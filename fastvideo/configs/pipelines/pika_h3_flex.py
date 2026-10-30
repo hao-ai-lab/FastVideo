@@ -63,16 +63,33 @@ class PikaH3FlexPipelineConfig(MiniMaxH3PipelineConfig):
             raise ValueError("Pika H3 Flex is not a FastH3 PDD student; pdd_step_indices must remain unset.")
 
     def apply_request_constraints(self, request: GenerationRequest, sampling_param: SamplingParam) -> SamplingParam:
-        """Fix ``num_inference_steps`` to the adapter's six-forward ladder."""
+        """Fix the six-forward ladder and fill an omitted canvas from ``pika_resolution_tier``.
+
+        ``PikaH3FlexSamplingParam`` and the presets carry the 768p canvas, so by
+        input preparation an omitted size is indistinguishable from an explicit
+        1344x768. The request's explicit-field tracking is the last place the two
+        differ: an omitted size takes the configured tier's 16:9 bucket, while an
+        explicit size still wins and picks its own tier.
+        """
         from fastvideo.api.compat import explicit_request_updates
 
+        explicit = explicit_request_updates(request)
         steps = len(PIKA_DENOISING_STEPS)
-        requested = explicit_request_updates(request).get("num_inference_steps", steps)
+        requested = explicit.get("num_inference_steps", steps)
         if requested != steps:
             raise ValueError(f"Pika H3 Flex runs exactly {steps} transformer forwards; the request sets "
                              f"num_inference_steps={requested}. The six-step ladder is part of the adapter "
                              f"contract, not a quality/speed knob.")
         sampling_param.num_inference_steps = steps
+
+        height, width = explicit.get("height"), explicit.get("width")
+        if (height is None) != (width is None):
+            raise ValueError("Pika H3 Flex `height` and `width` must be passed together, or neither; the request "
+                             f"sets height={height}, width={width}.")
+        if height is None:
+            from fastvideo.pipelines.basic.pika_h3_flex.buckets import DEFAULT_ASPECT, canvas_for_aspect
+
+            sampling_param.height, sampling_param.width = canvas_for_aspect(DEFAULT_ASPECT, self.pika_resolution_tier)
         return sampling_param
 
 
