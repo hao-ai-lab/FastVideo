@@ -56,9 +56,7 @@ def _qkv_norm_rope_kernel(
     NHG: tl.constexpr,
     I64: tl.constexpr,
 ):
-    # Head-group index is the fastest varying part of a flat 1-D grid, so consecutive CTAs scan
-    # a token's whole H*D slab in address order (pure sequential DRAM streams); a 1-D grid also
-    # avoids the 65535 limit on gridDim.y for the 73394-token shape.
+    # 1-D grid: gridDim.y is capped at 65535, below the 73k-token shape.
     pid = tl.program_id(0)
     h0 = (pid % NHG) * HB
     bt = pid // NHG
@@ -75,9 +73,7 @@ def _qkv_norm_rope_kernel(
     else:
         base = (batch * seq_len + tok) * num_heads * HD + h0 * HD
 
-    # rotary tables are shared by every head of a token: load once, HD-wide
     idx = tl.arange(0, HD)
-    # rotate-half partner index; channels >= RD are untouched
     pidx = tl.where(idx < RD, tl.where(idx < RD // 2, idx + RD // 2, idx - RD // 2), idx)
     gidx = tl.broadcast_to(pidx[None, :], (HB, HD))
     c = tl.load(cos_ptr + tok * RD + idx, mask=idx < RD, other=1.0).to(tl.float32)[None, :]
@@ -87,15 +83,12 @@ def _qkv_norm_rope_kernel(
     wq = tl.load(qw_ptr + idx).to(tl.float32)[None, :]
     wk = tl.load(kw_ptr + idx).to(tl.float32)[None, :]
 
-    # ---- issue every load first: q, k and v are in flight together ----
     xq = tl.load(q_ptr + base + off, mask=mask, other=0.0).to(tl.float32)
     xk = tl.load(k_ptr + base + off, mask=mask, other=0.0).to(tl.float32)
     xv = tl.load(v_ptr + base + off, mask=mask, other=0.0)
 
-    # ---- V: straight copy ----
     tl.store(out_ptr + 2 * plane + base + off, xv, mask=mask)
 
-    # ---- Q: RMSNorm over the head, partial RoPE on the first RD channels
     y = tl.reshape(xq, (HB, HD))
     inv = tl.math.rsqrt(tl.sum(y * y, 1) / HD + eps)[:, None]
     y = y * inv * wq
@@ -103,7 +96,6 @@ def _qkv_norm_rope_kernel(
     y = y * c + p * s
     tl.store(out_ptr + base + off, tl.reshape(y, (NB, )).to(out_ptr.dtype.element_ty), mask=mask)
 
-    # ---- K
     y = tl.reshape(xk, (HB, HD))
     inv = tl.math.rsqrt(tl.sum(y * y, 1) / HD + eps)[:, None]
     y = y * inv * wk

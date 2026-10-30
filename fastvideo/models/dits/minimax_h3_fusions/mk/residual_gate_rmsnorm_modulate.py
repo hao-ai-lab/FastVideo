@@ -49,7 +49,6 @@ def _residual_gate_rmsnorm_modulate_kernel(
     sbase = table_row * stride_scale
     hbase = table_row * stride_shift
 
-    # Pass 1: gated residual, store it, accumulate the row sum of squares.
     acc = tl.zeros((BLOCK, ), tl.float32)
     for c in range(0, n_cols, BLOCK):
         cur = c + cols
@@ -68,8 +67,6 @@ def _residual_gate_rmsnorm_modulate_kernel(
 
     rstd = tl.math.rsqrt(tl.sum(acc, axis=0) / n_cols + eps)
 
-    # Pass 2: normalize + modulate. ``hidden`` is re-read from L2 (it was just
-    # written) so no extra HBM traffic is generated.
     for c in range(0, n_cols, BLOCK):
         cur = c + cols
         m = cur < n_cols

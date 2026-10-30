@@ -54,7 +54,6 @@ def _h3_gated_residual_kernel(
 ):
     pid = tl.program_id(0)
     if WIDE:
-        # Rare >2^31-element shapes: always use 64-bit offsets and masks.
         off = pid.to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
         mask = off < n_elems
         row = off // D
@@ -71,7 +70,6 @@ def _h3_gated_residual_kernel(
     else:
         base = pid * BLOCK
         if base + BLOCK <= NFULL:
-            # Full block: no predicates anywhere on the hot path.
             off = base + tl.arange(0, BLOCK)
             row = off // D
             col = off - row * D

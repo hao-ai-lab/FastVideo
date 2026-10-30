@@ -104,8 +104,6 @@ def swiglu(x: torch.Tensor) -> torch.Tensor:
     block = min(_BLOCK, triton.next_power_of_2(ffn_dim))
     exact = (ffn_dim % block) == 0
     ntiles = (ffn_dim + block - 1) // block
-    # 32-bit addressing is a few percent faster; fall back to 64-bit for huge
-    # tensors.
     i64 = rows * packed_width > _I32_LIMIT
     num_warps = _NUM_WARPS if block >= 1024 else 2
     _h3_swiglu_kernel[(ntiles * rows, )](

@@ -58,7 +58,6 @@ import triton.language as tl
 
 H3_NORM_EPS = 1e-5
 
-#: Chunk width of the main pass, and of the table-fusion pass.
 _MAIN_BLOCK = 2048
 _TABLE_BLOCK = 1024
 
@@ -122,13 +121,6 @@ def _rmsnorm_modulate_kernel(
         acc += x * x
     rstd = 1.0 / tl.sqrt(tl.sum(acc, axis=0) / NC + eps)
 
-    # Apply the last chunk first: it was just read (still hot in L1) and is the
-    # only partially masked one, so its values are kept in registers instead of
-    # being re-fetched. Stores use the streaming (``.cs``) cache hint: the
-    # output is never re-read, so it should not displace the row/table lines
-    # that the apply pass still needs. That combination was worth ~1.5% on the
-    # production shapes -- the gap to the streaming-copy roofline is L1/LSU
-    # traffic, not DRAM.
     chunk = NCHUNK - 1
     off = chunk * BLOCK + cols
     mask = off < NC
