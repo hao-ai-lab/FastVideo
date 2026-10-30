@@ -34,6 +34,9 @@ def interpolate_curve(table: torch.Tensor, timesteps: torch.Tensor) -> torch.Ten
     return torch.lerp(table[low], table[low + 1], (position - low).unsqueeze(-1))
 
 
+_ATTACHED_ATTR = "_open_h3_sharp_curve_branches"
+
+
 class SharpCurveBranches:
 
     def __init__(self, weights_dir: str | Path) -> None:
@@ -50,15 +53,17 @@ class SharpCurveBranches:
         if len(self.factors) != NUM_CURVE_BRANCHES:
             raise ValueError(f"Expected {NUM_CURVE_BRANCHES} Sharp curve branches, found {len(self.factors)}.")
         self.coords: torch.Tensor | None = None
-        self._attached: set[int] = set()
         self._device_factors: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
     def set_timesteps(self, unique_timesteps: torch.Tensor) -> None:
         self.coords = interpolate_curve(self.table, unique_timesteps)
 
     def attach(self, transformer: torch.nn.Module) -> None:
-        """Register the branch hooks on ``transformer`` once."""
-        if id(transformer) in self._attached:
+        """Register the branch hooks on ``transformer`` unless this instance already carries them.
+
+        The mark lives on the module, so a reloaded lazy transformer, a new instance, gets its own hooks.
+        """
+        if getattr(transformer, _ATTACHED_ATTR, None) is self:
             return
         modules = dict(transformer.named_modules())
         missing = sorted(set(self.factors) - set(modules))
@@ -66,7 +71,7 @@ class SharpCurveBranches:
             raise ValueError(f"Sharp curve branches match no transformer module: {missing[:5]}")
         for name in self.factors:
             modules[name].register_forward_hook(self._hook(name))
-        self._attached.add(id(transformer))
+        setattr(transformer, _ATTACHED_ATTR, self)
 
     def _hook(self, name: str):
 
