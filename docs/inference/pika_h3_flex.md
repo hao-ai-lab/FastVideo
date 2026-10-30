@@ -31,10 +31,20 @@ VSA sparsity are not used.
 
 ## Tasks
 
+The commands below assume a FlashAttention-4 host; see
+[Attention backend](#attention-backend) before running them elsewhere.
+
 ```bash
+export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1
+
 # text to video + audio
 python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
     --prompt "a paper boat drifting down a rainy street"
+
+# 480p portrait, ten seconds
+python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
+    --resolution 480p --aspect 9:16 --duration 10 \
+    --prompt "a lighthouse at dusk, waves breaking below"
 
 # first frame, last frame, or both
 python examples/inference/basic/basic_pika_h3_flex.py --task i2va \
@@ -74,8 +84,87 @@ kept exactly; otherwise FastVideo picks the tier from the requested short edge
 Frame counts follow Pika's `17n + 5` grid at 24 fps (5–15 s, 120–362 aligned
 frames). The default 16:9 p768 canvas is 1344×768 and 124 frames.
 
+| Duration | 5 s | 10 s | 15 s |
+|---|---|---|---|
+| `num_frames` | 124 | 243 | 362 |
+
+The example script picks the bucket with `--resolution {480p,768p}` and
+`--aspect` (`21:9`, `16:9`, `3:2`, `4:3`, `5:4`, `1:1`, `4:5`, `3:4`, `2:3`,
+`9:16`, `9:21`), and the frame count with `--duration` seconds. `--height`,
+`--width`, and `--num-frames` override them.
+
+Through the API, a request that omits `height` and `width` uses the 16:9
+bucket of the configured tier:
+
+```python
+PipelineSelection(experimental={"pika_resolution_tier": "p480"})  # 832x480 when the size is omitted
+```
+
+An explicit `height`/`width` always wins and selects its own tier. "Omitted"
+means absent from a request parsed from a mapping or config file, or from a
+`generate_video(...)` call without `height`/`width`; a `GenerationRequest`
+constructed in Python counts `SamplingConfig`'s 1280×720 default as set, which
+snaps to the 768p 16:9 bucket. Pass the size explicitly in that case.
+
 Pika center-crops both keyframes to the bucket. MiniMax-H3 stretches its first
 frame instead; do not reuse that fit for Pika.
+
+## Attention backend
+
+Run Pika with FlashAttention-4 on Hopper or Blackwell:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 \
+    python examples/inference/basic/basic_pika_h3_flex.py --task t2va --prompt "..."
+```
+
+FA4 is opt-in. Installing `flash_attn.cute` is not enough:
+`fastvideo/attention/utils/flash_attn_default.py` only selects it when
+`FASTVIDEO_FA4=1`, and neither the example's defaults nor `--lossless-accel`
+set that variable. With `FASTVIDEO_FA4=1` and an unusable FA4 install the run
+fails at import instead of silently falling back.
+
+Without FA4, the `FLASH_ATTN` backend uses FA3 or FA2 if one is installed. On a
+host with neither (common on Blackwell), backend selection falls back to
+`TORCH_SDPA`. SDPA at 768p is much slower and can run out of memory, so do not
+use it for 768p benchmarks or production runs.
+
+## Performance and memory
+
+All measurements: one GB200, 768p 16:9 (1344×768), 5 s (124 frames), six
+forwards, warm requests, FA4, every component resident (`--offload resident`).
+
+| Configuration (T2VA) | Generation time |
+|---|---|
+| Official `pika-h3-pro` CLI | 59.7 s |
+| FastVideo, BF16 | 26.2 s |
+| FastVideo, NVFP4 `quality-36L` decoder | 18.0 s |
+| FastVideo, NVFP4 `fast-8L` decoder | 17.4 s |
+
+The 36L decoder measured 40.5 dB PSNR against the BF16 decoder on the same
+latents. The 8L decoder was timed but not scored here.
+
+Task coverage, seed 42, NVFP4 text encoder, BF16 decoder, also with
+`FASTVIDEO_MINIMAX_H3_FUSIONS=all`:
+
+| Task | Wall | Denoise | Decode | Peak memory | Check |
+|---|---|---|---|---|---|
+| T2VA | 25.49 s | 16.70 s | 8.04 s | 104.6 GiB | on prompt; 21.7 dB PSNR vs the BF16-encoder output |
+| I2VA | 27.37 s | 18.02 s | 8.23 s | 104.9 GiB | first frame vs input 26.5 dB, SSIM 0.715 |
+| FL2VA | 28.95 s | 19.49 s | 8.12 s | 105.2 GiB | first frame 39.6 dB / 0.971, last frame 29.1 dB / 0.819 |
+| Ref2VA, two image references | 51.17 s | 38.42 s | 7.74 s | 108.5 GiB | 64,241 packed tokens; both references used |
+
+The NVFP4 text encoder's first request in a fresh process paid a one-time
+first-use cost of about 183 s; later requests did not.
+
+Peak resident memory for the BF16 FastVideo T2VA run was about 129 GiB. The
+official CLI's sampling peak was 71.7 GiB; the two figures measure different
+things (process-resident memory versus the sampling phase).
+
+The example's default `--offload lazy` loads components on demand and offloads
+the encoders and VAE. It fits smaller devices but reloads the DiT on every
+request: the same T2VA request took 48.06 s (28.31 s denoise) on GB200 in that
+mode. Use `--offload resident` when the device holds every component.
 
 ## Training-free acceleration
 
@@ -91,10 +180,11 @@ lossless switches:
 * `OffloadConfig(lazy_module_load=True)` and `dit_layerwise=True` for smaller
   GPUs;
 * `CompileConfig(enabled=True)` for `torch.compile`;
-* the standard FlashAttention/SDPA backend selection.
+* FlashAttention-4 through `FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
+  FASTVIDEO_FA4=1` (see [Attention backend](#attention-backend)).
 
 `--lossless-accel` in the example enables the first four before the generator
-starts. Kernel work beyond the existing exact kernels is intentionally not part
+starts. It does not enable FA4; set the two attention variables at launch. Kernel work beyond the existing exact kernels is intentionally not part
 of this integration.
 
 ## NVFP4 on Blackwell

@@ -16,9 +16,23 @@ parallel VAE tiles) before the generator starts.  ``--nvfp4-decoder`` and
 ``--nvfp4-text-encoder`` opt into the existing Blackwell FP4 weight paths;
 they change weights, not the six-forward sampler.  Kernel/VSA work is separate.
 
+``--resolution`` (480p/768p), ``--aspect`` (one of Pika's eleven buckets), and
+``--duration`` (5-15 s) pick the bucket and the ``17n + 5`` frame count;
+``--height``/``--width``/``--num-frames`` override them with explicit values.
+Launch with ``FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1`` on a
+FlashAttention-4 host (Hopper/Blackwell); without FA4 attention falls back to
+FA3/FA2 or, if neither is installed, to SDPA.
+
+``--offload resident`` keeps every component on the GPU, which is how the
+GB200 timings in docs/inference/pika_h3_flex.md were measured; the default
+``lazy`` mode loads components on demand for smaller devices and is slower.
+
 Examples:
-    python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
+    FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 \
+    python examples/inference/basic/basic_pika_h3_flex.py --task t2va --offload resident \
         --prompt "a paper boat drifting down a rainy street"
+    python examples/inference/basic/basic_pika_h3_flex.py --task t2va \
+        --resolution 480p --aspect 9:16 --duration 10 --prompt "a lighthouse at dusk"
     python examples/inference/basic/basic_pika_h3_flex.py --task fl2va \
         --image first.png --last-image last.png --prompt "the flower opens"
     python examples/inference/basic/basic_pika_h3_flex.py --task ref2va \
@@ -49,6 +63,14 @@ from fastvideo.api import (
 )
 from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
+from fastvideo.pipelines.basic.pika_h3_flex.buckets import (
+    PIKA_ASPECTS,
+    PIKA_FPS,
+    PIKA_MAX_DURATION,
+    PIKA_MIN_DURATION,
+    canvas_for_aspect,
+    resolve_frames,
+)
 
 # Training-free switches FastVideo already exposes. Workers inherit the
 # environment, so they must be set before VideoGenerator starts.
@@ -60,6 +82,7 @@ LOSSLESS_ACCEL_ENV = {
 }
 
 TASKS = ("t2va", "i2va", "l2va", "fl2va", "ref2va")
+RESOLUTIONS = {"480p": "p480", "768p": "p768"}
 
 
 def _reference(value: str) -> MiniMaxH3Reference:
@@ -84,14 +107,25 @@ def parse_args() -> argparse.Namespace:
                         type=_reference,
                         default=[],
                         help="ordered reference (repeatable; ref2va)")
-    parser.add_argument("--height", type=int, default=768)
-    parser.add_argument("--width", type=int, default=1344)
-    parser.add_argument("--num-frames", type=int, default=124)
+    parser.add_argument("--resolution", choices=tuple(RESOLUTIONS), default="768p", help="Pika resolution tier")
+    parser.add_argument("--aspect", choices=PIKA_ASPECTS, default="16:9", help="bucket aspect ratio (W:H)")
+    parser.add_argument("--duration",
+                        type=float,
+                        default=5.0,
+                        help=f"seconds ({PIKA_MIN_DURATION:g}-{PIKA_MAX_DURATION:g}); rounded up to the 17n+5 grid")
+    parser.add_argument("--height", type=int, help="explicit canvas height (with --width; overrides the bucket)")
+    parser.add_argument("--width", type=int, help="explicit canvas width (with --height; overrides the bucket)")
+    parser.add_argument("--num-frames", type=int, help="explicit frame count (overrides --duration)")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--compile", action="store_true", help="torch.compile the DiT")
     parser.add_argument("--lossless-accel", action="store_true", help="enable bit-identical speed-ups")
-    parser.add_argument("--low-vram", action="store_true", help="stream the DiT layerwise")
+    parser.add_argument("--offload",
+                        choices=("lazy", "resident"),
+                        default="lazy",
+                        help="lazy: load components on demand and offload the encoders/VAE (fits smaller devices); "
+                        "resident: keep everything on the GPU (fastest, about 105-130 GiB on GB200)")
+    parser.add_argument("--low-vram", action="store_true", help="stream the DiT layerwise (lazy offload only)")
     parser.add_argument("--nvfp4-decoder",
                         help="Blackwell-only NVFP4 H3 decoder (quality-36L or fast-8L decoder-nvfp4.safetensors)")
     parser.add_argument("--nvfp4-text-encoder",
@@ -107,16 +141,53 @@ def parse_args() -> argparse.Namespace:
         parser.error("--task ref2va needs at least one --reference")
     if args.task != "ref2va" and args.reference:
         parser.error("--reference is only valid with --task ref2va")
+    if (args.height is None) != (args.width is None):
+        parser.error("--height and --width must be passed together")
+    if args.low_vram and args.offload == "resident":
+        parser.error("--low-vram streams the DiT and cannot be combined with --offload resident")
     return args
+
+
+def _offload(args: argparse.Namespace) -> OffloadConfig:
+    if args.offload == "resident":
+        return OffloadConfig(dit=False,
+                             dit_layerwise=False,
+                             text_encoder=False,
+                             vae=False,
+                             pin_cpu_memory=False,
+                             lazy_module_load=False)
+    return OffloadConfig(
+        dit=False,
+        dit_layerwise=args.low_vram,
+        text_encoder=True,
+        vae=True,
+        pin_cpu_memory=not args.low_vram,
+        lazy_module_load=True,
+    )
+
+
+def _canvas(args: argparse.Namespace) -> tuple[int, int]:
+    if args.height is not None:
+        return args.height, args.width
+    return canvas_for_aspect(args.aspect, RESOLUTIONS[args.resolution])
+
+
+def _num_frames(args: argparse.Namespace) -> int:
+    if args.num_frames is not None:
+        return args.num_frames
+    return resolve_frames(round(args.duration * PIKA_FPS))
 
 
 def _inputs(args: argparse.Namespace) -> InputConfig:
     if args.task == "ref2va":
         return InputConfig(references=args.reference)
+    # Keep only the keyframes the task uses, so switching --task never turns
+    # an I2VA run into FL2VA because a --last-image was also passed.
+    first = args.image if args.task in ("i2va", "fl2va") else None
+    last = args.last_image if args.task in ("l2va", "fl2va") else None
     # The request adapter copies image fields verbatim; the stage loads
     # ``image_path`` itself but requires ``last_image`` to already be a PIL image.
-    last_image = load_image(args.last_image) if args.last_image else None
-    return InputConfig(image_path=args.image, last_image=last_image)
+    return InputConfig(image_path=first, last_image=load_image(last) if last else None)
 
 
 def _pipeline(args: argparse.Namespace) -> PipelineSelection:
@@ -140,16 +211,12 @@ def main() -> None:
         for key, value in LOSSLESS_ACCEL_ENV.items():
             os.environ.setdefault(key, value)
 
+    height, width = _canvas(args)
+    num_frames = _num_frames(args)
+    print(f"Pika H3 Flex {args.task}: {width}x{height}, {num_frames} frames ({num_frames / PIKA_FPS:.2f} s)")
     output_path = Path(args.output) / f"pika_h3_flex_{args.task}.mp4"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    offload = OffloadConfig(
-        dit=False,
-        dit_layerwise=args.low_vram,
-        text_encoder=True,
-        vae=True,
-        pin_cpu_memory=not args.low_vram,
-        lazy_module_load=True,
-    )
+    offload = _offload(args)
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
@@ -169,9 +236,9 @@ def main() -> None:
                 negative_prompt="",
                 inputs=_inputs(args),
                 sampling=SamplingConfig(
-                    height=args.height,
-                    width=args.width,
-                    num_frames=args.num_frames,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
                     fps=24,
                     num_inference_steps=6,
                     guidance_scale=1.0,
