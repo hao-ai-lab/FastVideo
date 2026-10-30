@@ -133,6 +133,7 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
+  "Efficient-Large-Model/Open-H3-Regenerate-2K": "open-h3-regenerate-2k",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
