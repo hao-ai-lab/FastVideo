@@ -717,8 +717,9 @@ FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
 FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(8,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call. The ViT decoder "
-                                     "treats batch entries independently, so batching tiles is bitwise equal to "
-                                     "per-tile decoding. On GB200 at 768x1344, 8 tiles per call decodes 107 "
+                                     "treats batch entries independently, so batching tiles matches per-tile "
+                                     "decoding, except for NVFP4 decoders with dynamic activation scales, which "
+                                     "always decode per tile. On GB200 at 768x1344, 8 tiles per call decodes 107 "
                                      "frames in 3.7 s instead of 5.4 s and 362 frames in 12.8 s instead of 18.3 s "
                                      "(+0.7 GiB peak). 1 decodes per tile.")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,

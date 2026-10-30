@@ -351,11 +351,7 @@ def test_decode_clip_no_spatial_tiling_stage_ranges() -> None:
 
 
 def test_decode_clip_emits_tiled_stage_ranges(monkeypatch) -> None:
-    """Nest indexed decoder tiles between tile-splitting and stitching ranges.
-
-    Pins the per-tile driver: the shipped default batches eight tiles per decoder
-    call, which emits one ``decode_tile_batches`` range instead of per-tile ranges.
-    """
+    """Nest indexed decoder tiles between tile-splitting and stitching ranges."""
     monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "1")
     vae = _empty_typed_module(AutoencoderKLMiniMaxH3)
     vae.use_tiling = True
