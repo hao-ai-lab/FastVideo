@@ -248,8 +248,12 @@ def _dp() -> tuple[int, int]:
 
 
 def _shard(rows: list[Any], shard: int, num_shards: int) -> list[Any]:
+    """This group's rows; striding a hash order keeps resolutions mixed (the plan alternates 480p / 768p groups)."""
+    import hashlib
+
     dp_rank, dp_size = _dp()
-    return rows[shard * dp_size + dp_rank::num_shards * dp_size]
+    ordered = sorted(rows, key=lambda row: hashlib.sha256(row.id.encode()).hexdigest())
+    return ordered[shard * dp_size + dp_rank::num_shards * dp_size]
 
 
 def _is_writer() -> bool:
