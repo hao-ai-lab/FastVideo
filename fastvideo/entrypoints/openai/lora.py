@@ -188,10 +188,14 @@ class LoraRuntime:
         logger.info("OpenAI server applies LoRA adapter %r at strength %g", adapter_id, strength)
         try:
             generator.set_lora_adapter(adapter_id, self.adapters[adapter_id].path, strength=strength)
+        except (BrokenPipeError, EOFError):
+            # A dead worker: the serving engine marks itself unhealthy, and a clear would only reach the same worker.
+            raise
         except Exception as error:
+            logger.exception("LoRA adapter %r could not be applied", adapter_id)
             # A failed change may keep the previous adapter or leave a partial one; clearing gives the base model.
             self._clear(generator)
-            raise LoraRequestError(f"LoRA adapter {adapter_id!r} could not be applied: {error}") from error
+            raise LoraRequestError(f"LoRA adapter {adapter_id!r} could not be applied on this server.") from error
         self.loaded.add(adapter_id)
         self.current_id = adapter_id
         self.current_strength = strength
@@ -202,6 +206,9 @@ class LoraRuntime:
         self.current_strength = None
         try:
             generator.clear_lora_adapter()
+        except (BrokenPipeError, EOFError):
+            self.unknown_state = True
+            raise
         except Exception:
             logger.exception("OpenAI server could not clear the LoRA adapter")
             self.unknown_state = True

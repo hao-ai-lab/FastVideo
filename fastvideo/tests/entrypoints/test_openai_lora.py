@@ -345,7 +345,8 @@ def test_failed_change_fails_the_request_and_does_not_generate(make_client) -> N
     job = _job(client, name="realism", scale=0.8)
 
     assert sync.status_code == 500
-    assert "could not be applied" in sync.json()["error"]["message"]
+    assert "could not be applied on this server" in sync.json()["error"]["message"]
+    assert "cannot load" not in sync.json()["error"]["message"]
     assert job["status"] == "failed"
     assert all(event[0] != "generate" for event in generator.events)
 
@@ -523,3 +524,17 @@ def test_side_branch_check_resolves_a_hub_model_id(tmp_path: Path, monkeypatch: 
     with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False):
         assert adapters_attach_as_side_branch(config) is True
     assert requested == [("org/model", [f"transformer/{H3_NVFP4_DIT_EXPORT_FILENAME}"])]
+
+
+def test_a_dead_worker_during_an_adapter_change_marks_the_server_unhealthy(make_client) -> None:
+    generator = _FakeGenerator()
+    client = make_client(generator)
+
+    def dead_worker(*args: Any, **kwargs: Any) -> None:
+        raise BrokenPipeError("worker 0 exited")
+
+    generator.set_lora_adapter = dead_worker  # type: ignore[method-assign]
+
+    assert _sync(client, name="realism").status_code == 500
+    assert client.get("/health").status_code == 503
+    assert ("clear",) not in generator.events

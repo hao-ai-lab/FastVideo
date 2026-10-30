@@ -119,3 +119,50 @@ def test_clear_restores_base_weights_after_a_change_that_failed_part_way(setup) 
 
     for name in ("first", "second"):
         assert torch.equal(getattr(transformer, name).base_layer.weight, original[name])
+
+
+def test_clear_after_a_partial_failure_in_a_block_mixing_side_branch_and_merged_layers(monkeypatch, env_overrides) -> None:
+    from fastvideo.tests.layers.test_lora_side_branch import _packed_linear
+
+    env_overrides.enter_context(envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False))
+    monkeypatch.setattr(lora_pipeline.dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: torch.device("cpu"))
+    transformer = torch.nn.Module()
+    transformer.packed = _packed_linear()
+    transformer.dense = ReplicatedLinear(_packed_linear().input_size, _packed_linear().output_size, bias=False,
+                                         params_dtype=torch.float32)
+    in_dim, out_dim = transformer.packed.input_size, transformer.packed.output_size
+    dense_original = transformer.dense.weight.detach().clone()
+    generator = torch.Generator().manual_seed(3)
+
+    def factors(rows_in: int) -> dict[str, torch.Tensor]:
+        return {"lora_A": torch.randn(RANK, rows_in, generator=generator),
+                "lora_B": torch.randn(out_dim, RANK, generator=generator)}
+
+    pipe = _Pipe.__new__(_Pipe)
+    adapter_a = {f"{layer}.{key}": value for layer in ("packed", "dense") for key, value in factors(in_dim).items()}
+    # B applies to "packed" first, then fails on "dense" because its factors have the wrong input size.
+    adapter_b = {**{f"packed.{key}": value for key, value in factors(in_dim).items()},
+                 **{f"dense.{key}": value for key, value in factors(in_dim + 1).items()}}
+    for name, value in dict(lora_adapters={"a": adapter_a, "b": adapter_b}, lora_adapter_paths={}, lora_layers={},
+                            cur_adapter_name="", cur_adapter_path="", cur_adapter_strength=1.0, lora_initialized=False,
+                            lora_path=None, fastvideo_args=SimpleNamespace(training_mode=False),
+                            device=torch.device("cpu"), trainable_transformer_modules={"transformer": transformer}).items():
+        setattr(pipe, name, value)
+
+    def convert_one(name: str, module: torch.nn.Module) -> None:
+        module.packed, module.dense = get_lora_layer(module.packed), get_lora_layer(module.dense)
+        layers = {"packed": module.packed, "dense": module.dense}
+        pipe.lora_layers[name] = SimpleNamespace(lora_layers_by_block=lambda: iter([(None, layers)]))
+
+    pipe._convert_one_transformer = convert_one  # type: ignore[method-assign]
+    pipe.set_lora_adapter("a", strength=1.0)
+    assert transformer.packed.side_branch and transformer.dense.merged
+    with pytest.raises(RuntimeError):
+        pipe.set_lora_adapter("b", strength=1.0)
+
+    pipe.clear_lora_adapter()
+
+    assert transformer.packed.lora_A is None
+    assert transformer.dense.lora_A is None and not transformer.dense.merged
+    assert torch.equal(transformer.dense.base_layer.weight, dense_original)
