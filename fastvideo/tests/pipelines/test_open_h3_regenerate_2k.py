@@ -370,6 +370,26 @@ def test_saved_draft_latent_loads_as_a_native_four_dimensional_latent(tmp_path, 
     assert torch.all(loaded == 0.5)
 
 
+def test_saved_draft_latent_rejects_a_batch_of_several_drafts(tmp_path):
+    path = tmp_path / "draft.pt"
+    torch.save(torch.zeros(2, 24, 31, 24, 42), path)
+    with pytest.raises(ValueError, match=r"\[1, C, T, h, w\]"):
+        _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+
+
+def test_absolute_module_mapping_dispatches_on_its_role():
+    from types import SimpleNamespace
+
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    pipeline = SimpleNamespace(model_path="/release",
+                               _extra_config_module_map={"transformer": "/models/my_refiner", "vae": "base_model/vae"})
+
+    assert ComposedPipelineBase._component_load_target(pipeline, "transformer") == ("transformer", "/models/my_refiner")
+    assert ComposedPipelineBase._component_load_target(pipeline, "vae") == ("base_model/vae", "/release/base_model/vae")
+    assert ComposedPipelineBase._component_load_target(pipeline, "scheduler") == ("scheduler", "/release/scheduler")
+
+
 def test_saved_draft_latent_rejects_the_wrong_rank(tmp_path):
     path = tmp_path / "draft_latent.pt"
     torch.save(torch.zeros(24, 31, 48), path)

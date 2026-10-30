@@ -77,7 +77,7 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         if isinstance(tensor, dict):
             raise ValueError(f"{path} holds a mapping; save the draft latent tensor itself.")
         tensor = torch.as_tensor(tensor)
-        if tensor.ndim == 5:
+        if tensor.ndim == 5 and tensor.shape[0] == 1:
             tensor = tensor[0]
         if tensor.ndim != 4:
             raise ValueError(f"A draft latent must be [C, T, h, w] or [1, C, T, h, w], got {tuple(tensor.shape)}.")
