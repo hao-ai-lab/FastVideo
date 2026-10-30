@@ -41,6 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attention-backend", default="TORCH_SDPA")
     parser.add_argument("--draft-size", choices=("768p", "576p"), default="768p",
                         help="size the draft is encoded at; 576p for drafts from other video models")
+    parser.add_argument("--vae-decoder", default=None,
+                        help="NVFP4 decoder-nvfp4.safetensors that replaces the VAE decoder at load "
+                        "(Blackwell only, see docs/inference/open_h3_regenerate_2k.md)")
     parser.add_argument("--runs", type=int, default=1, help="repeat the request to measure warm timings")
     return parser.parse_args()
 
@@ -48,16 +51,19 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
+    experimental = {
+        "attention_backend": args.attention_backend,
+        "draft_size": args.draft_size,
+    }
+    if args.vae_decoder:
+        experimental["h3_vae_nvfp4_decoder"] = args.vae_decoder
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
             engine=EngineConfig(num_gpus=1, offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False)),
             pipeline=PipelineSelection(
                 components=ComponentConfig(),
-                experimental={
-                    "attention_backend": args.attention_backend,
-                    "draft_size": args.draft_size,
-                },
+                experimental=experimental,
             ),
         ))
     try:

@@ -20,6 +20,9 @@ generator:
       attention_backend: TORCH_SDPA
       # 768p for MiniMax-H3 drafts; 576p encodes drafts from other video models at 1024x576.
       draft_size: 768p
+      # NVFP4 video decoder (Blackwell only). Download one tier from FastVideo/FastH3-NVFP4-VAE-Decoder and point
+      # this at it; the release VAE has the full 36 blocks, so both tiers apply. `fast-8L` is the cheap option.
+      # h3_vae_nvfp4_decoder: ./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
 
 server:
   host: 0.0.0.0
