@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import TypeVar
 
 import numpy as np
 import torch
@@ -24,6 +25,8 @@ from fastvideo.utils import pixels_to_uint8
 
 logger = init_logger(__name__)
 
+T = TypeVar("T")
+
 _DISABLE_HINT = "or turn the guardrails off with `enable_guardrails=False` at your own risk."
 
 
@@ -36,6 +39,29 @@ def _sp_rank_and_size() -> tuple[int, int]:
         return 0, 1
     group = get_sp_group()
     return group.rank_in_group, group.world_size
+
+
+def _on_first_rank(fn: Callable[[], T], what: str) -> T:
+    """Runs ``fn`` on the first rank of the sequence-parallel group and returns its result on every rank.
+
+    A failure on the first rank is broadcast too, so the other ranks raise with it at once instead of waiting at their
+    next collective until it times out.
+    """
+    rank, world_size = _sp_rank_and_size()
+    outcome: tuple[bool, object] | None = None
+    if rank == 0:
+        try:
+            outcome = (True, fn())
+        except BaseException as e:
+            if world_size > 1:
+                get_sp_group().broadcast_object((False, f"{type(e).__name__}: {e}"), src=0)
+            raise
+    if world_size > 1:
+        outcome = get_sp_group().broadcast_object(outcome, src=0)
+    ok, value = outcome
+    if not ok:
+        raise RuntimeError(f"The first sequence-parallel rank failed to {what}: {value}")
+    return value
 
 
 class PAN2Guardrails:
@@ -52,8 +78,8 @@ class PAN2Guardrails:
                               _DISABLE_HINT)
         self.offload_to_cpu = offload_to_cpu
         self.checker = None
-        rank, _ = _sp_rank_and_size()
-        if rank == 0:
+
+        def load() -> None:
             from pan2_guardrail import PAN2SafetyChecker
 
             logger.info("Loading the PAN 2 guardrails (offload_to_cpu=%s)", offload_to_cpu)
@@ -61,6 +87,8 @@ class PAN2Guardrails:
             self.checker = PAN2SafetyChecker.from_pretrained()
             if not offload_to_cpu:
                 self.checker.to(get_local_torch_device())
+
+        _on_first_rank(load, "load the guardrails")
 
     @contextmanager
     def _on_device(self, module: torch.nn.Module) -> Iterator[None]:
@@ -77,11 +105,7 @@ class PAN2Guardrails:
                 torch.cuda.empty_cache()
 
     def _passes(self, check: Callable[[], bool]) -> bool:
-        rank, world_size = _sp_rank_and_size()
-        safe = bool(check()) if rank == 0 else None
-        if world_size > 1:
-            safe = get_sp_group().broadcast_object(safe, src=0)
-        return bool(safe)
+        return bool(_on_first_rank(lambda: bool(check()), "run the guardrail check"))
 
     def check_prompt(self, prompt: str) -> None:
 
