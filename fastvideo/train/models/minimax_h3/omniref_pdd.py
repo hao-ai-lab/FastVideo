@@ -70,6 +70,7 @@ class MiniMaxH3OmniRefPDDModel(ModelBase):
 
     _transformer_cls_name = "MiniMaxH3Transformer3DModel"
     _transformer_module_type = "transformer_ref"
+    _attention_backend = "VIDEO_SPARSE_ATTN_H3"
 
     def __init__(self,
                  *,
@@ -81,7 +82,7 @@ class MiniMaxH3OmniRefPDDModel(ModelBase):
                  qad: dict[str, Any] | None = None,
                  data: dict[str, Any] | None = None,
                  frozen_bf16: bool = False) -> None:
-        super().__init__(trainable=trainable, attention_backend="VIDEO_SPARSE_ATTN_H3")
+        super().__init__(trainable=trainable, attention_backend=self._attention_backend)
         # Keep a frozen role's masters in bf16 (the checkpoint's dtype) instead of an fp32 upcast: compute is bf16 either
         # way, so outputs are bit-identical, and the role needs half the memory.
         self._frozen_bf16 = bool(frozen_bf16)
@@ -284,7 +285,7 @@ class MiniMaxH3OmniRefPDDModel(ModelBase):
     def num_rungs(self) -> int:
         return int(self.plan.num_steps)
 
-    def schedulers(self) -> tuple[Any, Any]:
+    def schedulers(self, prepared: PreparedRow | None = None) -> tuple[Any, Any]:
         """Fresh video/audio schedulers on the PDD node sigmas (as the denoising stage sets them)."""
         from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
         video = MiniMaxH3Scheduler(shift=self.contract.video_shift)
