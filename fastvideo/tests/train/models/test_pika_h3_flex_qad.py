@@ -216,3 +216,42 @@ def test_adapter_factors_pair_peft_keys(tmp_path):
     save_file({"a.to_q.lora_A.default.weight": torch.zeros(2, 4)}, str(path))
     with pytest.raises(ValueError, match="both LoRA factors"):
         merge.adapter_factors(str(path))
+
+
+def _calibrate_module():
+    path = Path(__file__).resolve().parents[4] / "scripts/distill/pika_h3_flex_qad/calibrate_flex_nvfp4.py"
+    spec = importlib.util.spec_from_file_location("calibrate_flex_nvfp4", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_calibration_keys_follow_the_qad_table():
+    calibrate = _calibrate_module()
+    assert calibrate.amax_key("transformer.transformer_blocks.7.ff.fc_out") == "b7.ff.fc_out"
+    assert calibrate.amax_key("transformer_blocks.3._checkpoint_wrapped_module.ff.fc_in") == "b3.ff.fc_in"
+    assert calibrate.amax_key("transformer_blocks.3.attn.to_q") is None
+
+
+def test_calibration_candidates_and_outliers():
+    calibrate = _calibrate_module()
+    rows = [{"id": f"r{i}", "amax": {"b0.ff.fc_in": [float(i), 0.0, 1.0], "b0.ff.fc_out": [1.0, 2.0, 3.0]}}
+            for i in range(1, 101)]
+    rows[0]["amax"]["b0.ff.fc_out"] = [50.0, 0.0, 0.0]
+    table = calibrate.candidate_table(rows)
+    assert table["b0.ff.fc_in"]["max"] == 100.0
+    assert table["b0.ff.fc_in"]["0.5x_max"] == 50.0
+    assert table["b0.ff.fc_in"]["row_p90"] == pytest.approx(90.1)
+    assert set(calibrate.outlier_row_ids(rows, 2)) == {"r1", "r100"}
+
+
+def test_calibration_choice_all_tokens_or_balanced():
+    calibrate = _calibrate_module()
+    candidates = {"b0.ff.fc_in": {"max": 10.0, "0.5x_max": 5.0}}
+    # "max" wins on all-token error (video dominates) but loses badly on audio; the balanced objective picks the clip.
+    mse = {"b0.ff.fc_in": {"ref": [100.0, 1.0, 10.0], "max": [1.0, 0.5, 0.1], "0.5x_max": [2.0, 0.05, 0.1]}}
+    table, report = calibrate.choose_table(mse, candidates, "balanced")
+    assert table == {"b0.ff.fc_in": 5.0}
+    assert report["b0.ff.fc_in"]["best"] == "0.5x_max"
+    table, _ = calibrate.choose_table(mse, candidates, "all")
+    assert table == {"b0.ff.fc_in": 10.0}
