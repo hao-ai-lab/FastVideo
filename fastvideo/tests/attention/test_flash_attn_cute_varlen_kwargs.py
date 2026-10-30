@@ -11,106 +11,130 @@ as keyword arguments, so every packed-varlen forward crashed with
 The test installs a fake ``flash_attn.cute.interface`` whose ``_flash_attn_fwd``
 has the current (max_seqlen-free) signature, then calls the varlen forward
 directly. The old code fails with that TypeError; the fixed code forwards only
-the arguments the kernel accepts.
+the arguments the kernel accepts. It runs in a subprocess so the fake modules
+and the imported kernel references cannot leak into other tests.
 """
 
 from __future__ import annotations
 
-import importlib
+import json
+import subprocess
 import sys
-import types
 
 import pytest
 import torch
 
-_MODULE_NAME = "fastvideo.attention.utils.flash_attn_cute"
+_SKIP_EXIT_CODE = 77
+
+_SUBPROCESS_SCRIPT = r'''
+import importlib
+import importlib.machinery
+import json
+import sys
+import types
+
+import torch
+
+_SKIP_EXIT_CODE = 77
+
+import fastvideo  # noqa: F401  Import diffusers and the rest of the package before faking flash_attn.
+
+calls = []
 
 
-def _fake_flash_attn(monkeypatch: pytest.MonkeyPatch):
-    """Install a minimal flash_attn.cute.interface with the current signature."""
-    calls: list[dict] = []
+def fake_flash_attn_fwd(
+    q,
+    k,
+    v,
+    *,
+    cu_seqlens_q=None,
+    cu_seqlens_k=None,
+    softmax_scale=None,
+    causal=False,
+    window_size_left=None,
+    window_size_right=None,
+    softcap=0.0,
+    num_splits=1,
+    pack_gqa=None,
+    return_lse=True,
+    deterministic=False,
+    sm_margin=0,
+):
+    calls.append({
+        "cu_seqlens_q_is_input": cu_seqlens_q is cu_seqlens,
+        "softmax_scale": softmax_scale,
+        "causal": causal,
+        "return_lse": return_lse,
+    })
+    return torch.empty_like(q), torch.empty((q.shape[1], q.shape[0]), dtype=torch.float32)
 
-    def fake_flash_attn_fwd(
+
+def fake_flash_attn_bwd(*args, **kwargs):
+    raise NotImplementedError("the test fake only covers the forward")
+
+
+flash_attn = types.ModuleType("flash_attn")
+cute = types.ModuleType("flash_attn.cute")
+interface = types.ModuleType("flash_attn.cute.interface")
+flash_attn.__spec__ = importlib.machinery.ModuleSpec("flash_attn", None)
+cute.__spec__ = importlib.machinery.ModuleSpec("flash_attn.cute", None)
+interface.__spec__ = importlib.machinery.ModuleSpec("flash_attn.cute.interface", None)
+interface._flash_attn_fwd = fake_flash_attn_fwd
+interface._flash_attn_bwd = fake_flash_attn_bwd
+cute.interface = interface
+flash_attn.cute = cute
+sys.modules["flash_attn"] = flash_attn
+sys.modules["flash_attn.cute"] = cute
+sys.modules["flash_attn.cute.interface"] = interface
+
+try:
+    module = importlib.import_module("fastvideo.attention.utils.flash_attn_cute")
+except ImportError as exc:
+    print(exc, file=sys.stderr)
+    sys.exit(_SKIP_EXIT_CODE)
+module._flash_attn_fwd = fake_flash_attn_fwd
+
+
+q = torch.randn(7, 2, 8, device="cuda")
+cu_seqlens = torch.tensor([0, 7], dtype=torch.int32, device="cuda")
+with torch.no_grad():
+    out, lse = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
         q,
-        k,
-        v,
-        *,
-        cu_seqlens_q=None,
-        cu_seqlens_k=None,
-        softmax_scale=None,
-        causal=False,
-        window_size_left=None,
-        window_size_right=None,
-        softcap=0.0,
-        num_splits=1,
-        pack_gqa=None,
-        return_lse=True,
-        deterministic=False,
-        sm_margin=0,
-    ):
-        calls.append({
-            "cu_seqlens_q": cu_seqlens_q,
-            "cu_seqlens_k": cu_seqlens_k,
-            "softmax_scale": softmax_scale,
-            "causal": causal,
-            "return_lse": return_lse,
-        })
-        return torch.empty_like(q), torch.empty((q.shape[1], q.shape[0]), dtype=torch.float32)
+        q,
+        q,
+        cu_seqlens,
+        cu_seqlens,
+        7,
+        7,
+        0.125,
+        False,
+        False,
+    )
 
-    def fake_flash_attn_bwd(*args, **kwargs):
-        raise NotImplementedError("the test fake only covers the forward")
-
-    flash_attn = types.ModuleType("flash_attn")
-    cute = types.ModuleType("flash_attn.cute")
-    interface = types.ModuleType("flash_attn.cute.interface")
-    interface._flash_attn_fwd = fake_flash_attn_fwd
-    interface._flash_attn_bwd = fake_flash_attn_bwd
-    cute.interface = interface
-    flash_attn.cute = cute
-    monkeypatch.setitem(sys.modules, "flash_attn", flash_attn)
-    monkeypatch.setitem(sys.modules, "flash_attn.cute", cute)
-    monkeypatch.setitem(sys.modules, "flash_attn.cute.interface", interface)
-    return fake_flash_attn_fwd, calls
+with open(sys.argv[1], "w") as handle:
+    json.dump({"out_shape": list(out.shape), "lse_shape": list(lse.shape), "calls": calls}, handle)
+'''
 
 
-def _load_module(monkeypatch: pytest.MonkeyPatch):
-    fake_flash_attn_fwd, calls = _fake_flash_attn(monkeypatch)
-    module = importlib.import_module(_MODULE_NAME)
-    # A real FA4 install imports the real kernel; pin the fake so the contract
-    # under test is the forwarding call, not the kernel.
-    monkeypatch.setattr(module, "_flash_attn_fwd", fake_flash_attn_fwd)
-    return module, calls
-
-
-def test_varlen_forward_omits_max_seqlen_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_varlen_forward_omits_max_seqlen_kwargs(tmp_path) -> None:
     if not torch.cuda.is_available():
         pytest.skip("flash_attn.cute is only imported on CUDA builds")
-    try:
-        module, calls = _load_module(monkeypatch)
-    except ImportError as exc:
-        pytest.skip(f"flash_attn.cute is not importable: {exc}")
 
-    q = torch.randn(7, 2, 8, device="cuda")
-    cu_seqlens = torch.tensor([0, 7], dtype=torch.int32, device="cuda")
-    with torch.no_grad():
-        out, lse = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
-            q,
-            q,
-            q,
-            cu_seqlens,
-            cu_seqlens,
-            7,
-            7,
-            0.125,
-            False,
-            False,
-        )
+    result_path = tmp_path / "varlen_forward.json"
+    completed = subprocess.run([sys.executable, "-c", _SUBPROCESS_SCRIPT, str(result_path)],
+                               capture_output=True,
+                               text=True,
+                               check=False)
+    if completed.returncode == _SKIP_EXIT_CODE:
+        pytest.skip(f"flash_attn.cute is not importable: {completed.stderr.strip()}")
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(result_path.read_text())
 
-    assert out.shape == q.shape
-    assert lse.shape == (2, 7)
-    assert len(calls) == 1
-    forwarded = calls[0]
+    assert payload["out_shape"] == [7, 2, 8]
+    assert payload["lse_shape"] == [2, 7]
+    assert len(payload["calls"]) == 1
+    forwarded = payload["calls"][0]
     assert "max_seqlen_q" not in forwarded
     assert "max_seqlen_k" not in forwarded
-    assert forwarded["cu_seqlens_q"] is cu_seqlens
+    assert forwarded["cu_seqlens_q_is_input"]
     assert forwarded["softmax_scale"] == 0.125
