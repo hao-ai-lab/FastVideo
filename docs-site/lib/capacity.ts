@@ -41,9 +41,16 @@ export function assessWeightsRecipe({
 }: {
   weights: WeightsModel;
   config: Record<string, unknown>;
-  hardware: { memory_gb?: number; usable_budget_gb?: number; memory_unit?: string };
+  hardware: { memory_gb?: number; usable_budget_gb?: number; memory_unit?: string; memory_type?: string };
   budgetGb?: number;
 }): MemoryAssessment | undefined {
+  if (hardware.memory_type !== "dedicated" && hardware.memory_type !== "unified") {
+    return {
+      status: "unknown",
+      reason:
+        "A weights fit check requires dedicated GPU memory or unified memory. Host-only system RAM is not GPU capacity.",
+    };
+  }
   const generator = (config.generator ?? {}) as {
     engine?: { offload?: Record<string, boolean> };
     pipeline?: {
@@ -54,6 +61,12 @@ export function assessWeightsRecipe({
   const parts = { ...weights.parts };
   const components = generator.pipeline?.components ?? {};
   const experimental = generator.pipeline?.experimental ?? {};
+  if (experimental.video_decode_backend === "taeh3") {
+    return {
+      status: "unknown",
+      reason: "TAEH3 decoder weights are not modeled. This backend does not load the bundled H3 video VAE.",
+    };
+  }
   if (experimental.h3_vae_nvfp4_decoder) {
     return {
       status: "unknown",

@@ -409,7 +409,8 @@ evidence leaves startup coverage unknown. Keep observations intact when deriving
 No FastH3 checkpoint has a full capacity model yet. A weights-only preflight
 is live on the FastH3 pages: it compares measured resident checkpoint weights
 with the selected device and labels the result as weights, not a request peak.
-Transformer quantization and NVFP4 decoder swaps return unknown until their
+Host-only system RAM is not accepted as GPU capacity. Transformer quantization,
+TAEH3, and NVFP4 decoder swaps return unknown until their
 effective layer profiles, retained components, and packed storage are modeled.
 A full estimate still stops early: `checkCoverage()` in `docs/js/cookbook-memory.mjs` still stops before the
 estimate for every FastH3 serving profile.

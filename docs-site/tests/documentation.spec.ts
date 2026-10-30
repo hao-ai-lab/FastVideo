@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
 
+test("Omni Apple silicon links open the published guide and MLX recipe", async ({ page }) => {
+  for (const slash of ["", "/"]) {
+    await page.goto(`/FastVideo/cookbook/minimax-h3/fasth3-omniref${slash}`);
+    const guide = page.getByRole("link", { name: "FastH3 Omni on MLX", exact: true });
+    await expect(guide).toHaveAttribute("href", "/FastVideo/inference/fasth3_omniref_mlx");
+    await guide.click();
+    await expect(page).toHaveURL(/\/FastVideo\/inference\/fasth3_omniref_mlx\/?$/);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  }
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-omniref");
+  await page.getByRole("link", { name: "MLX recipe", exact: true }).click();
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint");
+});
+
 test("GitHub stars refresh automatically and survive a failed refresh", async ({ page }) => {
   await page.clock.install();
   let requests = 0;

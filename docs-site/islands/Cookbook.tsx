@@ -1008,7 +1008,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
     runtime !== "all" ||
     task !== "All tasks";
   const categoryCount = (value: string) =>
-    modelDirectory.filter((model) => value === "All models" || model.category === value).length;
+    modelDirectory.filter((model) => !model.hidden && (value === "All models" || model.category === value)).length;
   return (
     <MotionConfig reducedMotion="user">
       <div className="cookbook not-prose recipe-directory">

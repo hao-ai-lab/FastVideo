@@ -1,8 +1,12 @@
 # Run H3 with a server and playground
 
 Start FastH3 on CUDA, one DGX Spark, or Apple Silicon MLX, then send requests from a
-browser, cURL, or your app. The server keeps the model loaded between requests, so
-several clients can share one process.
+browser, cURL, or your app. Several clients can share one server process.
+
+CUDA requests reuse a loaded `VideoGenerator`. MLX keeps one pipeline object and
+a prompt-embedding cache, but loads and releases heavyweight components between
+phases to fit unified memory. MLX serving still pays that component-loading cost
+on subsequent requests.
 
 The server implements the OpenAI-compatible video-job API. The Python and
 JavaScript clients use that API, but requests go to FastVideo. You do not need an

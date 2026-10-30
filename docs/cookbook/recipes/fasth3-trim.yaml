@@ -21,6 +21,7 @@ deployments:
       - Based on the released one-Spark inference recipe. This serving adaptation and edited hardware combinations have not been GPU-validated.
       - The checkpoint includes NVFP4 weights and encoder, a lightweight video VAE, and its trained eight-forward schedule. No local CompactH3 assembly is needed.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options:
       - server.*
       - generator.engine.num_gpus

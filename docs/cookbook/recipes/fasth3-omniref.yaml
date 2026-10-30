@@ -39,6 +39,7 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: &omniref_options
       - server.*
       - generator.engine.offload.text_encoder
@@ -93,6 +94,7 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: *omniref_options
     overrides:
       default_request.sampling.num_frames:
@@ -143,5 +145,6 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: *omniref_options
     overrides: *omniref_overrides

@@ -83,7 +83,7 @@ packs before inference.
 
 For configurations without transformer quantization or a decoder swap, FastH3
 pages compare checkpoint weights with the selected device. This is a weights
-check, not a request peak. Quantized transformers and NVFP4 decoder swaps stay
+check, not a request peak. Host-only RAM cannot establish GPU fit. Quantized transformers, TAEH3, and NVFP4 decoder swaps stay
 unestimated until metadata covers the effective layer profile, retained
 components, and packed runtime storage. The editor explains the missing
 coverage instead of substituting an unrelated export or decoder file size.

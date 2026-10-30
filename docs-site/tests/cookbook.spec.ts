@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(35);
+  await expect(cards).toHaveCount(36);
   await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -276,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(35);
+  await expect(page.locator(".recipe-card")).toHaveCount(36);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -541,6 +541,31 @@ test("recipe facts state validity and why memory has no estimate", async ({ page
   await expect(page.getByText(/Select a device to estimate memory/)).toBeVisible();
 });
 
+test("host-only system RAM cannot produce a GPU weights fit verdict", async ({ page }) => {
+  await page.goto(`${route}?hardware=custom&hwName=Host&hwType=system&hwMemory=128&hwUnit=GB&hwBackend=cuda`);
+  const facts = page.locator(".recipe-facts");
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(facts.getByText(/Host-only system RAM is not GPU capacity/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download YAML", exact: false })).toBeEnabled();
+});
+
+test("TAEH3 stops using the bundled VAE weights in memory facts", async ({ page }) => {
+  await page.goto(`${route}?hardware=custom&hwName=GPU&hwType=dedicated&hwMemory=80&hwUnit=GB&hwBackend=cuda`);
+  const facts = page.locator(".recipe-facts");
+  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await chip(page, "Video decoder", "taeh3");
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(facts.getByText(/TAEH3 decoder weights are not modeled/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"video_decode_backend": "taeh3"');
+  await chip(page, "Video decoder", "h3-vae");
+  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+});
+
 test("FastH3 keeps unmodeled quantization and decoder residency unknown", async ({ page }) => {
   await page.goto(route);
   await chooseHardware(page, "RTX 5090");
@@ -678,6 +703,33 @@ test("the directory filters by runtime without a hardware picker", async ({ page
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute("href", /\/cookbook\/wan\/models\/[^?]+$/);
   await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
+});
+
+test("MLX Omni discovery and its original route expose the MLX launch command", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Runtime", { exact: true }).selectOption("mlx");
+  await page.getByLabel("Search recipes").fill("FastH3 Omni");
+  const cards = page.locator(".recipe-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toHaveAttribute("href", "/FastVideo/cookbook/minimax-h3/models/fasth3-omniref-mlx");
+  await cards.click();
+  await expect(page.getByLabel("Inference command")).toContainText("convert_minimax_h3_mlx.py");
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint ./FastH3-OmniRef-MLX/int6");
+  await expect(page.getByLabel("Inference command")).not.toContainText("fastvideo serve");
+  await page.reload();
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint ./FastH3-OmniRef-MLX/int6");
+});
+
+test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
+    const button = page.getByRole("button", { name: category, exact: true });
+    const count = Number(await button.locator(".recipe-filter-count").innerText());
+    await button.click();
+    await expect(page.locator(".recipe-card")).toHaveCount(count);
+    await expect(page.locator(".recipe-card").filter({ hasText: "FastH3 Preview V0.2" })).toHaveCount(0);
+  }
 });
 
 test("task discovery filters the directory and round-trips through the URL", async ({ page }) => {

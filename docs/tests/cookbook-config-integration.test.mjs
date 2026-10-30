@@ -12,6 +12,25 @@ function at(value, path) {
   return path.split(".").reduce((current, key) => current?.[key], value);
 }
 
+test("every local NVFP4 encoder choice includes its download requirement", () => {
+  const path = "generator.pipeline.components.text_encoder_weights";
+  const catalogs = buildCatalogs().filter((catalog) => catalog.controls.some((control) => control.path === path));
+  assert.ok(catalogs.length > 0);
+  for (const catalog of catalogs) {
+    const option = catalog.controls.find((control) => control.path === path);
+    if (!option.schema.enum?.includes("./fasth3-nvfp4-encoder/text_encoder")) continue;
+    assert.ok(
+      catalog.requirements.some(
+        (requirement) =>
+          requirement.includes("hf download ") &&
+          requirement.includes("--include 'text_encoder/*'") &&
+          requirement.includes("--local-dir fasth3-nvfp4-encoder"),
+      ),
+      `${catalog.id} must explain how to create the selected encoder directory`,
+    );
+  }
+});
+
 function fixture({ interfaceName = "rest", backend = "cuda", workload = "t2v" } = {}) {
   return {
     id: "example/deployment",
