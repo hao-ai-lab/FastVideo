@@ -250,14 +250,26 @@ def reference_latents(row: dict[str, Any], index: int) -> tuple[str, Any, Any]:
 
 
 def decode_visual(latents: Any, vae: Any) -> Any:
-    """Normalized latents ``[1, 24, T, H, W]`` -> uint8 frames ``[T', H*16, W*16, 3]``."""
+    """Normalized latents ``[1, 24, T, H, W]`` -> uint8 frames ``[T', H*16, W*16, 3]``.
+
+    Decodes spatially tiled (a 145-frame 768p reference or a 2048-edge image next to the resident Qwen3-VL does not
+    fit untiled); tiling is switched back off so the reference re-encode keeps the released untiled numerics.
+    """
     import torch
 
-    with torch.no_grad():
-        z = vae.denormalize_latents(latents.to("cuda", torch.float32))
-        sample = vae.decode(z, return_dict=False)[0]
-        pixels = vae.denormalize_pixels(sample).clamp(0, 1)
-    return (pixels[0].permute(1, 2, 3, 0) * 255).round().to(torch.uint8).cpu().numpy()
+    tiling = vae.use_tiling
+    vae.use_tiling = True
+    try:
+        with torch.no_grad():
+            z = vae.denormalize_latents(latents.to("cuda", torch.float32))
+            sample = vae.decode(z, return_dict=False)[0]
+            frames = (vae.denormalize_pixels(sample).clamp(0, 1)[0].permute(1, 2, 3, 0) * 255).round()
+            frames = frames.to(torch.uint8).cpu().numpy()
+    finally:
+        vae.use_tiling = tiling
+    del z, sample
+    torch.cuda.empty_cache()
+    return frames
 
 
 def decode_audio(latents: Any, audio_vae: Any) -> Any:
@@ -421,8 +433,17 @@ def run_encode(args: argparse.Namespace) -> None:
 
     from fastvideo.dataset.dataloader.schema import pyarrow_schema_ref2va
 
+    import torch
+
     out = Path(args.output_dir)
     specs = json.loads((out / "plan.json").read_text())[args.shard::args.num_shards]
+    skipped = out / f"skipped-shard{args.shard:02d}.jsonl"
+    if args.retry_skipped:
+        if not skipped.exists():
+            return
+        retry = {(e["id"], e["resolution"]) for e in map(json.loads, skipped.read_text().splitlines())}
+        specs = [s for s in specs if (s["id"], s["resolution"]) in retry]
+        skipped.rename(skipped.with_suffix(".retried"))
     manifest = out / f"MANIFEST-shard{args.shard:02d}.jsonl"
     done = set()
     if manifest.exists():
@@ -434,7 +455,8 @@ def run_encode(args: argparse.Namespace) -> None:
             record = encode_spec(row_spec, args.model_path)
         except Exception as error:  # one bad source row must not stop the shard; it is reported and skipped
             print(f"SKIP {row_spec['id']} {row_spec['resolution']}: {type(error).__name__}: {error}", flush=True)
-            with (out / f"skipped-shard{args.shard:02d}.jsonl").open("a") as handle:
+            torch.cuda.empty_cache()
+            with skipped.open("a") as handle:
                 handle.write(json.dumps({"id": row_spec["id"], "resolution": row_spec["resolution"],
                                          "error": f"{type(error).__name__}: {error}"}) + "\n")
             continue
@@ -452,6 +474,8 @@ def run_encode(args: argparse.Namespace) -> None:
             handle.write(json.dumps(entry) + "\n")
         print(f"encoded {index + 1}/{len(specs)} {row_spec['case']} {row_spec['resolution']} {row_spec['id']}",
               flush=True)
+        del record
+        torch.cuda.empty_cache()
 
 
 def run_finalize(args: argparse.Namespace) -> None:
@@ -489,6 +513,7 @@ def main() -> None:
     parser.add_argument("--model-path", help="merged Flex Ref2VA model (encode)")
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
+    parser.add_argument("--retry-skipped", action="store_true", help="encode only this shard's skipped rows")
     args, overrides = parser.parse_known_args()
     if args.stage == "plan":
         run_plan(args, overrides)
