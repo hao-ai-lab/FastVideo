@@ -25,6 +25,7 @@ from fastvideo.entrypoints.openai.request_adapter import (
     prepare_reference_media,
 )
 from fastvideo.pipelines.basic.hunyuan15.presets import HUNYUAN15_I2V_480P_DISTILLED
+from fastvideo.pipelines.basic.pan2.presets import PAN2_T2V
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -37,6 +38,7 @@ BASELINES = {
     "openai_kandinsky6_ti2va.yaml": "t2v",
     "openai_kandinsky6_ti2va_distilled.yaml": "t2v",
     "openai_ltx2_distilled.yaml": "t2v",
+    "openai_pan2.yaml": "t2v",
     "openai_flux1_dev.yaml": "t2i",
     "openai_flux2_dev.yaml": "t2i",
     "openai_flux2_klein.yaml": "t2i",
@@ -110,6 +112,33 @@ def test_hunyuan_i2v_480p_keeps_the_registered_checkpoint_semantics(tmp_path: Pa
     assert adapted.sampling.width == 1280
     assert adapted.inputs.image_path == str(image)
     assert adapted.output.output_path.endswith(".mp4")
+
+
+def test_pan2_serving_matches_its_preset_and_runs_image_to_video_from_a_reference(tmp_path: Path) -> None:
+    config = _load("openai_pan2.yaml")
+    sampling = config.default_request.sampling
+    assert config.generator.model_path == "IFM/PAN2"
+    assert config.generator.engine.offload.dit is False
+    assert config.generator.engine.offload.dit_layerwise is False
+    for field in ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale"):
+        assert getattr(sampling, field) == PAN2_T2V.defaults[field], field
+    assert config.default_request.negative_prompt == PAN2_T2V.defaults["negative_prompt"]
+
+    image = tmp_path / "first-frame.png"
+    image.write_bytes(b"not-decoded-at-admission")
+    for reference in (None, {"image_url": str(image)}):
+        request = VideoGenerationRequest(prompt="a red fox", image_reference=reference)
+        adapted = build_generation_request(
+            "pan2_test",
+            request,
+            _args(config, "t2v"),
+            served_model_name=config.server.served_model_name or "",
+            output_dir=str(tmp_path),
+            default_request=config.default_request,
+        )
+        assert adapted.sampling.num_frames == 313
+        assert adapted.inputs.image_path == (str(image) if reference else None)
+        assert adapted.output.output_path.endswith(".mp4")
 
 
 def test_stable_audio_seconds_override_produces_wav(tmp_path: Path) -> None:

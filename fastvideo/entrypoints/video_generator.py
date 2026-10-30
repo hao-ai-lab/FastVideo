@@ -162,6 +162,31 @@ def _quantize_video_frames_to_uint8(src: torch.Tensor) -> torch.Tensor:
         return rearrange(vid_u8, "b c t h w -> t b c h w")
 
 
+def _video_frames(src: torch.Tensor) -> list[np.ndarray]:
+    """`[b, c, t, h, w]` decoded output -> one host uint8 frame `[h, w, 3]` per time step, the batch tiled six to a
+    row by `torchvision.utils.make_grid` (which also repeats a single channel three times).
+
+    One RGB video, every request of most pipelines, is quantized and laid out frames-first and channels-last on
+    ``src``'s device, copied to the host once, and its frames are views of that one array. Building each frame on the
+    CPU instead (a channels-last copy per frame) took 0.48 s against 0.38 s for 241 frames of 704 x 1248 on a B300
+    node, and 1-2 s in a job pinned to two CPUs. Same values either way; the out-of-memory fallback of
+    `_quantize_video_frames_to_uint8` applies to both.
+    """
+    if src.ndim == 5 and src.shape[0] == 1 and src.shape[1] == 3:
+        try:
+            host = pixels_to_uint8(src)[0].permute(1, 2, 3, 0).contiguous().cpu()
+        except torch.cuda.OutOfMemoryError:
+            logger.warning("GPU out of memory laying out the decoded video's frames; doing it on the CPU instead.")
+            src_cpu = src.detach().to("cpu")
+            host = pixels_to_uint8(src_cpu if src_cpu.dtype == torch.uint8 else src_cpu.float())[0].permute(
+                1, 2, 3, 0).contiguous()
+        return list(host.numpy())
+    return [
+        torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy()
+        for x in _quantize_video_frames_to_uint8(src)
+    ]
+
+
 def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
     """Validate typed stage overrides against the model's registered preset."""
     if not request.stage_overrides:
@@ -1041,10 +1066,7 @@ class VideoGenerator:
             # `samples` above is just the pinned-CPU mirror of `output_batch.output` (`samples.copy_(output)` or
             # `output.cpu()`) with no intervening preprocessing, so reading `output_batch.output` here is the same
             # data. See `_quantize_video_frames_to_uint8` for why this quantizes on-device and its OOM fallback.
-            vid_u8 = _quantize_video_frames_to_uint8(output_batch.output)
-            frames = [
-                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
-            ]
+            frames = _video_frames(output_batch.output)
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:

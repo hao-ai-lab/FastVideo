@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(37);
+  await expect(cards).toHaveCount(38);
   await expect(cards.first()).toContainText("FastH3 OmniRef");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -277,7 +277,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(37);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -441,6 +441,26 @@ test("source-backed serving pages expose their actual server settings", async ({
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("port: 9005");
   await expect(page.getByLabel("Source example", { exact: true })).toContainText("Wan2.2-T2V-A14B");
   await expect(page.getByRole("button", { name: "Copy config + command", exact: true })).toBeEnabled();
+});
+
+test("PAN 2 has a family card with the IFM logo and an editable serving deployment", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Search recipes").fill("PAN 2");
+  const pan2 = page.locator(".recipe-card");
+  await expect(pan2).toHaveCount(1);
+  await expect(pan2.locator("img")).toHaveAttribute("src", /\/ifm\.webp$/);
+  await expect(pan2.locator(".recipe-card-kicker")).toHaveText("IFM");
+  await pan2.click();
+  await expect(page).toHaveURL(/cookbook\/pan2\/pan2$/);
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("PAN 2");
+  await settings(page, "Serving");
+  await page.getByLabel("Port", { exact: true }).fill("9010");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"port": 9010/);
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"model_path": "IFM\/PAN2"/);
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"dit_layerwise": false/);
+  await expect(page.getByRole("button", { name: "Download YAML", exact: false })).toBeEnabled();
 });
 
 test("source model hardware preferences survive hydration and reload", async ({ page }) => {

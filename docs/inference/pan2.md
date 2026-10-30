@@ -1,0 +1,122 @@
+# PAN 2 Text/Image to Video
+
+PAN 2 is a 29B mixture-of-transformers video DiT with separate video and text streams, a Qwen3.5 text encoder and the
+Wan2.2 VAE. One pipeline serves text-to-video and image-to-video: pass `image_path` to condition on a first frame and
+leave it out for text only.
+
+## Model
+
+| Hub repo | Pipeline | Workloads | Example |
+|---|---|---|---|
+| `IFM/PAN2` | `PAN2ModularPipeline` | T2V, I2V | [`basic_pan2.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pan2.py) |
+
+PAN2 checkpoints use the Modular Diffusers layout (`modular_model_index.json`). Any repo id or local directory whose
+name contains `pan2` (or whose manifest declares `PAN2ModularPipeline`) resolves to this pipeline. The defaults come
+from the `pan2_t2v` and `pan2_i2v` presets:
+
+| Setting | Default |
+|---|---|
+| Resolution | 704x1248 (height and width must be multiples of 32) |
+| Frames | 313, 13 s at 24 fps (`num_frames - 1` must be a multiple of 4) |
+| Steps | 50, uniform sigmas from 1 to 0 with the checkpoint's flow shift (9 for `IFM/PAN2-TEST`, the reference sampler's value) |
+| Guidance | 2.5, classifier-free guidance, the reference launcher's default (3 before 2026-10-23). Image-to-video keeps the first latent frame out of guidance (`i2v_skip_first_latent_cfg`, on by default, as in the reference sampler) |
+| Negative prompt | The release's structured negative caption (`negative_prompt.json` of the PAN2 repository) with its three `time_range_sec` values set to the clip length, `0 to 20` for 481 frames at 24 fps, as in the reference sampler. It is used whenever the request's negative prompt is empty; a single space gives the empty unconditional prompt PAN 2 trained with |
+
+PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
+prompts work, with weaker results.
+
+## Usage
+
+```bash
+python examples/inference/basic/basic_pan2.py
+```
+
+```python
+from fastvideo import VideoGenerator
+
+generator = VideoGenerator.from_pretrained(
+    "IFM/PAN2",
+    num_gpus=1,
+    dit_cpu_offload=False,
+    dit_layerwise_offload=False,
+    text_encoder_cpu_offload=True,
+)
+generator.generate_video(
+    "A red fox trots through fresh snow in a pine forest at dawn.",
+    image_path=None,  # or the path of a first frame for image-to-video
+    output_path="video_samples_pan2",
+)
+```
+
+For image-to-video, the first frame is scaled to cover the requested resolution and center cropped, then encoded by the
+VAE into the first latent frame of the conditioning input. As in the reference sampler, an `image_path` is read as its
+stored pixels: an EXIF orientation tag does not rotate it.
+
+## Guardrails
+
+PAN 2 runs with guardrails by default, as in its vLLM-Omni and Diffusers integrations. The
+[`pan2-guardrail`](https://github.com/MBZUAI-IFM/PAN2-guardrail) package checks every prompt before any compute and every
+generated video after decoding. A blocked prompt or video raises `PAN2GuardrailViolationError`. Install the package
+before loading the pipeline:
+
+```bash
+pip install git+https://github.com/MBZUAI-IFM/PAN2-guardrail
+```
+
+| Setting | Default | What it does |
+|---|---|---|
+| `enable_guardrails` | `True` | Pass `False` to `VideoGenerator.from_pretrained` to turn both checks off, at your own risk. Without the package, loading fails unless the guardrails are off. |
+| `offload_guardrail_models` | `False` | Keeps the guard models on CPU and moves each one to the GPU only for its check. |
+
+With sequence parallelism, the first GPU of the group loads the guard models and runs the checks, and every rank
+raises on its verdict. The video check reads the decoded pixels, so `output_type="latent"` is refused while the
+guardrails are on.
+
+## Parallelism
+
+With `num_gpus > 1`, FastVideo runs Ulysses sequence parallelism: the video tokens are sharded across ranks and the
+text tokens are replicated. The number of GPUs must divide the 32 attention heads. Sequence-parallel padding of the
+video tokens is trimmed before attention, so no attention mask is needed.
+
+Padding is always excluded, without an opt-in setting. At 704x1248 with 313 frames, the 67,782 video tokens need
+two padding tokens at SP=4. They are removed before joining the text tokens in every attention block. This provides
+the same exclusion as vLLM-Omni's unconditional padding mask in
+[revision `e0c4c731`](https://github.com/vllm-project/vllm-omni/commit/e0c4c73158a5e4f44eda8eaa8879f7fd9cedbd74).
+The trimmed sequence can use either FlashAttention or Torch SDPA.
+
+```bash
+PAN2_NUM_GPUS=4 python examples/inference/basic/basic_pan2.py
+```
+
+## Performance switches
+
+PAN2 sampling turns these on by default (`PAN2PipelineConfig`); pass any of them as `False` to
+`VideoGenerator.from_pretrained` to turn it off:
+
+| Switch | What it does |
+|---|---|
+| `vae_decode_kernel` | Decodes with fastvideo-kernel's Wan2.2 decoder on B200 / GB200 / B300 (704x1248, batch 1): bf16 with fp32 accumulation, 7x faster than the fp32 decode on a B300 at PSNR 61-63 dB and SSIM 0.998 against it, at a peak of about 20 GiB for a 5 s video. It builds on first use (minutes) against fastvideo-kernel's CUTLASS submodule (`git submodule update --init fastvideo-kernel/include/cutlass`, or set `CUTLASS_DIR`); each process builds in a directory of its own under `WAN22_VAE_DECODE_BUILD_DIR`, and later processes copy the build from the cache there. Other GPUs and sizes keep the fp32 decode. |
+| `vae_decode_kernel_parallel` | With 2, 4 or 8 GPUs, splits that decode over them instead of decoding the whole video on each: a 20 s video takes 3.0 s on one B300, 1.55 s on two, 0.79 s on four and 0.47 s on eight. |
+| `dit_fused_kernels` | Runs the DiT's fused Triton kernels for Q/K RMSNorm + RoPE and LayerNorm + modulation. Their rounding differs slightly from the unfused path. |
+
+On Blackwell GPUs (sm_100 and newer) with FlashAttention-4 (`flash_attn.cute`) installed, PAN2 also attends with FA4 unless `FASTVIDEO_FA4` is set: 288 s instead of 670 s with the Torch SDPA fallback for 241 frames on one B300. Set `FASTVIDEO_FA4=0` to keep the backend FastVideo picks otherwise.
+
+On GPUs with room for every component (B200, B300), keep the text encoder resident as well:
+`text_encoder_cpu_offload=False`.
+
+## Memory and offloading
+
+The example keeps the DiT on the GPUs and offloads the text encoder between requests. Sequence parallelism shards
+video tokens; each rank still holds the DiT weights. Increasing `num_gpus` alone does not shard those weights.
+For devices that cannot hold the DiT, see [CPU offloading](offloading.md) for `dit_cpu_offload` and
+`dit_layerwise_offload`. Hardware recipes and timings reported by vLLM-Omni use its own offload implementation;
+they have not been validated for FastVideo.
+
+The full `IFM/PAN2` checkpoint is not public yet. Local parity tests use the public random-weight
+`wuqing157/tiny-pan2-modular-pipe` checkpoint; it verifies the integration and produces noise rather than useful video.
+
+## Differences from the vLLM-Omni integration
+
+- The Cache-DiT `quality` policy and CFG-parallel execution are vLLM-Omni serving features and are not ported.
+- The text encoder is a FastVideo-native Qwen3.5 port. Its Gated DeltaNet layers use a PyTorch chunked delta rule
+  instead of the `fla` kernels.

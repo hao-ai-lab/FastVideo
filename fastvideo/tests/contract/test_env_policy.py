@@ -87,6 +87,7 @@ EXTERNAL_ALLOWLIST = {
     "CUDACXX": "CUDA compiler.",
     "CUBLAS_WORKSPACE_CONFIG": "cuBLAS workspace setting.",
     "TORCHDYNAMO_DISABLE": "PyTorch Dynamo switch.",
+    "TRITON_INTERPRET": "Triton interpreter switch; tests run kernels through it on CPU.",
     "PYTORCH_MPS_*": "PyTorch MPS memory settings.",
     "USER": "Login name of the current user.",
     "PYTHONPATH": "Python module search path.",

@@ -124,7 +124,8 @@ def _fetch_image_bytes(url: str, attempts: int = 3, timeout: float = 30.0) -> by
 
 # adapted from diffusers.utils import load_image
 def load_image(image: str | PIL.Image.Image,
-               convert_method: Callable[[PIL.Image.Image], PIL.Image.Image] | None = None) -> PIL.Image.Image:
+               convert_method: Callable[[PIL.Image.Image], PIL.Image.Image] | None = None,
+               exif_transpose: bool = True) -> PIL.Image.Image:
     """
     Loads `image` to a PIL Image.
 
@@ -134,6 +135,8 @@ def load_image(image: str | PIL.Image.Image,
         convert_method (Callable[[PIL.Image.Image], PIL.Image.Image], *optional*):
             A conversion method to apply to the image after loading it. When set to `None` the image will be converted
             "RGB".
+        exif_transpose (`bool`, *optional*, defaults to `True`):
+            Whether to rotate the image upright by its EXIF orientation tag. `False` keeps the stored pixels.
 
     Returns:
         `PIL.Image.Image`:
@@ -154,7 +157,8 @@ def load_image(image: str | PIL.Image.Image,
         raise ValueError(
             "Incorrect format used for the image. Should be a URL linking to an image, a local path, or a PIL image.")
 
-    image = PIL.ImageOps.exif_transpose(image)
+    if exif_transpose:
+        image = PIL.ImageOps.exif_transpose(image)
 
     image = convert_method(image) if convert_method is not None else image.convert("RGB")
 
