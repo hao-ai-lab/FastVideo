@@ -243,7 +243,7 @@ def test_stage_attaches_the_branches_to_each_materialized_lazy_transformer(monke
     assert second.targets[-1] is not loaded_first
 
 
-def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None):
+def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None, fastvideo_args=None):
     from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
     from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
     from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import denoising
@@ -260,7 +260,7 @@ def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None):
     transformer = transformer if transformer is not None else _ConstantVelocityTransformer(velocity)
     curve = curve if curve is not None else _RecordingCurve()
     stage = denoising.Regenerate2KDenoisingStage(transformer, curve, None)
-    return stage.forward(batch, None), transformer, curve
+    return stage.forward(batch, fastvideo_args), transformer, curve
 
 
 def test_euler_steps_integrate_the_constant_velocity_over_sigma_zero_to_start(monkeypatch):
@@ -346,3 +346,45 @@ def test_generate_dotted_override_sets_the_nvfp4_decoder_option(tmp_path):
     assert config.generator.pipeline.experimental["h3_vae_nvfp4_decoder"] == "/tmp/decoder-nvfp4.safetensors"
     assert generator_config_to_fastvideo_args(config.generator).h3_vae_nvfp4_decoder == "/tmp/decoder-nvfp4.safetensors"
 
+
+class _OffloadedTransformer(_ConstantVelocityTransformer):
+
+    def __init__(self, velocity, fail=False):
+        super().__init__(velocity)
+        self.fail = fail
+        self.moves = []
+
+    def to(self, device):
+        self.moves.append(str(device))
+        return self
+
+    def __call__(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("forward failed")
+        return super().__call__(**kwargs)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_full_cpu_offload_moves_the_transformer_back_to_cpu_after_the_refine(monkeypatch, fail):
+    from types import SimpleNamespace
+
+    transformer = _OffloadedTransformer(0.5, fail=fail)
+    args = SimpleNamespace(dit_cpu_offload=True, dit_layerwise_offload=False, use_fsdp_inference=False)
+    if fail:
+        with pytest.raises(RuntimeError, match="forward failed"):
+            _denoise(monkeypatch, steps=2, transformer=transformer, fastvideo_args=args)
+    else:
+        _denoise(monkeypatch, steps=2, transformer=transformer, fastvideo_args=args)
+
+    assert transformer.moves == ["cpu", "cpu"]  # to the stage device (CPU in this test), then back to the host
+
+
+@pytest.mark.parametrize("variable, value", [("FASTVIDEO_H3_ADALN_CACHE", True),
+                                              ("FASTVIDEO_H3_ADALN_TABLE", "/tmp/adaln_tables.pt")])
+def test_pipeline_refuses_an_adaln_cache_that_would_skip_the_sharp_branches(variable, value):
+    from fastvideo import envs
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.open_h3_regenerate_2k_pipeline import refuse_adaln_cache
+
+    refuse_adaln_cache()
+    with getattr(envs, variable).override(value), pytest.raises(ValueError, match="Sharp curve branches"):
+        refuse_adaln_cache()

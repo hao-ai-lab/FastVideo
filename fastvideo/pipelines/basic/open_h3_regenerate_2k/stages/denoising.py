@@ -60,8 +60,21 @@ class Regenerate2KDenoisingStage(PipelineStage):
         device = get_local_torch_device()
         sigmas = refine_sigmas(batch.num_inference_steps, self.start_sigma)
         state = batch.latents.to(device)
-        with self._attention_kernel(device):
-            state = self._euler_loop(batch, layout, state, sigmas, device, transformer)
+        layerwise = bool(getattr(fastvideo_args, "dit_layerwise_offload", False))
+        full_cpu_offload = (bool(getattr(fastvideo_args, "dit_cpu_offload", False)) and not layerwise
+                            and not bool(getattr(fastvideo_args, "use_fsdp_inference", False)))
+        try:
+            if full_cpu_offload:
+                transformer.to(device)
+            with self._attention_kernel(device):
+                state = self._euler_loop(batch, layout, state, sigmas, device, transformer)
+        finally:
+            if layerwise:
+                manager = getattr(transformer, "_layerwise_offload_manager", None)
+                if manager is not None and getattr(manager, "enabled", False):
+                    manager.release_all()
+            if full_cpu_offload:
+                transformer.to("cpu")
         batch.latents = state
         return batch
 
