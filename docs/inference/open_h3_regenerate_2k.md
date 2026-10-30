@@ -87,10 +87,12 @@ The response headers carry `X-Request-Id`, `X-Model`, `X-Inference-Time-S` and `
 - `size`, `width` and `height` may be omitted or `2560x1440`; `num_frames` may be omitted or 124 (the frame count of the
   VAE grid; the video has 121 frames); `fps` must be 24. `seconds` is not accepted.
 - `num_inference_steps` is 3 (default) or 2; `seed` sets the refine noise.
+- Serve with `attention_backend: TORCH_SDPA`: the refine stage selects cuDNN attention, which at about 133k tokens is
+  about 3x faster than PyTorch's default flash dispatch. The `FLASH_ATTN` backend bypasses that selection.
 
 ## Parity with the reference
 
-Measured on one GB200 (tray hpc-rack-1-5, BF16, dense attention) against the reference `standard_fwd` with the released
+Measured on one GB200 (BF16, `TORCH_SDPA` with cuDNN attention) against the reference `standard_fwd` with the released
 VAE, same draft, seed (1766580932), prompt and VAE posterior seed (42). The reference's noise is a CUDA generator draw
 that FastVideo reproduces (the same `torch.Generator(device="cuda")` seed), so no injected noise was needed.
 
