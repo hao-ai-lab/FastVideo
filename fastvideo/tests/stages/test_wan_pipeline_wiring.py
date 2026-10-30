@@ -14,6 +14,7 @@ from fastvideo.tests.stages._denoising_fixtures import RecordingDenoiser, TinyVA
     ("wan.wan_pipeline", "WanDenoisingStage", True),
     ("wan.wan_i2v_pipeline", "WanDenoisingStage", False),
     ("wan.wan_v2v_pipeline", "WanDenoisingStage", False),
+    ("wan.wan_vace_pipeline", "WanVACEDenoisingStage", False),
     ("wan.lucy_edit_pipeline", "WanDenoisingStage", False),
     ("wan.wan_dmd_pipeline", "DmdDenoisingStage", False),
     ("wan.wan_i2v_dmd_pipeline", "DmdDenoisingStage", False),
