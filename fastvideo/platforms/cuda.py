@@ -177,7 +177,7 @@ class CudaPlatformBase(Platform):
             if not cls.has_device_capability(80, device_id=torch.cuda.current_device()):
                 raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
             prefill_backend = envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get()
-            if prefill_backend == "cudnn" and not cls.has_device_capability(90):
+            if prefill_backend == "cudnn" and not cls.has_device_capability(90, device_id=torch.cuda.current_device()):
                 raise RuntimeError("FLASHINFER cuDNN THD prefill requires Hopper (sm90) or newer. "
                                    "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
             if dtype not in (torch.float16, torch.bfloat16):
