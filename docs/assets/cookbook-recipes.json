@@ -764,7 +764,7 @@
       "id": "open-h3-regenerate-2k",
       "family": "minimax_h3",
       "stage": "inference",
-      "task": "Video to 2K video",
+      "task": "Video super-resolution (2K regeneration)",
       "label": "Open-H3-Regenerate-2K",
       "summary": "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with NVlabs' three-step refiner. The output is silent.",
       "model": "Efficient-Large-Model/Open-H3-Regenerate-2K",

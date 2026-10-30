@@ -175,6 +175,10 @@
             "href": "/cookbook/minimax-h3/fasth3-4step"
           },
           {
+            "label": "Open-H3-Regenerate-2K",
+            "href": "/cookbook/minimax-h3/open-h3-regenerate-2k"
+          },
+          {
             "label": "Recipes and setup",
             "href": "/cookbook/minimax-h3"
           },
