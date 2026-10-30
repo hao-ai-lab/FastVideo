@@ -24,7 +24,10 @@ import atexit
 import functools
 import importlib.util
 import os
+import shutil
+import socket
 import sys
+import tempfile
 
 import torch
 import torch.distributed as dist
@@ -60,13 +63,19 @@ def _tools():
 
 @functools.lru_cache(maxsize=None)
 def _module():
-    """The extension built from solution/, once per process. Builds are kept in WAN22_VAE_DECODE_BUILD_DIR (default
-    ~/.cache/fastvideo/wan22_vae_decode), one directory per local rank, and reused while the sources and flags match."""
+    """The extension built from solution/, once per process, in a build directory of the process's own under
+    WAN22_VAE_DECODE_BUILD_DIR (default ~/.cache/fastvideo/wan22_vae_decode), removed when the process exits.
+
+    Processes that build at once each write only their own directory. Finished builds go to the cache beside them,
+    keyed by the sources, flags and toolchain and added by an atomic rename, so later processes copy one instead of
+    building again."""
     loader, _ = _tools()
     base = os.environ.get("WAN22_VAE_DECODE_BUILD_DIR", os.path.expanduser("~/.cache/fastvideo/wan22_vae_decode"))
-    build_dir = os.path.join(base, f"rank{os.environ.get('LOCAL_RANK', '0')}")
-    os.makedirs(base, exist_ok=True)
-    return loader.load(os.path.join(HERE, "solution"), build_dir=build_dir, chdir=False).module
+    cache = os.path.join(base, "cache")
+    os.makedirs(cache, exist_ok=True)
+    build_dir = tempfile.mkdtemp(prefix=f"build-{socket.gethostname()}-{os.getpid()}-", dir=base)
+    atexit.register(shutil.rmtree, build_dir, True)
+    return loader.load(os.path.join(HERE, "solution"), build_dir=build_dir, chdir=False, cache=cache).module
 
 
 def weight_names() -> list[str]:

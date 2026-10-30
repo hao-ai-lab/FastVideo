@@ -20,7 +20,8 @@ video = decoder.decode(latents)   # [1, 48, T, 44, 78], as the VAE's decode take
   default: torch.distributed's default group) and calls `decode` with the full latents; rank 0 gets the video and the
   other ranks `None`. On one GPU without torch.distributed, the decoder initializes a single-rank NCCL group.
 - The first call builds the extension from `solution/` (about a minute) into `$WAN22_VAE_DECODE_BUILD_DIR` (default
-  `~/.cache/fastvideo/wan22_vae_decode`, one directory per `LOCAL_RANK`), and later processes reuse the build.
+  `~/.cache/fastvideo/wan22_vae_decode`). Each process builds in a directory of its own, so concurrent processes do
+  not collide, and puts the finished build in the `cache/` beside it, from which later processes copy it.
 - `WanVAEDecoder(..., frames_per_pass=4)` sets the latent frames each GPU carries through one pass (see below).
 - `WanVAEDecoder` prepares the weights once (layout, phase and Winograd transforms of the weights). The raw entry
   points are `prepare(weights, rank, world, pg)`, `run(z, weights, rank, world, pg, out)` (4 frames per pass) and

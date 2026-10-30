@@ -15,6 +15,7 @@ from torch.distributed.tensor import DTensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.pan2.negative_prompt import render_pan2_default_negative_prompt
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -30,10 +31,21 @@ _USER_HEADER = "<|im_start|>user\n"
 
 
 class PAN2InputValidationStage(InputValidationStage):
-    """Rejects geometry the PAN2 VAE and patch embedding cannot represent."""
+    """Rejects geometry the PAN2 VAE and patch embedding cannot represent.
+
+    An ``image_path`` first frame is loaded as the reference sampler loads it: the stored pixels, without the rotation
+    of an EXIF orientation tag.
+    """
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        batch = super().forward(batch, fastvideo_args)
+        image_path = batch.image_path
+        if image_path is not None and not image_path.endswith(".mp4"):
+            batch.pil_image = load_image(image_path, exif_transpose=False)
+            batch.image_path = None
+        try:
+            batch = super().forward(batch, fastvideo_args)
+        finally:
+            batch.image_path = image_path
         pipeline_config = fastvideo_args.pipeline_config
         vae_arch = pipeline_config.vae_config.arch_config
         spatial_multiple = vae_arch.spatial_compression_ratio * pipeline_config.dit_config.arch_config.patch_size[1]
