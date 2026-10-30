@@ -26,8 +26,8 @@ models:
       enabled: true
       linears:
         enabled: true
-        amax_json: examples/train/calibration/pika_h3_flex/amax-ref2va.json
-        amax_sha256: null
+        amax_json: examples/train/calibration/pika_h3_flex/amax-ref2va-balanced.json
+        amax_sha256: ad60b45fea00906c55e370a0dec82638eb413d6b68537d1ceb38fc52da90b373
         # Attention linears use the unit activation scale; only the FFN
         # linears read their calibrated amax from this table.
         attention: true
@@ -37,6 +37,8 @@ models:
         enabled: false
     data:
       manifests:
+      # Flex-sized rows (build_flex_ref2va_rows.py) first: they replace v4 rows with the same id.
+      - data/flex-ref2va/MANIFEST.jsonl
       - data/omniref/train-manifest.jsonl
       cases:
       - first_frame
@@ -44,13 +46,16 @@ models:
       - storyboard
       - continue_scene
       - continue_shot
-      - full_scene_audio_image_reference
+      - audio_reference
+      - mixed_image_video
+      - many_images
+      - multi_video
       per_group:
-        480p: 400
-        768p: 50
+        480p: 160
+        768p: 40
       seed: 20261007
-      max_frames: 243
-      eval_manifest: data/omniref/eval-manifest.json
+      max_frames: 345
+      eval_manifest: data/flex-ref2va/eval-manifest.json
       eval_resolutions:
       - 480p
       - 768p

@@ -1,0 +1,136 @@
+# Pika H3 Flex Ref2VA NVFP4 QAD (the FastH3 QAD recipe on Flex's six-forward ladder).
+#
+# Teacher: Pika H3 Flex Ref2VA in bf16, i.e. MiniMax-H3 `transformer_ref` with the
+# released `ref2va` adapter merged by
+# scripts/distill/pika_h3_flex_qad/merge_pika_adapter.py. Student: the same
+# weights with NVFP4 W4A4 q/k/v/out plus FFN fc_in/fc_out in all 50 blocks
+# active from step 0, static FFN activation scales from the Flex calibration
+# table. Attention stays BF16 dense: Flex has no VSA gate, so there is no FP4
+# sparse-attention stage and no gate to freeze. Norms, AdaLN, the token refiner
+# and the FP32 boundary modules stay frozen.
+#
+# The objective, evaluation, guards and checkpoint contract are the shared
+# recipe's (docs/training/minimax_h3_fp4_qad.md). Rows are OmniRef Ref2VA
+# parquet rows; the teacher computes every target on the fly, so the OmniRef
+# held-out eval manifest is reused as is.
+#
+# Paths are placeholders: the merged model, the calibration table (pin its
+# sha256 once calibrated), the row manifests and the output dir.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.flex.MiniMaxH3FlexRef2VAModel
+    init_from: /mnt/nfs/vlm-aryan/pika-flex-qad/models/pika-flex-ref2va-merged
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    qad:
+      enabled: true
+      linears:
+        enabled: true
+        amax_json: /mnt/nfs/vlm-aryan/pika-flex-qad/calib/amax-ref2va-balanced-ad60b45fea00.json
+        amax_sha256: ad60b45fea00906c55e370a0dec82638eb413d6b68537d1ceb38fc52da90b373
+        # Attention linears use the unit activation scale; only the FFN
+        # linears read their calibrated amax from this table.
+        attention: true
+        ffn: true
+        skip_blocks: []
+      fp4_attention:
+        enabled: false
+    data:
+      manifests:
+      # Flex-tier rows first: they replace the v4 rows with the same id and resolution.
+      - /mnt/nfs/vlm-aryan/pika-flex-qad/data/flex-ref2va/MANIFEST.jsonl
+      - /mnt/lustre/vlm-wlsaidhi/fastvideo/data/omniref-v4-processed/20260919T001000Z/encoded/full/MANIFEST.jsonl
+      cases:
+      - first_frame
+      - first_last_frame
+      - storyboard
+      - continue_scene
+      - continue_shot
+      - audio_reference
+      - mixed_image_video
+      - many_images
+      - multi_video
+      per_group:
+        480p: 160
+        768p: 40
+      seed: 20261007
+      max_frames: 345
+      eval_manifest: /mnt/nfs/vlm-aryan/pika-flex-qad/data/flex-ref2va/eval-manifest.json
+      eval_resolutions:
+      - 480p
+      - 768p
+      eval_per_group:
+        480p: 2
+        768p: 1
+      eval_max_frames: 0
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.flex.MiniMaxH3FlexRef2VAModel
+    init_from: /mnt/nfs/vlm-aryan/pika-flex-qad/models/pika-flex-ref2va-merged
+    trainable: false
+    frozen_bf16: true
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.pdd_qad.OmniRefPDDQADMethod
+  video_weight: 1.0
+  audio_weight: 1.0
+  rollout_fraction: 0.25
+  rollout_start_step: 20
+  # Half of the six forwards train per row, as OmniRef trains 4 of 8.
+  rungs_per_row: 3
+  eval_every: 15
+  full_eval_every: 30
+  patience: 2
+  fidelity_tolerance: 0.05
+  require_bitwise_init: true
+  save_best: true
+  select_metric: score
+  eval_save_dir: /mnt/nfs/vlm-aryan/pika-flex-qad/runs/ref2va-qad/samples
+  objective: output+recon
+  recon_lambda: 1.0
+  recon_normalize: step0
+  max_rollout_rows: 10
+  noise_floor_eval: true
+  step0_cache: /mnt/nfs/vlm-aryan/pika-flex-qad/runs/ref2va-qad/step0_cache.json
+
+training:
+  distributed:
+    num_gpus: 16
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 16
+    pin_cpu_memory: false
+  data:
+    train_batch_size: 1
+    seed: 1234
+  optimizer:
+    learning_rate: 5.0e-06
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+    weight_decay: 0.0
+    lr_scheduler: cosine_with_min_lr
+    lr_warmup_steps: 10
+    min_lr_ratio: 0.3
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: /mnt/nfs/vlm-aryan/pika-flex-qad/runs/ref2va-qad
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: ''
+  tracker:
+    trackers: [wandb]
+    project_name: pika-h3-flex-nvfp4
+    run_name: pika-flex-ref2va-nvfp4-qad
+  model:
+    enable_gradient_checkpointing_type: full
+  dit_precision: fp32
+  vsa_sparsity: 0.0
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline: {}
