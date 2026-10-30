@@ -45,6 +45,7 @@ from fastvideo.pipelines.basic.minimax_h3.encoder_split import (
 )
 from fastvideo.pipelines.basic.minimax_h3.vsa_guard import refuse_zero_initialized_h3_vsa
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.platforms import AttentionBackendEnum
@@ -268,8 +269,17 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 
         ``_pinned_swap`` reuses a parameter's stored host copy across parks; a LoRA
         swap/merge/unmerge changes the weights, so the stale copy must not win.
+
+        A deferred component that is not resident holds no pinned copies, and
+        touching ``__dict__`` through its ``LazyModule`` would load it: the
+        constructor adapter attaches while the transformer materializes, after
+        conditioning has already released the text encoder.
         """
         for module in self.modules.values():
+            if is_lazy_module(module):
+                if not module.is_materialized:
+                    continue
+                module = module.materialize()
             getattr(module, "__dict__", {}).pop("_pinned_host_tensors", None)
 
     def set_lora_adapter(self, *args, **kwargs):  # type: ignore[override]
