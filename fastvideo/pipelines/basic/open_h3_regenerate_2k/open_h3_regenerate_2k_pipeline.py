@@ -14,6 +14,7 @@ from typing import Any
 
 import torch
 
+from fastvideo import envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.upsamplers.minimax_h3_latent_upscaler import MiniMaxH3LatentUpscaler
@@ -36,6 +37,13 @@ _BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae"
                     "audio_scheduler")
 
 
+def refuse_adaln_cache() -> None:
+    """Raise when an H3 AdaLN cache is enabled: it bypasses the projection modules that carry the Sharp branches."""
+    if envs.FASTVIDEO_H3_ADALN_CACHE.get() or envs.FASTVIDEO_H3_ADALN_TABLE.get():
+        raise ValueError("Open-H3-Regenerate-2K needs the AdaLN projections: unset FASTVIDEO_H3_ADALN_CACHE and "
+                         "FASTVIDEO_H3_ADALN_TABLE, whose cached modulation skips the 50 Sharp curve branches.")
+
+
 class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
     """MiniMax-H3 T2VA layout with a draft-latent start, fixed sigmas and a silent output."""
 
@@ -49,6 +57,7 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
         return [f"{BASE_MODEL_DIR}/model_index.json", *components, "lora/**", "latent_upsampler/*.safetensors"]
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
+        refuse_adaln_cache()
         revision = getattr(self.fastvideo_args, "revision", None)
         self.model_path = maybe_download_model(model_path,
                                                revision=revision,
