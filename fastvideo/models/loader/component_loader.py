@@ -1655,7 +1655,6 @@ class PipelineComponentLoader:
             component_model_path,
         )
 
-        # A component under a subfolder (e.g. "base_model/vae") dispatches on its own name.
         module_name = module_name.rsplit("/", 1)[-1]
         # Get the appropriate loader for this module type
         loader = ComponentLoader.for_module_type(module_name, transformers_or_diffusers)

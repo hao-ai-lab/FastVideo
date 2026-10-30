@@ -124,7 +124,7 @@ def test_sharp_branch_adds_curve_term_to_projection_output(tmp_path):
         block.proj = _Projection(6)
         model.blocks.append(block)
     curve.attach(model)
-    curve.attach(model)  # idempotent: a second attach must not double the term
+    curve.attach(model)
     timesteps = torch.tensor([0.1, 0.9])
     x = torch.randn(2, 4)
     base, _ = model.blocks[0].proj.linear(x), None
@@ -199,15 +199,51 @@ class _RecordingCurve:
     def __init__(self):
         self.timesteps = []
         self.attached = 0
+        self.targets = []
 
     def attach(self, transformer):
         self.attached += 1
+        self.targets.append(transformer)
 
     def set_timesteps(self, unique):
         self.timesteps.append(unique.clone())
 
 
-def _denoise(monkeypatch, steps, velocity=0.5):
+def _curve_model(out_features):
+    model = torch.nn.Module()
+    model.blocks = torch.nn.ModuleList()
+    for _ in range(NUM_CURVE_BRANCHES):
+        block = torch.nn.Module()
+        block.proj = _Projection(out_features)
+        model.blocks.append(block)
+    return model
+
+
+def test_sharp_branches_reach_a_reloaded_transformer_instance(tmp_path):
+    _write_curve_release(tmp_path, 6, NUM_CURVE_BRANCHES)
+    curve = SharpCurveBranches(tmp_path)
+    curve.set_timesteps(torch.tensor([0.1, 0.9]))
+    x = torch.randn(2, 4)
+    for model in (_curve_model(6), _curve_model(6)):
+        curve.attach(model)
+        out, _ = model.blocks[0].proj(x)
+        assert not torch.allclose(out, model.blocks[0].proj.linear(x))
+
+
+def test_stage_attaches_the_branches_to_each_materialized_lazy_transformer(monkeypatch):
+    from fastvideo.pipelines.lazy_module import LazyModule
+
+    lazy = LazyModule("transformer", lambda: _ConstantVelocityTransformer(0.5))
+    first = _denoise(monkeypatch, steps=2, transformer=lazy)[2]
+    loaded_first = first.targets[-1]
+    assert lazy.release()
+    second = _denoise(monkeypatch, steps=2, transformer=lazy, curve=first)[2]
+
+    assert not isinstance(loaded_first, LazyModule) and not isinstance(second.targets[-1], LazyModule)
+    assert second.targets[-1] is not loaded_first
+
+
+def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None):
     from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
     from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
     from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import denoising
@@ -221,7 +257,8 @@ def _denoise(monkeypatch, steps, velocity=0.5):
     batch.latents = torch.zeros(layout.video_indices.numel(), 8)
     batch.audio_latents = torch.ones(layout.audio_indices.numel(), 4)
     batch.extra[MINIMAX_H3_LAYOUT_KEY] = layout
-    transformer, curve = _ConstantVelocityTransformer(velocity), _RecordingCurve()
+    transformer = transformer if transformer is not None else _ConstantVelocityTransformer(velocity)
+    curve = curve if curve is not None else _RecordingCurve()
     stage = denoising.Regenerate2KDenoisingStage(transformer, curve, None)
     return stage.forward(batch, None), transformer, curve
 

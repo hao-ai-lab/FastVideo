@@ -49,6 +49,15 @@ export const recipePages = [
     featured: true,
   },
   {
+    id: "open-h3-regenerate-2k",
+    family: "MiniMax H3",
+    title: "Open-H3-Regenerate-2K",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/open-h3-regenerate-2k",
+    description: "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with a three-step refiner.",
+    tags: ["Video to video", "2K", "3-step"],
+  },
+  {
     id: "fastwan21",
     family: "Wan",
     title: "FastWan2.1 1.3B",

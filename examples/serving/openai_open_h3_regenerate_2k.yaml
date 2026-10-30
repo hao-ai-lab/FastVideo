@@ -17,7 +17,7 @@ generator:
       vae_enabled: false
   pipeline:
     experimental:
-      attention_backend: FLASH_ATTN
+      attention_backend: TORCH_SDPA
       # 768p for MiniMax-H3 drafts; 576p encodes drafts from other video models at 1024x576.
       draft_size: 768p
       # NVFP4 video decoder (Blackwell only). Download one tier from FastVideo/FastH3-NVFP4-VAE-Decoder and point
