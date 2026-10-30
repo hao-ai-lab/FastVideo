@@ -57,9 +57,7 @@ class Regenerate2KDenoisingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         transformer = self.transformer
-        if is_lazy_module(transformer):
-            transformer.materialize()
-        self.curve.attach(transformer)
+        self.curve.attach(transformer.materialize() if is_lazy_module(transformer) else transformer)
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise ValueError("The MiniMax-H3 packed layout is missing before denoising.")

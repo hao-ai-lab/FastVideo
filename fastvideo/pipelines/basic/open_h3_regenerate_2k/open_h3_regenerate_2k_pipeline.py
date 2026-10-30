@@ -67,7 +67,6 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
                                                revision=revision,
                                                allow_patterns=self.get_hf_download_allow_patterns())
         if self.fastvideo_args.lora_path is None:
-            # The merged refine LoRA is part of the release; it is a constructor-time adapter like any H3 LoRA.
             self.fastvideo_args.lora_path = os.path.join(self.model_path, LORA_FILE)
         refine_transformer_dir = resolve_refine_transformer_dir(config.refine_transformer_dir)
         if refine_transformer_dir is not None:

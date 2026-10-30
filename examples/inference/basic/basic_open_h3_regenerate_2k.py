@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("outputs/open_h3_regenerate_2k"))
     parser.add_argument("--steps", type=int, choices=(2, 3), default=3, help="refine steps (3 is the released setting)")
     parser.add_argument("--seed", type=int, default=1766580932)
-    parser.add_argument("--attention-backend", default="FLASH_ATTN")
+    parser.add_argument("--attention-backend", default="TORCH_SDPA")
     parser.add_argument("--draft-size", choices=("768p", "576p"), default="768p",
                         help="size the draft is encoded at; 576p for drafts from other video models")
     parser.add_argument("--refine-transformer", default=None,

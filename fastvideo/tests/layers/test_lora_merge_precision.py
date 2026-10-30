@@ -42,3 +42,20 @@ def test_fp32_adapter_is_added_in_fp32_and_rounded_once() -> None:
 def test_bf16_adapter_keeps_the_bf16_merge() -> None:
     merged, base, a, b = _merged(torch.bfloat16)
     assert torch.equal(merged, base + b @ a)
+
+
+def test_merge_helper_used_with_and_without_fsdp_rounds_once() -> None:
+    torch.manual_seed(1)
+    layer = ReplicatedLinear(IN, OUT, bias=False, params_dtype=torch.bfloat16)
+    with torch.no_grad():
+        layer.weight.copy_(torch.randn(OUT, IN))
+    wrapped = get_lora_layer(layer)
+    a, b = torch.randn(RANK, IN), torch.randn(OUT, RANK) * 0.1
+    wrapped.lora_A, wrapped.lora_B = torch.nn.Parameter(a), torch.nn.Parameter(b)
+    wrapped.lora_rank, wrapped.lora_alpha, wrapped.lora_strength = RANK, RANK, 0.5
+    weight = layer.weight.detach().clone()
+
+    merged = wrapped._merged_weight(weight)
+
+    assert merged.dtype == torch.bfloat16
+    assert torch.equal(merged, (weight.float() + 0.5 * (b @ a)).to(torch.bfloat16))
