@@ -502,7 +502,6 @@ def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None, pipeline
 
 
 def test_open_h3_regenerate_2k_vae_load_applies_the_exported_decoder(tmp_path):
-    """Regenerate-2K loads its ``base_model/vae`` through the same swap, so the option applies there too."""
     from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
 
     _write_vae_dir(tmp_path / "vae", decoder_layers=5)

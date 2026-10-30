@@ -107,16 +107,17 @@ hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nv
     'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae
 ```
 
-Select it through the surface you drive the pipeline with; the field, the CLI flag and the environment variable all
-set `fastvideo_args.h3_vae_nvfp4_decoder`, and the serve-config field wins over the environment.
+Select it through the surface you drive the pipeline with. The config field (also a dotted override of
+`fastvideo generate`), the example's `--vae-decoder` and the environment variable all set
+`fastvideo_args.h3_vae_nvfp4_decoder`, and the config field wins over the environment.
 
 ```bash
 # example script
 python examples/inference/basic/basic_open_h3_regenerate_2k.py --video draft.mp4 --prompt "..." \
     --vae-decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
-# `fastvideo generate` and the serve config use the same field
-fastvideo generate --model-path Efficient-Large-Model/Open-H3-Regenerate-2K --video draft.mp4 --prompt "..." \
-    --h3-vae-nvfp4-decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
+# `fastvideo generate`: a run config, with the decoder as a dotted override
+fastvideo generate --config regen2k_run.yaml \
+    --generator.pipeline.experimental.h3_vae_nvfp4_decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
 ```
 
 ```yaml
@@ -126,7 +127,7 @@ generator:
       h3_vae_nvfp4_decoder: ./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors
 ```
 
-`FASTVIDEO_H3_VAE_NVFP4_DECODER` stays as the fallback when neither the serve config nor the CLI sets the field. The
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` stays as the fallback when the config does not set the field. The
 swap happens in the VAE loader, so the dense decoder never reaches the GPU: it is replaced on the CPU by the exported
 checkpoint (2.0 GiB of packed weights instead of 9.7 GiB of FP32), moved to the device, and decoded under bf16 autocast.
 The decoder keeps the pipeline's tiling (at 2560x1440: 8x13 tiles of 256 px with 64 px overlap) and the fused Triton
