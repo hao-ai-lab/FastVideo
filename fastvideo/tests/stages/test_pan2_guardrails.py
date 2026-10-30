@@ -128,24 +128,60 @@ def test_offloaded_guards_visit_the_device_only_for_their_check(fake_package, mo
     assert moves == [("text_guard", "cpu"), ("text_guard", "cpu"), ("video_guard", "cpu"), ("video_guard", "cpu")]
 
 
-def test_ranks_other_than_the_first_take_the_broadcast_verdict(fake_package, monkeypatch):
-    broadcasts = []
+class FakeGroup:
+    """A two-rank sequence-parallel group seen from ``rank``; a peer receives ``replies`` in order."""
 
-    class Group:
-        rank_in_group, world_size = 1, 2
+    def __init__(self, rank, replies=()):
+        self.rank_in_group, self.world_size = rank, 2
+        self.replies, self.broadcasts = list(replies), []
 
-        def broadcast_object(self, obj, src=0):
-            broadcasts.append(obj)
-            return False
+    def broadcast_object(self, obj, src=0):
+        self.broadcasts.append(obj)
+        return obj if self.rank_in_group == src else self.replies.pop(0)
 
+
+def _sp_group(monkeypatch, group):
     monkeypatch.setattr(pan2_guardrails, "model_parallel_is_initialized", lambda: True)
-    monkeypatch.setattr(pan2_guardrails, "get_sp_group", lambda: Group())
+    monkeypatch.setattr(pan2_guardrails, "get_sp_group", lambda: group)
+    return group
+
+
+def test_ranks_other_than_the_first_take_the_broadcast_verdict(fake_package, monkeypatch):
+    group = _sp_group(monkeypatch, FakeGroup(rank=1, replies=[(True, None), (True, False)]))
     guardrails = PAN2Guardrails()
     # This rank loads no checker and runs no check: it raises on rank 0's verdict.
     assert guardrails.checker is None
     with pytest.raises(PAN2GuardrailViolationError):
         guardrails.check_prompt("A red fox.")
-    assert broadcasts == [None]
+    assert group.broadcasts == [None, None]
+
+
+def test_a_failed_load_on_the_first_rank_reaches_the_other_ranks_at_once(fake_package, monkeypatch):
+    def fail():
+        raise OSError("no guard weights")
+
+    monkeypatch.setattr(FakeSafetyChecker, "from_pretrained", staticmethod(fail))
+    first = _sp_group(monkeypatch, FakeGroup(rank=0))
+    with pytest.raises(OSError, match="no guard weights"):
+        PAN2Guardrails()
+    assert first.broadcasts == [(False, "OSError: no guard weights")]
+
+    _sp_group(monkeypatch, FakeGroup(rank=1, replies=first.broadcasts))
+    with pytest.raises(RuntimeError, match="failed to load the guardrails: OSError: no guard weights"):
+        PAN2Guardrails()
+
+
+def test_a_failed_check_on_the_first_rank_reaches_the_other_ranks_at_once(fake_package, monkeypatch):
+    first = _sp_group(monkeypatch, FakeGroup(rank=0))
+    guardrails = PAN2Guardrails()
+    monkeypatch.setattr(guardrails.checker, "check_text_safety", lambda prompt: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        guardrails.check_prompt("A red fox.")
+    assert first.broadcasts[-1] == (False, "ZeroDivisionError: division by zero")
+
+    _sp_group(monkeypatch, FakeGroup(rank=1, replies=[(True, None), first.broadcasts[-1]]))
+    with pytest.raises(RuntimeError, match="failed to run the guardrail check"):
+        PAN2Guardrails().check_prompt("A red fox.")
 
 
 @pytest.mark.parametrize("config", [None, SimpleNamespace(enable_guardrails=True, offload_guardrail_models=True)])
