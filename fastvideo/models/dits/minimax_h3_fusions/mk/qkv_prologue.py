@@ -71,7 +71,7 @@ def _qkv_norm_rope_kernel(
     mask = hrow < num_heads
 
     if I64:
-        base = batch.to(tl.int64) * plane + (tok * num_heads + h0).to(tl.int64) * HD
+        base = (batch.to(tl.int64) * seq_len + tok) * num_heads * HD + h0 * HD
     else:
         base = (batch * seq_len + tok) * num_heads * HD + h0 * HD
 

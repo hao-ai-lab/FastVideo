@@ -73,18 +73,17 @@ def test_mk_tier_dispatches_and_matches_sol(monkeypatch, distributed_setup):
         monkeypatch.setattr(mk, name, counted)
 
     sol, mk_block, eager = _block(False), _block(True), _block(False, fused=False)
-    mk_block.load_state_dict(sol.state_dict())
-    eager.load_state_dict(sol.state_dict())
     # The loader zero-initialises ReplicatedLinear (weights arrive from the
     # checkpoint) and that would make the block an identity, hiding every kernel
-    # difference. Give both copies the same non-trivial weights instead.
+    # difference. Give all three copies the same non-trivial weights instead.
     torch.manual_seed(2)
-    for block in (sol, mk_block, eager):
-        for name, param in block.named_parameters():
-            if name.endswith(".weight") and param.dim() == 2 or name.endswith(".bias"):
-                param.data.normal_(0.0, 0.02)
-            elif name.endswith(".weight"):
-                param.data.fill_(1.0)
+    for name, param in sol.named_parameters():
+        if name.endswith(".weight") and param.dim() == 2 or name.endswith(".bias"):
+            param.data.normal_(0.0, 0.02)
+        elif name.endswith(".weight"):
+            param.data.fill_(1.0)
+    mk_block.load_state_dict(sol.state_dict())
+    eager.load_state_dict(sol.state_dict())
     inputs = _inputs()
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
         expected = sol(*inputs)

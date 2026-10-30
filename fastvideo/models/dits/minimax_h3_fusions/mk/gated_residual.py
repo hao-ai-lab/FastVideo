@@ -45,6 +45,7 @@ def _h3_gated_residual_kernel(
     gate_ptr,
     index_ptr,
     n_elems,
+    n_index,
     D: tl.constexpr,
     GS: tl.constexpr,
     BLOCK: tl.constexpr,
@@ -58,7 +59,7 @@ def _h3_gated_residual_kernel(
         mask = off < n_elems
         row = off // D
         col = off - row * D
-        table_row = tl.load(index_ptr + row, mask=mask, other=0).to(tl.int32)
+        table_row = tl.load(index_ptr + row % n_index, mask=mask, other=0).to(tl.int32)
         hidden = tl.load(hidden_ptr + off, mask=mask, eviction_policy="evict_last").to(tl.float32)
         branch = tl.load(branch_ptr + off, mask=mask, eviction_policy="evict_last").to(tl.float32)
         gate = tl.load(gate_ptr + table_row * GS + col, mask=mask, eviction_policy="evict_last").to(tl.float32)
@@ -74,7 +75,7 @@ def _h3_gated_residual_kernel(
             off = base + tl.arange(0, BLOCK)
             row = off // D
             col = off - row * D
-            table_row = tl.load(index_ptr + row).to(tl.int32)
+            table_row = tl.load(index_ptr + row % n_index).to(tl.int32)
             hidden = tl.load(hidden_ptr + off, eviction_policy="evict_last").to(tl.float32)
             branch = tl.load(branch_ptr + off, eviction_policy="evict_last").to(tl.float32)
             gate = tl.load(gate_ptr + table_row * GS + col, eviction_policy="evict_last").to(tl.float32)
@@ -84,7 +85,7 @@ def _h3_gated_residual_kernel(
             mask = off < n_elems
             row = off // D
             col = off - row * D
-            table_row = tl.load(index_ptr + row, mask=mask, other=0).to(tl.int32)
+            table_row = tl.load(index_ptr + row % n_index, mask=mask, other=0).to(tl.int32)
             hidden = tl.load(hidden_ptr + off, mask=mask, eviction_policy="evict_last").to(tl.float32)
             branch = tl.load(branch_ptr + off, mask=mask, eviction_policy="evict_last").to(tl.float32)
             gate = tl.load(
@@ -141,6 +142,7 @@ def gated_residual(
         gate,
         index,
         n_elems,
+        index.numel(),
         D=hidden_size,
         GS=gate_row_stride,
         BLOCK=block,
