@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from diffusers import ConfigMixin, ModelMixin
 from diffusers.configuration_utils import register_to_config
+import pytest
 from safetensors.torch import load_file
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
@@ -16,11 +17,26 @@ from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Ref2VAModularPipeline
 from fastvideo.train.entrypoint.dcp_to_diffusers import (
     _native_export_state_dict,
+    _resolve_export_checkpoint,
     _save_diffusers_safetensors,
     _save_role_pretrained,
     _strict_reload_verify,
 )
 from fastvideo.train.utils.lora import enable_lora_training, finalize_lora_training
+
+
+def test_resolve_export_checkpoint_accepts_tagged_weights_only_dir(tmp_path: Path) -> None:
+    tagged = tmp_path / "best"
+    (tagged / "dcp").mkdir(parents=True)
+    (tagged / "dcp" / ".metadata").write_text("")
+    assert _resolve_export_checkpoint(str(tagged)) == tagged.resolve()
+
+
+def test_resolve_export_checkpoint_rejects_plain_dir(tmp_path: Path) -> None:
+    plain = tmp_path / "best"
+    plain.mkdir()
+    with pytest.raises(ValueError, match="best"):
+        _resolve_export_checkpoint(str(plain))
 
 
 class _ArchConfig:

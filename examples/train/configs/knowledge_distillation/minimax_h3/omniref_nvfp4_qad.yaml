@@ -1,0 +1,135 @@
+# FastH3 OmniRef NVFP4 QAD (the shared FP4 QAD recipe, Ref2VA profile).
+#
+# Student: OmniRef Ref2VA (8-forward PDD ladder) with the deployed NVFP4
+# numerics active from step 0: NVFP4 W4A4 q/k/v/out plus FFN fc_in/fc_out in
+# all 50 blocks, and the FP4 sparse-attention emulator at VSA tile 128. The
+# VSA compression gates and every norm stay frozen at the calibrated bf16
+# values; training them drifts the tile selection and causes ghosting. The
+# teacher is the same checkpoint in bf16.
+#
+# See docs/training/minimax_h3_fp4_qad.md for the recipe shared with the V2
+# (T2AV QAD) profile, calibration, and the checkpoint contract.
+#
+# Released result: FastVideo/FastH3-OmniRef-NVFP4-QAD (step 120 of 200).
+# `init_from` is the calibrated OmniRef checkpoint used as QAD step 0,
+# not that released result. The calibrated amax table is vendored under
+# examples/train/calibration/fasth3/ and pinned by sha256 below.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.omniref_pdd.MiniMaxH3OmniRefPDDModel
+    init_from: data/models/omniref-nvfp4-ptq
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    qad:
+      enabled: true
+      linears:
+        enabled: true
+        amax_json: examples/train/calibration/fasth3/amax-omniref-mse-bf16-top8.json
+        # Attention and gate linears use the unit activation scale; only the
+        # FFN linears read their calibrated amax from this table.
+        attention: true
+        gate: true
+        ffn: true
+        skip_blocks: []
+        amax_sha256: 14b93ec308faf0d89bd13ded507d287c030bb3005c96b8063213eb8a09df083d
+      fp4_attention:
+        enabled: true
+        two_level_p: true
+        smooth_k: true
+        first_block_max_floor: null
+    data:
+      manifests:
+      - data/omniref/train-manifest.jsonl
+      cases:
+      - first_frame
+      - first_last_frame
+      - storyboard
+      - continue_scene
+      - continue_shot
+      - full_scene_audio_image_reference
+      per_group:
+        480p: 400
+        768p: 50
+      seed: 20261007
+      max_frames: 243
+      eval_manifest: data/omniref/eval-manifest.json
+      eval_resolutions:
+      - 480p
+      - 768p
+      eval_per_group:
+        480p: 2
+        768p: 1
+      eval_max_frames: 0
+    # Only the projections and FFN linears train: the same set the deployed
+    # NVFP4 export quantizes. Gates, norms and modulation stay frozen.
+    trainable_patterns: transformer_blocks\.\d+\.(attn\.(to_q|to_k|to_v|to_out)|ff\.(fc_in|fc_out))\.
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.omniref_pdd.MiniMaxH3OmniRefPDDModel
+    init_from: data/models/omniref-nvfp4-ptq
+    trainable: false
+    frozen_bf16: true
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.pdd_qad.OmniRefPDDQADMethod
+  video_weight: 1.0
+  audio_weight: 1.0
+  rollout_fraction: 0.25
+  rollout_start_step: 20
+  rungs_per_row: 4
+  eval_every: 15
+  full_eval_every: 30
+  patience: 2
+  fidelity_tolerance: 0.05
+  require_bitwise_init: true
+  save_best: true
+  select_metric: score
+  eval_save_dir: outputs/omniref_nvfp4_qad/samples
+  objective: output+recon
+  recon_lambda: 1.0
+  recon_normalize: step0
+  max_rollout_rows: 10
+  noise_floor_eval: true
+  step0_cache: outputs/omniref_nvfp4_qad/step0_cache.json
+
+training:
+  distributed:
+    num_gpus: 16
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 16
+    pin_cpu_memory: false
+  data:
+    train_batch_size: 1
+    seed: 1234
+  optimizer:
+    learning_rate: 5.0e-06
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+    weight_decay: 0.0
+    lr_scheduler: cosine_with_min_lr
+    lr_warmup_steps: 10
+    min_lr_ratio: 0.3
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/omniref_nvfp4_qad
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: ''
+  tracker:
+    trackers: [wandb]
+    project_name: fasth3-omniref-nvfp4
+    run_name: omniref-nvfp4-qad
+  model:
+    enable_gradient_checkpointing_type: full
+  dit_precision: fp32
+  vsa_sparsity: 0.0
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline: {}

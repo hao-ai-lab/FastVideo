@@ -315,6 +315,10 @@
         "href": "/training/attn_qat"
       },
       {
+        "label": "FastH3 NVFP4 QAD",
+        "href": "/training/minimax_h3_fp4_qad"
+      },
+      {
         "label": "HunyuanVideo 1.5 T2V",
         "href": "/training/hunyuan15_overfit"
       },

@@ -105,4 +105,23 @@ class FP4VSAFineAttention:
         return out.transpose(1, 2)
 
 
-__all__ = ["FP4AttentionNumerics", "FP4VSAFineAttention", "load_qat_vsa_modules"]
+def vsa_impls(transformer: torch.nn.Module) -> list[Any]:
+    """Every VSA-H3 attention implementation in a MiniMax-H3 transformer."""
+    impls = []
+    for module in transformer.modules():
+        impl = getattr(getattr(module, "distributed_attention", None), "attn_impl", None)
+        if impl is not None and hasattr(impl, "fine_attention_override"):
+            impls.append(impl)
+    return impls
+
+
+def install_fp4_vsa_attention(transformer: torch.nn.Module, numerics: FP4AttentionNumerics | None) -> int:
+    """Route every VSA-H3 layer's fine attention through the emulator (``None`` restores the kernels)."""
+    override = FP4VSAFineAttention(numerics) if numerics is not None else None
+    impls = vsa_impls(transformer)
+    for impl in impls:
+        impl.fine_attention_override = override
+    return len(impls)
+
+
+__all__ = ["FP4AttentionNumerics", "FP4VSAFineAttention", "install_fp4_vsa_attention", "load_qat_vsa_modules"]
