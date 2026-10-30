@@ -9,7 +9,6 @@ from fastvideo.attention.backends.flashinfer import FlashInferImpl
 from fastvideo.attention.backends.sdpa import SDPAImpl
 from fastvideo.configs.models.dits.matrixgame2 import MatrixGame2WanVideoArchConfig
 from fastvideo.configs.models.dits.matrixgame3 import MatrixGame3WanVideoArchConfig
-from fastvideo.configs.models.dits.dreamx_world import DreamXWorldArchConfig
 from fastvideo.configs.models.dits.wan_animate import WanAnimateArchConfig
 from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
 import fastvideo.models.wan.transformer as wan
@@ -53,7 +52,6 @@ def requested_flashinfer(monkeypatch):
     (WanVideoArchConfig, SDPAImpl),
     (MatrixGame2WanVideoArchConfig, SDPAImpl),
     (MatrixGame3WanVideoArchConfig, SDPAImpl),
-    (DreamXWorldArchConfig, SDPAImpl),
     (WanAnimateArchConfig, SDPAImpl),
 ])
 @pytest.mark.parametrize("image", [False, True])
@@ -113,16 +111,15 @@ def test_sparse_self_attention_backends_are_filtered_from_cross_attention(reques
 
 
 def test_derived_families_preserve_inheritance_and_backend_scope(requested_flashinfer):
-    from fastvideo.models.dits.dreamx_world import DreamXWorldTransformer3DModel
     from fastvideo.models.dits.wan_animate import WanAnimateTransformer3DModel
 
-    for model_cls in (DreamXWorldTransformer3DModel, WanAnimateTransformer3DModel):
-        assert issubclass(model_cls, WanTransformer3DModel)
-        assert AttentionBackendEnum.FLASHINFER not in model_cls._supported_attention_backends
-        block = WanTransformerBlock(dim=128, ffn_dim=256, num_heads=2, cross_attn_norm=True,
-                                    supported_attention_backends=model_cls._supported_attention_backends)
-        assert isinstance(block.attn1.attn_impl, SDPAImpl)
-        assert isinstance(block.attn2.attn.attn_impl, SDPAImpl)
+    model_cls = WanAnimateTransformer3DModel
+    assert issubclass(model_cls, WanTransformer3DModel)
+    assert AttentionBackendEnum.FLASHINFER not in model_cls._supported_attention_backends
+    block = WanTransformerBlock(dim=128, ffn_dim=256, num_heads=2, cross_attn_norm=True,
+                                supported_attention_backends=model_cls._supported_attention_backends)
+    assert isinstance(block.attn1.attn_impl, SDPAImpl)
+    assert isinstance(block.attn2.attn.attn_impl, SDPAImpl)
 
 
 def test_standard_wan_preserves_existing_backends():
