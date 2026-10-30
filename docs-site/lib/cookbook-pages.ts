@@ -49,6 +49,15 @@ export const recipePages = [
     featured: true,
   },
   {
+    id: "open-h3-regenerate-2k",
+    family: "MiniMax H3",
+    title: "Open-H3-Regenerate-2K",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/open-h3-regenerate-2k",
+    description: "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with a three-step refiner.",
+    tags: ["Video to video", "2K", "3-step"],
+  },
+  {
     id: "fastwan21",
     family: "Wan",
     title: "FastWan2.1 1.3B",
@@ -124,6 +133,7 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
+  "Efficient-Large-Model/Open-H3-Regenerate-2K": "open-h3-regenerate-2k",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",

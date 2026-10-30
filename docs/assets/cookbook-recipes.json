@@ -761,6 +761,22 @@
       "limitations": ["Pass --reference-audio for an additional audio reference. The checked-in source defaults to four GPUs."]
     },
     {
+      "id": "open-h3-regenerate-2k",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Video super-resolution (2K regeneration)",
+      "label": "Open-H3-Regenerate-2K",
+      "summary": "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with NVlabs' three-step refiner. The output is silent.",
+      "model": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+      "source": "examples/inference/basic/basic_open_h3_regenerate_2k.py",
+      "command": ": \"${INPUT_VIDEO:?Set INPUT_VIDEO to a 768P MiniMax-H3 draft}\"\npython examples/inference/basic/basic_open_h3_regenerate_2k.py --video \"$INPUT_VIDEO\" --prompt \"A red fox trots through fresh snow in a pine forest at golden hour.\"",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "2560x1440 MP4 at outputs/open_h3_regenerate_2k/regen2k_0.mp4",
+      "related": ["minimax-h3-t2v", "fasth3-8step-v2-cuda"]
+    },
+    {
       "id": "fasth3-lora-preview",
       "family": "minimax_h3",
       "stage": "inference",

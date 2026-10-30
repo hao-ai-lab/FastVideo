@@ -44,7 +44,7 @@ runtimes:
         host: 0.0.0.0
         port: 8000
         served_model_name: null
-    workloads: [t2v, i2v]
+    workloads: [t2v, i2v, v2v]
     options: &cuda_options
       server.served_model_name:
         anyOf:

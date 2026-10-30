@@ -254,13 +254,7 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device()).full_tensor()
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B).to(data) @ self.slice_lora_a_weights(self.lora_A).to(data))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
+            unsharded_base_layer.weight = nn.Parameter(self._merged_weight(data).to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(get_local_torch_device(),
@@ -277,15 +271,21 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            self.base_layer.weight.data = data.to(current_device, non_blocking=True)
+            self.base_layer.weight.data = self._merged_weight(data).to(current_device, non_blocking=True)
 
         self.merged = True
+
+    def _merged_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """``weight`` plus the scaled adapter delta, in ``weight``'s dtype.
+
+        An adapter stored wider than the base (an FP32 adapter on a BF16 DiT) is multiplied and added at its own
+        precision and rounded once, as a merge-then-cast reference does; with FSDP or without.
+        """
+        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
+        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
+        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return (weight.to(accumulate_dtype) + (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
 
     @torch.no_grad()
     # @torch.compile(dynamic=True)
