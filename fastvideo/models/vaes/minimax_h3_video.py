@@ -537,7 +537,7 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
 
 
 def _tile_batch_size() -> int:
-    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 8)."""
     return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
 
 
