@@ -71,7 +71,7 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
                             raw_latent_shape=(1, 2, 1, 1, 1), output=None)
     args = SimpleNamespace(vae_parallel_decode=False, pin_cpu_memory=False, vae_cpu_offload=True,
                            output_type="latent")
-    monkeypatch.setattr(decoding, "_decode_participation", lambda *a: (None, True, False))
+    monkeypatch.setattr(decoding, "_decode_participation", lambda *a, **k: (None, True, False))
     monkeypatch.setattr(decoding, "_layout", lambda batch: layout)
     monkeypatch.setattr(decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(decoding, "h3_dit_patch_size", lambda *a: (1, 1, 1))
