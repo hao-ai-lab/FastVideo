@@ -714,10 +714,14 @@ FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
                                              category="performance",
                                              doc="Expand the serialized NVFP4 MiniMax-H3 text encoder with one "
                                              "fused Triton pass on GPUs without FP4 GEMM.")
-FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(8,
                                      category="performance",
-                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
-                                     "tile.")
+                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call. The ViT decoder "
+                                     "treats batch entries independently, so batching tiles matches per-tile "
+                                     "decoding, except for NVFP4 decoders with dynamic activation scales, which "
+                                     "always decode per tile. On GB200 at 768x1344, 8 tiles per call decodes 107 "
+                                     "frames in 3.7 s instead of 5.4 s and 362 frames in 12.8 s instead of 18.3 s "
+                                     "(+0.7 GiB peak). 1 decodes per tile.")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
                                           category="performance",
                                           doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
@@ -727,7 +731,8 @@ FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
                                          category="performance",
                                          doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
                                          "the sequence-parallel ranks in the parallel decode and keyframe encode; "
-                                         "bitwise equal to the serial path.")
+                                         "bitwise equal to the serial path. Requires "
+                                         "FASTVIDEO_H3_VAE_TILE_BATCH=1 (the split replays the per-tile path).")
 FASTVIDEO_H3_VAE_NVFP4_FUSED = EnvBool(True,
                                        category="performance",
                                        doc="Run NVFP4 MiniMax-H3 VAE decoder blocks through the bit-exact fused "

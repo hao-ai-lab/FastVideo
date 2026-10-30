@@ -182,3 +182,84 @@ def test_decode_to_pixels_rejects_incomplete_output(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="wrote 0 frames"):
         vae.decode_to_pixels(latents, output)
+
+
+def test_tile_batch_defaults_to_eight(monkeypatch) -> None:
+    from fastvideo.models.vaes.minimax_h3_video import _tile_batch_size
+
+    monkeypatch.delenv("FASTVIDEO_H3_VAE_TILE_BATCH", raising=False)
+    assert _tile_batch_size() == 8
+    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "3")
+    assert _tile_batch_size() == 3
+    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "0")
+    assert _tile_batch_size() == 1
+
+
+def test_dynamic_nvfp4_act_scale_decodes_per_tile(monkeypatch) -> None:
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import NVFP4DecoderLinear
+    from fastvideo.models.vaes.minimax_h3_video import _tile_batch_size
+
+    decoder = torch.nn.Module()
+    decoder.proj = NVFP4DecoderLinear(torch.zeros(16, 16), None, None, torch.float32, act_scale="dynamic")
+    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "8")
+    assert _tile_batch_size(decoder) == 1
+    assert _tile_batch_size() == 8
+
+    decoder.proj.act_scale = "static"
+    assert _tile_batch_size(decoder) == 8
+    decoder.proj.act_scale = "unit"
+    assert _tile_batch_size(decoder) == 8
+    assert _tile_batch_size(torch.nn.Linear(16, 16)) == 8
+
+
+@torch.inference_mode()
+def test_dynamic_nvfp4_act_scale_decodes_one_tile_per_call(monkeypatch) -> None:
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import NVFP4DecoderLinear
+
+    torch.manual_seed(20260814)
+    vae = _tiny_vae()
+    vae.enable_tiling(tile_sample_min_height=8,
+                      tile_sample_min_width=8,
+                      tile_sample_min_overlap_height=2,
+                      tile_sample_min_overlap_width=2)
+    latents = torch.randn(1, 4, 12, 4, 4)
+    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "8")
+    calls = []
+    decoder_forward = vae.decoder.forward
+
+    def record_batch(hidden_states):
+        calls.append(hidden_states.shape[0])
+        return decoder_forward(hidden_states)
+
+    vae.decoder.forward = record_batch
+    batched = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, batched)
+    batched_calls = len(calls)
+
+    calls.clear()
+    vae.decoder.dynamic_probe = NVFP4DecoderLinear(torch.zeros(16, 16), None, None, torch.float32, act_scale="dynamic")
+    per_tile = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, per_tile)
+
+    assert len(calls) > batched_calls
+    assert all(size == 1 for size in calls)
+    assert_close(per_tile, batched, atol=1e-6, rtol=0.0)
+
+
+@torch.inference_mode()
+def test_batched_tile_decode_matches_per_tile(monkeypatch) -> None:
+    torch.manual_seed(20260814)
+    vae = _tiny_vae()
+    vae.enable_tiling(tile_sample_min_height=8,
+                      tile_sample_min_width=8,
+                      tile_sample_min_overlap_height=2,
+                      tile_sample_min_overlap_width=2)
+    latents = torch.randn(1, 4, 12, 4, 4)
+    outputs = {}
+    for tile_batch in (1, 8):
+        monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", str(tile_batch))
+        output = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+        vae.decode_to_pixels(latents, output)
+        outputs[tile_batch] = output
+
+    assert_close(outputs[1], outputs[8], atol=1e-6, rtol=0.0)
