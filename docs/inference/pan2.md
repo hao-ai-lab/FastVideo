@@ -49,7 +49,8 @@ generator.generate_video(
 ```
 
 For image-to-video, the first frame is scaled to cover the requested resolution and center cropped, then encoded by the
-VAE into the first latent frame of the conditioning input.
+VAE into the first latent frame of the conditioning input. As in the reference sampler, an `image_path` is read as its
+stored pixels: an EXIF orientation tag does not rotate it.
 
 ## Guardrails
 
@@ -94,9 +95,11 @@ PAN2 sampling turns these on by default (`PAN2PipelineConfig`); pass any of them
 
 | Switch | What it does |
 |---|---|
-| `vae_decode_kernel` | Decodes with fastvideo-kernel's Wan2.2 decoder on B200 / GB200 / B300 (704x1248, batch 1): bf16 with fp32 accumulation, 7x faster than the fp32 decode on a B300 at PSNR 61-63 dB and SSIM 0.998 against it, at a peak of about 20 GiB for a 5 s video. It builds on first use (minutes) into `WAN22_VAE_DECODE_BUILD_DIR`, against fastvideo-kernel's CUTLASS submodule (`git submodule update --init fastvideo-kernel/include/cutlass`, or set `CUTLASS_DIR`). Other GPUs and sizes keep the fp32 decode. |
+| `vae_decode_kernel` | Decodes with fastvideo-kernel's Wan2.2 decoder on B200 / GB200 / B300 (704x1248, batch 1): bf16 with fp32 accumulation, 7x faster than the fp32 decode on a B300 at PSNR 61-63 dB and SSIM 0.998 against it, at a peak of about 20 GiB for a 5 s video. It builds on first use (minutes) against fastvideo-kernel's CUTLASS submodule (`git submodule update --init fastvideo-kernel/include/cutlass`, or set `CUTLASS_DIR`); each process builds in a directory of its own under `WAN22_VAE_DECODE_BUILD_DIR`, and later processes copy the build from the cache there. Other GPUs and sizes keep the fp32 decode. |
 | `vae_decode_kernel_parallel` | With 2, 4 or 8 GPUs, splits that decode over them instead of decoding the whole video on each: a 20 s video takes 3.0 s on one B300, 1.55 s on two, 0.79 s on four and 0.47 s on eight. |
 | `dit_fused_kernels` | Runs the DiT's fused Triton kernels for Q/K RMSNorm + RoPE and LayerNorm + modulation. Their rounding differs slightly from the unfused path. |
+
+On Blackwell GPUs (sm_100 and newer) with FlashAttention-4 (`flash_attn.cute`) installed, PAN2 also attends with FA4 unless `FASTVIDEO_FA4` is set: 288 s instead of 670 s with the Torch SDPA fallback for 241 frames on one B300. Set `FASTVIDEO_FA4=0` to keep the backend FastVideo picks otherwise.
 
 On GPUs with room for every component (B200, B300), keep the text encoder resident as well:
 `text_encoder_cpu_offload=False`.

@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """PAN2 video generation: text-to-video, and image-to-video from a first frame."""
 
+import sys
+
 import torch
 
+from fastvideo import envs
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.pan2.guardrails import (
     PAN2Guardrails,
     PAN2PromptGuardrailStage,
@@ -19,12 +23,44 @@ from fastvideo.pipelines.basic.pan2.stages import (
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import DecodingStage, LatentPreparationStage
 
+logger = init_logger(__name__)
+
+# The modules that read FASTVIDEO_FA4 when they are imported.
+_FA4_READERS = ("fastvideo.attention.utils.flash_attn_default", "fastvideo.attention.utils.flash_attn_no_pad")
+
+
+def default_to_flash_attention_4() -> bool:
+    """Turns FlashAttention-4 on for PAN2 on Blackwell GPUs, where it is about 2.3x faster than the SDPA fallback.
+
+    Only when FASTVIDEO_FA4 is unset, the GPU is sm_100 or newer, FA4 imports, and no attention module has read the
+    variable yet. Returns whether FA4 was turned on.
+    """
+    if envs.FASTVIDEO_FA4.is_set() or not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10:
+        return False
+    try:
+        import fastvideo.attention.utils.flash_attn_cute  # noqa: F401
+    except ImportError:
+        logger.info("PAN2 would use FlashAttention-4 on this GPU, but flash_attn.cute is not installed.")
+        return False
+    if any(name in sys.modules for name in _FA4_READERS):
+        logger.warning("PAN2 defaults to FlashAttention-4 on this GPU, but attention was set up before the pipeline; "
+                       "set FASTVIDEO_FA4=1 to use it.")
+        return False
+    envs.FASTVIDEO_FA4.set(True)
+    logger.info("PAN2 uses FlashAttention-4 on this GPU; set FASTVIDEO_FA4=0 to turn it off.")
+    return True
+
 
 class PAN2Pipeline(ComposedPipelineBase):
     """One stage chain serves both modes: a request with ``image_path`` (or a PIL ``pil_image``) runs image-to-video
     from that first frame, and one without runs text-to-video."""
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
+
+    def __init__(self, *args, **kwargs) -> None:
+        # Before the modules load: the attention backend reads FASTVIDEO_FA4 when it is imported.
+        default_to_flash_attention_4()
+        super().__init__(*args, **kwargs)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
