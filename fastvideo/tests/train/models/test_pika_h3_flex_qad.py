@@ -266,18 +266,12 @@ def _builder_module():
 
 
 _PROMPT = "subject_definitions: <Picture 1> is the exact first frame of the target video.\n\nsummary: A dog runs."
+_ASSET_A = "asset-" + "a" * 32
 
 
-def _v4_entry(case: str, refs: list[dict], clip: str = "asset-" + "a" * 32 + "_f000001_f000124_x") -> dict:
-    return {
-        "case": case,
-        "id": f"{case}:{clip}" if case in ("first_frame", "first_last_frame", "storyboard") else clip,
-        "resolution": "480p",
-        "prompt": _PROMPT,
-        "references": refs,
-        "target": {"height": 480, "width": 832, "num_frames": 124},
-        "target_clip_id": clip,
-    }
+def _entry(case: str, clip: str, parquet: str, resolution: str = "480p") -> dict:
+    entry_id = f"{case}:{clip}" if case in ("first_frame", "first_last_frame", "storyboard") else clip
+    return {"case": case, "id": entry_id, "parquet": parquet, "resolution": resolution}
 
 
 def test_builder_adds_subject_definitions_in_order():
@@ -285,39 +279,45 @@ def test_builder_adds_subject_definitions_in_order():
     after = builder._subject(_PROMPT, "<Audio 1> is the soundtrack of the target video.")
     assert after.startswith("subject_definitions: <Picture 1> is the exact first frame of the target video. <Audio 1>")
     assert after.endswith("\n\nsummary: A dog runs.")
-    before = builder._subject(_PROMPT, "<Picture 1> is the first frame.", before=True)
+    before = builder.apply_prompt_edits(_PROMPT, [("<Picture 1> is the first frame.", True)])
     assert before.startswith("subject_definitions: <Picture 1> is the first frame. <Picture 1> is the exact")
+    assert builder.v4_id("storyboard", "c") == "storyboard:c" and builder.v4_id("continue_shot", "c") == "c"
 
 
-def test_builder_variants_carry_flex_reference_mixes(tmp_path):
+def test_builder_new_cases_from_stored_rows():
     import random as stdlib_random
+    from collections import defaultdict
     builder = _builder_module()
-    image = [{"kind": "image", "path": "/x/keyframes/480p/c/first.png", "crop_left": 11, "crop_right": 11}]
-    entry = _v4_entry("first_frame", image)
-    audio = builder.variant("audio_reference", entry, tmp_path, stdlib_random.Random(0), [])
-    assert [r["kind"] for r in audio["references"]] == ["image", "audio"]
-    assert audio["id"].startswith("audio_reference:") and audio["case"] == "audio_reference"
-    assert audio["references"][1]["path"].endswith("target_clips/480p/" + entry["target_clip_id"] + ".mp4")
-    retier = builder.variant("retier", entry, tmp_path, stdlib_random.Random(0), [])
-    assert retier["id"] == entry["id"] and retier["case"] == "first_frame" and retier["prompt"] == _PROMPT
-    board = _v4_entry("storyboard", image * 3)
-    many = builder.variant("many_images", board, tmp_path, stdlib_random.Random(0), [])
+    counts = {"ff.pq": 1, "sb.pq": 3, "ff2.pq": 1, "sb2.pq": 5, "cs.pq": 1, "cs2.pq": 1}
+    first = _entry("first_frame", f"{_ASSET_A}_f1_f124_x", "ff.pq")
+    board = _entry("storyboard", f"{_ASSET_A}_f1_f124_x", "sb.pq")
+    scene = _entry("continue_scene", f"{_ASSET_A}_omniref_continue_1", "cs.pq")
+    shot = _entry("continue_shot", f"{_ASSET_A}_omniref_continue_2", "cs2.pq")
+    by_asset = defaultdict(list)
+    by_asset[(_ASSET_A, "480p", "image")] = [first, board, _entry("first_frame", f"{_ASSET_A}_f9_x", "ff2.pq"),
+                                            _entry("storyboard", f"{_ASSET_A}_f9_x", "sb2.pq")]
+    by_asset[(_ASSET_A, "480p", "continue")] = [scene, shot]
+    rng = stdlib_random.Random(0)
+    audio = builder.new_case_spec("audio_reference", first, rng, by_asset, counts.get)
+    assert [r["kind"] for r in audio["references"]] == ["stored", "target_audio"]
+    assert audio["id"] == f"audio_reference:{_ASSET_A}_f1_f124_x" and audio["source_case"] == "first_frame"
+    mixed = builder.new_case_spec("mixed_image_video", scene, rng, by_asset, counts.get)
+    assert [r["kind"] for r in mixed["references"]] == ["target_frame", "stored"] and mixed["prompt_edits"][0][1]
+    many = builder.new_case_spec("many_images", board, rng, by_asset, counts.get)
     assert 6 <= len(many["references"]) <= 9
-    assert many["prompt"].count("is a frame of the target video") == len(many["references"]) - 3
+    assert {r["parquet"] for r in many["references"][3:]} <= {"ff.pq", "ff2.pq", "sb2.pq"}
+    assert len(many["prompt_edits"]) == len(many["references"]) - 3
+    multi = builder.new_case_spec("multi_video", scene, rng, by_asset, counts.get)
+    assert [r["parquet"] for r in multi["references"]] == ["cs.pq", "cs2.pq"] and multi["references"][1]["audio"] is False
+    lonely = defaultdict(list, {(_ASSET_A, "480p", "continue"): [scene]})
+    assert builder.new_case_spec("multi_video", scene, rng, lonely, counts.get) is None
 
 
-def test_builder_continuation_variants(tmp_path):
-    import random as stdlib_random
+def test_builder_plan_retiers_only_480p_and_keeps_ids():
     builder = _builder_module()
-    clip = "asset-" + "b" * 32 + "_omniref_continue_1"
-    video = [{"kind": "video", "path": "/x/a/preceding.mp4", "use_embedded_audio": True}]
-    entry = _v4_entry("continue_scene", video, clip=clip)
-    entry["target_clip_id"] = clip + "__target"
-    mixed = builder.variant("mixed_image_video", entry, tmp_path, stdlib_random.Random(0), [])
-    assert [r["kind"] for r in mixed["references"]] == ["frame", "video"]
-    assert mixed["references"][0]["path"].endswith(f"continuation_clips/480p/asset-{'b' * 32}/{clip}/target.mp4")
-    sibling = _v4_entry("continue_shot", [{"kind": "video", "path": "/x/b/preceding.mp4"}], clip=clip + "2")
-    multi = builder.variant("multi_video", entry, tmp_path, stdlib_random.Random(0), [entry, sibling])
-    assert [r["path"] for r in multi["references"]] == ["/x/a/preceding.mp4", "/x/b/preceding.mp4"]
-    assert multi["references"][1]["audio"] is False
-    assert builder.variant("multi_video", entry, tmp_path, stdlib_random.Random(0), [entry]) is None
+    first = _entry("first_frame", f"{_ASSET_A}_f1_x", "a.pq")
+    hi = _entry("first_frame", f"{_ASSET_A}_f1_x", "b.pq", "768p")
+    v4 = {(first["id"], "480p"): first, (hi["id"], "768p"): hi}
+    specs = builder.plan_rows(v4, {(first["id"], "480p"), (hi["id"], "768p")}, {}, 0, set(), lambda _: 1)
+    assert len(specs) == 1 and specs[0]["id"] == first["id"] and specs[0]["case"] == "first_frame"
+    assert specs[0]["references"] == [{"kind": "stored", "parquet": "a.pq", "index": 0, "audio": True}]
