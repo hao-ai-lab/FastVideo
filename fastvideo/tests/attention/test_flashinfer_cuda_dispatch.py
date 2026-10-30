@@ -47,8 +47,6 @@ def _install_fake_flashinfer_with_cudnn(monkeypatch) -> None:
 
 
 def _block_flashinfer_import(monkeypatch) -> None:
-    # A None entry in sys.modules makes `import flashinfer.prefill` raise
-    # ImportError, regardless of whether the real package is installed.
     monkeypatch.setitem(sys.modules, "flashinfer.prefill", None)
     monkeypatch.setitem(sys.modules, "flashinfer", None)
 
@@ -132,8 +130,13 @@ def test_flashinfer_cudnn_resolves_for_head_size_128(env_overrides, monkeypatch)
 ])
 def test_flashinfer_prefill_gpu_requirements(env_overrides, monkeypatch, capability, prefill_backend, allowed):
     env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override(prefill_backend))
-    monkeypatch.setattr(CudaPlatformBase, "has_device_capability",
-                        classmethod(lambda cls, required, device_id=0: capability >= required))
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+
+    def mock_capability(cls, required, device_id=0):
+        assert device_id == 0
+        return capability >= required
+
+    monkeypatch.setattr(CudaPlatformBase, "has_device_capability", classmethod(mock_capability))
     _install_fake_flashinfer_with_cudnn(monkeypatch)
     if allowed:
         result = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
@@ -141,3 +144,27 @@ def test_flashinfer_prefill_gpu_requirements(env_overrides, monkeypatch, capabil
     else:
         with pytest.raises(RuntimeError, match="Hopper.*sm90"):
             CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+
+
+@pytest.mark.parametrize("current_supported", [True, False])
+def test_flashinfer_cudnn_checks_current_device(env_overrides, monkeypatch, current_supported):
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    checked = []
+
+    def capability(cls, required, device_id=0):
+        checked.append((required, device_id))
+        if required == 80:
+            return True
+        assert required == 90
+        return current_supported if device_id == 1 else not current_supported
+
+    monkeypatch.setattr(CudaPlatformBase, "has_device_capability", classmethod(capability))
+    _install_fake_flashinfer_with_cudnn(monkeypatch)
+    if current_supported:
+        result = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+        assert result.endswith("FlashInferBackend")
+    else:
+        with pytest.raises(RuntimeError, match="Hopper.*sm90"):
+            CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+    assert checked == [(80, 1), (90, 1)]
