@@ -105,6 +105,8 @@ export interface SourceRecipe {
 export const sourceRecipes = sourceCatalog.recipes as SourceRecipe[];
 const familyInfo: Record<string, { title: string; path: string; logo: string; category: string }> = {
   minimax_h3: { title: "MiniMax H3", path: "minimax-h3", logo: "minimax", category: "Video" },
+  // A post-trained MiniMax-H3 (Pika adapters on H3 components), listed with the H3 family.
+  pika_h3_flex: { title: "MiniMax H3", path: "minimax-h3", logo: "pika", category: "Video" },
   wan: { title: "Wan", path: "wan", logo: "wan-ai", category: "Video" },
   ltx2: { title: "LTX", path: "ltx", logo: "ltx", category: "Video" },
   hunyuan: { title: "Hunyuan", path: "hunyuan", logo: "tencent-hunyuan", category: "Video" },
@@ -158,6 +160,7 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
     const providers: Record<string, string> = {
       fastvideo: "FastVideo",
       minimax: "MiniMax",
+      pika: "Pika",
       "wan-ai": "Wan AI",
       ltx: "Lightricks",
       "tencent-hunyuan": "Tencent",
