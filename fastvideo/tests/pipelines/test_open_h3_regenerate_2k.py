@@ -186,9 +186,13 @@ class _ConstantVelocityTransformer:
     def __init__(self, velocity):
         self.velocity = velocity
         self.calls = []
+        self.attn_metadata = []
 
     def __call__(self, **kwargs):
+        from fastvideo.forward_context import get_forward_context
+
         self.calls.append(kwargs)
+        self.attn_metadata.append(get_forward_context().attn_metadata)
         rows = kwargs["hidden_states"].shape[1]
         audio_rows = kwargs["audio_hidden_states"].shape[1]
         return torch.full((1, rows, 8), self.velocity), torch.zeros(1, audio_rows, 4)
@@ -207,6 +211,15 @@ class _RecordingCurve:
 
     def set_timesteps(self, unique):
         self.timesteps.append(unique.clone())
+
+
+def _refine_args(vsa_builder=None):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 2, 2))),
+                           VSA_sparsity=0.8,
+                           VSA_tile_size=64,
+                           vsa_builder=vsa_builder)
 
 
 def _curve_model(out_features):
@@ -243,13 +256,15 @@ def test_stage_attaches_the_branches_to_each_materialized_lazy_transformer(monke
     assert second.targets[-1] is not loaded_first
 
 
-def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None, fastvideo_args=None):
+def _denoise(monkeypatch, steps, velocity=0.5, vsa_builder=None, transformer=None, curve=None, fastvideo_args=None):
     from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
     from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
     from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import denoising
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     monkeypatch.setattr(denoising, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(denoising, "_h3_vsa_metadata_builder", lambda *args: vsa_builder)
+    monkeypatch.setattr(denoising, "_h3_vsa_single_region_segments", lambda layout, patch: ("segments", ))
     layout = build_packed_sequence(torch.ones(3, dtype=torch.long), 2, 2, 2, 2, (1, 2, 2))
     batch = ForwardBatch(data_type="video")
     batch.num_inference_steps = steps
@@ -260,7 +275,8 @@ def _denoise(monkeypatch, steps, velocity=0.5, transformer=None, curve=None, fas
     transformer = transformer if transformer is not None else _ConstantVelocityTransformer(velocity)
     curve = curve if curve is not None else _RecordingCurve()
     stage = denoising.Regenerate2KDenoisingStage(transformer, curve, None)
-    return stage.forward(batch, fastvideo_args), transformer, curve
+    args = fastvideo_args if fastvideo_args is not None else _refine_args(vsa_builder)
+    return stage.forward(batch, args), transformer, curve
 
 
 def test_euler_steps_integrate_the_constant_velocity_over_sigma_zero_to_start(monkeypatch):
@@ -295,6 +311,123 @@ def test_registry_resolves_the_release_to_the_regenerate_pipeline(tmp_path):
         assert get_model_info(path).pipeline_cls.__name__ == "OpenH3Regenerate2KPipeline"
     preset, family = get_preset_selection(hub_id)
     assert (preset, family) == ("open_h3_regenerate_2k", "open_h3_regenerate_2k")
+
+
+def test_refine_transformer_dir_accepts_a_component_dir_or_its_checkpoint_parent(tmp_path):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.open_h3_regenerate_2k_pipeline import (
+        resolve_refine_transformer_dir,
+    )
+
+    assert resolve_refine_transformer_dir(None) is None
+    component = tmp_path / "transformer"
+    component.mkdir()
+    (component / "config.json").write_text("{}")
+    assert resolve_refine_transformer_dir(str(component)) == str(component)
+    assert resolve_refine_transformer_dir(str(tmp_path)) == str(component)
+    with pytest.raises(ValueError, match="config.json"):
+        resolve_refine_transformer_dir(str(tmp_path / "missing"))
+
+
+def _preparation_stage(tmp_path, draft_latent_path=None):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.latent_preparation import (
+        Regenerate2KLatentPreparationStage,
+    )
+
+    return Regenerate2KLatentPreparationStage(None,
+                                              None,
+                                              None,
+                                              load_upscaler=lambda: None,
+                                              draft_size="768p",
+                                              start_sigma=None,
+                                              draft_latent_path=draft_latent_path)
+
+
+def _preparation_batch():
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import MINIMAX_H3_TEXT_TOKEN_TAGS_KEY
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    batch = ForwardBatch(data_type="video")
+    batch.prompt_embeds = [torch.zeros(1, 3, 4)]
+    batch.raw_latent_shape = (1, 24, 31, 90, 160)
+    batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = torch.zeros(3, dtype=torch.long)
+    return batch
+
+
+def test_draft_latent_input_removes_the_draft_video_requirement(tmp_path):
+    video_batch = _preparation_batch()
+    assert not _preparation_stage(tmp_path).verify_input(video_batch, None).is_valid()
+
+    latent_path = tmp_path / "draft_latent.pt"
+    torch.save(torch.zeros(24, 31, 48, 84), latent_path)
+    assert _preparation_stage(tmp_path, str(latent_path)).verify_input(_preparation_batch(), None).is_valid()
+
+
+def test_a_pt_draft_video_path_is_a_per_request_draft_latent(tmp_path):
+    stage = _preparation_stage(tmp_path)
+    assert stage._draft_latent_source("/drafts/fox.mp4") is None
+    assert stage._draft_latent_source("/drafts/fox_latent.PT") == "/drafts/fox_latent.PT"
+    configured = _preparation_stage(tmp_path, "/drafts/configured.pt")
+    assert configured._draft_latent_source("/drafts/other.pt") == "/drafts/configured.pt"
+
+
+@pytest.mark.parametrize("shape", [(24, 31, 48, 84), (1, 24, 31, 48, 84)])
+def test_saved_draft_latent_loads_as_a_native_four_dimensional_latent(tmp_path, shape):
+    path = tmp_path / "draft_latent.pt"
+    torch.save(torch.full(shape, 0.5), path)
+    loaded = _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+    assert loaded.shape == (24, 31, 48, 84) and loaded.dtype == torch.float32
+    assert torch.all(loaded == 0.5)
+
+
+def test_saved_draft_latent_rejects_a_batch_of_several_drafts(tmp_path):
+    path = tmp_path / "draft.pt"
+    torch.save(torch.zeros(2, 24, 31, 24, 42), path)
+    with pytest.raises(ValueError, match=r"\[1, C, T, h, w\]"):
+        _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+
+
+def test_absolute_module_mapping_dispatches_on_its_role():
+    from types import SimpleNamespace
+
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    pipeline = SimpleNamespace(model_path="/release",
+                               _extra_config_module_map={"transformer": "/models/my_refiner", "vae": "base_model/vae"})
+
+    assert ComposedPipelineBase._component_load_target(pipeline, "transformer") == ("transformer", "/models/my_refiner")
+    assert ComposedPipelineBase._component_load_target(pipeline, "vae") == ("base_model/vae", "/release/base_model/vae")
+    assert ComposedPipelineBase._component_load_target(pipeline, "scheduler") == ("scheduler", "/release/scheduler")
+
+
+def test_saved_draft_latent_rejects_the_wrong_rank(tmp_path):
+    path = tmp_path / "draft_latent.pt"
+    torch.save(torch.zeros(24, 31, 48), path)
+    with pytest.raises(ValueError, match=r"\[C, T, h, w\]"):
+        _preparation_stage(tmp_path, str(path))._load_draft_latent(str(path), torch.device("cpu"))
+
+
+class _RecordingVSABuilder:
+
+    def __init__(self):
+        self.builds = []
+
+    def build(self, **kwargs):
+        self.builds.append(kwargs)
+        return f"metadata-{len(self.builds)}"
+
+
+def test_vsa_backend_builds_one_sparse_metadata_per_refine_step(monkeypatch):
+    builder = _RecordingVSABuilder()
+    _, transformer, _ = _denoise(monkeypatch, steps=3, vsa_builder=builder)
+    assert [build["VSA_sparsity"] for build in builder.builds] == [0.8, 0.8, 0.8]
+    assert all(build["tile_size"] == 64 and build["exempt"] for build in builder.builds)
+    assert [build["current_timestep"] for build in builder.builds] == [0, 1, 2]
+    assert transformer.attn_metadata == ["metadata-1", "metadata-2", "metadata-3"]
+
+
+def test_dense_backend_passes_no_attention_metadata(monkeypatch):
+    _, transformer, _ = _denoise(monkeypatch, steps=3)
+    assert transformer.attn_metadata == [None, None, None]
 
 
 class _OffloadedTransformer(_ConstantVelocityTransformer):
