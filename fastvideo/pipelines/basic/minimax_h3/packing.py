@@ -93,7 +93,7 @@ class MiniMaxH3PackedLayout:
     # Per-reference conditioning spans in packed order (Ref2VA only; empty
     # elsewhere): (kind, row_count, latent_shape) covering exactly the rows
     # between the text tokens and the target audio. kind is "audio" / "image"
-    # / "video"; latent_shape is the reference's raw latent (frames, height,
+    # / "video" / "continuation"; latent_shape is the reference's raw latent (frames, height,
     # width) for visual kinds and (0, 0, 0) for audio rows. A video reference
     # with sound contributes two entries — its audio rows precede its video
     # rows. Retained so VSA-H3 can 3-D-tile (and sparsify) reference-video
@@ -165,6 +165,15 @@ class MiniMaxH3PackedBatchLayout:
             raise ValueError("H3 packed-batch position_ids must cover the complete sequence")
         if self.token_tags.shape != (self.sequence_length, ):
             raise ValueError("H3 packed-batch token_tags must cover the complete sequence")
+
+
+@dataclass(frozen=True)
+class MiniMaxH3ContinuationLayout:
+    """Latent geometry of a continuation clip (``reference.MiniMaxH3PreparedContinuation``)."""
+
+    num_latent_frames: int
+    # 0 for a clip without a soundtrack.
+    num_audio_latents: int
 
 
 def _validate_packed_rows(layout: MiniMaxH3PackedLayout | MiniMaxH3PackedBatchLayout) -> None:
@@ -497,8 +506,15 @@ def build_ref2va_packed_sequence(
     latent_width: int,
     num_audio_latents: int,
     patch_size: tuple[int, int, int],
+    continuation: MiniMaxH3ContinuationLayout | None = None,
 ) -> MiniMaxH3PackedLayout:
-    """Build `[text | ordered references | target audio | target video]`."""
+    """Build `[text | ordered references | continuation clip | target audio | target video]`.
+
+    A continuation clip follows the references and advances the rotary clock as a video reference with its
+    soundtrack would; its video rows then take the coordinates of the target's first latent frames and its audio rows
+    those of the target's first audio latents, so the clip conditions the start of the target in place (the
+    reference context of ComfyUI-H3-Continuum). VSA-H3 keeps its rows dense.
+    """
     if patch_size != (1, 2, 2):
         raise ValueError(f"MiniMax-H3 Ref2VA requires patch_size=(1, 2, 2), got {patch_size}.")
     if text_token_tags.ndim != 1:
@@ -531,6 +547,13 @@ def build_ref2va_packed_sequence(
     num_reference_video_rows = sum(visual_row_counts)
     num_reference_audio_rows = sum(reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS for reference in references
                                    if reference.has_audio)
+    rows_per_target_frame = (latent_height // patch_h) * (latent_width // patch_w)
+    if continuation is not None:
+        if not 0 < continuation.num_latent_frames < num_latent_frames or continuation.num_audio_latents < 0:
+            raise ValueError(f"Continuation clip {continuation} does not fit a target of {num_latent_frames} "
+                             "latent frames.")
+        num_reference_video_rows += continuation.num_latent_frames * rows_per_target_frame
+        num_reference_audio_rows += continuation.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
     sequence_length = (num_text_tokens + num_reference_video_rows + num_reference_audio_rows + num_target_audio_rows +
                        num_target_video_rows)
 
@@ -603,6 +626,29 @@ def build_ref2va_packed_sequence(
             )
         else:
             raise ValueError(f"Unsupported prepared reference type: {reference.media_type!r}.")
+
+    if continuation is not None:
+        audio_count = continuation.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+        visual_row_count = continuation.num_latent_frames * rows_per_target_frame
+        if audio_count:
+            reference_segments.append(("audio", audio_count, (0, 0, 0)))
+        # Not "video": _h3_vsa_ref2va_segments keeps every other span dense.
+        reference_segments.append(
+            ("continuation", visual_row_count, (continuation.num_latent_frames, latent_height, latent_width)))
+        audio_rows = slice(cursor, cursor + audio_count)
+        video_rows = slice(audio_rows.stop, audio_rows.stop + visual_row_count)
+        cursor = video_rows.stop
+        if audio_count:
+            audio_indices.append(torch.arange(audio_rows.start, audio_rows.stop))
+        video_indices.append(torch.arange(video_rows.start, video_rows.stop))
+        rotary_time += max(float(continuation.num_audio_latents),
+                           _reference_temporal_span(continuation.num_latent_frames))
+        frame_time = temporal_position_grid(continuation.num_latent_frames, rotary_time)
+        position_ids[video_rows, 0] = frame_time.repeat_interleave(rows_per_target_frame)
+        position_ids[video_rows, 1:] = target_frame_grid.repeat(continuation.num_latent_frames // patch_t, 1)
+        if audio_count:
+            _fill_audio_positions(position_ids, audio_rows, continuation.num_audio_latents, rotary_time,
+                                  target_width_grid)
 
     audio_start = cursor
     video_start = audio_start + num_target_audio_rows
