@@ -22,7 +22,8 @@ class OpenH3Regenerate2KPipelineConfig(MiniMaxH3PipelineConfig):
     ``transformer/`` subdirectory is one, such as a FastH3 export, instead of the release's ``base_model/transformer``.
     The released LoRA and Sharp branches are base-derived adapters, so they keep loading over whatever DiT is chosen.
     ``draft_latent_path`` skips the draft video entirely: a ``.pt`` holding the native H3 latent ``[C, T, h, w]`` (or
-    ``[1, C, T, h, w]``) of the draft goes straight to the upscaler.
+    ``[1, C, T, h, w]``) of the draft goes straight to the upscaler. A request whose draft video path ends in
+    ``.pt`` is read the same way, per request.
     """
 
     draft_size: str = "768p"

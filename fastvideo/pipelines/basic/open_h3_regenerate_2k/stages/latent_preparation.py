@@ -71,6 +71,12 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
             if fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
+    def _draft_latent_source(self, video_path: str | None) -> str | None:
+        """The saved draft latent for this request: the configured one, or a ``.pt`` passed as the draft video."""
+        if self.draft_latent_path is not None:
+            return self.draft_latent_path
+        return video_path if video_path is not None and video_path.lower().endswith(".pt") else None
+
     def _load_draft_latent(self, path: str, device: torch.device) -> torch.Tensor:
         """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video."""
         tensor = torch.load(path, map_location="cpu", weights_only=True)
@@ -114,8 +120,9 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         patch_size = h3_dit_patch_size(fastvideo_args)
         _, channels, num_latent_frames, latent_height, latent_width = batch.raw_latent_shape
 
+        latent_source = self._draft_latent_source(batch.video_path)
         draft = (self._encode_draft(batch.video_path, device, fastvideo_args)
-                 if self.draft_latent_path is None else self._load_draft_latent(self.draft_latent_path, device))
+                 if latent_source is None else self._load_draft_latent(latent_source, device))
         upscaler = self.load_upscaler()
         upscaled = upscale_latent(upscaler, draft, (batch.height, batch.width))
         if tuple(upscaled.shape) != (channels, num_latent_frames, latent_height, latent_width):

@@ -362,6 +362,14 @@ def test_draft_latent_input_removes_the_draft_video_requirement(tmp_path):
     assert _preparation_stage(tmp_path, str(latent_path)).verify_input(_preparation_batch(), None).is_valid()
 
 
+def test_a_pt_draft_video_path_is_a_per_request_draft_latent(tmp_path):
+    stage = _preparation_stage(tmp_path)
+    assert stage._draft_latent_source("/drafts/fox.mp4") is None
+    assert stage._draft_latent_source("/drafts/fox_latent.PT") == "/drafts/fox_latent.PT"
+    configured = _preparation_stage(tmp_path, "/drafts/configured.pt")
+    assert configured._draft_latent_source("/drafts/other.pt") == "/drafts/configured.pt"
+
+
 @pytest.mark.parametrize("shape", [(24, 31, 48, 84), (1, 24, 31, 48, 84)])
 def test_saved_draft_latent_loads_as_a_native_four_dimensional_latent(tmp_path, shape):
     path = tmp_path / "draft_latent.pt"
