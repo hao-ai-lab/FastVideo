@@ -235,14 +235,18 @@ def _flash_attn_cute_varlen_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # Current flash_attn.cute builds derive max_seqlen_q/max_seqlen_k from
+    # cu_seqlens inside _flash_attn_fwd and reject them as kwargs ("got an
+    # unexpected keyword argument 'max_seqlen_q'"). They stay in this custom
+    # op's signature because callers and the backward context pass them, but
+    # they are not forwarded.
+    del max_seqlen_q, max_seqlen_k
     out, lse = _flash_attn_fwd(
         q,
         k,
         v,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
         softmax_scale=softmax_scale,
         causal=causal,
         window_size_left=None,
