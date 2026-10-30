@@ -23,6 +23,7 @@ F32 weights are converted to BF16 here, which is what the loader uses.
 | FastH3 4-Step V1        | 137.7   | 65.3        | 62.1         | 10.3 |
 | FastH3 Trim             | 56.8    | 34.9        | 15.3         | 6.5  |
 | FastH3 Omni v1          | 92.5    | 65.3        | 15.3         | 11.9 |
+| Pika H3 Flex            | 136.7   | 64.3        | 62.1         | 10.3 |
 | FastWan2.1 1.3B         | 13.6    | 2.8         | 10.6         | 0.3  |
 | Wan2.1 T2V 14B          | 37.4    | 26.6        | 10.6         | 0.3  |
 | Wan2.1 I2V 14B          | 41.9    | 30.5        | 10.6         | 0.3  |
@@ -33,6 +34,9 @@ F32 weights are converted to BF16 here, which is what the loader uses.
 | Kandinsky 6 Pro         | 41.9    | 32.5        | 8.0          | 1.4  |
 | Kandinsky 6 Pro distill | 37.5    | 28.1        | 8.0          | 1.4  |
 | LTX2 Distilled          | 66.9    | 35.2        | 25.4         | 3.6  |
+
+Pika H3 Flex's transformer is the 61.7 GiB H3 trunk plus its 2.6 GiB task adapter.
+Ref2VA swaps in `transformer_ref` and the `ref2va` adapter, which are the same size.
 
 The FastVideo organization publishes the same FastH3 model at several
 precisions. The transformer shrinks with precision; the text encoder and VAE

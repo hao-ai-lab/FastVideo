@@ -72,6 +72,21 @@
         "https://huggingface.co/FastVideo/FastVideo-FastH3-Omni-8-Step-V1/tree/main",
         "https://huggingface.co/FastVideo/FastH3-Omni-NVFP4-QAD/tree/main"
       ]
+    },
+    "pika-h3-flex-t2va": {
+      "parts": {
+        "transformer": 61.73,
+        "adapter": 2.58,
+        "text_encoder": 62.13,
+        "vae": 9.7,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33,
+        "text_encoder_quantized": 15.33
+      },
+      "sources": ["https://huggingface.co/Pika-Labs/Pika-H3-Flex/tree/main"]
     }
   }
 }
