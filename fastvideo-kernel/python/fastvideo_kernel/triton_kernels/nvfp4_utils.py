@@ -30,11 +30,12 @@ def _compute_quant_and_scale(
     # Explicit cast to fp32 since most ops are not supported on bfloat16. We avoid needless conversions to and from bf16
     f32_tensor = src_tensor.to(tl.float32)
     abs_tensor = tl.abs(f32_tensor)
-    abs_tensor = tl.where(valid_src_mask, abs_tensor, -1.0)  # Don't consider padding tensors in scale computation
+    abs_tensor = tl.where(valid_src_mask, abs_tensor, 0.0)  # Don't consider padding tensors in scale computation
 
     if two_level_quant_P:
         # row max from SageAttn3 paper
-        global_max_val = tl.max(f32_tensor, axis=1, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, 1)
+        masked_f32 = tl.where(valid_src_mask, f32_tensor, 0.0)
+        global_max_val = tl.max(masked_f32, axis=1, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, 1)
         global_max_val = tl.maximum(global_max_val, 1e-8)
         s_enc = ((6 * 448) / global_max_val).reshape([BLOCK_SIZE_OUT_DIM, 1, 1])
         s_dec = (1 / s_enc)
@@ -55,7 +56,10 @@ def _compute_quant_and_scale(
                      keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)  # per block maxima
     s_dec_b = max_val / 6  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_dec_b_e4m3 = (s_dec_b * s_enc).to(tl.float8e4nv)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
-    s_enc_b = 1 / (s_dec_b_e4m3.to(tl.float32) * s_dec)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
+    block_decode = s_dec_b_e4m3.to(tl.float32) * s_dec
+    # Fully masked or zero-scale groups decode to 0; guard the reciprocal so the
+    # FP4 conversion never sees 1/0 -> inf or 0*inf -> NaN.
+    s_enc_b = 1 / tl.where(block_decode > 0.0, block_decode, 1.0)
 
     f32_tensor = tl.reshape(f32_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
     quant_tensor = f32_tensor * s_enc_b
