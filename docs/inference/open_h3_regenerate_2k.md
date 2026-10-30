@@ -129,9 +129,13 @@ released (base MiniMax-H3, merged LoRA, Sharp branches, three Euler steps). All 
 space (`[24, 37, 48, 84]` for a 124-frame 768P clip), so a FastH3 draft latent goes straight to the upscaler.
 
 ```bash
+# FastH3 QAD (V2.1) NVFP4 draft, NVFP4 decode at 2K
 python examples/inference/basic/basic_fasth3_to_regen2k.py \
-    --draft-model FastVideo/FastVideo-FastH3-8-Step-V2 --prompt "A red fox trots through fresh snow" \
-    --output outputs/fasth3_regen2k            # add --draft-quant h3_dit_vsa for an NVFP4 draft
+    --draft-model FastVideo/FastH3-QAD-v2 --draft-quant h3_dit_vsa \
+    --vae-decoder fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors \
+    --prompt "A red fox trots through fresh snow" --output outputs/fasth3_regen2k
+# FastH3 Trim NVFP4 draft: --draft-model FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4 --draft-quant h3_dit_vsa
+# FastH3 V2 BF16 draft:    --draft-model FastVideo/FastVideo-FastH3-8-Step-V2 (no --draft-quant)
 ```
 
 Two handoffs are available:

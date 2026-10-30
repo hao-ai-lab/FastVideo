@@ -8,7 +8,8 @@ The regen stack is unchanged (base MiniMax-H3, the released merged LoRA and Shar
         --draft-model FastVideo/FastVideo-FastH3-8-Step-V2 --regen-model Efficient-Large-Model/Open-H3-Regenerate-2K \
         --prompt "A red fox trots through fresh snow" --output outputs/fasth3_regen2k
 
-A packed NVFP4 draft checkpoint needs ``--draft-quant h3_dit_vsa``.
+A packed NVFP4 draft checkpoint (FastH3 QAD, FastH3 Trim NVFP4) needs ``--draft-quant h3_dit_vsa``; ``--vae-decoder``
+selects an NVFP4 decoder for the 2K decode.
 """
 
 from __future__ import annotations
@@ -49,6 +50,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--draft-seed", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=1766580932, help="regen refine noise seed")
     parser.add_argument("--output", type=Path, default=Path("outputs/fasth3_regen2k"))
+    parser.add_argument("--vae-decoder",
+                        default=None,
+                        help="NVFP4 H3 video decoder for the regen decode (Blackwell), e.g. "
+                        "quality-36L/decoder-nvfp4.safetensors from FastVideo/FastH3-NVFP4-VAE-Decoder")
     return parser.parse_args()
 
 
@@ -108,6 +113,9 @@ def main() -> None:
                                                    experimental={
                                                        "attention_backend": "TORCH_SDPA",
                                                        "draft_size": "768p",
+                                                       **({
+                                                           "h3_vae_nvfp4_decoder": args.vae_decoder
+                                                       } if args.vae_decoder else {}),
                                                    })))
     try:
         result = generator.generate(
