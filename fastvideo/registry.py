@@ -42,6 +42,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -60,6 +61,7 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
 from fastvideo.api.flux import FluxSamplingParam
+from fastvideo.api.pika_h3_flex import PikaH3FlexSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -1152,6 +1154,26 @@ def _register_configs() -> None:
 
     _register_wan_configs(WAN_MODEL_DEFINITIONS)
 
+    # Pika H3 Flex. It reuses MiniMax-H3's components, but its six-forward
+    # re-noise sampler and bucket geometry are a separate family contract.
+    register_configs(
+        sampling_param_cls=PikaH3FlexSamplingParam,
+        pipeline_config_cls=PikaH3FlexPipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["Pika-Labs/Pika-H3-Flex"],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "pika-h3-flex",
+                "pika_h3_flex",
+                "pikah3flexmodularpipeline",
+                "pikah3flexref2vamodularpipeline",
+            )),
+        ],
+        model_family="pika_h3_flex",
+        default_preset="pika_h3_flex_t2va",
+        pipeline_cls_name="PikaH3FlexModularPipeline",
+    )
+
     # MiniMax H3
     register_configs(
         sampling_param_cls=None,
@@ -1350,6 +1372,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
     from fastvideo.pipelines.basic.minimax_h3.presets import (
         ALL_PRESETS as MINIMAX_H3_PRESETS, )
+    from fastvideo.pipelines.basic.pika_h3_flex.presets import (
+        ALL_PRESETS as PIKA_H3_FLEX_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
@@ -1383,6 +1407,7 @@ def _register_presets() -> None:
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
+        PIKA_H3_FLEX_PRESETS,
         MMAUDIO_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,

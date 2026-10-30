@@ -175,6 +175,10 @@
             "href": "/cookbook/minimax-h3/fasth3-4step"
           },
           {
+            "label": "Pika H3 Flex",
+            "href": "/cookbook/minimax-h3/models/pika-h3-flex-t2va"
+          },
+          {
             "label": "Recipes and setup",
             "href": "/cookbook/minimax-h3"
           },

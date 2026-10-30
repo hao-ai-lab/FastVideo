@@ -236,20 +236,33 @@ def build_packed_batch_sequence(documents: tuple[MiniMaxH3PackedLayout, ...], ) 
     )
 
 
-def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int, int]:
+def resolve_canvas_size(
+    aspect_width: float,
+    aspect_height: float,
+    *,
+    short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    max_pixels: int = MINIMAX_H3_MAX_PIXELS,
+) -> tuple[int, int]:
+    """Resolve a canvas from an aspect ratio and a tier's short-edge/area rules.
+
+    The defaults are the released MiniMax-H3 768p rule.  Pika H3 Flex passes its
+    own 480p/768p tier values through the keyword arguments.
+    """
     if aspect_width <= 0 or aspect_height <= 0:
         raise ValueError(f"The aspect ratio must be positive, got {aspect_width}:{aspect_height}.")
+    if short_edge <= 0 or max_pixels <= 0:
+        raise ValueError(f"Canvas short_edge and max_pixels must be positive, got {short_edge}, {max_pixels}.")
     ratio = aspect_width / aspect_height
     if not MINIMAX_H3_MIN_ASPECT_RATIO <= ratio <= MINIMAX_H3_MAX_ASPECT_RATIO:
         raise ValueError(f"MiniMax-H3 supports aspect ratios from 1:4 to 4:1, got {aspect_width}:{aspect_height}.")
 
     if ratio >= 1:
-        width, height = MINIMAX_H3_SHORT_EDGE * ratio, float(MINIMAX_H3_SHORT_EDGE)
+        width, height = short_edge * ratio, float(short_edge)
     else:
-        width, height = float(MINIMAX_H3_SHORT_EDGE), MINIMAX_H3_SHORT_EDGE / ratio
+        width, height = float(short_edge), short_edge / ratio
     area = width * height
-    if area > MINIMAX_H3_MAX_PIXELS:
-        scale = (MINIMAX_H3_MAX_PIXELS / area)**0.5
+    if area > max_pixels:
+        scale = (max_pixels / area)**0.5
         width, height = width * scale, height * scale
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return max(multiple, round(height / multiple) * multiple), max(multiple, round(width / multiple) * multiple)
