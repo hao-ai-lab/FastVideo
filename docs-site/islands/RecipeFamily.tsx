@@ -4,8 +4,9 @@ import { modelDirectory, sitePath } from "@/lib/cookbook-pages";
 export default function RecipeFamily({ family }: { family: string }) {
   const models = modelDirectory.filter(
     (model) =>
-      model.recipes.some((recipe) => recipe.family === family) ||
-      (family === "minimax_h3" && model.family === "FastH3"),
+      !model.hidden &&
+      (model.recipes.some((recipe) => recipe.family === family) ||
+        (family === "minimax_h3" && model.family === "FastH3")),
   );
   return (
     <div className="recipe-directory not-prose">

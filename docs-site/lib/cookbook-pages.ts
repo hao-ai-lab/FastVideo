@@ -3,6 +3,15 @@ import sourceCatalog from "../../docs/assets/cookbook-recipes.json" with { type:
 /** Presentation metadata only. Deployments and editable fields come from the cookbook backend. */
 export const recipePages = [
   {
+    id: "fasth3-preview",
+    family: "MiniMax H3",
+    title: "FastH3 Preview V0.2",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-preview",
+    description: "The few-step FastH3 preview checkpoint on CUDA or native Apple Silicon MLX.",
+    tags: ["Text to video", "Audio", "4-step"],
+  },
+  {
     id: "fasth3-8step",
     family: "MiniMax H3",
     title: "FastH3 8-Step V2",
@@ -149,54 +158,53 @@ export function taskLabel(value: string): string {
   return TASK_GROUPS.find(([pattern]) => pattern.test(normalized))?.[1] ?? "Text to video";
 }
 
-const mappedModels = [...new Set(sourceRecipes.map((recipe) => recipe.model))]
-  .filter((model) => !hiddenBackends.has(backendModels[model]))
-  .map((model) => {
-    const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
-    const first = recipes[0];
-    const family = familyInfo[first.family];
-    const backend = recipePages.find((page) => page.id === backendModels[model]);
-    const ownModel = model.startsWith("FastVideo/Fast");
-    const logo = ownModel ? "fastvideo" : family.logo;
-    const providers: Record<string, string> = {
-      fastvideo: "FastVideo",
-      minimax: "MiniMax",
-      "wan-ai": "Wan AI",
-      ltx: "Lightricks",
-      "tencent-hunyuan": "Tencent",
-      kandinsky: "Kandinsky Lab",
-      "black-forest-labs": "Black Forest Labs",
-      qwen: "Qwen",
-      stabilityai: "Stability AI",
-      nvidia: "NVIDIA",
-    };
-    return {
-      id: backend?.id ?? first.id,
-      model,
-      recipes,
-      title:
-        backend?.title ??
-        (model.includes("FastH3-4-step")
-          ? "FastH3 4-Step V1"
-          : model.includes("FastH3-Preview-v0.2")
-            ? "FastH3 Preview V0.2"
-            : model === "MiniMaxAI/MiniMax-H3"
-              ? "MiniMax H3"
-              : first.label.split(" on ")[0]),
-      family: backend?.family ?? family.title,
-      familyPath: `/cookbook/${family.path}`,
-      path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
-      logo,
-      provider: providers[logo],
-      category: family.category,
-      description: backend?.description ?? first.summary,
-      tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
-      task: taskLabel(backend?.tags[0] ?? first.task),
-      platforms: [...new Set(recipes.flatMap((recipe) => recipe.gpu_types))],
-      configurable: !!backend,
-      featured: backend?.featured ?? false,
-    };
-  });
+const mappedModels = [...new Set(sourceRecipes.map((recipe) => recipe.model))].map((model) => {
+  const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
+  const first = recipes[0];
+  const family = familyInfo[first.family];
+  const backend = recipePages.find((page) => page.id === backendModels[model]);
+  const ownModel = model.startsWith("FastVideo/Fast");
+  const logo = ownModel ? "fastvideo" : family.logo;
+  const providers: Record<string, string> = {
+    fastvideo: "FastVideo",
+    minimax: "MiniMax",
+    "wan-ai": "Wan AI",
+    ltx: "Lightricks",
+    "tencent-hunyuan": "Tencent",
+    kandinsky: "Kandinsky Lab",
+    "black-forest-labs": "Black Forest Labs",
+    qwen: "Qwen",
+    stabilityai: "Stability AI",
+    nvidia: "NVIDIA",
+  };
+  return {
+    id: backend?.id ?? first.id,
+    model,
+    recipes,
+    title:
+      backend?.title ??
+      (model.includes("FastH3-4-step")
+        ? "FastH3 4-Step V1"
+        : model.includes("FastH3-Preview-v0.2")
+          ? "FastH3 Preview V0.2"
+          : model === "MiniMaxAI/MiniMax-H3"
+            ? "MiniMax H3"
+            : first.label.split(" on ")[0]),
+    family: backend?.family ?? family.title,
+    familyPath: `/cookbook/${family.path}`,
+    path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
+    logo,
+    provider: providers[logo],
+    category: family.category,
+    description: backend?.description ?? first.summary,
+    tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
+    task: taskLabel(backend?.tags[0] ?? first.task),
+    platforms: [...new Set(recipes.flatMap((recipe) => recipe.gpu_types))],
+    configurable: !!backend,
+    hidden: hiddenBackends.has(backend?.id ?? ""),
+    featured: backend?.featured ?? false,
+  };
+});
 
 const byPage = new Map<string, (typeof mappedModels)[number]>();
 for (const entry of mappedModels) {

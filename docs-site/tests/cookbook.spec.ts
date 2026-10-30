@@ -541,7 +541,7 @@ test("recipe facts state validity and why memory has no estimate", async ({ page
   await expect(page.getByText(/Select a device to estimate memory/)).toBeVisible();
 });
 
-test("FastH3 reports a weights estimate and reacts to quantization", async ({ page }) => {
+test("FastH3 keeps unmodeled quantization and decoder residency unknown", async ({ page }) => {
   await page.goto(route);
   await chooseHardware(page, "RTX 5090");
   const facts = page.locator(".recipe-facts");
@@ -552,13 +552,68 @@ test("FastH3 reports a weights estimate and reacts to quantization", async ({ pa
     .getByRole("group", { name: "Transformer quantization", exact: true })
     .getByRole("button", { name: "NVFP4", exact: true })
     .click();
-  await expect(page.getByText(/Resident weights need 47\.2 GiB/)).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
   await page
     .getByRole("group", { name: "NVFP4 video decoder", exact: true })
     .getByRole("button", { name: /8L · fast/ })
     .click();
-  await expect(page.getByText(/Resident weights need 38\.8 GiB/)).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"transformer_quant": "NVFP4"');
+  await expect(page.getByLabel("Generated YAML")).toContainText("fast-8L/decoder-nvfp4.safetensors");
 });
+
+test("4-Step quantization and full-depth decoder swaps also stay unestimated", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-4step");
+  await chooseHardware(page, "RTX 5090");
+  const facts = page.locator(".recipe-facts");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await chip(page, "Transformer quantization", "FP8");
+  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await chip(page, "Transformer quantization", "Default");
+  await page
+    .getByRole("group", { name: "NVFP4 video decoder", exact: true })
+    .getByRole("button", { name: /36L/ })
+    .click();
+  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+});
+
+test("the retired Preview route and deployment links keep their checkpoint", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-preview");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText("FastVideo-Minimax-FastH3-Preview-v0.2");
+  await page.goto("/FastVideo/cookbook?deployment=fasth3-preview%2Fcuda-rest");
+  await expect(page).toHaveURL(/minimax-h3\/fasth3-preview/);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText("FastVideo-Minimax-FastH3-Preview-v0.2");
+});
+
+for (const [deployment, label, sequential, tileBatch] of [
+  ["rtx5090-rest", "RTX 5090", true, "4"],
+  ["rtx-pro6000-rest", "RTX PRO 6000", false, "8"],
+  ["spark-rest", "DGX Spark", false, "12"],
+  ["cuda-rest", "RTX 5090", true, "4"],
+] as const) {
+  test(`Omni deployment link ${deployment} preserves its hardware baseline`, async ({ page }) => {
+    await page.goto(`/FastVideo/cookbook?deployment=fasth3-omniref%2F${deployment}`);
+    await expect(page).toHaveURL(/minimax-h3\/fasth3-omniref/);
+    await expect(page.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Serving", exact: true }).click();
+    await output(page, "config.yaml");
+    const yaml = page.getByLabel("Generated YAML");
+    await expect(yaml).toContainText(`"h3_sequential_load": ${sequential}`);
+    await expect(yaml).toContainText('"layer_profile": "h3_dit_vsa"');
+    await output(page, "Commands");
+    await expect(page.getByLabel("Server command")).toContainText(`FASTVIDEO_H3_VAE_TILE_BATCH=${tileBatch}`);
+    if (deployment === "spark-rest")
+      await expect(page.getByLabel("Server command")).toContainText("FASTVIDEO_NVFP4_MM_BACKEND=cudnn");
+  });
+}
 
 test("packed FastH3 checkpoints keep their fixed precision", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-trim");

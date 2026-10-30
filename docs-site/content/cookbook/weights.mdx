@@ -9,8 +9,8 @@ measured on 2026-10-27 with the Hugging Face tree API. Treat it as the weight
 floor. A run also needs activations, VSA workspace, and decode buffers, so
 weights that fit do not guarantee a run that fits.
 
-The cookbook editor still starts from the maintained BF16 deployment. Use this
-page to pick a checkpoint before you open a recipe.
+The cookbook editor starts from each recipe's maintained deployment. Changing
+a quantization control does not select one of the published exports below.
 
 ## Catalog weights
 
@@ -55,36 +55,38 @@ only shrink when the repository ships them quantized too.
 | 4-Step V1         | BF16           | 137.7   | 65.3        | 62.1         | 10.3 |
 | 4-Step V1         | NVFP4          | 114.5   | 49.8        | 62.1         | 2.5  |
 | Omni v1           | BF16 DiT       | 65.3    | 65.3        | n/a          | n/a  |
-| Omni v1           | FP8            | 114.6   | 47.4        | 15.3         | 4.5  |
-| Omni v1           | NVFP4 QAD      | 101.1   | 37.0        | 15.3         | 11.0 |
+| Omni v1           | FP8            | 67.2    | 47.4        | 15.3         | 4.5  |
+| Omni v1           | NVFP4 QAD      | 63.3    | 37.0        | 15.3         | 11.0 |
 | NVFP4 VAE decoder | quality        | 5.8     | n/a         | n/a          | 5.8  |
 | NVFP4 VAE decoder | fast           | 1.3     | n/a         | n/a          | 1.3  |
 
 The NVFP4 checkpoint keeps the BF16 text encoder, which is why it is larger
 than FP8. The Consumer variant pairs the smaller NVFP4 transformer with the
-FP8 text encoder and VAE, which brings the total to 58.7 GiB. That needs a
-64 GB card. Offload the text encoder and it drops to 43.4 GiB, which fits
-48 GB. On 32 GB the 8-Step DiT alone is 36.9 GiB, so use Trim NVFP4 with the
-encoder offloaded: 32.9 GiB in total, 17.6 GiB resident.
+FP8 text encoder and VAE, which brings the listed weights to 58.7 GiB. These
+export sizes do not establish device fit. Loading, offload, quantization
+profiles, and temporary buffers affect runtime residency. The decoder-only
+rows exclude the VAE encoder and can contain master weights that the loader
+packs before inference.
 
 ## Pick by GPU
 
-| GPU family       | Examples                            | Use                                                                                                    | Why                                                               |
-| ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Blackwell        | RTX 5090, RTX PRO 6000, B200, GB200 | NVFP4, Consumer with encoder offload on 48 GB, Trim NVFP4 with encoder offload on 32 GB, NVFP4 decoder | Native FP4 tensor cores cut the transformer to about half of BF16 |
-| Hopper           | H100, H200                          | FP8                                                                                                    | FP8 tensor cores, NVFP4 falls back to slower paths                |
-| Ada              | RTX 4090, L40S                      | FP8                                                                                                    | FP8 works, NVFP4 does not                                         |
-| Ampere and older | A100, RTX 3090                      | BF16                                                                                                   | No FP8 or FP4 hardware                                            |
-| Apple silicon    | M-series                            | MLX INT6 or INT8                                                                                       | The MLX conversions are INT6 and INT8, not FP4                    |
-| DGX Spark        | GB10                                | NVFP4 with sequential load                                                                             | Unified memory, so the host RAM counts toward the budget          |
+| GPU family       | Examples                            | Use                                             | Why                                                               |
+| ---------------- | ----------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------- |
+| Blackwell        | RTX 5090, RTX PRO 6000, B200, GB200 | NVFP4 or FP8 with a matching maintained profile | Native FP4 tensor cores cut the transformer to about half of BF16 |
+| Hopper           | H100, H200                          | FP8                                             | FP8 tensor cores; the NVFP4 path requires Blackwell               |
+| Ada              | RTX 4090, L40S                      | FP8                                             | FP8 works, NVFP4 does not                                         |
+| Ampere and older | A100, RTX 3090                      | BF16                                            | No FP8 or FP4 hardware                                            |
+| Apple silicon    | M-series                            | MLX INT6 or INT8                                | The MLX conversions are INT6 and INT8, not FP4                    |
+| DGX Spark        | GB10                                | NVFP4 with sequential load                      | Unified memory, so the host RAM counts toward the budget          |
 
 ## What the cookbook does now
 
-FastH3 pages compare resident checkpoint weights with the selected device and
-say whether the weights fit. The comparison follows the controls above it:
-offloading the text encoder removes its 62.1 GiB, an NVFP4 transformer sets
-36.9 GiB, and the NVFP4 decoder replaces the 9.7 GiB VAE. The result is a
-weights check, not a request peak, and the page says so.
+For configurations without transformer quantization or a decoder swap, FastH3
+pages compare checkpoint weights with the selected device. This is a weights
+check, not a request peak. Quantized transformers and NVFP4 decoder swaps stay
+unestimated until metadata covers the effective layer profile, retained
+components, and packed runtime storage. The editor explains the missing
+coverage instead of substituting an unrelated export or decoder file size.
 
 The transformer quantization control writes
 `generator.engine.quantization.transformer_quant`, so the copied YAML names the

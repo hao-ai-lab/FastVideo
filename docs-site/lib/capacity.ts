@@ -54,19 +54,24 @@ export function assessWeightsRecipe({
   const parts = { ...weights.parts };
   const components = generator.pipeline?.components ?? {};
   const experimental = generator.pipeline?.experimental ?? {};
+  if (experimental.h3_vae_nvfp4_decoder) {
+    return {
+      status: "unknown",
+      reason:
+        "NVFP4 decoder residency is not modeled: the VAE retains its encoder and packs decoder weights after loading. Decoder file size is not the resident VAE size.",
+    };
+  }
   if (components.text_encoder_weights && weights.alternates?.text_encoder_quantized !== undefined) {
     parts.text_encoder = weights.alternates.text_encoder_quantized;
   }
   const quant = (config.generator as { engine?: { quantization?: { transformer_quant?: string | null } } })?.engine
     ?.quantization?.transformer_quant;
-  if (quant && weights.alternates) {
-    const key = quant === "NVFP4" ? "transformer_nvfp4" : quant === "FP8" ? "transformer_fp8" : undefined;
-    if (key && weights.alternates[key] !== undefined) parts.transformer = weights.alternates[key];
-  }
-  const decoder = experimental.h3_vae_nvfp4_decoder;
-  if (decoder && weights.alternates) {
-    const key = String(decoder).includes("fast-8L") ? "vae_nvfp4_fast" : "vae_nvfp4_quality";
-    if (weights.alternates[key] !== undefined) parts.vae = weights.alternates[key];
+  if (quant) {
+    return {
+      status: "unknown",
+      reason:
+        "Transformer quantization residency is not modeled for this checkpoint and layer profile. Published export sizes do not describe on-the-fly quantization of this configuration.",
+    };
   }
   const offload = generator.engine?.offload ?? {};
   if (offload.text_encoder) delete parts.text_encoder;

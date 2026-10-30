@@ -2,7 +2,8 @@ title: FastH3 Omni v1
 summary: Video and synchronized audio from a prompt plus ordered image, video, and audio references, in eight forwards.
 guide: docs/inference/fasth3_omniref.md
 deployments:
-  cuda-rest:
+  rtx5090-rest:
+    label: RTX 5090 REST
     runtime: fastvideo-cuda-rest
     workload: i2v
     defaults: examples/serving/openai_fasth3_omniref_rtx5090.yaml
@@ -64,3 +65,83 @@ deployments:
         minimum: 32
         multipleOf: 32
         default: 832
+
+  rtx-pro6000-rest:
+    label: RTX PRO 6000 REST
+    runtime: fastvideo-cuda-rest
+    workload: i2v
+    defaults: examples/serving/openai_fasth3_omniref_rtx_pro6000.yaml
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN_H3
+      FASTVIDEO_H3_VSA_FP4: "1"
+      FASTVIDEO_H3_VSA_FP4_PREFIX: fp8
+      FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P: "1"
+      FASTVIDEO_H3_VSA_FP4_K_SMOOTH: "1"
+      FASTVIDEO_H3_GATE_CHUNK_ROWS: "8192"
+      FASTVIDEO_MINIMAX_H3_FUSIONS: all
+      FASTVIDEO_VSA_TRITON: "1"
+      FASTVIDEO_VSA_PTX_BLACKWELL: "0"
+      FASTVIDEO_FA4: "0"
+      FASTVIDEO_H3_VAE_TILE_BATCH: "8"
+    requirements:
+      - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
+      - >-
+        Compose the model directory once: python examples/inference/basic/basic_fasth3_omniref_pdd.py
+        --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --composed-dir ./FastH3-OmniRef-Composed
+        --image assets/images/couple.jpg --prompt "a person speaking to camera"
+      - Requests carry ordered image_reference, video_reference, and audio references; list local media
+        directories in server.media_roots.
+      - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
+      - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+    options: *omniref_options
+    overrides:
+      default_request.sampling.num_frames:
+        enum: [124, 243, 362]
+        default: 124
+        description: Five, ten, or fifteen seconds at 24 fps.
+      default_request.sampling.height:
+        minimum: 32
+        multipleOf: 32
+        default: 768
+      default_request.sampling.width:
+        minimum: 32
+        multipleOf: 32
+        default: 1344
+
+  spark-rest:
+    label: DGX Spark REST
+    runtime: fastvideo-cuda-rest
+    workload: i2v
+    defaults: examples/serving/openai_fasth3_omniref_spark.yaml
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN_H3
+      FASTVIDEO_H3_VSA_FP4: "1"
+      FASTVIDEO_H3_VSA_FP4_PREFIX: fp8
+      FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P: "1"
+      FASTVIDEO_H3_VSA_FP4_K_SMOOTH: "1"
+      FASTVIDEO_H3_GATE_CHUNK_ROWS: "8192"
+      FASTVIDEO_ULYSSES_A2A: auto
+      FASTVIDEO_MINIMAX_H3_EXACT_KERNELS: all
+      FASTVIDEO_H3_VSA_HEADS_FIRST_TILE: "1"
+      FASTVIDEO_H3_VAE_TILE_PARALLEL: "1"
+      FASTVIDEO_H3_REF2VA_MEMO_ENTRIES: "16"
+      FASTVIDEO_MINIMAX_H3_FUSIONS: all
+      FASTVIDEO_VSA_TRITON: "1"
+      FASTVIDEO_VSA_PTX_BLACKWELL: "0"
+      FASTVIDEO_FA4: "0"
+      FASTVIDEO_NVFP4_MM_BACKEND: cudnn
+      FASTVIDEO_NVFP4_MM_ROW_SPLIT: table
+      FASTVIDEO_H3_VAE_TILE_BATCH: "12"
+      FASTVIDEO_H3_VAE_INT8_OVERLAY: "0"
+    requirements:
+      - Install FastVideo using the DGX Spark guide before running these commands.
+      - >-
+        Compose the model directory once: python examples/inference/basic/basic_fasth3_omniref_pdd.py
+        --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --composed-dir ./FastH3-OmniRef-Composed
+        --image assets/images/couple.jpg --prompt "a person speaking to camera"
+      - Requests carry ordered image_reference, video_reference, and audio references; list local media
+        directories in server.media_roots.
+      - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
+      - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+    options: *omniref_options
+    overrides: *omniref_overrides

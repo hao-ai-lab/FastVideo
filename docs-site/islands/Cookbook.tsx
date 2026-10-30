@@ -698,6 +698,11 @@ function MatrixRow({ title, children }: { title: string; children: ReactNode }) 
   );
 }
 
+function deploymentFromUrl() {
+  const requested = new URL(window.location.href).searchParams.get("deployment");
+  return requested === "fasth3-omniref/cuda-rest" ? "fasth3-omniref/rtx5090-rest" : requested;
+}
+
 export default function Cookbook({ modelId }: { modelId?: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -720,7 +725,7 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
           throw new Error("No cookbook deployments are available. Check the catalog and retry.");
         }
         setIndex(data);
-        const requested = new URL(window.location.href).searchParams.get("deployment");
+        const requested = deploymentFromUrl();
         const requestedModel = data.models.find((model) =>
           model.deployments.some((deployment) => deployment.id === requested),
         );
@@ -766,7 +771,7 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
   }
   useEffect(() => {
     const restore = () => {
-      const requested = new URL(window.location.href).searchParams.get("deployment");
+      const requested = deploymentFromUrl();
       const available = index?.models.find((item) => item.id === modelId)?.deployments ?? [];
       const next = available.find((deployment) => deployment.id === requested)?.id ?? available[0]?.id;
       if (!next) return;
@@ -976,6 +981,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
   };
   const visible = modelDirectory.filter(
     (model) =>
+      !model.hidden &&
       (category === "All models" || model.category === category) &&
       (family === "All families" || model.family === family) &&
       (task === "All tasks" || model.task === task) &&
