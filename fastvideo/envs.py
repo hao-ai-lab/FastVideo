@@ -267,6 +267,12 @@ FASTVIDEO_HOST_IP = EnvStr(
     category="distributed",
     doc="IP address of this node when the node has several network interfaces. Set it on each node for multi-node "
     "inference.")
+FASTVIDEO_PG_TIMEOUT_MIN = EnvInt(
+    0,
+    category="distributed",
+    doc="Timeout in minutes for the training process groups' collectives (0 keeps PyTorch's 10-minute default). "
+    "Raise it for large models whose rank-0 load and scatter, checkpoint saves or long evaluations outlast the "
+    "default.")
 FASTVIDEO_LOOPBACK_IP = EnvStr("",
                                category="distributed",
                                doc="Loopback IP address to use instead of the detected one.")
