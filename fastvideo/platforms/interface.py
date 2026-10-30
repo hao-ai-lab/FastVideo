@@ -25,6 +25,7 @@ class AttentionBackendEnum(enum.Enum):
     SAGE_SLA_ATTN = enum.auto()
     NABLA_ATTN = enum.auto()
     NO_ATTENTION = enum.auto()
+    FLASHINFER = enum.auto()
 
 
 class PlatformEnum(enum.Enum):
