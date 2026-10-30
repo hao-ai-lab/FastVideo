@@ -372,13 +372,30 @@ def test_failed_pre_load_check_leaves_the_base_model_in_place(make_client) -> No
     assert generator.events == [("generate", "plain")]
 
 
-def test_unrecoverable_state_refuses_a_plain_request(make_client) -> None:
-    generator = _FakeGenerator(failing={("realism", None), ("orbit", None)})
+def test_failed_first_load_leaves_the_base_model_serving(make_client) -> None:
+    generator = _FakeGenerator(failing={("realism", None)})
     client = make_client(generator)
 
-    _sync(client, name="realism")
+    failed = _sync(client, name="realism")
+    plain = _sync(client, "plain")
+    again = _sync(client, "plain again")
+
+    assert failed.status_code == 500
+    assert plain.status_code == 200 and again.status_code == 200
+    assert [event for event in generator.events if event[0] == "generate"] == [("generate", "plain"),
+                                                                              ("generate", "plain again")]
+
+
+def test_unrecoverable_state_after_a_loaded_adapter_refuses_a_plain_request(make_client) -> None:
+    generator = _FakeGenerator()
+    client = make_client(generator)
+    assert _sync(client, "styled", name="realism").status_code == 200
+    generator.failing = {("realism", None), ("orbit", None)}
+
+    failed = _sync(client, name="orbit")
     plain = _sync(client, "plain")
 
+    assert failed.status_code == 500
     assert plain.status_code == 500
     assert "restore the base model" in plain.json()["error"]["message"]
     assert ("generate", "plain") not in generator.events

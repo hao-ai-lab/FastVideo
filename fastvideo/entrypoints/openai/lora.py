@@ -205,6 +205,10 @@ class LoraRuntime:
 
         ``lora_path=None`` re-applies the adapter from the pipeline's memory, so recovery never reads an adapter
         file; an adapter the pipeline never loaded is refused before any weight changes.
+
+        Until an adapter has loaded, the model is the base model even after a failed load: a load that fails while
+        reading the adapter leaves the wrapped layers empty, and an empty wrapper runs its base layer. A failure
+        while applying the adapter keeps it in memory, so the strength-0 reset above covers that case.
         """
         candidates = dict.fromkeys(adapter_id for adapter_id in (*preferred, *self.loaded) if adapter_id is not None)
         for adapter_id in candidates:
@@ -216,6 +220,11 @@ class LoraRuntime:
             self.loaded.add(adapter_id)
             self.current_id = adapter_id
             self.current_strength = 0.0
+            self.unknown_state = False
+            return True
+        if not self.loaded:
+            self.current_id = None
+            self.current_strength = None
             self.unknown_state = False
             return True
         return False
