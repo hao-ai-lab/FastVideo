@@ -656,6 +656,7 @@ class LoRAPipeline(ComposedPipelineBase):
         # Merge the new adapter
         adapted_count = 0
         consumed: set[str] = set()
+        untouched: list[str] = []
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -696,17 +697,21 @@ class LoRAPipeline(ComposedPipelineBase):
                             adapted_count += 1
                             consumed.update((lora_A_name, lora_B_name, lora_alpha_name))
                         else:
-                            if rank == 0:
-                                logger.warning(
-                                    "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
-                                    lora_path,
-                                    name,
-                                )
+                            untouched.append(name)
                             layer.disable_lora = True
                     # Repack inside the offload scope, while the block's parameters are resident.
                     repack_scope = [module] if module is not None else list(layers.values())
                     _convert_quantized_weights_after_lora_change(repack_scope,
                                                                  skip=_all_side_branch(layers.values(), repack_scope))
+        if untouched and rank == 0:
+            # One summary, not one line per wrapped layer: an adapter that trains a subset of the
+            # wrapped linears (e.g. no AdaLN projections) would otherwise log hundreds of warnings.
+            logger.warning(
+                "LoRA adapter %s has no weights for %d wrapped layers; LoRA is disabled on them (e.g. %s).",
+                lora_path,
+                len(untouched),
+                ", ".join(untouched[:5]),
+            )
         logger.info(
             "Rank %d: LoRA adapter %s applied to %d layers",
             rank,
