@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Bounded text-only reuse; synthetic encoder keeps these regressions weight-free."""
 
 import gc
 import weakref
@@ -15,7 +14,6 @@ from fastvideo.pipelines.lazy_module import LazyModule
 
 
 class TinyConditioner(MiniMaxH3Qwen3VLConditioner):
-    """Use native root reload methods with a small embedding instead of Qwen weights."""
 
     def __init__(self, offset=0.0):
         torch.nn.Module.__init__(self)
@@ -212,7 +210,6 @@ def test_non_single_rank_and_invalid_budgets_are_rejected(make_stage, monkeypatc
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires one CUDA GPU")
 def test_native_qwen_conditioner_cuda_reuse_and_reload(distributed_setup):
-    """Real native H3 encoder and stage; random tiny weights, no released checkpoint."""
     from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
         MiniMaxH3Qwen3VLArchConfig, MiniMaxH3Qwen3VLConfig)
     from fastvideo.distributed import get_local_torch_device
