@@ -82,3 +82,18 @@ def test_adapter_change_on_a_released_transformer_does_not_load_it(monkeypatch, 
 
     assert not transformer.is_materialized
     assert transformer.materialize().layer.lora_strength == 0.0
+
+
+def test_a_cleared_adapter_is_not_reapplied_on_reload(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_LORA_SIDE_BRANCH.override(True))
+    monkeypatch.setattr(lora_pipeline.dist, "get_rank", lambda: 0)
+    pipeline, transformer = _lazy_pipeline()
+    pipeline.convert_to_lora_layers()
+    transformer.materialize()
+    pipeline.set_lora_adapter("realism", strength=0.8)
+
+    pipeline.clear_lora_adapter()
+    assert transformer.materialize().layer.lora_A is None
+    assert transformer.release()
+
+    assert transformer.materialize().layer.lora_A is None

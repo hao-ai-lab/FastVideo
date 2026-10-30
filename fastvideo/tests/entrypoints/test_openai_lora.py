@@ -32,12 +32,18 @@ REALISM_PATH = "fal/MiniMax-H3-Realism-People-LoRA"
 
 
 class _FakeGenerator:
-    """Records each adapter change and each generation; like the pipeline, it re-applies a held adapter by name."""
+    """Records each adapter change, clear and generation, in the order they arrive."""
 
-    def __init__(self, failing: set[tuple[str, float | None]] | None = None) -> None:
+    def __init__(self, failing: set[tuple[str, float | None]] | None = None, clear_fails: bool = False) -> None:
         self.failing = failing or set()
+        self.clear_fails = clear_fails
         self.held: set[str] = set()
         self.events: list[tuple[Any, ...]] = []
+
+    def clear_lora_adapter(self) -> None:
+        self.events.append(("clear",))
+        if self.clear_fails:
+            raise RuntimeError("cannot clear")
 
     def set_lora_adapter(self, nickname: str, path: str | None = None, strength: float = 1.0) -> None:
         self.events.append(("set", nickname, path, strength))
@@ -341,7 +347,7 @@ def test_failed_change_fails_the_request_and_does_not_generate(make_client) -> N
     assert sync.status_code == 500
     assert "could not be applied" in sync.json()["error"]["message"]
     assert job["status"] == "failed"
-    assert all(event[0] == "set" for event in generator.events)
+    assert all(event[0] != "generate" for event in generator.events)
 
 
 def test_failed_change_never_leaves_an_unrequested_adapter(make_client) -> None:
@@ -354,9 +360,8 @@ def test_failed_change_never_leaves_an_unrequested_adapter(make_client) -> None:
 
     assert failed.status_code == 500
     assert plain.status_code == 200
-    # Recovery re-applies the held previous adapter at strength 0 from memory, so "plain" renders the base model.
-    assert generator.events[-3:] == [("set", "orbit", "pablodawson/Orbit", 1.0), ("set", "realism", None, 0.0),
-                                     ("generate", "plain")]
+    # The failed change clears every layer back to the base model, so "plain" needs no further change.
+    assert generator.events[-3:] == [("set", "orbit", "pablodawson/Orbit", 1.0), ("clear",), ("generate", "plain")]
 
 
 def test_failed_pre_load_check_leaves_the_base_model_in_place(make_client) -> None:
@@ -382,35 +387,37 @@ def test_failed_first_load_leaves_the_base_model_serving(make_client) -> None:
 
     assert failed.status_code == 500
     assert plain.status_code == 200 and again.status_code == 200
-    assert [event for event in generator.events if event[0] == "generate"] == [("generate", "plain"),
-                                                                              ("generate", "plain again")]
+    assert generator.events == [("set", "realism", REALISM_PATH, 0.8), ("clear",), ("generate", "plain"),
+                                ("generate", "plain again")]
 
 
-def test_unrecoverable_state_after_a_loaded_adapter_refuses_a_plain_request(make_client) -> None:
-    generator = _FakeGenerator()
+def test_a_failed_change_whose_clear_also_fails_refuses_until_a_clear_succeeds(make_client) -> None:
+    generator = _FakeGenerator(failing={("orbit", None)}, clear_fails=True)
     client = make_client(generator)
     assert _sync(client, "styled", name="realism").status_code == 200
-    generator.failing = {("realism", None), ("orbit", None)}
 
-    failed = _sync(client, name="orbit")
-    plain = _sync(client, "plain")
+    assert _sync(client, name="orbit").status_code == 500
+    refused = _sync(client, "plain")
+    generator.clear_fails = False
+    recovered = _sync(client, "plain again")
 
-    assert failed.status_code == 500
-    assert plain.status_code == 500
-    assert "restore the base model" in plain.json()["error"]["message"]
+    assert refused.status_code == 500
+    assert "clearing the adapter" in refused.json()["error"]["message"]
     assert ("generate", "plain") not in generator.events
+    assert recovered.status_code == 200
+    assert generator.events[-2:] == [("clear",), ("generate", "plain again")]
 
 
-def test_failed_strength_change_recovers_from_the_held_adapter(make_client) -> None:
+def test_a_selection_after_a_failed_change_applies_normally(make_client) -> None:
     generator = _FakeGenerator(failing={("realism", 0.8)})
     client = make_client(generator)
 
     assert _sync(client, name="realism", scale=0.5).status_code == 200
     assert _sync(client, name="realism", scale=0.8).status_code == 500
-    assert _sync(client, "plain").status_code == 200
+    assert _sync(client, name="realism", scale=0.5).status_code == 200
 
-    assert generator.events[-3:] == [("set", "realism", REALISM_PATH, 0.8), ("set", "realism", None, 0.0),
-                                     ("generate", "plain")]
+    assert generator.events[-4:] == [("set", "realism", REALISM_PATH, 0.8), ("clear",),
+                                     ("set", "realism", REALISM_PATH, 0.5), ("generate", "a fox")]
 
 
 def test_model_info_lists_adapters_without_paths(make_client) -> None:

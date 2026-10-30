@@ -775,6 +775,30 @@ class LoRAPipeline(ComposedPipelineBase):
                     _convert_quantized_weights_after_lora_change(repack_scope,
                                                                  skip=_all_side_branch(layers.values(), repack_scope))
 
+    def clear_lora_adapter(self) -> None:
+        """Return every LoRA layer to its base weights without reading an adapter, then restore the constructor adapter.
+
+        Merged layers get back the weights snapshotted when they were wrapped, and side-branch layers drop their
+        factors, so the result does not depend on which adapter, if any, the layers hold or how a change failed.
+        Loaded adapters stay in memory for a later ``set_lora_adapter``.
+        """
+        for transformer_lora_layers in self.lora_layers.values():
+            for module, layers in transformer_lora_layers.lora_layers_by_block():
+                with _get_hook_ctx(module):
+                    for layer in layers.values():
+                        layer.disable_lora = False
+                        layer.unmerge_lora_weights()
+                        layer.lora_A = None
+                        layer.lora_B = None
+                    # Repack inside the offload scope, while the block's parameters are resident.
+                    repack_scope = [module] if module is not None else list(layers.values())
+                    _convert_quantized_weights_after_lora_change(repack_scope,
+                                                                 skip=_all_side_branch(layers.values(), repack_scope))
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self._runtime_adapter = None
+        self._apply_constructor_adapter()
+
     def unmerge_lora_weights(self) -> None:
         """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state.
 

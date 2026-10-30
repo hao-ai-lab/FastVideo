@@ -87,3 +87,35 @@ def test_accumulating_keeps_the_earlier_adapter_where_the_new_one_has_nothing(se
     pipeline.set_lora_adapter("b", strength=1.0, accumulate=True)
 
     assert torch.equal(transformer.second.base_layer.weight, merged)
+
+
+def test_clear_restores_base_weights_after_an_adapter(setup) -> None:
+    pipeline, transformer = setup
+    original = {name: getattr(transformer, name).weight.detach().clone() for name in ("first", "second")}
+
+    pipeline.set_lora_adapter("a", strength=1.0)
+    pipeline.clear_lora_adapter()
+
+    for name in ("first", "second"):
+        layer = getattr(transformer, name)
+        assert torch.equal(layer.base_layer.weight, original[name])
+        assert layer.lora_A is None and not layer.merged
+    assert pipeline._runtime_adapter is None and pipeline.cur_adapter_name == ""
+    pipeline.set_lora_adapter("b", strength=1.0)
+    assert transformer.first.merged and torch.equal(transformer.second.base_layer.weight, original["second"])
+
+
+def test_clear_restores_base_weights_after_a_change_that_failed_part_way(setup) -> None:
+    pipeline, transformer = setup
+    original = {name: getattr(transformer, name).weight.detach().clone() for name in ("first", "second")}
+    pipeline.set_lora_adapter("a", strength=1.0)
+    # B's factors for "second" have the wrong shape, so the change fails after "first" already switched to B.
+    pipeline.lora_adapters["b"] = {**_adapter(["first"], 2), "second.lora_A": torch.randn(RANK, DIM + 1),
+                                   "second.lora_B": torch.randn(DIM, RANK)}
+
+    with pytest.raises(RuntimeError):
+        pipeline.set_lora_adapter("b", strength=1.0)
+    pipeline.clear_lora_adapter()
+
+    for name in ("first", "second"):
+        assert torch.equal(getattr(transformer, name).base_layer.weight, original[name])

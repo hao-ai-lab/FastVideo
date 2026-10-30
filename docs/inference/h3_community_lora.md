@@ -154,9 +154,9 @@ is rejected. A bad selection gets HTTP 400 before any job is stored.
 Strength `0` is exactly the base model, with output identical to a request without `lora`. A request without `lora`
 sets the last-used adapter to strength 0 instead of unloading it, so one request never inherits another's
 adapter. The server applies the adapter under the same lock as the generation, so requests never interleave. If
-a change fails, that request fails with the loader's message, and the server sets an adapter it already holds back
-to strength 0 before the next request; it never renders with an adapter the request did not select. A failed
-first load leaves the base model in place, so requests without `lora` keep working.
+a change fails, that request fails with the loader's message, and the server clears every LoRA layer back to the
+base weights without reading an adapter file, so it never renders with an adapter the request did not select and
+requests without `lora` keep working.
 
 Per-request adapters need side-branch LoRA layers, so the server refuses an allow-list unless the model is a packed
 NVFP4 export (a `transformer/nvfp4_weights.safetensors` file with `transformer_quant: NVFP4`) or

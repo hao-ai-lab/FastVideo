@@ -284,6 +284,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         super().unmerge_lora_weights()
         self._drop_pinned_host_copies()
 
+    def clear_lora_adapter(self) -> None:
+        super().clear_lora_adapter()
+        self._drop_pinned_host_copies()
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._ref2va = getattr(self, "_ref2va_default", False)
         self._denoise_stages_ready = False

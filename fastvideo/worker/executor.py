@@ -120,6 +120,13 @@ class Executor(ABC):
         """
         raise NotImplementedError
 
+    def clear_lora_adapter(self) -> None:
+        """Return every worker's LoRA layers to the base weights."""
+        responses: list[dict[str, Any]] = self.collective_rpc("clear_lora_adapter", kwargs={})
+        for i, response in enumerate(responses):
+            if response["status"] != "lora_adapter_cleared":
+                raise RuntimeError(f"Worker {i} failed to clear the LoRA adapter: {response['status']}")
+
     @abstractmethod
     def merge_lora_weights(self) -> None:
         """

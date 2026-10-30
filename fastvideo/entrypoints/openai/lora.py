@@ -117,7 +117,7 @@ class LoraRuntime:
     check_adapter: Callable[[LoRAAdapterConfig], None] = check_adapter_file
     current_id: str | None = None
     current_strength: float | None = None
-    # Set when a failed change left the generator's adapter state unknown; cleared by the next successful change.
+    # Set only when clearing after a failed change failed too; the next successful change or clear resets it.
     unknown_state: bool = False
     adapters: dict[str, LoRAAdapterConfig] = field(init=False)
     loaded: set[str] = field(init=False, default_factory=set)
@@ -160,14 +160,15 @@ class LoraRuntime:
     def apply(self, generator: Any, selection: LoraSelection | None) -> None:
         """Make the selection current on ``generator``; ``None`` sets the current adapter to strength 0.
 
-        Raises when a failed change left the adapter state unknown and it cannot be brought back to the base
-        model, so the server never renders with an adapter nobody asked for.
+        Raises when the generator cannot be cleared back to the base model after a failed change, so the server
+        never renders with an adapter nobody asked for.
         """
         if selection is None:
             if self.unknown_state:
-                if not self._reset_to_base(generator, []):
-                    raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and no "
-                                       "loaded adapter could be set to strength 0 to restore the base model.")
+                self._clear(generator)
+                if self.unknown_state:
+                    raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and "
+                                       "clearing the adapter to restore the base model failed too.")
                 return
             if self.current_id is None or self.current_strength == 0.0:
                 return
@@ -185,46 +186,24 @@ class LoraRuntime:
                 logger.warning("LoRA adapter %r failed its pre-load check: %s", adapter_id, error)
                 raise LoraRequestError(f"LoRA adapter {adapter_id!r} cannot be loaded on this server.") from error
         logger.info("OpenAI server applies LoRA adapter %r at strength %g", adapter_id, strength)
-        previous_id = None if self.unknown_state else self.current_id
         try:
             generator.set_lora_adapter(adapter_id, self.adapters[adapter_id].path, strength=strength)
         except Exception as error:
-            # The failed change may keep the previous adapter active or leave a partial one.
-            self.current_id = None
-            self.current_strength = None
-            self.unknown_state = True
-            self._reset_to_base(generator, [previous_id, adapter_id])
+            # A failed change may keep the previous adapter or leave a partial one; clearing gives the base model.
+            self._clear(generator)
             raise LoraRequestError(f"LoRA adapter {adapter_id!r} could not be applied: {error}") from error
         self.loaded.add(adapter_id)
         self.current_id = adapter_id
         self.current_strength = strength
         self.unknown_state = False
 
-    def _reset_to_base(self, generator: Any, preferred: list[str | None]) -> bool:
-        """Set an adapter the pipeline holds to strength 0, which is exactly the base model.
-
-        ``lora_path=None`` re-applies the adapter from the pipeline's memory, so recovery never reads an adapter
-        file; an adapter the pipeline never loaded is refused before any weight changes.
-
-        Until an adapter has loaded, the model is the base model even after a failed load: a load that fails while
-        reading the adapter leaves the wrapped layers empty, and an empty wrapper runs its base layer. A failure
-        while applying the adapter keeps it in memory, so the strength-0 reset above covers that case.
-        """
-        candidates = dict.fromkeys(adapter_id for adapter_id in (*preferred, *self.loaded) if adapter_id is not None)
-        for adapter_id in candidates:
-            try:
-                generator.set_lora_adapter(adapter_id, None, strength=0.0)
-            except Exception:
-                logger.exception("OpenAI server could not set LoRA adapter %r to strength 0", adapter_id)
-                continue
-            self.loaded.add(adapter_id)
-            self.current_id = adapter_id
-            self.current_strength = 0.0
-            self.unknown_state = False
-            return True
-        if not self.loaded:
-            self.current_id = None
-            self.current_strength = None
-            self.unknown_state = False
-            return True
-        return False
+    def _clear(self, generator: Any) -> None:
+        self.current_id = None
+        self.current_strength = None
+        try:
+            generator.clear_lora_adapter()
+        except Exception:
+            logger.exception("OpenAI server could not clear the LoRA adapter")
+            self.unknown_state = True
+            return
+        self.unknown_state = False
