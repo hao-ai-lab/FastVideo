@@ -90,7 +90,7 @@ def draft_latent(args: argparse.Namespace) -> torch.Tensor:
                               output=OutputConfig(save_video=False, return_frames=True)))
     finally:
         generator.shutdown()
-    return normalize_h3_latents(torch.as_tensor(result.frames), args.regen_model)
+    return normalize_h3_latents(torch.as_tensor(result.samples), args.regen_model)
 
 
 def main() -> None:
