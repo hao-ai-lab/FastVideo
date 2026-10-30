@@ -667,7 +667,10 @@ class VideoGenerator:
                 try:
                     # Generate video for this prompt using the same logic below
                     output_path = self._run_on_output_rank(
-                        partial(self._prepare_output_path, sampling_param.output_path, batch_prompt),
+                        partial(self._prepare_output_path,
+                                sampling_param.output_path,
+                                batch_prompt,
+                                output_video_name=sampling_param.output_video_name),
                         description="output-path setup",
                     )
                     kwargs["output_path"] = output_path
@@ -712,8 +715,9 @@ class VideoGenerator:
             else:
                 raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._run_on_output_rank(
-            lambda: self._prepare_output_path(sampling_param.output_path, output_name_hint
-                                              if output_name_hint else prompt),
+            lambda: self._prepare_output_path(sampling_param.output_path,
+                                              output_name_hint if output_name_hint else prompt,
+                                              output_video_name=sampling_param.output_video_name),
             description="output-path setup",
         )
         kwargs["output_path"] = output_path
@@ -744,6 +748,7 @@ class VideoGenerator:
         self,
         output_path: str,
         prompt: str,
+        output_video_name: str | None = None,
     ) -> str:
         """Build a unique, sanitized output file path.
 
@@ -751,9 +756,10 @@ class VideoGenerator:
         otherwise default to ``.png``. Video workloads use ``.mp4``.
 
         - If ``output_path`` already carries the correct extension, treat it
-          as a file path.
-        - Otherwise, treat ``output_path`` as a directory and derive the
-          filename from the prompt.
+          as a file path, taking precedence over ``output_video_name``.
+        - Otherwise, treat ``output_path`` as a directory and use
+          ``output_video_name`` when provided, falling back to the prompt.
+          A matching extension in the requested name is not appended twice.
         - Invalid filename characters are removed; if the name changes, a
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
@@ -762,8 +768,12 @@ class VideoGenerator:
         extension_lower = extension.lower()
         is_directory = os.path.isdir(output_path)
         if self._is_image_workload():
-            target_ext = extension_lower if not is_directory and extension_lower in {".png", ".jpg", ".jpeg", ".webp"
-                                                                                     } else ".png"
+            image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
+            name_extension = os.path.splitext(output_video_name or "")[1].lower()
+            if not is_directory and extension_lower in image_extensions:
+                target_ext = extension_lower
+            else:
+                target_ext = name_extension if name_extension in image_extensions else ".png"
         elif self._is_audio_workload():
             target_ext = ".wav"
         else:
@@ -801,8 +811,11 @@ class VideoGenerator:
                     target_ext,
                 )
             output_dir = output_path
-            prompt_component = _sanitize_filename_component(prompt[:100])
-            out_name = f"{prompt_component}{target_ext}"
+            name_component = output_video_name or prompt[:100]
+            if output_video_name and name_component.lower().endswith(target_ext):
+                name_component = name_component[:-len(target_ext)]
+            sanitized_name = _sanitize_filename_component(name_component)
+            out_name = f"{sanitized_name}{target_ext}"
 
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
