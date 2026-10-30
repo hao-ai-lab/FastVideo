@@ -167,9 +167,9 @@ if [ "${GPU_BACKEND}" = "CUDA" ] && ! (( PYTHON_ONLY )); then
     if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
         case "${cc_major}.${cc_minor}" in
             # Architecture-conditional kernels need the `a` target: Hopper TK (9.0),
-            # data-center Blackwell VSA tcgen05 (10.0/10.3), and the attn_qat_infer
-            # FP4 kernels that CMake's AUTO gate builds for 12.0a/12.1a.
-            9.0|10.0|10.3|12.0|12.1)
+            # data-center Blackwell VSA tcgen05 (10.0/10.3), Rubin VSA (10.7), and the
+            # attn_qat_infer FP4 kernels that CMake's AUTO gate builds for 12.0a/12.1a.
+            9.0|10.0|10.3|10.7|12.0|12.1)
                 export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}a"
                 ;;
             *)
@@ -194,6 +194,29 @@ if [ "${GPU_BACKEND}" = "CUDA" ] && ! (( PYTHON_ONLY )); then
         cuda_major="$("${cuda_compiler}" --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\)\..*/\1/p' | tail -n 1)"
         if [[ ! "${cuda_major}" =~ ^[0-9]+$ ]] || (( cuda_major < 13 )); then
             echo "ERROR: sm_121a requires CUDA Toolkit 13.0+; ${cuda_compiler} reports CUDA ${cuda_major:-unknown}." >&2
+            exit 1
+        fi
+    fi
+
+    if [[ "${TORCH_CUDA_ARCH_LIST}" =~ (^|[\;,[:space:]])(10\.7a|107a|sm_107a)([\;,[:space:]]|$) ]]; then
+        cuda_compiler="${CUDACXX:-}"
+        if [ -z "${cuda_compiler}" ] && [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
+            cuda_compiler="${CUDA_HOME}/bin/nvcc"
+        fi
+        if [ -z "${cuda_compiler}" ]; then
+            cuda_compiler="$(command -v nvcc || true)"
+        fi
+        if [ -z "${cuda_compiler}" ]; then
+            echo "ERROR: sm_107a requires CUDA Toolkit 13.4+, but nvcc was not found." >&2
+            echo "       Set CUDACXX or CUDA_HOME to a CUDA 13.4 toolkit." >&2
+            exit 1
+        fi
+        cuda_version="$("${cuda_compiler}" --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | tail -n 1)"
+        cuda_major="${cuda_version%%.*}"
+        cuda_minor="${cuda_version##*.}"
+        if [[ ! "${cuda_major}" =~ ^[0-9]+$ ]] || [[ ! "${cuda_minor}" =~ ^[0-9]+$ ]] \
+            || (( cuda_major < 13 || (cuda_major == 13 && cuda_minor < 4) )); then
+            echo "ERROR: sm_107a requires CUDA Toolkit 13.4+; ${cuda_compiler} reports CUDA ${cuda_version:-unknown}." >&2
             exit 1
         fi
     fi
