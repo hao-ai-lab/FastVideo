@@ -77,8 +77,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                       pin_memory: bool,
                       device: torch.device,
                       dtype: torch.dtype = torch.float32) -> torch.Tensor:
-        """The CPU pixel buffer (FP32, or uint8 when chunks are quantized on the GPU), reused across requests of
-        the same geometry on unified memory.
+        """The CPU FP32 pixel buffer, reused across requests of the same geometry on unified memory.
 
         The stage returns a uint8 copy, so the buffer never escapes. Reuse matters on
         unified-memory GPUs (DGX Spark): device-to-host copies into never-touched pageable
@@ -202,6 +201,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 # cast it to uint8 immediately anyway; the clamp matches the
                 # post-decode handling of VAE output slightly outside [0, 1].
                 output = output.mul_(255).clamp_(0, 255).to(torch.uint8)
+            elif self._output_buffer is not None and output is self._output_buffer[1]:
+                output = output.clone()
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:

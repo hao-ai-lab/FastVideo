@@ -1029,7 +1029,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
     @staticmethod
     def _copy_chunk_pixels(pixels: torch.Tensor, output: torch.Tensor, frame_start: int, non_blocking: bool) -> None:
-        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer (fp32, or uint8 quantized on device).
+        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer.
 
         Device-to-host copies run per (batch, channel) plane: the temporal
         slice of ``output`` is strided across channels, but each plane is
@@ -1041,7 +1041,6 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         """
         target = output[:, :, frame_start:frame_start + pixels.shape[2]]
         if output.dtype == torch.uint8:
-            # Same mul/clamp/truncating cast as the stage's fp32 host path, so frames are bitwise equal.
             pixels = (pixels * 255).clamp_(0, 255).to(torch.uint8)
         if pixels.device.type == "cuda":
             pixels = pixels.contiguous()

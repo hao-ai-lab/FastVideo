@@ -218,11 +218,13 @@ def test_decode_stage_streams_uint8_by_default(monkeypatch) -> None:
     assert torch.equal(result.output, torch.full((1, 3, 5, 16, 16), 63, dtype=torch.uint8))
 
 
+@pytest.mark.parametrize("uint8_pixels", [False, True])
 @pytest.mark.parametrize("unified_memory", [True, False])
-def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory) -> None:
+def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory,
+                                                                     uint8_pixels) -> None:
     """On unified memory, same-geometry requests reuse one pre-touched CPU buffer; returned
     frames never alias it. Discrete GPUs allocate per request and hold nothing between them."""
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", "0")
+    monkeypatch.setenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", "1" if uint8_pixels else "0")
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     allocations = []
@@ -242,12 +244,13 @@ def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch
             return (1, 3, 5, 16, 16)
 
         def decode_to_pixels(self, decoded_latents, output):
-            buffers.append((output, bool(torch.isnan(output).any())))
-            output.fill_(VAE.fill)
+            poisoned = bool(torch.isnan(output).any()) if output.is_floating_point() else bool((output == 255).any())
+            buffers.append((output, poisoned))
+            output.fill_(VAE.fill if output.is_floating_point() else round(VAE.fill * 255 - 0.5))
 
     def fake_allocate(size, *, dtype=None, pin_memory=False):
         allocations.append(size)
-        return torch.full(size, float("nan"), dtype=dtype)
+        return torch.full(size, float("nan") if dtype.is_floating_point else 255, dtype=dtype)
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
@@ -277,6 +280,7 @@ def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch
         assert buffers[0][0] is not buffers[1][0]
         assert stage._output_buffer is None
     assert torch.equal(first, torch.full_like(first, 63)) and torch.equal(second, torch.full_like(second, 127))
+    assert first.data_ptr() != second.data_ptr()
 
 
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
