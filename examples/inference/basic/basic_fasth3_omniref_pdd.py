@@ -61,7 +61,9 @@ from fastvideo.api import (
     QuantizationConfig,
     SamplingConfig,
 )
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig
 from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 CONTRACT = "fastvideo_inference.json"
@@ -154,7 +156,39 @@ def build_parser() -> argparse.ArgumentParser:
                         help="precomputed AdaLN modulation table, so the 26 GB of adaln_proj never loads "
                         "(write one once with FASTVIDEO_H3_ADALN_DUMP). Strongly recommended: the 24/32 GB "
                         "profiles need it to keep the DiT resident")
+    parser.add_argument("--token-reduction",
+                        action="store_true",
+                        help="training-free speed mode after antirez/h3.c: pair horizontally adjacent generated-video "
+                        "tokens inside the middle DiT blocks; faster, but can change composition")
+    parser.add_argument("--token-reduction-blocks",
+                        default=None,
+                        metavar="BEGIN:END",
+                        help="blocks that run reduced (default 4:30)")
+    parser.add_argument("--token-reduction-early",
+                        default=None,
+                        metavar="STEPS:END",
+                        help="for the first STEPS forwards, reduce up to block END instead (default 4:40; 0:0 "
+                        "disables)")
+    parser.add_argument("--token-reduction-scale",
+                        type=float,
+                        default=None,
+                        help="scale of the update each paired token gets from its pair (default 1.0); unpaired "
+                        "tokens, such as the last column of an odd-width video, take the full update as in h3.c")
     return parser
+
+
+def token_reduction_options(args: argparse.Namespace) -> dict[str, Any] | None:
+    """``h3_token_reduction`` options from the command line, or None when it is off."""
+    if not args.token_reduction:
+        return None
+    options: dict[str, Any] = {"enabled": True}
+    if args.token_reduction_blocks is not None:
+        options["blocks"] = args.token_reduction_blocks
+    if args.token_reduction_early is not None:
+        options["early"] = args.token_reduction_early
+    if args.token_reduction_scale is not None:
+        options["update_scale"] = args.token_reduction_scale
+    return options
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -164,6 +198,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("pass at least one ordered reference with --image, --video, or --audio")
     if not any(kind != "audio" for kind, _ in args.references):
         parser.error("Ref2VA needs at least one image or video reference")
+    tuning = (args.token_reduction_blocks, args.token_reduction_early, args.token_reduction_scale)
+    if not args.token_reduction and any(value is not None for value in tuning):
+        parser.error("--token-reduction-blocks/-early/-scale need --token-reduction")
+    if args.token_reduction:
+        # Reject malformed values and intervals past H3's 50 blocks before any download; the
+        # transformer loader checks the checkpoint's own depth.
+        try:
+            MiniMaxH3TokenReductionSchedule.from_options(token_reduction_options(args),
+                                                         num_blocks=MiniMaxH3ArchConfig().num_layers)
+        except ValueError as error:
+            parser.error(str(error))
     return args
 
 
@@ -421,7 +466,8 @@ def apply_profile(profile: DeviceProfile, decoder: str | None, adaln_table: str 
 def build_generator_config(model_dir: Path,
                            num_gpus: int,
                            lossless_accel: bool = False,
-                           profile: DeviceProfile | None = None) -> GeneratorConfig:
+                           profile: DeviceProfile | None = None,
+                           token_reduction: dict[str, Any] | None = None) -> GeneratorConfig:
     quantization = None
     if profile is not None:
         # `h3_dit_vsa` matches the packed export the consumer weights ship; the
@@ -444,6 +490,8 @@ def build_generator_config(model_dir: Path,
     else:
         offload = OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=False)
         experimental = {}
+    if token_reduction is not None:
+        experimental["h3_token_reduction"] = dict(token_reduction)
     return GeneratorConfig(
         model_path=str(model_dir),
         engine=EngineConfig(
@@ -496,7 +544,7 @@ def main() -> None:
     if args.height is None:
         args.height = profile.height if profile is not None else DEFAULT_HEIGHT
     generator = VideoGenerator.from_config(
-        build_generator_config(model_dir, args.num_gpus, args.lossless_accel, profile))
+        build_generator_config(model_dir, args.num_gpus, args.lossless_accel, profile, token_reduction_options(args)))
     try:
         result = generator.generate(
             GenerationRequest(

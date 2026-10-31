@@ -28,6 +28,7 @@ exec pytest \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/training/test_ltx2_rope_fps.py \
   ./fastvideo/tests/inference/test_basic_fasth3_omniref_pdd.py \
+  ./fastvideo/tests/inference/test_basic_fasth3_token_reduction.py \
   ./fastvideo/tests/inference/test_inference_regional_compile.py \
   ./fastvideo/tests/attention/ \
   ./fastvideo/tests/layers/test_pdd_linear.py \
