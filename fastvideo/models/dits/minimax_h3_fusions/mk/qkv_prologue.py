@@ -70,8 +70,10 @@ def _qkv_norm_rope_kernel(
 
     if I64:
         base = (batch.to(tl.int64) * seq_len + tok) * num_heads * HD + h0 * HD
+        vbase = 2 * plane.to(tl.int64)
     else:
         base = (batch * seq_len + tok) * num_heads * HD + h0 * HD
+        vbase = 2 * plane
 
     idx = tl.arange(0, HD)
     pidx = tl.where(idx < RD, tl.where(idx < RD // 2, idx + RD // 2, idx - RD // 2), idx)
@@ -87,7 +89,7 @@ def _qkv_norm_rope_kernel(
     xk = tl.load(k_ptr + base + off, mask=mask, other=0.0).to(tl.float32)
     xv = tl.load(v_ptr + base + off, mask=mask, other=0.0)
 
-    tl.store(out_ptr + 2 * plane + base + off, xv, mask=mask)
+    tl.store(out_ptr + vbase + base + off, xv, mask=mask)
 
     y = tl.reshape(xq, (HB, HD))
     inv = tl.math.rsqrt(tl.sum(y * y, 1) / HD + eps)[:, None]

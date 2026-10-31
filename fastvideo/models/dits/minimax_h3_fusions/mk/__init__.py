@@ -17,8 +17,11 @@ MotionKernel                                   replaces
 ``gated_residual``                            the compiled ``_gated_residual``
 ============================================  ======================================
 
-All five run in fp32 internally with a single rounding at the bf16/fp16 store
-and require the production H3 norm eps of ``1e-5`` (enforced at the call sites).
+All five compute in fp32 and require the production H3 norm eps of ``1e-5``
+(enforced at the call sites). ``swiglu``, ``gated_residual`` and the qkv prologue
+round once at the store; ``rmsnorm_modulate`` also rounds its folded modulation
+tables and ``residual_gate_rmsnorm_modulate`` normalizes the stored residual, so
+those two match the default path to about 2.4e-3 rel-L2 rather than bitwise.
 """
 
 try:

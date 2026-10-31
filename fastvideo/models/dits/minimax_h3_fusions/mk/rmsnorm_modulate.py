@@ -6,8 +6,9 @@ MiniMax-H3 inference shapes; opt-in through ``FASTVIDEO_MINIMAX_H3_FUSIONS=mk``.
 
 MiniMax H3 RMSNorm + row-indexed AdaLN modulation (two-kernel fast path).
 
-Math (FastVideo ``minimax_h3.py`` lines 729-731), FP32 internally with one
-rounding at the store::
+Math (FastVideo ``minimax_h3.py`` lines 729-731), FP32 internally; the folded
+tables ``weight * (1 + scale)`` and ``shift`` are rounded to the activation dtype
+before the apply pass, so the output rounds twice::
 
     y = rms_norm(x, weight, eps) * (1 + scale[idx]) + shift[idx]
 
