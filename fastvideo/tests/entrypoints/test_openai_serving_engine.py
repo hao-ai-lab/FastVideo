@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import os
 from pathlib import Path
 import threading
 import time
@@ -15,11 +17,13 @@ from fastapi.testclient import TestClient
 
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai import media_policy, request_adapter
 from fastvideo.entrypoints.openai.media_policy import MediaPolicy
-from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
+from fastvideo.entrypoints.openai.protocol import UrlAudioReference, VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
     build_generation_request,
+    discard_materialized_media,
     prepare_reference_media,
     validate_served_model_name,
 )
@@ -241,7 +245,8 @@ def test_wav_media_type_is_detected_from_output_path() -> None:
 def test_missing_video_reference_fails_during_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(tmp_path / "missing.mp4")})
     with pytest.raises(RequestAdaptationError, match="does not exist"):
-        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
+        asyncio.run(
+            prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
 
 
 def test_local_media_paths_need_a_configured_root(tmp_path: Path) -> None:
@@ -250,6 +255,166 @@ def test_local_media_paths_need_a_configured_root(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": str(clip)})
     with pytest.raises(RequestAdaptationError, match="server.media_roots"):
         asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+
+
+def _data_url(media_type: str, payload: bytes) -> str:
+    return f"data:{media_type};base64,{base64.b64encode(payload).decode()}"
+
+
+def _ref(kind: str, url: str) -> dict[str, str]:
+    return {f"{kind}_url": url}
+
+
+def _uploads(tmp_path: Path) -> list[Path]:
+    return list((tmp_path / "uploads").glob("*"))
+
+
+def test_inline_video_and_audio_references_are_decoded_in_order(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(
+        prompt="waves",
+        video_reference=[
+            _ref("video", _data_url("video/mp4", b"first-clip")),
+            _ref("video", _data_url("video/quicktime", b"second-clip")),
+        ],
+        audio_reference=[
+            _ref("audio", _data_url("audio/mpeg", b"first-track")),
+            _ref("audio", _data_url("audio/wav", b"second-track")),
+        ],
+    )
+    created = asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert isinstance(request.video_reference, list) and isinstance(request.audio_reference, list)
+    videos = [reference.video_url for reference in request.video_reference]
+    audios = [reference.audio_url for reference in request.audio_reference]
+    assert created == videos + audios
+    contents = [Path(path).read_bytes() for path in created]
+    assert contents == [b"first-clip", b"second-clip", b"first-track", b"second-track"]
+    assert [Path(path).suffix for path in created] == [".mp4", ".mov", ".mp3", ".wav"]
+    assert {Path(path).parent for path in created} == {tmp_path / "uploads"}
+    discard_materialized_media(created)
+    assert not _uploads(tmp_path)
+
+
+@pytest.mark.parametrize("chunk_chars", [media_policy.DATA_URL_CHUNK_CHARS, 3, 4, 5, 7])
+def test_inline_reference_payload_may_be_wrapped_and_percent_escaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                    chunk_chars: int) -> None:
+    # Small chunks put chunk boundaries inside percent escapes and line breaks.
+    monkeypatch.setattr(media_policy, "DATA_URL_CHUNK_CHARS", chunk_chars)
+    track = bytes(range(256)) * 2
+    encoded = base64.b64encode(track).decode()
+    lines = [encoded[start:start + 16] for start in range(0, len(encoded), 16)]
+    wrapped = "".join(line + ("%0A" if number % 2 else "\r\n") for number, line in enumerate(lines))
+    escaped = wrapped.replace("+", "%2B").replace("/", "%2f").replace("=", "%3D")
+    request = VideoGenerationRequest(prompt="waves", audio_reference={"audio_url": f"data:audio/flac;base64,{escaped}"})
+    created = asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert Path(created[0]).read_bytes() == track
+    assert created[0].endswith(".flac")
+
+
+@pytest.mark.parametrize(
+    ("kind", "url", "message"),
+    [
+        ("video", "data:video/mp4;base64,not*base64", "not valid base64"),
+        ("audio", "data:audio/mpeg;base64,", "payload is empty"),
+        ("video", "data:video/mp4,raw-bytes", "must be base64-encoded"),
+        ("video", _data_url("audio/mpeg", b"track"), "need a data:video/"),
+        ("audio", _data_url("video/mp4", b"clip"), "need a data:audio/"),
+        ("audio", _data_url("application/octet-stream", b"track"), "need a data:audio/"),
+        ("image", _data_url("video/mp4", b"clip"), "need a data:image/"),
+    ],
+)
+def test_invalid_inline_references_are_refused(tmp_path: Path, kind: str, url: str, message: str) -> None:
+    request = VideoGenerationRequest(prompt="waves", **{f"{kind}_reference": _ref(kind, url)})
+    with pytest.raises(RequestAdaptationError, match=message):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert not _uploads(tmp_path)
+
+
+def test_inline_reference_over_the_media_limit_is_refused(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="waves", audio_reference={"audio_url": _data_url("audio/wav", b"12345")})
+    with pytest.raises(RequestAdaptationError, match="4-byte limit"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), max_bytes=4, policy=MediaPolicy()))
+    assert not _uploads(tmp_path)
+    at_limit = VideoGenerationRequest(prompt="waves", video_reference={"video_url": _data_url("video/mp4", b"1234")})
+    created = asyncio.run(prepare_reference_media("request", at_limit, str(tmp_path), max_bytes=4,
+                                                  policy=MediaPolicy()))
+    assert Path(created[0]).read_bytes() == b"1234"
+
+
+def test_oversized_inline_payload_is_refused_before_it_is_all_read(tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_policy, "DATA_URL_CHUNK_CHARS", 8)
+    unescaped: list[int] = []
+    original_unquote = media_policy.unquote
+
+    def counting_unquote(chunk: str) -> str:
+        unescaped.append(len(chunk))
+        return original_unquote(chunk)
+
+    monkeypatch.setattr(media_policy, "unquote", counting_unquote)
+    source = "data:video/mp4;base64," + "QU%4AB\n" * 10_000
+    with pytest.raises(media_policy.MediaPolicyError, match="4-byte limit"):
+        media_policy.decode_data_url(source, str(tmp_path / "clip.mp4"), max_bytes=4)
+    assert max(unescaped) <= 8 and sum(unescaped) < 64
+    assert not (tmp_path / "clip.mp4").exists()
+
+
+def test_decoded_references_are_removed_when_a_later_reference_fails(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(
+        prompt="waves",
+        video_reference={"video_url": _data_url("video/mp4", b"clip")},
+        audio_reference={"audio_url": "data:audio/mpeg;base64,%%%"},
+    )
+    with pytest.raises(RequestAdaptationError, match="not valid base64"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert not _uploads(tmp_path)
+
+
+def test_cancelled_decoding_removes_its_file_once_the_thread_finishes(tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    asyncio.run(_assert_cancelled_decoding_removes_its_file(tmp_path, monkeypatch))
+
+
+async def _assert_cancelled_decoding_removes_its_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    written: list[bool] = []
+
+    def decode_after_release(source: str, target: str, *, max_bytes: int) -> None:
+        started.set()
+        release.wait(timeout=5)
+        try:
+            media_policy.decode_data_url(source, target, max_bytes=max_bytes)
+            written.append(os.path.exists(target))
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(request_adapter, "decode_data_url", decode_after_release)
+    request = VideoGenerationRequest(prompt="waves", video_reference={"video_url": _data_url("video/mp4", b"clip")})
+    preparing = asyncio.create_task(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert await asyncio.to_thread(started.wait, 5)
+    preparing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await preparing
+    # The thread writes its file only after the request is gone, so cleanup has to wait for the thread.
+    release.set()
+    assert await asyncio.to_thread(finished.wait, 5)
+    assert written == [True]
+    deadline = time.monotonic() + 5
+    while _uploads(tmp_path) and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    assert not _uploads(tmp_path)
+
+
+def test_local_audio_paths_need_a_configured_root(tmp_path: Path) -> None:
+    track = tmp_path / "track.wav"
+    track.write_bytes(b"x")
+    request = VideoGenerationRequest(prompt="waves", audio_reference={"audio_url": str(track)})
+    with pytest.raises(RequestAdaptationError, match="server.media_roots"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    created = asyncio.run(
+        prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
+    assert created == []
+    assert isinstance(request.audio_reference, UrlAudioReference)
+    assert request.audio_reference.audio_url == os.path.realpath(track)
 
 
 def test_mmaudio_v2a_requires_video_reference(tmp_path: Path) -> None:
@@ -267,13 +432,18 @@ def test_mmaudio_v2a_requires_video_reference(tmp_path: Path) -> None:
 def test_missing_reference_fails_during_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="a fox", input_reference=str(tmp_path / "missing.png"))
     with pytest.raises(RequestAdaptationError, match="does not exist"):
-        asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
+        asyncio.run(
+            prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy(roots=(str(tmp_path), ))))
 
 
 def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:
     request = VideoGenerationRequest(
         prompt="a fox",
-        video_params={"width": 832, "height": 480, "fps": 30},
+        video_params={
+            "width": 832,
+            "height": 480,
+            "fps": 30
+        },
         seconds="2",
         seed=7,
     )
@@ -304,7 +474,11 @@ def test_request_adapter_accepts_matching_startup_lora(tmp_path: Path) -> None:
     request = VideoGenerationRequest(
         prompt="a fox",
         model="fast",
-        lora={"name": "fast", "path": adapter, "scale": 0.75},
+        lora={
+            "name": "fast",
+            "path": adapter,
+            "scale": 0.75
+        },
     )
 
     build_generation_request(
@@ -359,10 +533,22 @@ def test_fasth3_request_uses_the_general_adapter(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"aspect_ratio": "16:9", "num_frames": 22}, "generates 5-15 seconds"),
-        ({"size": "100x100", "num_frames": 124}, "positive multiples of 32"),
-        ({"aspect_ratio": "1:9", "num_frames": 124}, "supports aspect ratios"),
-        ({"aspect_ratio": "16:9", "num_frames": 120}, "causal-VAE grid"),
+        ({
+            "aspect_ratio": "16:9",
+            "num_frames": 22
+        }, "generates 5-15 seconds"),
+        ({
+            "size": "100x100",
+            "num_frames": 124
+        }, "positive multiples of 32"),
+        ({
+            "aspect_ratio": "1:9",
+            "num_frames": 124
+        }, "supports aspect ratios"),
+        ({
+            "aspect_ratio": "16:9",
+            "num_frames": 120
+        }, "causal-VAE grid"),
     ],
 )
 def test_fasth3_invalid_geometry_fails_at_admission(tmp_path: Path, overrides, message) -> None:
@@ -396,7 +582,9 @@ def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
         task="ref2va",
         aspect_ratio="16:9",
         num_frames=124,
-        image_reference=[{"image_url": f"/tmp/reference-{index}.png"} for index in range(10)],
+        image_reference=[{
+            "image_url": f"/tmp/reference-{index}.png"
+        } for index in range(10)],
     )
     with pytest.raises(RequestAdaptationError, match="at most 9 image references"):
         build_generation_request(
@@ -489,7 +677,11 @@ def test_audio_jobs_publish_wav_media_type_and_seconds(tmp_path: Path) -> None:
         with TestClient(app) as client:
             created = client.post(
                 "/v1/videos",
-                json={"model": "stable-audio", "prompt": "rain", "seconds": 3},
+                json={
+                    "model": "stable-audio",
+                    "prompt": "rain",
+                    "seconds": 3
+                },
             )
             assert created.status_code == 200
             audio_id = created.json()["id"]
@@ -517,6 +709,69 @@ def test_audio_jobs_publish_wav_media_type_and_seconds(tmp_path: Path) -> None:
             assert sync.content.startswith(b"RIFF")
             assert generator.last_output is not None
             assert not generator.last_output.exists()
+    finally:
+        asyncio.run(VIDEO_STORE.clear())
+        state.clear_state()
+
+
+class _ReferenceGenerator(_FileGenerator):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.references: list[tuple[str, bytes]] = []
+
+    def generate(self, request):
+        self.references = [(reference.media_type, Path(reference.source).read_bytes())
+                           for reference in request.inputs.references]
+        return super().generate(request)
+
+
+def test_ref2va_route_accepts_inline_references_and_removes_them(tmp_path: Path) -> None:
+    from fastvideo.entrypoints.openai import state
+    from fastvideo.entrypoints.openai.video_api import router
+
+    generator = _ReferenceGenerator()
+    engine = OpenAIServingEngine(generator)  # type: ignore[arg-type]
+    args = _args("MiniMaxAI/MiniMax-H3", override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline")
+    state.set_state(
+        generator,  # type: ignore[arg-type]
+        engine,
+        args,  # type: ignore[arg-type]
+        str(tmp_path),
+        served_model_name="minimax-h3",
+    )
+    asyncio.run(VIDEO_STORE.clear())
+    app = FastAPI()
+    app.include_router(router)
+    body = dict(
+        model="minimax-h3",
+        prompt="a fox sings along",
+        task="ref2va",
+        aspect_ratio="16:9",
+        num_frames=124,
+        video_reference=[_ref("video", _data_url("video/mp4", b"clip-with-sound"))],
+        audio_reference=[
+            _ref("audio", _data_url("audio/mpeg", b"first-voice")),
+            _ref("audio", _data_url("audio/wav", b"second-voice")),
+        ],
+    )
+
+    try:
+        with TestClient(app) as client:
+            sync = client.post("/v1/videos/sync", json=body)
+            assert sync.status_code == 200, sync.text
+            assert generator.references == [
+                ("video", b"clip-with-sound"),
+                ("audio", b"first-voice"),
+                ("audio", b"second-voice"),
+            ]
+            assert not _uploads(tmp_path)
+
+            mismatched = {**body, "audio_reference": [_ref("audio", _data_url("video/mp4", b"clip"))]}
+            refused = client.post("/v1/videos", json=mismatched)
+            assert refused.status_code == 400
+            assert "need a data:audio/" in refused.text
+            assert not _uploads(tmp_path)
     finally:
         asyncio.run(VIDEO_STORE.clear())
         state.clear_state()
