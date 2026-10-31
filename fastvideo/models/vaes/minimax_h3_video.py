@@ -294,6 +294,55 @@ class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
         return angles.cos(), angles.sin()
 
 
+def _apply_rotary(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the rotate-half partial RoPE to activation-dtype ``[B, S, H, D]`` Q/K."""
+    rotary_dim = cos.shape[-1]
+    query_rotary, query_pass = query[..., :rotary_dim], query[..., rotary_dim:]
+    key_rotary, key_pass = key[..., :rotary_dim], key[..., rotary_dim:]
+    query_first, query_second = query_rotary.chunk(2, dim=-1)
+    key_first, key_second = key_rotary.chunk(2, dim=-1)
+    query_rotated = torch.cat([-query_second, query_first], dim=-1)
+    key_rotated = torch.cat([-key_second, key_first], dim=-1)
+    query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
+    key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
+    return query, key
+
+
+def _rotary_tables_fit(query: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> bool:
+    batch, seq_len, head_dim = query.shape[0], query.shape[1], query.shape[-1]
+    if cos.dim() != 4 or cos.shape != sin.shape:
+        return False
+    if cos.shape[0] != batch or cos.shape[1] != seq_len or cos.shape[2] != 1:
+        return False
+    if cos.device != query.device or sin.device != query.device:
+        return False
+    if not cos.is_contiguous() or not sin.is_contiguous():
+        return False
+    rotary_dim = cos.shape[-1]
+    return 0 < rotary_dim <= head_dim and rotary_dim % 2 == 0
+
+
+def _can_fuse_qk_norm_rope(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
+) -> bool:
+    """The Triton prologue needs CUDA, contiguous Q/K, packed per-token rotary tables, and a power-of-two head dim."""
+    if rotary_emb is None or not query.is_cuda or not query.is_contiguous():
+        return False
+    if not key.is_contiguous() or key.shape != query.shape or key.dtype != query.dtype or not query.is_floating_point():
+        return False
+    if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad):
+        return False
+    head_dim = query.shape[-1]
+    return head_dim & (head_dim - 1) == 0 and _rotary_tables_fit(query, rotary_emb[0], rotary_emb[1])
+
+
 class MiniMaxH3VideoAttention(nn.Module):
 
     def __init__(self, dim: int, heads: int, dim_head: int, eps: float = 1e-5, bias: bool = True) -> None:
@@ -350,21 +399,15 @@ class MiniMaxH3VideoAttention(nn.Module):
         query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
         del projections
 
-        query = self.norm_q(query.float()).to(query.dtype)
-        key = self.norm_k(key.float()).to(key.dtype)
-        if rotary_emb is not None:
+        if envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.get() and _can_fuse_qk_norm_rope(query, key, rotary_emb):
+            from fastvideo.models.vaes.minimax_h3_qk_norm_rope import qk_norm_rope_
             cos, sin = rotary_emb
-            cos = cos.to(query.dtype)
-            sin = sin.to(query.dtype)
-            rotary_dim = cos.shape[-1]
-            query_rotary, query_pass = query[..., :rotary_dim], query[..., rotary_dim:]
-            key_rotary, key_pass = key[..., :rotary_dim], key[..., rotary_dim:]
-            query_first, query_second = query_rotary.chunk(2, dim=-1)
-            key_first, key_second = key_rotary.chunk(2, dim=-1)
-            query_rotated = torch.cat([-query_second, query_first], dim=-1)
-            key_rotated = torch.cat([-key_second, key_first], dim=-1)
-            query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
-            key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
+            qk_norm_rope_(query, key, cos, sin, self.heads, query.shape[-1], cos.shape[-1], float(self.norm_q.eps))
+        else:
+            query = self.norm_q(query.float()).to(query.dtype)
+            key = self.norm_k(key.float()).to(key.dtype)
+            if rotary_emb is not None:
+                query, key = _apply_rotary(query, key, rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype))
 
         if self.attn_impl is not None and query.device.type != "cpu":
             # VAE decoding has no diffusion-step metadata, so call the selected
