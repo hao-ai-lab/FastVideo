@@ -127,11 +127,11 @@ def test_decode_to_pixels_uint8_matches_fp32_quantization(device: str) -> None:
 def test_batched_tile_encode_matches_per_tile(monkeypatch) -> None:
     torch.manual_seed(20260810)
     vae = _tiny_vae()
-    vae.enable_tiling(tile_sample_min_height=8,
-                      tile_sample_min_width=8,
-                      tile_sample_min_overlap_height=2,
-                      tile_sample_min_overlap_width=2)
-    pixels = torch.rand(1, 3, 1, 20, 20)
+    vae.enable_tiling(tile_sample_min_height=16,
+                      tile_sample_min_width=16,
+                      tile_sample_min_overlap_height=8,
+                      tile_sample_min_overlap_width=8)
+    pixels = torch.rand(1, 3, 1, 32, 32)
 
     monkeypatch.setenv("FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH", "1")
     per_tile = vae.encode(vae.normalize_pixels(pixels)).latent_dist.parameters
