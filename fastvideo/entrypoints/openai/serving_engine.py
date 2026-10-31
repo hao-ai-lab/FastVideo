@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, TypeVar
 
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai.lora import LoraRuntime, LoraSelection
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
 _T = TypeVar("_T")
@@ -35,8 +36,10 @@ class OpenAIServingEngine:
 
     def __init__(self,
                  generator: ServingGenerator,
-                 video_request_validator: Callable[[VideoGenerationRequest], None] | None = None) -> None:
+                 video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
+                 lora_runtime: LoraRuntime | None = None) -> None:
         self._generator = generator
+        self._lora_runtime = lora_runtime
         self._video_request_validator = video_request_validator
         self._generation_lock = asyncio.Lock()
         self._closed = False
@@ -45,6 +48,10 @@ class OpenAIServingEngine:
     @property
     def generator(self) -> ServingGenerator:
         return self._generator
+
+    @property
+    def lora_runtime(self) -> LoraRuntime | None:
+        return self._lora_runtime
 
     def validate_video_request(self, request: VideoGenerationRequest) -> None:
         if self._video_request_validator is not None:
@@ -77,18 +84,24 @@ class OpenAIServingEngine:
         request: GenerationRequest,
         *,
         on_start: Callable[[], Awaitable[None]] | None = None,
+        lora: LoraSelection | None = None,
     ) -> Any:
         """Generate one typed request without blocking the event loop."""
-        return await self.run_serialized(self._generator.generate, request, on_start=on_start)
+        return await self.run_serialized(self._generator.generate, request, on_start=on_start, lora=lora)
 
     async def run_serialized(
         self,
         function: Callable[..., _T],
         *args: Any,
         on_start: Callable[[], Awaitable[None]] | None = None,
+        lora: LoraSelection | None = None,
         **kwargs: Any,
     ) -> _T:
-        """Run a synchronous pipeline operation under the serving lock."""
+        """Run a synchronous pipeline operation under the serving lock.
+
+        With a LoRA allow-list, the adapter change runs in the same locked call as ``function``; ``lora=None``
+        renders the base model.
+        """
         if self._closed:
             raise RuntimeError("FastVideo serving engine is shutting down")
         async with self._generation_lock:
@@ -96,7 +109,8 @@ class OpenAIServingEngine:
                 raise RuntimeError("FastVideo serving engine is shutting down")
             if on_start is not None:
                 await on_start()
-            worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+            call = function if self._lora_runtime is None else self._with_lora(function, lora)
+            worker = asyncio.create_task(asyncio.to_thread(call, *args, **kwargs))
             try:
                 return await asyncio.shield(worker)
             except asyncio.CancelledError:
@@ -108,6 +122,16 @@ class OpenAIServingEngine:
             except (BrokenPipeError, EOFError) as error:
                 self._unhealthy_reason = str(error)
                 raise
+
+    def _with_lora(self, function: Callable[..., _T], selection: LoraSelection | None) -> Callable[..., _T]:
+        runtime = self._lora_runtime
+        assert runtime is not None
+
+        def call(*args: Any, **kwargs: Any) -> _T:
+            runtime.apply(self._generator, selection)
+            return function(*args, **kwargs)
+
+        return call
 
     async def run_async_serialized(self, function: Callable[[], Awaitable[_T]]) -> _T:
         """Run an async operation under the same pipeline lock."""

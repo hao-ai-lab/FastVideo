@@ -464,3 +464,16 @@ def test_attention_only_adapter_skips_repack_only_once_the_whole_block_is_packed
     assert not _all_side_branch(layers, [block])
     ffn.register_buffer("_nvfp4_weight", torch.zeros(1), persistent=False)
     assert _all_side_branch(layers, [block])
+
+
+def test_unmerge_after_a_second_merge_restores_the_original_weight() -> None:
+    """Restoring must copy the snapshot: aliasing it on its own device lets the next merge overwrite it."""
+    base = _dense_linear()
+    original = base.weight.detach().clone()
+    layer = get_lora_layer(base)
+    layer.set_lora_weights(*_factors(1), lora_alpha=8, strength=1.0)
+    layer.set_lora_weights(*_factors(2), lora_alpha=8, strength=1.0)
+
+    layer.unmerge_lora_weights()
+
+    assert torch.equal(layer.base_layer.weight, original)

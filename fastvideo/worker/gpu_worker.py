@@ -216,6 +216,12 @@ class Worker:
             return {"status": "lora_adapter_set"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
+    def clear_lora_adapter(self) -> dict[str, Any]:
+        if isinstance(self.pipeline, LoRAPipeline):
+            self.pipeline.clear_lora_adapter()
+            return {"status": "lora_adapter_cleared"}
+        return {"status": "failed: pipeline is not a LoRAPipeline"}
+
     def unmerge_lora_weights(self) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.unmerge_lora_weights()

@@ -303,9 +303,10 @@ class BaseLayerWithLoRA(nn.Module):
             raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
         if isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
-            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True))
+            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True, copy=True))
         else:
-            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight, non_blocking=True)
+            # copy=True: on the snapshot's own device .to() would alias it, and the next merge would write into it.
+            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight, non_blocking=True, copy=True)
 
         self.merged = False
 

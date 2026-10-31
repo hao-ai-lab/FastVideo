@@ -9,6 +9,7 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
+from fastvideo.entrypoints.openai.lora import LoraRequestError, LoraRuntime, LoraSelection
 from fastvideo.entrypoints.openai.media_policy import (
     MediaPolicy,
     MediaPolicyError,
@@ -299,8 +300,11 @@ def validate_model_and_lora(
     request: VideoGenerationRequest,
     args: FastVideoArgs,
     served_model_name: str,
-) -> None:
-    """Validate vLLM-style model and LoRA selectors against startup state.
+    lora_runtime: LoraRuntime | None = None,
+) -> LoraSelection | None:
+    """Validate vLLM-style model and LoRA selectors; return the per-request selection when an allow-list is set.
+
+    With a ``lora_runtime`` allow-list, ``lora.name`` must be an allow-listed id and ``lora.scale`` its strength.
 
     FastVideo's published FastH3 adapters include dense replacement tensors in
     addition to low-rank factors. Those tensors are applied while the model is
@@ -309,8 +313,14 @@ def validate_model_and_lora(
     """
     validate_served_model_name(request.model, args, served_model_name)
 
+    if lora_runtime is not None:
+        try:
+            return lora_runtime.resolve(request.lora)
+        except LoraRequestError as error:
+            raise RequestAdaptationError(str(error)) from error
+
     if request.lora is None:
-        return
+        return None
     if not args.lora_path:
         raise RequestAdaptationError(
             "This server has no startup LoRA. Configure generator.pipeline.components.lora_path before using "
@@ -335,6 +345,7 @@ def validate_model_and_lora(
         if not math.isclose(scale_value, args.lora_strength, rel_tol=0.0, abs_tol=1e-8):
             raise RequestAdaptationError(
                 f"Requested LoRA scale {scale_value:g} does not match startup strength {args.lora_strength:g}.")
+    return None
 
 
 def _apply_reference_inputs(
@@ -406,9 +417,10 @@ def build_generation_request(
     served_model_name: str,
     output_dir: str,
     default_request: GenerationRequest | None = None,
+    lora_runtime: LoraRuntime | None = None,
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
-    validate_model_and_lora(request, args, served_model_name)
+    validate_model_and_lora(request, args, served_model_name, lora_runtime)
     workload_type = getattr(args, "workload_type", "")
     workload_value = str(getattr(workload_type, "value", workload_type) or "")
     is_audio = workload_value.endswith("2a")

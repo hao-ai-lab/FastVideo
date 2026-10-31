@@ -1504,6 +1504,10 @@ class VideoGenerator:
                          accumulate: bool = False) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
 
+    def clear_lora_adapter(self) -> None:
+        """Return the transformer to its base weights (plus any constructor adapter), without reading an adapter."""
+        self.executor.clear_lora_adapter()
+
     def unmerge_lora_weights(self) -> None:
         """
         Use unmerged weights for inference to produce videos that align with 

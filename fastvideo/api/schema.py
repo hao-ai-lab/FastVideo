@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -308,6 +309,50 @@ class StreamingConfig:
 
 
 @dataclass
+class LoRAAdapterConfig:
+    """One community LoRA that a server may apply to a request.
+
+    ``id`` is the only name a client sees. ``path`` is the local file or directory, or the Hugging Face repo id,
+    that ``VideoGenerator.set_lora_adapter`` loads. Strength 0 is exactly the base model.
+    """
+    id: str
+    path: str
+    default_strength: float = 0.8
+    min_strength: float = 0.0
+    max_strength: float = 2.0
+    description: str = ""
+    license: str = ""
+    source_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("lora.adapters[].id must not be empty")
+        if not self.path.strip():
+            raise ValueError(f"LoRA adapter {self.id!r} has an empty path")
+        if not all(
+                math.isfinite(strength) for strength in (self.min_strength, self.default_strength, self.max_strength)):
+            raise ValueError(f"LoRA adapter {self.id!r} has a non-finite strength")
+        if not self.min_strength <= self.default_strength <= self.max_strength:
+            raise ValueError(f"LoRA adapter {self.id!r} needs min_strength <= default_strength <= "
+                             f"max_strength, got {self.min_strength}, {self.default_strength}, {self.max_strength}")
+
+
+@dataclass
+class ServeLoRAConfig:
+    """The LoRAs a request to the OpenAI server may select.
+
+    No adapter loads at startup: the transformer gains LoRA layers when the first request selects one.
+    """
+    adapters: list[LoRAAdapterConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        ids = [adapter.id for adapter in self.adapters]
+        duplicates = sorted({adapter_id for adapter_id in ids if ids.count(adapter_id) > 1})
+        if duplicates:
+            raise ValueError(f"lora.adapters repeats id(s): {', '.join(duplicates)}")
+
+
+@dataclass
 class ServeConfig:
     """Typed serve config loaded from ``fastvideo serve --config``.
 
@@ -332,6 +377,16 @@ class ServeConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)
     streaming: StreamingConfig | None = None
+    lora: ServeLoRAConfig | None = None
+
+    def __post_init__(self) -> None:
+        if not self.lora or not self.lora.adapters:
+            return
+        if self.generator.pipeline.components.lora_path:
+            raise ValueError("`lora.adapters` cannot be combined with a startup adapter "
+                             "(generator.pipeline.components.lora_path); use one or the other.")
+        if self.streaming is not None:
+            raise ValueError("`lora.adapters` applies to the OpenAI server and cannot be combined with `streaming:`.")
 
 
 __all__ = [
@@ -344,6 +399,7 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "LoRAAdapterConfig",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",
@@ -356,6 +412,7 @@ __all__ = [
     "RunConfig",
     "SamplingConfig",
     "ServeConfig",
+    "ServeLoRAConfig",
     "ServerConfig",
     "StreamingConfig",
     "WarmupConfig",
