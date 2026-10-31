@@ -203,7 +203,9 @@ export default function HardwarePicker({
         </button>
       </div>
       {record || open ? (
-        <p className="hardware-picker-caption">Used for the setup link and, on single-unit systems, the GPU count.</p>
+        <p className="hardware-picker-caption">
+          Sets the setup guide and memory budget. Choose checkpoint precision in the recipe settings.
+        </p>
       ) : null}
       {open ? (
         <div className="hardware-lookup" id={panelId} onKeyDown={(event) => event.key === "Escape" && close()}>

@@ -81,12 +81,15 @@ packs before inference.
 
 ## What the cookbook does now
 
-For configurations without transformer quantization or a decoder swap, FastH3
-pages compare checkpoint weights with the selected device. This is a weights
-check, not a request peak. Host-only RAM cannot establish GPU fit. Quantized transformers, TAEH3, and NVFP4 decoder swaps stay
-unestimated until metadata covers the effective layer profile, retained
-components, and packed runtime storage. The editor explains the missing
-coverage instead of substituting an unrelated export or decoder file size.
+FastH3 pages show known checkpoint sizes beside the selected device budget.
+These numbers are not a runtime fit check. Offload moves weights between phases;
+sequence parallelism does not necessarily shard weights; unified memory is one
+shared pool. The page does not turn those file sizes into a residency claim.
+
+When an encoder, decoder or transformer precision changes, the page keeps sizes
+for unchanged components and names the missing data. It never substitutes the
+size of a different published export. A complete peak estimate still requires
+loading, placement, activations and workspace models for the selected path.
 
 The transformer quantization control writes
 `generator.engine.quantization.transformer_quant`, so the copied YAML names the
