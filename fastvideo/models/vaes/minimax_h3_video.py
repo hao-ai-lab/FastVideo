@@ -1016,7 +1016,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
     @staticmethod
     def _copy_chunk_pixels(pixels: torch.Tensor, output: torch.Tensor, frame_start: int, non_blocking: bool) -> None:
-        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer.
+        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer (fp32, or uint8 quantized on device).
 
         Device-to-host copies run per (batch, channel) plane: the temporal
         slice of ``output`` is strided across channels, but each plane is
@@ -1027,6 +1027,9 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         before releasing the buffer.
         """
         target = output[:, :, frame_start:frame_start + pixels.shape[2]]
+        if output.dtype == torch.uint8:
+            # Same mul/clamp/truncating cast as the stage's fp32 host path, so frames are bitwise equal.
+            pixels = (pixels * 255).clamp_(0, 255).to(torch.uint8)
         if pixels.device.type == "cuda":
             pixels = pixels.contiguous()
             for batch_index in range(pixels.shape[0]):
@@ -1145,11 +1148,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         return DecoderOutput(sample=decoded)
 
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-        """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
+        """Stream decoded ``[0, 1]`` pixels into a caller-owned CPU buffer.
+
+        ``output`` is float32, or uint8 when the caller asks for the quantized
+        stream (``FASTVIDEO_H3_VAE_UINT8_PIXELS``); uint8 quantizes each chunk on
+        the GPU with the fp32 host path's exact mul/clamp/truncate arithmetic.
+        """
         expected_shape = self.decoded_pixel_shape(z.shape)
-        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+        if (output.device.type != "cpu" or output.dtype not in (torch.float32, torch.uint8)
+                or tuple(output.shape) != expected_shape):
             raise ValueError(
-                "`output` must be a CPU float32 tensor with shape "
+                "`output` must be a CPU float32 or uint8 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
         try:
             if self.use_slicing and z.shape[0] > 1:

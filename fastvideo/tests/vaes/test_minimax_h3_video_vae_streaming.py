@@ -107,6 +107,22 @@ def test_decode_to_pixels_matches_decode(latent_frames: int) -> None:
     assert_close(actual, expected, atol=0.0, rtol=0.0)
 
 
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="needs CUDA"))])
+@torch.inference_mode()
+def test_decode_to_pixels_uint8_matches_fp32_quantization(device: str) -> None:
+    torch.manual_seed(20260810)
+    vae = _tiny_vae().to(device)
+    latents = torch.randn(1, 4, 12, 4, 4, device=device)
+    fp32 = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    streamed = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.uint8)
+
+    vae.decode_to_pixels(latents, fp32)
+    vae.decode_to_pixels(latents, streamed)
+
+    assert torch.equal(streamed, fp32.mul_(255).clamp_(0, 255).to(torch.uint8))
+
+
 # 3: one chunk with pad tokens; 6: pad hitting the intra-clip tail;
 # 12: two blended chunks without padding; 13: three chunks plus pad trim.
 @pytest.mark.parametrize("latent_frames", (3, 6, 12, 13))

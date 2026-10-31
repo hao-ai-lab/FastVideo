@@ -753,6 +753,11 @@ FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
                                                category="performance",
                                                doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
                                                "projections.")
+FASTVIDEO_H3_VAE_UINT8_PIXELS = EnvBool(True,
+                                        category="performance",
+                                        doc="Quantize single-GPU MiniMax-H3 video VAE output to uint8 on the GPU per "
+                                        "chunk and stream uint8 into the host buffer; frames are bitwise identical "
+                                        "to the fp32 path. 0 streams fp32.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
