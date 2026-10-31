@@ -792,8 +792,21 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             self.tile_sample_min_width,
             self.tile_sample_min_overlap_width,
         )
+        per_call = envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.get()
         rows = []
-        for y_position, y_length in zip(y_indices, y_lengths):
+        if per_call > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+            tiles = [
+                x[..., y_position:y_position + y_length, x_position:x_position + x_length]
+                for y_position, y_length in zip(y_indices, y_lengths)
+                for x_position, x_length in zip(x_indices, x_lengths)
+            ]
+            encoded: list[torch.Tensor] = []
+            for start in range(0, len(tiles), per_call):
+                batch = torch.cat(tiles[start:start + per_call], dim=0)
+                encoded.extend(self.quant_conv(self.encoder(batch)).split(x.shape[0], dim=0))
+            columns = len(x_indices)
+            rows = [encoded[index:index + columns] for index in range(0, len(encoded), columns)]
+        for y_position, y_length in zip(y_indices, y_lengths) if not rows else ():
             row = []
             for x_position, x_length in zip(x_indices, x_lengths):
                 tile = x[..., y_position:y_position + y_length, x_position:x_position + x_length]
