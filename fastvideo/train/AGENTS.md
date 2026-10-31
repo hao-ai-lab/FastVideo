@@ -17,6 +17,7 @@ train/
 │   ├── knowledge_distillation/  #   KDMethod, KDCausalMethod
 │   ├── consistency_model/       #   Consistency-model training methods
 │   └── rl/                      #   RL methods, sampling helpers, rewards
+│       └── promptrl/            #   PromptRL: refiner GRPO + Wan flow-policy
 ├── models/
 │   ├── base.py             #   ModelBase / CausalModelBase wrappers
 │   ├── wan/, hunyuan/, cosmos/, kandinsky5/, ltx2/, matrixgame2/, minimax_h3/  # Per-family wrappers
@@ -60,6 +61,18 @@ Trainer = Method × Model × [Callback...] × Config
    reimplement.
 3. Expose `trainable_parameters()` so the optimizer factory can group them.
 4. Register in `utils/builder.py` if the trainer dispatches by name.
+
+## Training Roles
+
+`roles/base.py::TrainRoleBase` is the lightweight contract every
+training role satisfies: `checkpoint_modules()`, `trainable_parameters()`,
+lifecycle hooks (`init_preprocessors`, `on_train_start`), and device
+metadata. `ModelBase` inherits it for diffusion roles; non-diffusion
+roles (e.g. `roles/qwen_refiner.py`, a PEFT-LoRA language model)
+implement it directly. The builder, DCP checkpointing
+(`TrainingMethod.checkpoint_state`), gradient clipping, and optimizer
+plumbing all operate on `TrainRoleBase`, so mixed diffusion + LM
+methods (PromptRL) compose the same way diffusion-only methods do.
 
 ## Adding a New Method
 
