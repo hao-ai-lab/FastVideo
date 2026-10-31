@@ -6,9 +6,9 @@
 # weights with NVFP4 W4A4 q/k/v/out plus FFN fc_in/fc_out in all 50 blocks,
 # static FFN scales from the Flex FL2VA calibration table, BF16 dense attention.
 #
-# Rows are text-only (T2VA) prompt manifests in the V2 QAD format
-# (scripts/distill/minimax_h3_v2_qad/{build_v2_prompts,precompute_v2_text}.py);
-# rows may carry their own width/height/num_frames on Flex's bucket grid.
+# Rows are T2VA / I2VA / L2VA / FL2VA keyframe-anchor rows built from the
+# OmniRef v4 rows by scripts/distill/pika_h3_flex_qad/build_flex_ref2va_rows.py
+# --mode fl2va (exact first/last frames, re-encoded at the canvas size).
 #
 # Paths are placeholders: the merged model, the calibration table (pin its
 # sha256 once calibrated), the prompt manifests and the output dir.
@@ -32,11 +32,27 @@ models:
       fp4_attention:
         enabled: false
     data:
-      train_manifest: data/pika-flex-fl2va/train.jsonl
-      eval_manifest: data/pika-flex-fl2va/eval.jsonl
-      width: 832
-      height: 480
-      num_frames: 124
+      manifests:
+      - data/flex-fl2va/MANIFEST.jsonl
+      cases:
+      - t2va
+      - i2va
+      - l2va
+      - fl2va
+      per_group:
+        480p: 160
+        768p: 40
+      seed: 20261007
+      max_frames: 345
+      # FL2VA rows hold out their own eval rows (top-up from the groups); the listed manifest is empty.
+      eval_manifest: data/flex-fl2va/eval-manifest.json
+      eval_resolutions:
+      - 480p
+      - 768p
+      eval_per_group:
+        480p: 2
+        768p: 1
+      eval_max_frames: 0
   teacher:
     _target_: fastvideo.train.models.minimax_h3.flex.MiniMaxH3FlexFL2VAModel
     init_from: data/models/pika-flex-fl2va-merged

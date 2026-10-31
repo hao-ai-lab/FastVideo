@@ -194,6 +194,56 @@ def apply_prompt_edits(prompt: str, edits: list[tuple[str, bool]]) -> str:
     return prompt
 
 
+# ---------------------------------------------------------------------- FL2VA rows (keyframe anchors)
+# FL2VA task -> (v4 case whose image references are the exact keyframes, reference index per anchor).
+FL2VA_SOURCES = {
+    "t2va": ("first_frame", ()),
+    "i2va": ("first_frame", (0, )),
+    "l2va": ("first_last_frame", (1, )),
+    "fl2va": ("first_last_frame", (0, 1)),
+}
+FL2VA_DEFINITIONS = {
+    "t2va": (),
+    "i2va": ("<Picture 1> is the exact first frame of the target video.", ),
+    "l2va": ("<Picture 1> is the exact last frame of the target video.", ),
+    "fl2va": ("<Picture 1> is the exact first frame of the target video.",
+              "<Picture 2> is the exact last frame of the target video."),
+}
+
+
+def fl2va_prompt(caption: str, case: str) -> str:
+    """The v4 caption with its reference paragraphs replaced by this task's keyframe definitions."""
+    paragraphs = [p for p in caption.split("\n\n") if not p.startswith(("subject_definitions:", "retention_analysis:"))]
+    if FL2VA_DEFINITIONS[case]:
+        paragraphs.insert(0, "subject_definitions: " + " ".join(FL2VA_DEFINITIONS[case]))
+    return "\n\n".join(paragraphs)
+
+
+def plan_fl2va_rows(v4: dict[tuple[str, str], dict[str, Any]], counts: dict[str, int], split: dict[str, float],
+                    seed: int, exclude_sources: set[str]) -> list[dict[str, Any]]:
+    """``counts[task]`` rows per FL2VA task, split over resolutions by ``split``; held-out sources excluded."""
+    specs = []
+    for case, total in sorted(counts.items()):
+        source_case, indices = FL2VA_SOURCES[case]
+        for res, share in sorted(split.items()):
+            pool = sorted((e for (i, r), e in v4.items()
+                           if r == res and e["case"] == source_case and i.split(":", 1)[-1] not in exclude_sources),
+                          key=lambda e: e["id"])
+            random.Random(f"{seed}:{case}:{res}").shuffle(pool)
+            for entry in pool[:round(total * share)]:
+                source = entry["id"].split(":", 1)[-1]
+                specs.append({
+                    "mode": "fl2va",
+                    "id": f"{case}:{source}",
+                    "case": case,
+                    "source_case": source_case,
+                    "resolution": res,
+                    "base_parquet": entry["parquet"],
+                    "keyframes": [{"parquet": entry["parquet"], "index": i} for i in indices],
+                })
+    return specs
+
+
 # ---------------------------------------------------------------------- stored-latent decoding (GPU)
 _COLUMNS = ("caption", "vae_latent_bytes", "vae_latent_shape", "audio_latent_bytes", "audio_latent_shape",
             "reference_video_latent_rows_bytes", "reference_video_latent_rows_shape",
@@ -404,11 +454,85 @@ def encode_spec(row_spec: dict[str, Any], model_path: str) -> dict[str, Any]:
     return record
 
 
+def encode_fl2va_conditioning(encoding: Any, prompt: str, keyframes: list[Any], model_path: Path,
+                              model_index: dict[str, Any], fastvideo_args: Any) -> tuple[Any, Any]:
+    """Qwen3-VL presentation of an FL2VA request: ``<Picture k>:`` keyframe vision tokens, then the prompt."""
+    import torch
+
+    stage = encoding.MiniMaxH3ConditioningStage(
+        conditioner=encoding._load_component("text_encoder", model_path, model_index, fastvideo_args),
+        tokenizer=encoding._load_component("tokenizer", model_path, model_index, fastvideo_args),
+        processor=encoding._load_component("processor", model_path, model_index, fastvideo_args),
+        ref2va=False,
+    )
+    batch = encoding.ForwardBatch(data_type="video", prompt=prompt)
+    batch.extra[encoding.MINIMAX_H3_KEYFRAMES_KEY] = list(keyframes)
+    batch = stage.forward(batch, fastvideo_args)
+    text = batch.prompt_embeds[0].squeeze(0).float().cpu().contiguous()
+    tags = batch.extra[encoding.MINIMAX_H3_TEXT_TOKEN_TAGS_KEY].to(dtype=torch.long, device="cpu").contiguous()
+    if text.ndim != 2 or tags.shape != text.shape[:1]:
+        raise ValueError(f"FL2VA conditioning shapes {tuple(text.shape)} / {tuple(tags.shape)} do not align")
+    return text, tags
+
+
+def encode_fl2va_spec(row_spec: dict[str, Any], model_path: str) -> dict[str, Any]:
+    """The base v4 row's target with this task's keyframes (decoded, canvas-cropped, re-encoded) and prompt."""
+    import pyarrow.parquet as pq
+    import torch
+    from PIL import Image
+
+    from fastvideo.pipelines.basic.minimax_h3.packing import prepare_keyframe_image
+    from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference
+
+    encoding, model_index, fastvideo_args = _encoders(model_path)
+    path = Path(model_path)
+    vae = encoding._load_component("vae", path, model_index, fastvideo_args)
+    record = pq.ParquetFile(row_spec["base_parquet"]).read().to_pylist()[0]
+    height, width = int(record["height"]), int(record["width"])
+    images, prepared = [], []
+    for keyframe in row_spec["keyframes"]:
+        media, visual, _ = reference_latents(stored_row(keyframe["parquet"]), int(keyframe["index"]))
+        if media != "image":
+            raise ValueError(f"{keyframe} is a {media} reference, not a keyframe image")
+        image = prepare_keyframe_image(Image.fromarray(decode_visual(visual, vae)[0]), height, width, stretch=False)
+        images.append(image)
+        reference = MiniMaxH3PreparedReference(media_type="image")
+        reference.image = image
+        prepared.append(reference)
+    visual = encoding.encode_ref_visual_anchor(prepared, path, model_index, fastvideo_args, _PATCH, augment=False)
+    prompt = fl2va_prompt(record["caption"], row_spec["case"])
+    text, tags = encode_fl2va_conditioning(encoding, prompt, images, path, model_index, fastvideo_args)
+    metadata = encoding._canonical_prepared_references(prepared)
+    for name, tensor in (("text_embedding", text), ("text_token_tags", tags), ("reference_video_latent_rows", visual),
+                         ("reference_audio_latent_rows", torch.empty(0, 32))):
+        array = tensor.detach().float().cpu().contiguous()
+        record[f"{name}_bytes"] = array.numpy().tobytes()
+        record[f"{name}_shape"] = list(array.shape)
+        record[f"{name}_dtype"] = "float32"
+    for field, key in (("reference_media_types", "media_type"), ("reference_has_audio", "has_audio"),
+                       ("reference_num_latent_frames", "num_latent_frames"),
+                       ("reference_latent_heights", "latent_height"), ("reference_latent_widths", "latent_width"),
+                       ("reference_num_audio_latents", "num_audio_latents")):
+        record[field] = [ref[key] for ref in metadata]
+    record["id"] = row_spec["id"]
+    record["caption"] = prompt
+    return record
+
+
 # ---------------------------------------------------------------------- drivers
 def run_plan(args: argparse.Namespace, overrides: list[str]) -> None:
     from fastvideo.train.models.minimax_h3.omniref_data import load_eval_rows
 
     v4 = load_v4(Path(args.v4_manifest))
+    if args.mode == "fl2va":
+        exclude = ({row.source
+                    for row in load_eval_rows(args.eval_manifest, V4_CASES, ("480p", "768p"), 99, 0)}
+                   if args.eval_manifest else set())
+        counts = {item.split("=")[0]: int(item.split("=")[1]) for item in args.fl2va_counts}
+        split = {item.split("=")[0]: float(item.split("=")[1]) for item in args.resolution_split}
+        specs = plan_fl2va_rows(v4, counts, split, args.seed, exclude)
+        _write_plan(Path(args.output_dir), specs)
+        return
     retier: set[tuple[str, str]] = set()
     for config in args.plan_config:
         retier |= qad_plan_ids(config, overrides)
@@ -417,12 +541,15 @@ def run_plan(args: argparse.Namespace, overrides: list[str]) -> None:
     extra = {item.split("=")[0]: int(item.split("=")[1]) for item in args.extra_per_group}
     exclude = {row.source for row in load_eval_rows(args.eval_manifest, V4_CASES, ("480p", "768p"), 99, 0)}
     specs = plan_rows(v4, retier, extra, args.seed, exclude, reference_count)
-    out = Path(args.output_dir)
+    _write_plan(Path(args.output_dir), specs)
+
+
+def _write_plan(out: Path, specs: list[dict[str, Any]]) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "plan.json").write_text(json.dumps(specs))
     summary: dict[str, int] = defaultdict(int)
     for row_spec in specs:
-        label = row_spec["case"] if row_spec["case"] in NEW_CASES else f"retier/{row_spec['case']}"
+        label = row_spec["case"] if row_spec["case"] in NEW_CASES or row_spec.get("mode") else f"retier/{row_spec['case']}"
         summary[f"{label}/{row_spec['resolution']}"] += 1
     print(f"{len(specs)} rows: {dict(sorted(summary.items()))}")
 
@@ -452,7 +579,8 @@ def run_encode(args: argparse.Namespace) -> None:
         if (row_spec["id"], row_spec["resolution"]) in done:
             continue
         try:
-            record = encode_spec(row_spec, args.model_path)
+            encode = encode_fl2va_spec if row_spec.get("mode") == "fl2va" else encode_spec
+            record = encode(row_spec, args.model_path)
         except Exception as error:  # one bad source row must not stop the shard; it is reported and skipped
             print(f"SKIP {row_spec['id']} {row_spec['resolution']}: {type(error).__name__}: {error}", flush=True)
             torch.cuda.empty_cache()
@@ -487,7 +615,10 @@ def run_finalize(args: argparse.Namespace) -> None:
     (out / "MANIFEST.jsonl").write_text("\n".join(lines) + "\n")
     skipped = sum(len(p.read_text().splitlines()) for p in out.glob("skipped-shard*.jsonl"))
     print(f"MANIFEST.jsonl: {len(lines)} rows ({skipped} skipped)")
-    if args.eval_manifest:
+    if not args.eval_manifest:
+        # FL2VA holds out rows from its own groups (eval_per_group top-up); the trainer still reads a manifest.
+        (out / "eval-manifest.json").write_text("[]\n")
+    else:
         encoded = {(e["id"], e["resolution"]): e["parquet"] for e in map(json.loads, lines)}
         items = json.loads(Path(args.eval_manifest).read_text())
         replaced = 0
@@ -509,6 +640,10 @@ def main() -> None:
     parser.add_argument("--plan-max-frames", nargs="*", type=int, default=[], help="extra max_frames plans to cover")
     parser.add_argument("--eval-manifest", help="held-out manifest; its sources are excluded from new cases")
     parser.add_argument("--extra-per-group", nargs="*", default=["480p=80", "768p=20"])
+    parser.add_argument("--mode", choices=("ref2va", "fl2va"), default="ref2va")
+    parser.add_argument("--fl2va-counts", nargs="*", default=["t2va=400", "i2va=300", "l2va=100", "fl2va=300"],
+                        help="FL2VA rows per task (--mode fl2va)")
+    parser.add_argument("--resolution-split", nargs="*", default=["480p=0.8", "768p=0.2"])
     parser.add_argument("--seed", type=int, default=20261030)
     parser.add_argument("--model-path", help="merged Flex Ref2VA model (encode)")
     parser.add_argument("--shard", type=int, default=0)

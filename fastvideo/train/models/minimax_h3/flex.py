@@ -15,8 +15,8 @@ Differences from OmniRef:
   modality) only, so the teacher-forced pass, the student rollout and the seed+1 noise-floor eval of a row all draw
   the same noise. It is not Pika's sampler stream; the distribution is.
 
-``MiniMaxH3FlexRef2VAModel`` reads OmniRef Ref2VA rows (``omniref_data``) on ``transformer_ref``;
-``MiniMaxH3FlexFL2VAModel`` reads text-only rows (``v2_data``) on ``transformer``.
+``MiniMaxH3FlexRef2VAModel`` reads Ref2VA rows (``omniref_data``) on ``transformer_ref``;
+``MiniMaxH3FlexFL2VAModel`` reads T2VA / I2VA / L2VA / FL2VA keyframe-anchor rows on ``transformer``.
 """
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.train.models.minimax_h3.omniref_pdd import MiniMaxH3OmniRefPDDModel, _pin_amax
-from fastvideo.train.models.minimax_h3.v2_t2v import MiniMaxH3V2T2VModel
 
 if TYPE_CHECKING:
     from fastvideo.train.models.minimax_h3.omniref_data import PreparedRow
@@ -232,18 +231,91 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
             yield unique.to(self.device), inverse.to(self.device)
 
 
+# Keyframe anchors of each FL2VA task, in packing order (Pika's first/last-frame conditioning).
+FL2VA_ANCHORS: dict[str, tuple[str, ...]] = {
+    "t2va": (),
+    "i2va": ("first", ),
+    "l2va": ("last", ),
+    "fl2va": ("first", "last")
+}
+
+
+def prepare_fl2va_row(spec: Any, row: dict[str, Any], *, patch_size: tuple[int, int, int], latent_channels: int,
+                      audio_channels: int, device: torch.device) -> PreparedRow:
+    """Initial packed FL2VA state: keyframe anchors at the canvas size, noised to the keyframe clean time.
+
+    Mirrors ``MiniMaxH3LatentPreparationStage``: the row's image references are the keyframes (one latent frame at
+    the target's latent size each, clean), packed as ``build_packed_sequence`` condition rows in anchor order and
+    noised with ``keyframe_condition_noise`` before the target's unit noise, all from one row-seeded generator.
+    """
+    from diffusers.utils.torch_utils import randn_tensor
+
+    from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
+    from fastvideo.pipelines.basic.minimax_h3.packing import (MINIMAX_H3_AUDIO_CHANNELS, MINIMAX_H3_KEYFRAME_NOISE_AUG,
+                                                              audio_latent_num_frames, build_packed_sequence,
+                                                              keyframe_condition_noise, patchify_video_latents,
+                                                              video_latent_num_frames)
+    from fastvideo.train.models.minimax_h3.omniref_data import PreparedRow, _tensor, prepared_references
+
+    anchors = FL2VA_ANCHORS.get(spec.case)
+    if anchors is None:
+        raise ValueError(f"{spec.id}: {spec.case!r} is not an FL2VA task ({sorted(FL2VA_ANCHORS)})")
+    num_frames, height, width = int(row["num_frames"]), int(row["height"]), int(row["width"])
+    frames, lat_h, lat_w = video_latent_num_frames(num_frames), height // 16, width // 16
+    references = prepared_references(row)
+    if len(references) != len(anchors) or any(ref.media_type != "image" or (ref.num_latent_frames, ref.latent_height,
+                                                                            ref.latent_width) != (1, lat_h, lat_w)
+                                              for ref in references):
+        raise ValueError(f"{spec.id}: {spec.case} needs {len(anchors)} canvas-size keyframe(s), got "
+                         f"{[(r.media_type, r.latent_height, r.latent_width) for r in references]}")
+    num_audio = audio_latent_num_frames(num_frames)
+    tags = _tensor(row, "text_token_tags").round().to(torch.long)
+    embeds = _tensor(row, "text_embedding").to(device=device, dtype=torch.bfloat16)[None]
+    layout = build_packed_sequence(tags, frames, lat_h, lat_w, num_audio, patch_size, keyframe_anchors=anchors)
+    generator = torch.Generator("cpu").manual_seed(spec.seed)
+    clean = _tensor(row, "reference_video_latent_rows")
+    condition = clean[:0].to(device)
+    if anchors:
+        noise = keyframe_condition_noise(((1, lat_h, lat_w), ) * len(anchors),
+                                         patch_size,
+                                         latent_channels,
+                                         generator=generator,
+                                         device=device)
+        condition = MiniMaxH3Scheduler().scale_noise(clean.to(device), MINIMAX_H3_KEYFRAME_NOISE_AUG, noise)
+    video_noise = randn_tensor((1, latent_channels, frames, lat_h, lat_w),
+                               generator=generator,
+                               device=device,
+                               dtype=torch.float32)
+    audio = randn_tensor((num_audio * MINIMAX_H3_AUDIO_CHANNELS, audio_channels),
+                         generator=generator,
+                         device=device,
+                         dtype=torch.float32)
+    video = torch.cat((condition, patchify_video_latents(video_noise, patch_size)))
+    if video.shape[0] != layout.video_indices.numel() or audio.shape[0] != layout.audio_indices.numel():
+        raise ValueError(f"{spec.id}: packed rows do not match the FL2VA layout")
+    return PreparedRow(spec, layout, embeds, video, audio, (latent_channels, frames, lat_h, lat_w), references, clean)
+
+
 class MiniMaxH3FlexFL2VAModel(MiniMaxH3FlexRef2VAModel):
-    """The FL2VA adapter on ``transformer``: text-only (T2VA) rows from ``v2_data`` manifests."""
+    """The FL2VA adapter on ``transformer``: T2VA / I2VA / L2VA / FL2VA rows (keyframe anchors, not references).
+
+    Rows come from ``build_flex_ref2va_rows.py --mode fl2va`` manifests (``case`` in ``FL2VA_ANCHORS``) and are
+    planned, held out and streamed exactly as the Ref2VA rows (``omniref_data``).
+    """
 
     _transformer_module_type = "transformer"
     _task = "fl2va"
 
-    # The data path is V2's (``v2_data`` manifests: prompt, Qwen3-VL embedding, seed); only the ladder differs.
-    init_preprocessors = MiniMaxH3V2T2VModel.init_preprocessors
-    load_row = MiniMaxH3V2T2VModel.load_row
+    def prepare(self, spec: Any, row: dict[str, Any]) -> PreparedRow:
+        return prepare_fl2va_row(spec,
+                                 row,
+                                 patch_size=self.patch_size,
+                                 latent_channels=24,
+                                 audio_channels=32,
+                                 device=self.device)
 
 
 __all__ = [
-    "FLEX_TRAINABLE", "FlexContract", "MiniMaxH3FlexFL2VAModel", "MiniMaxH3FlexRef2VAModel", "RowRenoiseScheduler",
-    "flex_sigmas", "renoise_seed"
+    "FL2VA_ANCHORS", "FLEX_TRAINABLE", "FlexContract", "prepare_fl2va_row", "MiniMaxH3FlexFL2VAModel",
+    "MiniMaxH3FlexRef2VAModel", "RowRenoiseScheduler", "flex_sigmas", "renoise_seed"
 ]

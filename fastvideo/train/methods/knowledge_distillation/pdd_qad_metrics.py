@@ -179,7 +179,14 @@ def keyframe_latents(prepared: Any, final_video: torch.Tensor) -> dict[str, tupl
             image = latent[0]
         images.append(image)
         offset += count
-    pairs = {"first_frame": [("first", 0, 0)], "first_last_frame": [("first", 0, 0), ("last", -1, 1)]}
+    # (metric name, generated frame, keyframe index) per case; FL2VA keyframes carry the same names.
+    pairs = {
+        "first_frame": [("first", 0, 0)],
+        "first_last_frame": [("first", 0, 0), ("last", -1, 1)],
+        "i2va": [("first", 0, 0)],
+        "l2va": [("last", -1, 0)],
+        "fl2va": [("first", 0, 0), ("last", -1, 1)],
+    }
     return {
         name: (video[:, frame], images[ref] if ref < len(images) else None)
         for name, frame, ref in pairs.get(prepared.spec.case, [])

@@ -389,3 +389,70 @@ def test_segment_reconstruction_trains_from_teacher_segment_inputs():
     assert float(student.transformer_blocks[1].linear.weight.grad.abs().max()) > 0.0
     assert student.transformer_blocks[2].linear.weight.grad is None or \
         float(student.transformer_blocks[2].linear.weight.grad.abs().max()) == 0.0
+
+
+def test_fl2va_prompt_keeps_the_description_and_defines_the_keyframes():
+    builder = _builder_module()
+    caption = ("subject_definitions: <Picture 1> is the exact first frame.\n\nsummary: A dog runs.\n\n"
+               "retention_analysis: <Picture 1> is preserved.\n\noverall_soundscape: barking")
+    assert builder.fl2va_prompt(caption, "t2va") == "summary: A dog runs.\n\noverall_soundscape: barking"
+    last = builder.fl2va_prompt(caption, "l2va")
+    assert last.startswith("subject_definitions: <Picture 1> is the exact last frame of the target video.\n\n")
+    assert "retention_analysis" not in last
+    both = builder.fl2va_prompt(caption, "fl2va")
+    assert "<Picture 2> is the exact last frame" in both.split("\n\n")[0]
+
+
+def test_fl2va_plan_takes_keyframes_from_the_matching_v4_case():
+    builder = _builder_module()
+    v4 = {}
+    for n in range(10):
+        for case in ("first_frame", "first_last_frame"):
+            for res in ("480p", "768p"):
+                entry = _entry(case, f"{_ASSET_A}_f{n}_x", f"{case}-{n}-{res}.pq", res)
+                v4[(entry["id"], res)] = entry
+    specs = builder.plan_fl2va_rows(v4, {"t2va": 5, "i2va": 5, "l2va": 5, "fl2va": 5}, {"480p": 0.8, "768p": 0.2},
+                                    0, set())
+    by_case = {}
+    for row in specs:
+        by_case.setdefault(row["case"], []).append(row)
+    assert {case: len(rows) for case, rows in by_case.items()} == {"t2va": 5, "i2va": 5, "l2va": 5, "fl2va": 5}
+    assert all(not r["keyframes"] for r in by_case["t2va"])
+    assert all([k["index"] for k in r["keyframes"]] == [1] and "first_last_frame" in r["base_parquet"]
+               for r in by_case["l2va"])
+    assert all([k["index"] for k in r["keyframes"]] == [0, 1] for r in by_case["fl2va"])
+    assert all(r["id"].startswith(f"{r['case']}:") for r in specs)
+    assert sum(r["resolution"] == "768p" for r in by_case["i2va"]) == 1
+
+
+def test_fl2va_row_packs_keyframe_anchors():
+    from types import SimpleNamespace
+    import numpy as np
+    from fastvideo.train.models.minimax_h3.flex import prepare_fl2va_row
+    lat_h, lat_w, frames = 30, 52, 124
+    rows_per_frame = (lat_h // 2) * (lat_w // 2)
+
+    def row(n_keyframes):
+        def put(name, array):
+            return {f"{name}_bytes": array.astype(np.float32).tobytes(), f"{name}_shape": list(array.shape)}
+        out = {"num_frames": frames, "height": lat_h * 16, "width": lat_w * 16,
+               "reference_media_types": ["image"] * n_keyframes, "reference_has_audio": [False] * n_keyframes,
+               "reference_num_latent_frames": [1] * n_keyframes, "reference_latent_heights": [lat_h] * n_keyframes,
+               "reference_latent_widths": [lat_w] * n_keyframes, "reference_num_audio_latents": [0] * n_keyframes}
+        out.update(put("text_token_tags", np.ones(7)))
+        out.update(put("text_embedding", np.zeros((7, 8))))
+        out.update(put("reference_video_latent_rows", np.random.rand(n_keyframes * rows_per_frame, 96)))
+        out.update(put("reference_audio_latent_rows", np.zeros((0, 32))))
+        return out
+
+    spec = SimpleNamespace(id="x", case="fl2va", seed=3)
+    prepared = prepare_fl2va_row(spec, row(2), patch_size=(1, 2, 2), latent_channels=24, audio_channels=32,
+                                 device=torch.device("cpu"))
+    assert prepared.layout.num_condition_video_rows == 2 * rows_per_frame
+    assert prepared.video.shape[0] == prepared.layout.video_indices.numel()
+    t2va = prepare_fl2va_row(SimpleNamespace(id="y", case="t2va", seed=3), row(0), patch_size=(1, 2, 2),
+                             latent_channels=24, audio_channels=32, device=torch.device("cpu"))
+    assert t2va.layout.num_condition_video_rows == 0
+    with pytest.raises(ValueError, match="needs 1"):
+        prepare_fl2va_row(SimpleNamespace(id="z", case="i2va", seed=3), row(2), patch_size=(1, 2, 2),
+                          latent_channels=24, audio_channels=32, device=torch.device("cpu"))
