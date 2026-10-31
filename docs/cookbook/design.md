@@ -162,6 +162,12 @@ Reset            = resolveConfig(catalog, {})
   counts and parallel degrees that divide the count, with supported `-1`
   automatic values. Invalid combinations are rejected without changing edits.
 
+Component checks reject a TAEH3 backend with an NVFP4 H3 decoder override and
+reject an NVFP4 layer profile paired with another transformer precision. In the
+editor, selecting TAEH3 clears the override; selecting an NVFP4 decoder restores
+`h3-vae`. The copied YAML and visible chips follow the same choices. Schema
+checks do not certify model loading or GPU execution.
+
 The native runtime still resolves model-, hardware- and request-dependent
 defaults. Cookbook validation does not establish complete native validity,
 server readiness or GPU memory fit. Client instructions use same-machine

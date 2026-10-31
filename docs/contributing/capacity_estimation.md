@@ -406,14 +406,15 @@ evidence leaves startup coverage unknown. Keep observations intact when deriving
 
 ## FastH3 coverage
 
-No FastH3 checkpoint has a full capacity model yet. A weights-only preflight
-is live on the FastH3 pages: it compares measured resident checkpoint weights
-with the selected device and labels the result as weights, not a request peak.
-Host-only system RAM is not accepted as GPU capacity. Transformer quantization,
-TAEH3, and NVFP4 decoder swaps return unknown until their
-effective layer profiles, retained components, and packed storage are modeled.
-A full estimate still stops early: `checkCoverage()` in `docs/js/cookbook-memory.mjs` still stops before the
-estimate for every FastH3 serving profile.
+No FastH3 checkpoint has a full capacity model yet. The editor shows a
+checkpoint-size breakdown and device budget, with `status: unknown` for runtime
+fit. It does not subtract CPU-offloaded weights or divide file sizes by GPU
+count. Those operations need phase residency and per-rank placement models.
+
+Replacement components without matching data are omitted from the known-size
+subtotal and named as missing coverage. Host-only system RAM cannot establish
+GPU fit. A custom GiB budget keeps its unit; unified memory uses the shared
+normalizer's usable-memory policy instead of treating nominal RAM as VRAM.
 
 | Profile | First stop | Why |
 | --- | --- | --- |
@@ -436,8 +437,8 @@ To make a FastH3 estimate possible, in order:
 6. Record successful runs on the RTX 5090, RTX PRO 6000, and DGX Spark profiles
    so the analytical estimate can be calibrated rather than trusted blindly.
 
-Until those land, the cookbook reports a weights fact for FastH3 instead of a
-peak estimate. That is the correct result, not a bug.
+Until those land, the cookbook can report checkpoint data but cannot answer
+whether an edited FastH3 request fits a GPU.
 
 ## Static consumers
 

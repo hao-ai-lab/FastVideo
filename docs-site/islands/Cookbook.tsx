@@ -140,10 +140,10 @@ function FieldControl({
             <button
               key={JSON.stringify(choice)}
               type="button"
-              aria-pressed={value === choice}
+              aria-pressed={value === choice || (value === undefined && choice === null)}
               onClick={() => update(field.path, JSON.stringify(choice), field)}
             >
-              {choice === null ? "Default" : choiceLabel(field.path, choice)}
+              {choice === null ? (CHOICE_LABELS[field.path]?.null ?? "Default") : choiceLabel(field.path, choice)}
             </button>
           ))}
         </div>
@@ -201,7 +201,7 @@ function FieldControl({
           Use null
         </button>
       )}
-      <p id={`${id}-hint`} className="sr-only">
+      <p id={`${id}-hint`} className="matrix-note">
         {field.schema.description}
         {value === undefined ? " Inherited from the runtime." : ""}
       </p>
@@ -271,6 +271,18 @@ function Editor({
         errors[path] = "Enter a valid number or JSON value for this field.";
       }
     }
+    const decoderPath = "generator.pipeline.experimental.h3_vae_nvfp4_decoder";
+    const backendPath = "generator.pipeline.experimental.video_decode_backend";
+    if (path === backendPath && next[path] === "taeh3" && fields.some((field) => field.path === decoderPath)) {
+      next[decoderPath] = null;
+      delete errors[decoderPath];
+      setNotice("TAEH3 selected. The NVFP4 decoder override was cleared.");
+    }
+    if (path === decoderPath && next[path] && fields.some((field) => field.path === backendPath)) {
+      next[backendPath] = "h3-vae";
+      delete errors[backendPath];
+      setNotice("H3 VAE selected for the NVFP4 decoder.");
+    }
     if (path === GPU_COUNT_PATH && typeof next[path] === "number") {
       const fitted = fitParallelism(fields, next, next[path] as number);
       if (fitted !== next) {
@@ -310,34 +322,36 @@ function Editor({
   const memory =
     result && !failure
       ? hardwareRecord
-        ? capacityModel.model
-          ? assessRecipe({
-              model: capacityModel.model,
-              example: { workload: catalog.workload, env: catalog.env },
-              hardware: hardwareRecord,
-              config: result.config,
-              budgetGb: hardwareRecord.usable_budget_gb,
-              hostGb: hardwareRecord.host_ram_gb,
-            })
-          : catalog.runtime.backend === "mlx" && capacityModel.status !== "loading"
-            ? {
-                status: "unknown" as const,
-                reason: "MLX checkpoints use a different precision and load pattern; memory is not estimated.",
-              }
-            : capacityModel.status !== "loading" && weights
-              ? assessWeightsRecipe({
-                  weights,
-                  config: result.config,
-                  hardware: hardwareRecord,
-                  budgetGb: hardwareRecord.usable_budget_gb,
-                })
-              : {
+        ? capacityModel.status === "error"
+          ? { status: "unknown" as const, reason: `Memory data could not load. ${capacityModel.error}` }
+          : capacityModel.model
+            ? assessRecipe({
+                model: capacityModel.model,
+                example: { workload: catalog.workload, env: catalog.env },
+                hardware: hardwareRecord,
+                config: result.config,
+                budgetGb: hardwareRecord.usable_budget_gb,
+                hostGb: hardwareRecord.host_ram_gb,
+              })
+            : catalog.runtime.backend === "mlx" && capacityModel.status !== "loading"
+              ? {
                   status: "unknown" as const,
-                  reason:
-                    capacityModel.status === "loading"
-                      ? "Loading the memory estimate."
-                      : "No capacity model ships for this checkpoint.",
+                  reason: "MLX checkpoints use a different precision and load pattern; memory is not estimated.",
                 }
+              : capacityModel.status !== "loading" && weights
+                ? assessWeightsRecipe({
+                    weights,
+                    config: result.config,
+                    hardware: hardwareRecord,
+                    budgetGb: hardwareRecord.usable_budget_gb,
+                  })
+                : {
+                    status: "unknown" as const,
+                    reason:
+                      capacityModel.status === "loading"
+                        ? "Loading the memory estimate."
+                        : "No capacity model ships for this checkpoint.",
+                  }
         : { status: "unknown" as const, reason: "Select a device to estimate memory for this recipe." }
       : undefined;
   const renderField = (field: Field) => (
@@ -587,7 +601,11 @@ function Editor({
               </a>
             </div>
           </div>
-          <RecipeFacts validity={failure ? "invalid" : result ? "valid" : "loading"} memory={memory} />
+          <RecipeFacts
+            validity={failure ? "invalid" : result ? "valid" : "loading"}
+            memory={memory}
+            retryMemory={capacityModel.status === "error" ? capacityModel.retry : undefined}
+          />
         </MatrixRow>
         {catalog.workload === "i2v" && runMode !== "serving" && (
           <MatrixRow title="Inputs">
