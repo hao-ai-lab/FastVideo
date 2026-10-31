@@ -223,18 +223,18 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(37);
-  await expect(cards.first()).toContainText("FastH3 OmniRef");
+  await expect(cards).toHaveCount(36);
+  await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
   await expect(cards).toHaveCount(1);
   await cards.click();
-  await expect(page).toHaveURL(/cookbook\/wan\/wan21-i2v$/);
+  await expect(page).toHaveURL(/cookbook\/wan\/wan21-i2v\/?$/);
   await expect(page.getByLabel("Base model")).toHaveCount(0);
   await page.getByRole("link", { name: "← All recipes", exact: true }).click();
   await page.getByLabel("Search recipes").fill("FastWan2.1");
   await page.locator(".recipe-card").click();
-  await expect(page).toHaveURL(/cookbook\/wan\/fastwan21$/);
+  await expect(page).toHaveURL(/cookbook\/wan\/fastwan21\/?$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("FastWan2.1 1.3B");
 });
 
@@ -253,8 +253,7 @@ test("hardware preferences stay distinct from schema-backed GPU count and topolo
   await expect(yaml).toContainText('"num_gpus": 1');
   await expect(yaml).not.toContainText('"hardware"');
   await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
-  await expect(page.getByText("Fit unknown", { exact: true })).toBeVisible();
-  await expect(page.getByText("No recorded run", { exact: true })).toBeVisible();
+  await expect(page.getByText("Weights fit", { exact: true })).toBeVisible();
   await page.getByLabel("GPU count", { exact: true }).fill("0");
   await expect(yaml).toHaveCount(0);
   await expect(page.getByLabel("GPU count", { exact: true })).toHaveAttribute("aria-invalid", "true");
@@ -277,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(37);
+  await expect(page.locator(".recipe-card")).toHaveCount(36);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -462,16 +461,16 @@ test("custom devices persist and no preview control can block generated YAML", a
   await page.getByRole("button", { name: "Can't find it? Add a device", exact: true }).click();
   await page.getByLabel("Device name", { exact: true }).fill("RTX 4090");
   await page.getByRole("combobox", { name: "Memory type", exact: true }).selectOption("dedicated");
-  await page.getByRole("spinbutton", { name: "Nominal memory", exact: true }).fill("24");
-  await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("32");
-  await expect(page.getByText("The usable budget cannot exceed the nominal memory.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Use this device", exact: true })).toBeDisabled();
-  await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("22");
+  await page.getByRole("spinbutton", { name: "Total memory", exact: true }).fill("24");
+  await page.getByRole("spinbutton", { name: "Usable memory (optional)", exact: true }).fill("32");
+  await expect(page.getByText("Usable memory cannot exceed total memory.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save device", exact: true })).toBeDisabled();
+  await page.getByRole("spinbutton", { name: "Usable memory (optional)", exact: true }).fill("22");
   await page.getByRole("spinbutton", { name: "Host RAM (optional)", exact: true }).fill("64");
-  await page.getByRole("button", { name: "Use this device", exact: true }).click();
+  await page.getByRole("button", { name: "Save device", exact: true }).click();
   await expect(page.getByText("RTX 4090", { exact: true })).toBeVisible();
   await expect(page.locator(".hardware-selected")).toContainText("24 GB VRAM");
-  await expect(page.locator(".hardware-selected")).toContainText("Your budget: 22 GB");
+  await expect(page.locator(".hardware-selected")).toContainText("Usable memory: 22 GB");
   await expect(page.locator(".hardware-selected")).toContainText("Host RAM: 64 GB");
   await expect(page).toHaveURL(/hardware=custom/);
   await expect(page).toHaveURL(/hwName=RTX\+4090/);
@@ -480,28 +479,26 @@ test("custom devices persist and no preview control can block generated YAML", a
   await expect(page.locator(".hardware-selected")).toContainText("24 GB VRAM");
   await expect(page.locator(".component-plan")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await page.getByRole("button", { name: "Clear hardware", exact: true }).click();
   await expect(page.getByText("RTX 4090", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
 });
 
-test("hardware is never preselected; a single-GPU device sets one GPU with valid parallelism", async ({ page }) => {
+test("hardware is never preselected and a desktop card keeps the recipe GPU count", async ({ page }) => {
   await page.goto(route);
   await expect(page.locator(".hardware-picker")).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
   await output(page, "config.yaml");
   const yaml = page.getByLabel("Generated YAML", { exact: true });
   await expect(yaml).toContainText('"num_gpus": 4');
   await chooseHardware(page, "RTX 5090");
   await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
   await expect(page.getByText(/GeForce RTX 5090 .*32 GB VRAM/)).toBeVisible();
-  await expect(page.getByText(/Set to 1 GPU for .*RTX 5090/)).toBeVisible();
-  await expect(yaml).toContainText('"num_gpus": 1');
-  await expect(yaml).toContainText('"sp_size": -1');
+  await expect(yaml).toContainText('"num_gpus": 4');
   await expect(yaml).not.toContainText('"hardware"');
   await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
-  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear hardware", exact: true }).click();
+  await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
 });
 
 test("lowering the GPU count resets parallelism that no longer fits", async ({ page }) => {
@@ -522,7 +519,7 @@ test("browser back after a hardware-only change keeps the editor loaded", async 
   await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
   await page.goBack();
   await expect(page).not.toHaveURL(/hardware=/);
-  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
   await expect(page.getByText("Loading deployment settings…")).toHaveCount(0);
 });
@@ -535,15 +532,135 @@ test("hardware links resolve catalog aliases and non-CUDA devices are not CUDA t
   await expect(page.getByRole("radio", { name: /Arc B580/ })).toHaveCount(0);
 });
 
-test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
+test("recipe facts state validity and why memory has no estimate", async ({ page }) => {
   await page.goto(route);
-  const facts = page.getByLabel("Recipe facts");
+  const facts = page.locator(".recipe-facts");
   await expect(facts.getByText("Valid configuration", { exact: true })).toBeVisible();
-  await expect(facts.getByText("Fit unknown", { exact: true })).toBeVisible();
-  await expect(facts.getByText("No recorded run", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Details", exact: true }).click();
-  await expect(page.getByText(/This is not a fit claim/)).toBeVisible();
-  await expect(page.getByText(/do not establish this configuration/)).toBeVisible();
+  await expect(page.getByText(/Select a device to estimate memory/)).toBeVisible();
+});
+
+test("host-only system RAM cannot produce a GPU weights fit verdict", async ({ page }) => {
+  await page.goto(`${route}?hardware=custom&hwName=Host&hwType=system&hwMemory=128&hwUnit=GB&hwBackend=cuda`);
+  const facts = page.locator(".recipe-facts");
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(facts.getByText(/Host-only system RAM is not GPU capacity/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download YAML", exact: false })).toBeEnabled();
+});
+
+test("TAEH3 stops using the bundled VAE weights in memory facts", async ({ page }) => {
+  await page.goto(`${route}?hardware=custom&hwName=GPU&hwType=dedicated&hwMemory=80&hwUnit=GB&hwBackend=cuda`);
+  const facts = page.locator(".recipe-facts");
+  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await chip(page, "Video decoder", "taeh3");
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(facts.getByText(/TAEH3 decoder weights are not modeled/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"video_decode_backend": "taeh3"');
+  await chip(page, "Video decoder", "h3-vae");
+  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+});
+
+test("FastH3 keeps unmodeled quantization and decoder residency unknown", async ({ page }) => {
+  await page.goto(route);
+  await chooseHardware(page, "RTX 5090");
+  const facts = page.locator(".recipe-facts");
+  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByText(/Resident weights need 75\.6 GiB of 29\.8 GiB/)).toBeVisible();
+  await page
+    .getByRole("group", { name: "Transformer quantization", exact: true })
+    .getByRole("button", { name: "NVFP4", exact: true })
+    .click();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await page
+    .getByRole("group", { name: "NVFP4 video decoder", exact: true })
+    .getByRole("button", { name: /8L · fast/ })
+    .click();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"transformer_quant": "NVFP4"');
+  await expect(page.getByLabel("Generated YAML")).toContainText("fast-8L/decoder-nvfp4.safetensors");
+});
+
+test("4-Step quantization and full-depth decoder swaps also stay unestimated", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-4step");
+  await chooseHardware(page, "RTX 5090");
+  const facts = page.locator(".recipe-facts");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await chip(page, "Transformer quantization", "FP8");
+  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await chip(page, "Transformer quantization", "Default");
+  await page
+    .getByRole("group", { name: "NVFP4 video decoder", exact: true })
+    .getByRole("button", { name: /36L/ })
+    .click();
+  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
+});
+
+test("the retired Preview route and deployment links keep their checkpoint", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-preview");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText("FastVideo-Minimax-FastH3-Preview-v0.2");
+  await page.goto("/FastVideo/cookbook?deployment=fasth3-preview%2Fcuda-rest");
+  await expect(page).toHaveURL(/minimax-h3\/fasth3-preview/);
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText("FastVideo-Minimax-FastH3-Preview-v0.2");
+});
+
+for (const [deployment, label, sequential, tileBatch] of [
+  ["rtx5090-rest", "RTX 5090", true, "4"],
+  ["rtx-pro6000-rest", "RTX PRO 6000", false, "8"],
+  ["spark-rest", "DGX Spark", false, "12"],
+  ["cuda-rest", "RTX 5090", true, "4"],
+] as const) {
+  test(`Omni deployment link ${deployment} preserves its hardware baseline`, async ({ page }) => {
+    await page.goto(`/FastVideo/cookbook?deployment=fasth3-omniref%2F${deployment}`);
+    await expect(page).toHaveURL(/minimax-h3\/fasth3-omniref/);
+    await expect(page.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Serving", exact: true }).click();
+    await output(page, "config.yaml");
+    const yaml = page.getByLabel("Generated YAML");
+    await expect(yaml).toContainText(`"h3_sequential_load": ${sequential}`);
+    await expect(yaml).toContainText('"layer_profile": "h3_dit_vsa"');
+    await output(page, "Commands");
+    await expect(page.getByLabel("Server command")).toContainText(`FASTVIDEO_H3_VAE_TILE_BATCH=${tileBatch}`);
+    if (deployment === "spark-rest")
+      await expect(page.getByLabel("Server command")).toContainText("FASTVIDEO_NVFP4_MM_BACKEND=cudnn");
+  });
+}
+
+test("packed FastH3 checkpoints keep their fixed precision", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-trim");
+  await page.getByRole("tab", { name: "config.yaml" }).click();
+  await expect(page.getByLabel("Generated YAML")).toContainText('"transformer_quant": "NVFP4"');
+  await expect(page.getByLabel("Generated YAML")).toContainText('"layer_profile": "h3_dit_vsa"');
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Transformer quantization", exact: true })).toHaveCount(0);
+});
+
+test("MLX FastH3 stays unestimated and a GiB device keeps its unit", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-8step?deployment=fasth3-8step%2Fmlx-rest");
+  await page.getByRole("button", { name: "+ Find or add a Mac", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("M4 Max");
+  await page.getByRole("radio", { name: /Apple M4 Max 128 GB/ }).click();
+  await expect(page.getByText("Memory not estimated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByText(/MLX checkpoints use a different precision/)).toBeVisible();
+  await page.goto(
+    "/FastVideo/cookbook/minimax-h3/fasth3-8step?hardware=custom&hwName=Big&hwType=dedicated&hwMemory=80&hwUnit=GiB&hwBackend=cuda",
+  );
+  await expect(page.getByText("Weights fit, little headroom", { exact: true })).toBeVisible();
 });
 
 test("catalog lookup resolves aliases, variants, and unified memory without pooling", async ({ page }) => {
@@ -552,7 +669,7 @@ test("catalog lookup resolves aliases, variants, and unified memory without pool
   await expect(page).toHaveURL(/hardware=rtx-pro-6000-blackwell-workstation-96gb/);
   await expect(page.locator(".hardware-selected")).toContainText("96 GB VRAM");
   await expect(page.locator(".hardware-address-note")).toContainText("Per device, not a combined pool");
-  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await page.getByRole("button", { name: "Clear hardware", exact: true }).click();
   await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
   await page.getByLabel("Search hardware", { exact: true }).fill("GB10");
   await page.getByRole("radio", { name: /DGX Spark/ }).click();
@@ -572,9 +689,9 @@ test("MLX lookup uses unified memory and a custom Mac stays reusable", async ({ 
   await page.getByRole("radio", { name: /Apple M4 Max/ }).click();
   await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
   await expect(page.locator(".hardware-selected")).toContainText("Apple MLX");
-  await expect(page.locator(".hardware-selected")).toContainText("Usable budget: 96 GB");
+  await expect(page.locator(".hardware-selected")).toContainText("Usable memory: 96 GB");
   await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
-  await expect(page.getByRole("button", { name: "Clear hardware target", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear hardware", exact: true })).toBeVisible();
 });
 
 test("the directory filters by runtime without a hardware picker", async ({ page }) => {
@@ -586,6 +703,33 @@ test("the directory filters by runtime without a hardware picker", async ({ page
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute("href", /\/cookbook\/wan\/models\/[^?]+$/);
   await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
+});
+
+test("MLX Omni discovery and its original route expose the MLX launch command", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Runtime", { exact: true }).selectOption("mlx");
+  await page.getByLabel("Search recipes").fill("FastH3 Omni");
+  const cards = page.locator(".recipe-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toHaveAttribute("href", "/FastVideo/cookbook/minimax-h3/models/fasth3-omniref-mlx");
+  await cards.click();
+  await expect(page.getByLabel("Inference command")).toContainText("convert_minimax_h3_mlx.py");
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint ./FastH3-OmniRef-MLX/int6");
+  await expect(page.getByLabel("Inference command")).not.toContainText("fastvideo serve");
+  await page.reload();
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint ./FastH3-OmniRef-MLX/int6");
+});
+
+test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
+    const button = page.getByRole("button", { name: category, exact: true });
+    const count = Number(await button.locator(".recipe-filter-count").innerText());
+    await button.click();
+    await expect(page.locator(".recipe-card")).toHaveCount(count);
+    await expect(page.locator(".recipe-card").filter({ hasText: "FastH3 Preview V0.2" })).toHaveCount(0);
+  }
 });
 
 test("task discovery filters the directory and round-trips through the URL", async ({ page }) => {
@@ -613,10 +757,10 @@ test("directory filters round-trip through the URL", async ({ page }) => {
 
 test("a saved target missing from the catalog stays visible and clearable", async ({ page }) => {
   await page.goto(`${route}?hardware=retired-gpu`);
-  await expect(page.getByText(/Saved hardware target \(retired-gpu\) is not in this catalog/)).toBeVisible();
-  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await expect(page.getByText(/The saved device \(retired-gpu\) is not in this catalog/)).toBeVisible();
+  await page.getByRole("button", { name: "Clear hardware", exact: true }).click();
   await expect(page).not.toHaveURL(/hardware=/);
-  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
 });
 
 test("catalog search renders one plain no-results message", async ({ page }) => {

@@ -798,6 +798,39 @@
 .recipe-card-grid-configurable .recipe-card {
   border-block-start: 2px solid var(--blume-accent);
 }
+/* Family runbook cards are static: no curtain, so they need their own rhythm. */
+.recipe-card-static {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-block-size: 13.5rem;
+  padding: 1.25rem 1.25rem 1rem;
+}
+.recipe-card-static .recipe-card-top {
+  margin-block-end: 0;
+  padding-block-end: 0;
+}
+.recipe-card-static h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.recipe-card-static footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-block-start: auto;
+  margin-inline: 0;
+  padding-block: 0.75rem 0;
+  border-block-start: 1px solid var(--recipe-line);
+  font-size: 0.6875rem;
+}
+.recipe-card-static footer span:first-child {
+  color: var(--blume-muted-foreground);
+}
 .recipe-empty {
   padding-block: 2rem;
   text-align: center;
@@ -1621,4 +1654,26 @@
 }
 .recipe-request-code summary {
   padding-block: 0.25rem;
+}
+
+/* Article rhythm.
+   Blume's prose gives <details> no vertical margin, so consecutive cookbook
+   sections touch. Tables inherit the body line height, which makes dense cells
+   taller than the prose around them. Both are set here, once, instead of in
+   each page's markup. */
+.prose details {
+  margin-block: 1rem;
+}
+.prose details + details {
+  margin-top: 1rem;
+}
+.prose summary {
+  cursor: pointer;
+}
+.prose table {
+  line-height: 1.5;
+}
+.prose td,
+.prose th {
+  vertical-align: top;
 }

@@ -14,7 +14,7 @@ export default function FastModels() {
       models: group.models.filter(
         (model) =>
           (family === "All models" || family === group.name) &&
-          `${group.name} ${group.summary} ${model.id}`.toLowerCase().includes(query.trim().toLowerCase()),
+          `${group.name} ${model.id}`.toLowerCase().includes(query.trim().toLowerCase()),
       ),
     }))
     .filter((group) => group.models.length);
@@ -48,7 +48,7 @@ export default function FastModels() {
         <header className="model-catalog-heading">
           <div>
             <h2 id="checkpoint-catalog">Browse checkpoints</h2>
-            <p>Find the export your runtime needs.</p>
+            <p>Pick the checkpoint that matches your runtime.</p>
           </div>
           <a href="https://huggingface.co/collections/FastVideo/fastvideo-fasth3">
             Earlier FastH3 releases <span aria-hidden="true">↗</span>
@@ -67,7 +67,7 @@ export default function FastModels() {
             <input
               id={id}
               type="search"
-              placeholder="Name, precision, or runtime…"
+              placeholder="Name, family, or precision…"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />

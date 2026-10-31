@@ -1,4 +1,4 @@
-title: FastH3 OmniRef
+title: FastH3 Omni v1
 summary: Video and synchronized audio from a prompt plus ordered image, video, and audio references, in eight forwards.
 guide: docs/inference/fasth3_omniref.md
 deployments:
@@ -39,10 +39,12 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: &omniref_options
       - server.*
       - generator.engine.offload.text_encoder
       - generator.pipeline.experimental.h3_vae_nvfp4_decoder
+      - generator.pipeline.components.text_encoder_weights
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width
@@ -92,6 +94,7 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: *omniref_options
     overrides:
       default_request.sampling.num_frames:
@@ -142,5 +145,6 @@ deployments:
         directories in server.media_roots.
       - Based on the maintained inference recipe; this serving adaptation has not been GPU-validated.
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional NVFP4 text encoder (Blackwell only): hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder"
     options: *omniref_options
     overrides: *omniref_overrides

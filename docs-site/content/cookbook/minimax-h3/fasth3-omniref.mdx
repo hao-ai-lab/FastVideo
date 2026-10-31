@@ -1,7 +1,14 @@
 ---
-title: FastH3 OmniRef
-description: Configure FastH3 OmniRef reference-to-video serving on an RTX 5090, RTX PRO 6000, or DGX Spark.
+title: FastH3 Omni v1
+description: Configure FastH3 Omni v1 reference-to-video serving and copy inference or serving commands.
 mode: frame
 ---
 
 <Cookbook modelId="fasth3-omniref" />
+
+## Apple silicon
+
+The MLX path composes the BF16 Omni release with the NVFP4 text encoder, converts
+the DiT to INT6, and runs the same image and audio references on Metal. Follow
+[FastH3 Omni on MLX](/inference/fasth3_omniref_mlx).
+For copyable local commands, open the [MLX recipe](/cookbook/minimax-h3/models/fasth3-omniref-mlx).
