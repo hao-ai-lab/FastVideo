@@ -24,6 +24,7 @@ exec pytest \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
+  ./fastvideo/tests/distributed/test_sp_warmup_device.py \
   ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/training/test_ltx2_rope_fps.py \
