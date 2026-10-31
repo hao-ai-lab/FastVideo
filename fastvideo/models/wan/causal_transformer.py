@@ -17,6 +17,7 @@ import torch.distributed as dist
 
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, LocalAttention)
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
@@ -378,12 +379,18 @@ class CausalWanTransformerBlock(nn.Module):
 class CausalWanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
-    _supported_attention_backends = WanVideoConfig()._supported_attention_backends
+    _supported_attention_backends = tuple(
+        backend for backend in WanVideoConfig()._supported_attention_backends
+        if backend != AttentionBackendEnum.FLASHINFER)
     param_names_mapping = WanVideoConfig().param_names_mapping
     reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str, Any]) -> None:
+        if effective_attention_backend(config) == AttentionBackendEnum.FLASHINFER:
+            raise NotImplementedError(
+                "FLASHINFER is supported only for dense Wan attention; causal Wan is not supported. "
+                "Use FLASH_ATTN or TORCH_SDPA for causal Wan.")
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim

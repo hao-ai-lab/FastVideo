@@ -489,6 +489,14 @@ def test_allowlist_entries_are_still_real_directories():
     assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")
 
 
+def test_transformer_lane_collects_flashinfer_coverage():
+    lane = (REPO_ROOT / ".buildkite/scripts/lanes/transformer.sh").read_text()
+
+    assert "./fastvideo/tests/transformers" in lane
+    assert "./fastvideo/tests/attention/test_flashinfer_backend.py" in lane
+    assert "./fastvideo/tests/attention/test_flashinfer_cuda_dispatch.py" in lane
+
+
 def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
     lane = (REPO_ROOT / '.buildkite/scripts/lanes/dreamverse.sh').read_text()
     pattern = re.search(r"--grep-invert='([^']+)'", lane).group(1)
