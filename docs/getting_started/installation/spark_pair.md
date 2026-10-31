@@ -149,6 +149,39 @@ fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yam
 
 Stop the cluster when you are done: `ray stop` on both nodes.
 
+For eager FastH3 FP4 attention, `generator.pipeline.experimental.h3_vsa_fp4.sp_head_chunks`
+overlaps head-group communication with independent attention work. It defaults to `1`.
+The head count must divide evenly by `sp_size * sp_head_chunks`; on a two-Spark pair FastH3's
+56 heads allow 2, 4, 7, 14 or 28 chunks. The pair example config uses 7 (four heads per group). The grouped path packs directly into each exchange buffer and writes
+received heads into their original output positions. Changing the attention batch shape can change
+floating-point reductions, so compare generated quality as well as wall time for your checkpoint.
+
+The optional `h3_vsa_fp4.sp_projection_overlap: true` starts each Q/K/V exchange as soon as its
+projection is packed, overlapping traffic with the remaining projection GEMMs. It defaults to
+`false` and requires two ranks, head dimension 128, eager BF16 inference and compatible NVFP4
+QKV/gate projections with shared input quantization. Other configurations use the ordinary
+head-group exchange. Packing arithmetic and FP8 transport precision are unchanged.
+
+The optional `h3_vsa_fp4.sp_input_gather: true` gathers the existing packed FP4 inputs and
+rotary tables before computing each rank's assigned Q/K/V heads. The gate projection overlaps
+that smaller input transfer. It defaults to `false`, requires `sp_projection_overlap: true`,
+and currently supports the measured GB10/cuDNN shape: 7430 local rows, 5376 input channels,
+56 heads and bias-free NVFP4 QKV projections. Other shapes use the existing exchange path.
+All projections, normalization, rotary operations and FP8 packet rounding remain present;
+no steps or tokens are omitted. Validate generated output when changing this GEMM shape.
+
+The optional `h3_vsa_fp4.sp_pooled_key_mean: true` reuses tile statistics for key smoothing
+on the grouped tile-64 path with FP8 prefix attention and `smooth_k: true`. It defaults to
+`false`. All key rows still contribute, including zero padding in the normalization length,
+but the changed reduction order can alter generated samples. Validate quality for the checkpoint
+and workload before enabling it.
+
+The optional `h3_vsa_fp4.sp_direct_keys: true` avoids the intermediate BF16 key tensor on
+that pooled-mean path. It defaults to `false`. Key preparation reads the current exchange's
+FP8 packets and applies the same FP32 multiply, BF16 rounding and smoothing as the ordinary
+receive path. All keys and their tile statistics still contribute; other attention configurations
+retain ordinary key stores.
+
 ## Released V2, FastH3-QAD-v2 and Trim NVFP4 stacks
 
 The public eight-forward V2 and Trim stacks include the NVFP4 encoder and

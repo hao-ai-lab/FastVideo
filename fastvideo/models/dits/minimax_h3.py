@@ -29,6 +29,7 @@ from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_siz
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.pdd import PDDReplicatedLinear, fuse_pdd_heads
 from fastvideo.layers.quantization import QuantizationConfig
@@ -163,7 +164,10 @@ class MiniMaxH3FeedForward(nn.Module):
         # (4.5 GiB at 78k tokens), so chunks bound the activation peak on 24-32 GB GPUs.
         self.chunk_tokens = envs.FASTVIDEO_H3_FFN_CHUNK_TOKENS.get()
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor,
+                pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None) -> torch.Tensor:
+        if pre_quantized is not None:
+            return self._forward(hidden_states, pre_quantized)
         tokens = hidden_states.shape[-2] if hidden_states.dim() > 1 else 0
         if (self.chunk_tokens and tokens > self.chunk_tokens and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling() and hidden_states.numel() == tokens * hidden_states.shape[-1]):
@@ -174,12 +178,29 @@ class MiniMaxH3FeedForward(nn.Module):
             return out
         return self._forward(hidden_states)
 
-    def _forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def _forward(self, hidden_states: torch.Tensor,
+                 pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None) -> torch.Tensor:
         if self.use_mxfp8:
             from fastvideo.layers.mxfp8linear import mxfp8_swiglu_feed_forward
 
             return mxfp8_swiglu_feed_forward(hidden_states, self.fc_in, self.fc_out)
-        hidden_states, _ = self.fc_in(hidden_states)
+        if self.fuse_swiglu and pre_quantized is not None and not torch.compiler.is_compiling():
+            from fastvideo.models.dits.minimax_h3_fusions.swiglu_gemm import try_swiglu_gemm
+
+            fused = try_swiglu_gemm(self, hidden_states, pre_quantized)
+            if fused is not None:
+                return fused
+        if pre_quantized is None:
+            hidden_states, _ = self.fc_in(hidden_states)
+        else:
+            hidden_states = self.fc_in.quant_method.apply(
+                self.fc_in, hidden_states, self.fc_in.bias, pre_quantized=pre_quantized,
+            )
+        if (self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states)
+                and not torch.compiler.is_compiling()):
+            quantized = self._quantized_swiglu_output(hidden_states)
+            if quantized is not None:
+                return quantized
         if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
             hidden_states = minimax_h3_swiglu(hidden_states)
         elif self.exact_swiglu and exact_kernels.supports_rowwise(hidden_states):
@@ -189,6 +210,43 @@ class MiniMaxH3FeedForward(nn.Module):
             hidden_states = hidden_states * F.silu(gate)
         hidden_states, _ = self.fc_out(hidden_states)
         return hidden_states
+
+    def input_quantization_scale(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
+        """Static scale for a fused producer, or None when ordinary preparation is needed."""
+        method = getattr(self.fc_in, "quant_method", None)
+        if (self.chunk_tokens or type(method) is not NVFP4QuantizeMethod
+                or not method.wants_prequantized_input() or hidden_states.dtype != torch.bfloat16
+                or hidden_states.shape[-1] % 64 or torch.cuda.get_device_capability(hidden_states.device)[0] < 10):
+            return None
+        scale = method._static_activation_global_sf()
+        if scale is None:
+            scale = getattr(self.fc_in, "_nvfp4_input_global_sf", None)
+        if scale is None and not method._dynamic_activation_scale():
+            scale = method.x_global_sf
+        return scale
+
+    def _quantized_swiglu_output(self, packed: torch.Tensor) -> torch.Tensor | None:
+        """Fuse BF16 SwiGLU with compatible static/unit-scale NVFP4 preparation."""
+        layer = self.fc_out
+        method = getattr(layer, "quant_method", None)
+        if (type(method) is not NVFP4QuantizeMethod or not method.wants_prequantized_input()
+                or packed.dtype != torch.bfloat16 or packed.shape[-1] % 128 or not packed.is_contiguous()
+                or torch.cuda.get_device_capability(packed.device)[0] < 10):
+            return None
+        scale = method._static_activation_global_sf()
+        if scale is None:
+            scale = getattr(layer, "_nvfp4_input_global_sf", None)
+        if scale is None:
+            if method._dynamic_activation_scale():
+                return None
+            scale = method.x_global_sf
+        from fastvideo.models.dits.minimax_h3_fusions.swiglu_quant import swiglu_quantize_nvfp4
+
+        pre = swiglu_quantize_nvfp4(packed, scale)
+        # apply(pre_quantized=...) reads only this view's shape. The BF16
+        # SwiGLU activation itself is never allocated or written.
+        shape_view = packed[..., :packed.shape[-1] // 2]
+        return method.apply(layer, shape_view, layer.bias, pre_quantized=pre)
 
 
 class MiniMaxH3Attention(nn.Module):
@@ -351,12 +409,30 @@ class MiniMaxH3Attention(nn.Module):
             return exact_kernels.rope_prefix(hidden_states, rotary_emb)
         return self._apply_rotary_emb(hidden_states, rotary_emb)
 
+    def input_quantization_scale(
+        self, hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
+    ) -> torch.Tensor | None:
+        """Allow producer quantization only when this call will use the shared FP4 route."""
+        fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        if (not self._vsa_fp4 or fine_override is not None or rotary_emb is None
+                or torch.is_grad_enabled() or torch.compiler.is_compiling()
+                or not hidden_states.is_cuda or hidden_states.dtype != torch.bfloat16
+                or torch.cuda.get_device_capability(hidden_states.device)[0] < 10):
+            return None
+        meta = get_forward_context().attn_metadata
+        if not isinstance(meta, MiniMaxH3VSAMetadata) or not meta.exempt or meta.pad_tokens:
+            return None
+        from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_qkv_gate_scale
+
+        return _shared_qkv_gate_scale(self, hidden_states)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
         attn_metadata: AttentionMetadata | None = None,
+        pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
@@ -367,13 +443,22 @@ class MiniMaxH3Attention(nn.Module):
             if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt and not meta.pad_tokens:
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 if not model_parallel_is_initialized() or get_sp_world_size() == 1:
-                    hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
+                    hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope,
+                                                       pre_quantized=pre_quantized)
                 else:
                     hidden_states = vsa_fp4_attention_sp(self, hidden_states, rotary_emb, meta, use_fused_rope,
-                                                         get_sp_group())
+                                                         get_sp_group(), pre_quantized=pre_quantized)
                 with STAGES.span("out_proj"):
-                    hidden_states, _ = self.to_out(hidden_states)
+                    if isinstance(hidden_states, tuple):
+                        shape_view, prepared = hidden_states
+                        hidden_states = self.to_out.quant_method.apply(
+                            self.to_out, shape_view, self.to_out.bias, pre_quantized=prepared,
+                        )
+                    else:
+                        hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
+        if pre_quantized is not None:
+            raise RuntimeError("Prequantized H3 attention input requires the eager FP4 VSA route")
         if (self._vsa_tile_first and hidden_states.is_cuda and rotary_emb is not None
                 and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
                 and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
@@ -548,7 +633,7 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
             prefix=f"{prefix}.linear",
         )
 
-    def enable_host_cache(self, table: dict | None = None) -> None:
+    def enable_host_cache(self, table: dict | None = None, *, keep_resident: bool = False) -> None:
         """Keep the projection in pinned host memory and cache its output per timestep set.
 
         The modulation is a pure function of the timestep embedding, and few-step checkpoints sample a fixed
@@ -563,7 +648,11 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
             self._cache_key = None
             return
         weight, bias = weight.data, bias.data
-        if table is None:
+        if table is None and keep_resident:
+            # Unified-memory GPUs share the host pool. Reuse the original allocation
+            # instead of making a pinned copy and copying it back on every cache miss.
+            self._host_weight, self._host_bias = weight, bias
+        elif table is None:
             self._host_weight = weight.to("cpu").pin_memory()
             self._host_bias = bias.to("cpu").pin_memory()
         else:
@@ -700,7 +789,10 @@ class MiniMaxH3TransformerBlock(nn.Module):
         adaln_indices: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int,
-    ) -> torch.Tensor:
+        *,
+        _attention_prepared: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+        _next_block: MiniMaxH3TransformerBlock | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         with nvtx_range("minimax_h3.transformer_block.adaln_projection"):
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
                 t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
@@ -710,7 +802,21 @@ class MiniMaxH3TransformerBlock(nn.Module):
         use_exact_modulate = (not use_modulate_fusion and self.exact_modulate and adaln_indices.is_contiguous()
                               and exact_kernels.supports_rowwise(hidden_states, shift_msa, scale_msa, gate_msa,
                                                                  shift_mlp, scale_mlp, gate_mlp))
-        if use_modulate_fusion:
+        attn_quantized = _attention_prepared
+        attn_scale = (self.attn.input_quantization_scale(hidden_states, rotary_emb)
+                      if attn_quantized is None and use_modulate_fusion and not torch.compiler.is_compiling() else None)
+        if attn_quantized is not None:
+            norm_hidden_states = hidden_states
+        elif attn_scale is not None:
+            from fastvideo.models.dits.minimax_h3_fusions.modulation_quant import modulate_quantize_nvfp4
+
+            with nvtx_range("minimax_h3.transformer_block.modulate_quant_fusion"):
+                attn_quantized = modulate_quantize_nvfp4(
+                    hidden_states, self.norm1.weight, scale_msa, shift_msa, adaln_indices,
+                    self.norm1.eps, attn_scale,
+                )
+            norm_hidden_states = hidden_states  # Shape only; QKV and the gate consume attn_quantized.
+        elif use_modulate_fusion:
             with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                 norm_hidden_states = fused_rmsnorm_modulate(
                     hidden_states,
@@ -730,11 +836,26 @@ class MiniMaxH3TransformerBlock(nn.Module):
                 norm_hidden_states = norm_hidden_states * (
                     1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.self_attention"):
-            attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
+            attention_output = (self.attn(norm_hidden_states, rotary_emb, original_seq_len,
+                                          pre_quantized=attn_quantized) if attn_quantized is not None
+                                else self.attn(norm_hidden_states, rotary_emb, original_seq_len))
         # The attention input is dead now. Keeping it until assignment below
         # overlaps three full-width activations during the residual fusion.
         del norm_hidden_states
-        if use_modulate_fusion:
+        ff_quantized = None
+        ff_scale = (self.ff.input_quantization_scale(hidden_states)
+                    if use_modulate_fusion and not torch.compiler.is_compiling() else None)
+        if ff_scale is not None:
+            from fastvideo.models.dits.minimax_h3_fusions.modulation_quant import residual_modulate_quantize_nvfp4
+
+            with nvtx_range("minimax_h3.transformer_block.modulate_quant_fusion"):
+                hidden_states, ff_quantized = residual_modulate_quantize_nvfp4(
+                    hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp,
+                    shift_mlp, adaln_indices, self.norm2.eps, ff_scale,
+                )
+            # The following NVFP4 projection consumes only this tensor's shape.
+            norm_hidden_states = hidden_states
+        elif use_modulate_fusion:
             with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                 hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
                     hidden_states,
@@ -759,8 +880,23 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
         del attention_output
         with nvtx_range("minimax_h3.transformer_block.feed_forward"), STAGES.span("feed_forward"):
-            feed_forward_output = self.ff(norm_hidden_states)
+            feed_forward_output = (self.ff(norm_hidden_states, pre_quantized=ff_quantized)
+                                   if ff_quantized is not None else self.ff(norm_hidden_states))
         if use_modulate_fusion and not torch.compiler.is_compiling():
+            if _next_block is not None and _next_block.fuse_modulate:
+                next_quant_scale = _next_block.attn.input_quantization_scale(hidden_states, rotary_emb)
+                if next_quant_scale is not None:
+                    from fastvideo.models.dits.minimax_h3_fusions.modulation_quant import (
+                        residual_modulate_quantize_nvfp4,
+                    )
+
+                    next_shift, next_scale, *_ = _next_block.adaln_proj(temb)
+                    return residual_modulate_quantize_nvfp4(
+                        hidden_states, feed_forward_output, gate_mlp, _next_block.norm1.weight,
+                        next_scale.to(hidden_states.dtype), next_shift.to(hidden_states.dtype),
+                        adaln_indices, _next_block.norm1.eps, next_quant_scale,
+                        round_residual_before_norm=True,
+                    )
             return _gated_residual(hidden_states, gate_mlp, adaln_indices, feed_forward_output)
         if use_exact_modulate:
             return exact_kernels.gate_residual(hidden_states, gate_mlp, feed_forward_output, adaln_indices)
@@ -1181,7 +1317,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         object.__setattr__(self, "_splice_late", late)
         self._splice_from_step = int(from_step)
 
-    def enable_adaln_host_cache(self, table_path: str | None = None) -> None:
+    def enable_adaln_host_cache(self, table_path: str | None = None, *, keep_resident: bool = False) -> None:
         """Move every block's AdaLN projection to pinned host memory behind a per-timestep cache.
 
         With ``table_path`` (written by FASTVIDEO_H3_ADALN_DUMP), the cache is prefilled from precomputed
@@ -1193,7 +1329,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             raw = torch.load(table_path, map_location="cpu")
             tables = {int(i): {ast.literal_eval(k): v for k, v in blk.items()} for i, blk in raw.items()}
         for index, block in enumerate(self.transformer_blocks):
-            block.adaln_proj.enable_host_cache(None if tables is None else tables[index])
+            block.adaln_proj.enable_host_cache(None if tables is None else tables[index], keep_resident=keep_resident)
         self._adaln_host_cache = True
         self._adaln_dumped_entries = -1
 
@@ -1331,6 +1467,18 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 block.adaln_proj._cache_key = key
             self._move_adaln_tables(temb.device)
 
+        # Keep cross-block preparation local to this forward. Compiled/wrapped
+        # blocks retain their normal tensor-only interface.
+        cross_block = (not torch.compiler.is_compiling() and getattr(self, "_adaln_host_cache", False)
+                       and _can_run_minimax_h3_fusion(packed_hidden_states)
+                       and packed_hidden_states.dtype == torch.bfloat16
+                       and all(type(b) is MiniMaxH3TransformerBlock
+                               and getattr(b.forward, "__func__", None) is MiniMaxH3TransformerBlock.forward
+                               and getattr(b, "_compiled_call_impl", None) is None
+                               and not b._forward_pre_hooks and not b._forward_hooks
+                               and b.norm1.weight.device == packed_hidden_states.device
+                               for b in self.transformer_blocks))
+        attention_prepared = None
         # The eager driver owns profiling markers while each block's compiled
         # forward owns the graph that the marker surrounds.
         for block_index, block in enumerate(self.transformer_blocks):
@@ -1338,13 +1486,21 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 logger.info("H3_MEMORY_BLOCK %d allocated=%.3f GiB reserved=%.3f GiB", block_index,
                             torch.cuda.memory_allocated() / 2**30, torch.cuda.memory_reserved() / 2**30)
             with nvtx_range(f"minimax_h3.transformer_block.{block_index}"), STAGES.span("block_total"):
-                packed_hidden_states = block(
-                    packed_hidden_states,
-                    temb,
-                    adaln_indices,
-                    rotary_emb,
-                    original_seq_len,
-                )
+                if cross_block:
+                    next_block = (self.transformer_blocks[block_index + 1]
+                                  if block_index + 1 < len(self.transformer_blocks) else None)
+                    result = block(
+                        packed_hidden_states, temb, adaln_indices, rotary_emb, original_seq_len,
+                        _attention_prepared=attention_prepared, _next_block=next_block,
+                    )
+                    if isinstance(result, tuple):
+                        packed_hidden_states, attention_prepared = result
+                    else:
+                        packed_hidden_states, attention_prepared = result, None
+                else:
+                    packed_hidden_states = block(
+                        packed_hidden_states, temb, adaln_indices, rotary_emb, original_seq_len,
+                    )
 
         packed_hidden_states = self.norm_out(
             packed_hidden_states,
