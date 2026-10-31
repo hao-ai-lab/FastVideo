@@ -59,3 +59,11 @@ def test_grad_required_stays_eager(cuda_tensors) -> None:
     assert not _can_fuse_qk_norm_rope(query, key, (cos, sin))
     with torch.no_grad():
         assert _can_fuse_qk_norm_rope(query, key, (cos, sin))
+
+
+def test_mismatched_key_dtype_stays_eager(cuda_tensors) -> None:
+    query, key = _query_key()
+    cos = torch.randn(2, 5, 1, 8)
+    sin = torch.randn(2, 5, 1, 8)
+
+    assert not _can_fuse_qk_norm_rope(query, key.double(), (cos, sin))

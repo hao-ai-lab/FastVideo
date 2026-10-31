@@ -335,7 +335,7 @@ def _can_fuse_qk_norm_rope(
     """The Triton prologue needs CUDA, contiguous Q/K, packed per-token rotary tables, and a power-of-two head dim."""
     if rotary_emb is None or not query.is_cuda or not query.is_contiguous():
         return False
-    if not key.is_contiguous() or key.shape != query.shape or not query.is_floating_point():
+    if not key.is_contiguous() or key.shape != query.shape or key.dtype != query.dtype or not query.is_floating_point():
         return False
     if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad):
         return False
