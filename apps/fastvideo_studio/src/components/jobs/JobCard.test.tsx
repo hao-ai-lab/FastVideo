@@ -54,6 +54,14 @@ beforeEach(() => {
 });
 
 describe('JobCard', () => {
+  it('cancels a queued job without offering Start or Edit', async () => {
+    render(<JobCard job={makeJob({ status: 'queued' })} />);
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(stopJob).toHaveBeenCalledWith('job-1'));
+  });
+
   it('keeps selection and job action buttons as semantic siblings', () => {
     render(<JobCard job={makeJob()} />);
 

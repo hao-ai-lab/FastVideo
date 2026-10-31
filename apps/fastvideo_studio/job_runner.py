@@ -17,7 +17,9 @@ import logging
 import logging.handlers
 import multiprocessing as mp
 import os
+import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -28,7 +30,10 @@ from typing import Any
 import yaml
 
 from fastvideo.utils import get_mp_context
+from fastvideo.attention.selector import coerce_attn_backend, get_env_variable_attn_backend
 from fastvideo_studio.database import Database
+from fastvideo_studio.inference_options import resolve_attention_defaults
+from fastvideo_studio.models import CreateJobRequest
 from fastvideo_studio.training_config import (
     build_training_config,
     get_training_env,
@@ -41,11 +46,13 @@ logger = logging.getLogger("fastvideo.studio.job_runner")
 _TQDM_PCT_RE = re.compile(r"(\d+)%\|")
 _TQDM_FRAC_RE = re.compile(r"\b(\d+)/(\d+)\b")
 
+_TRAINING_STOP_TIMEOUT_S = 30.0
 _MAX_LOG_LINES = 2000  # ring-buffer cap per job
 
 
 class JobStatus(str, enum.Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -148,6 +155,8 @@ class Job:
     fps: int = 24
     seed: int = 1024
     negative_prompt: str = ""
+    attention_backend: str | None = None
+    vsa_tile_size: int | None = None
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     dit_layerwise_offload: bool = False
@@ -210,6 +219,8 @@ class Job:
             "seed": self.seed,
             "negative_prompt": self.negative_prompt,
             "num_gpus": self.num_gpus,
+            "attention_backend": self.attention_backend,
+            "vsa_tile_size": self.vsa_tile_size,
             "dit_cpu_offload": self.dit_cpu_offload,
             "dit_layerwise_offload": self.dit_layerwise_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
@@ -342,6 +353,10 @@ class JobRunner:
         # the model-loading cost once per model configuration.
         self._generators: dict[tuple, Any] = {}
         self._generators_lock = threading.Lock()
+        self._queue: queue.Queue[tuple[Job, threading.Event] | None] = queue.Queue()
+        self._closed = False
+        self._active_job: Job | None = None
+        self._worker = threading.Thread(target=self._serve_jobs, name="studio-jobs", daemon=True)
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
@@ -350,6 +365,7 @@ class JobRunner:
         # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
+        self._worker.start()
 
     def _load_logs(self, job: Job) -> None:
         """Populate job's log buffer from its log file if it exists."""
@@ -379,9 +395,9 @@ class JobRunner:
         try:
             for row in self._db.get_all_jobs():
                 status = row["status"]
-                if status == "running":
+                if status in ("running", "queued"):
+                    row["error"] = f"Server restarted (job was {status})"
                     status = JobStatus.FAILED
-                    row["error"] = "Server restarted (job was running)"
                     row["finished_at"] = time.time()
                     self._db.update_job(row["id"], {
                         "status": "failed",
@@ -431,6 +447,8 @@ class JobRunner:
                     seed=row.get("seed", 1024),
                     negative_prompt=row.get("negative_prompt", "") or "",
                     num_gpus=row.get("num_gpus", 1),
+                    attention_backend=row.get("attention_backend"),
+                    vsa_tile_size=row.get("vsa_tile_size"),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
                     dit_layerwise_offload=row.get("dit_layerwise_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
@@ -465,12 +483,65 @@ class JobRunner:
         except Exception as exc:
             logger.warning("Failed to persist job %s: %s", job.id, exc)
 
+    def _clear_generators(self) -> None:
+        with self._generators_lock:
+            generators = list(self._generators.values())
+            self._generators.clear()
+        for generator in generators:
+            generator.shutdown()
+
     def _shutdown(self) -> None:
-        """Shutdown the shared multiprocessing manager on exit."""
-        try:
-            self._mp_manager.shutdown()
-        except Exception as exc:
-            logger.warning("Failed to shutdown mp manager: %s", exc)
+        """Stop accepting work and release workers before their log manager."""
+        with self._jobs_lock:
+            if self._closed:
+                return
+            self._closed = True
+            for job in self._jobs.values():
+                if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+                    job._stop_event.set()
+            self._queue.put(None)
+        for job in list(self._jobs.values()):
+            self._terminate_training_process(job)
+        # Inference cancellation is cooperative. Keep its queues and owning
+        # thread alive until loading/generation and worker cleanup finish.
+        self._worker.join()
+        self._clear_generators()
+        self._mp_manager.shutdown()
+        atexit.unregister(self._shutdown)
+
+    def _serve_jobs(self) -> None:
+        # The owning thread stays alive across jobs: worker parent-death signals
+        # must not fire when a per-job thread exits.
+        while True:
+            item = self._queue.get()
+            if item is None:
+                self._clear_generators()
+                return
+            job, stop_event = item
+            with self._jobs_lock:
+                if stop_event.is_set():
+                    if job._stop_event is stop_event:
+                        job.status = JobStatus.STOPPED
+                        job.finished_at = time.time()
+                        job._log_buf.phase = "stopped"
+                        self._save_job(job)
+                    continue
+                self._active_job = job
+                job.status = JobStatus.RUNNING
+            try:
+                if job.job_type != "inference":
+                    self._clear_generators()
+                self._run_job(job)
+            except BaseException as exc:
+                logger.exception("Unhandled exception in job %s", job.id)
+                job.status = JobStatus.FAILED
+                job.error = f"{type(exc).__name__}: {exc}"
+                job.finished_at = time.time()
+                job._log_buf.phase = "failed"
+                self._save_job(job)
+            finally:
+                with self._jobs_lock:
+                    self._active_job = None
 
     def create_job(
         self,
@@ -505,6 +576,8 @@ class JobRunner:
         guidance_rescale: float = 0.0,
         fps: int = 24,
         seed: int = 1024,
+        attention_backend: str | None = None,
+        vsa_tile_size: int | None = None,
         num_gpus: int = 1,
         negative_prompt: str = "",
         dit_cpu_offload: bool = False,
@@ -519,6 +592,9 @@ class JobRunner:
         sp_size: int = -1,
     ) -> Job:
         """Create a new job (does not start it automatically)."""
+        backend = coerce_attn_backend(attention_backend)
+        if vsa_tile_size is not None and vsa_tile_size <= 0:
+            raise ValueError("vsa_tile_size must be positive")
         job = Job(
             id=job_id,
             model_id=model_id,
@@ -553,6 +629,8 @@ class JobRunner:
             seed=seed,
             negative_prompt=negative_prompt or "",
             num_gpus=num_gpus,
+            attention_backend=backend.name if backend else None,
+            vsa_tile_size=vsa_tile_size,
             dit_cpu_offload=dit_cpu_offload,
             dit_layerwise_offload=dit_layerwise_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
@@ -600,11 +678,12 @@ class JobRunner:
         """
         with self._jobs_lock:
             job = self._jobs.pop(job_id, None)
+            if job is not None:
+                job._stop_event.set()
         if job is None:
             return False
 
-        # Best-effort stop
-        job._stop_event.set()
+        self._terminate_training_process(job)
         try:
             self._db.delete_job(job_id)
         except Exception as exc:
@@ -631,6 +710,8 @@ class JobRunner:
         "fps",
         "seed",
         "num_gpus",
+        "attention_backend",
+        "vsa_tile_size",
         "dit_cpu_offload",
         "dit_layerwise_offload",
         "text_encoder_cpu_offload",
@@ -676,88 +757,95 @@ class JobRunner:
         """Edit the configuration of a job that has not produced a result."""
         with self._jobs_lock:
             job = self._jobs.get(job_id)
-        if job is None:
-            raise ValueError(f"Job {job_id} not found")
-        if job.status not in self.EDITABLE_STATUSES:
-            allowed = ", ".join(s.value for s in self.EDITABLE_STATUSES)
-            raise ValueError(f"Job is {job.status.value}; only {allowed} jobs can be edited. "
-                             "Duplicate it instead.")
-        unknown = set(updates) - set(self.CONFIG_FIELDS)
-        if unknown:
-            raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
-        for field_name, value in updates.items():
-            setattr(job, field_name, value)
-        self._save_job(job)
-        return job
+            if job is None:
+                raise ValueError(f"Job {job_id} not found")
+            if job.status not in self.EDITABLE_STATUSES or self._active_job is job:
+                allowed = ", ".join(s.value for s in self.EDITABLE_STATUSES)
+                raise ValueError(f"Job is {job.status.value}; only {allowed} jobs can be edited. "
+                                 "Duplicate it instead.")
+            unknown = set(updates) - set(self.CONFIG_FIELDS)
+            if unknown:
+                raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
+            updates = dict(updates)
+            if "attention_backend" in updates:
+                backend = coerce_attn_backend(updates["attention_backend"])
+                updates["attention_backend"] = backend.name if backend else None
+            if "vsa_tile_size" in updates:
+                tile = updates["vsa_tile_size"]
+                if tile is not None and (isinstance(tile, bool) or not isinstance(tile, int) or tile <= 0):
+                    raise ValueError("vsa_tile_size must be a positive integer")
+            merged = {key: getattr(job, key) for key in self.CONFIG_FIELDS}
+            validated = CreateJobRequest(**{**merged, **updates}).model_dump()
+            updates = {key: validated[key] for key in updates}
+            self._db.update_job_config(job_id, updates)
+            for field_name, value in updates.items():
+                setattr(job, field_name, value)
+            self._save_job(job)
+            return job
 
     def start_job(self, job_id: str) -> Job:
-        """Start (or restart) a pending / stopped / failed job.
-        
-        Raises:
-            ValueError: If job not found or cannot be started
-        """
+        """Enqueue a job once; one persistent thread owns its full lifecycle."""
         with self._jobs_lock:
+            if self._closed:
+                raise ValueError("Job runner is shutting down")
             job = self._jobs.get(job_id)
-        if job is None:
-            raise ValueError(f"Job {job_id} not found")
-        if job.status == JobStatus.RUNNING:
-            raise ValueError("Job is already running")
-        if job.status == JobStatus.COMPLETED:
-            raise ValueError("Job already completed. Delete and re-create to run again.")
-        # Reset state for re-run
-        job.status = JobStatus.PENDING
-        job.error = None
-        job.output_path = None
-        job.log_file_path = None  # Will be set when job starts
-        job.started_at = None
-        job.finished_at = None
-        job._stop_event.clear()
-        job._log_buf = JobLogBuffer()  # fresh log buffer
-        job.log_file_handler = None  # Reset file handler
-        job._process = None  # Reset subprocess handle
-
-        # Wrap _run_job in an additional safety layer to catch any exceptions
-        # that might escape (though they shouldn't with our comprehensive handling)
-        def safe_run_job(job: Job):
-            """Wrapper to ensure _run_job never raises an unhandled exception."""
-            try:
-                self._run_job(job)
-            except BaseException as exc:
-                # This should never happen, but if it does, we catch it here
-                logger.critical("Unhandled exception escaped from _run_job for job %s: %s", job.id, exc, exc_info=True)
-                with contextlib.suppress(Exception):
-                    job.status = JobStatus.FAILED
-                    job.error = (f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
-                    job.finished_at = time.time()
-
-        thread = threading.Thread(target=safe_run_job, args=(job, ), daemon=True)
-        job._thread = thread
-        thread.start()
-        logger.info("Started job %s", job.id)
+            if job is None:
+                raise ValueError(f"Job {job_id} not found")
+            if job.status in (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.COMPLETED) or self._active_job is job:
+                raise ValueError(f"Job cannot start while {job.status.value}")
+            job.status = JobStatus.QUEUED
+            job.error = None
+            job.output_path = None
+            job.log_file_path = None
+            job.started_at = None
+            job.finished_at = None
+            # A new event keeps an old cancelled queue entry from executing a restart.
+            job._stop_event = threading.Event()
+            job._log_buf = JobLogBuffer()
+            job._log_buf.phase = "queued"
+            job.log_file_handler = None
+            job._process = None
+            self._save_job(job)
+            self._queue.put((job, job._stop_event))
         return job
 
     def stop_job(self, job_id: str) -> Job:
-        """Request a running job to stop.
-        
-        For inference: cooperative stop between phases.
-        For training: terminates the subprocess.
-        
-        Raises:
-            ValueError: If job not found or not running
-        """
+        """Cancel queued work immediately; running work stops between phases."""
         with self._jobs_lock:
             job = self._jobs.get(job_id)
-        if job is None:
-            raise ValueError(f"Job {job_id} not found")
-        if job.status != JobStatus.RUNNING:
-            raise ValueError(f"Job is not running (status={job.status.value})")
-
-        job._stop_event.set()
-        if job._process is not None:
-            with contextlib.suppress(Exception):
-                job._process.terminate()
-        logger.info("Stop requested for job %s", job.id)
+            if job is None:
+                raise ValueError(f"Job {job_id} not found")
+            if job.status not in (JobStatus.RUNNING, JobStatus.QUEUED):
+                raise ValueError(f"Job is not running or queued (status={job.status.value})")
+            job._stop_event.set()
+            if job.status == JobStatus.QUEUED:
+                job.status = JobStatus.STOPPED
+                job.finished_at = time.time()
+                job._log_buf.phase = "stopped"
+                self._save_job(job)
+        self._terminate_training_process(job)
         return job
+
+    @staticmethod
+    def _terminate_training_process(job: Job) -> None:
+        process = job._process
+        if process is None:
+            return
+        # The leader may exit while a child still owns a GPU or the stdout pipe.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _TRAINING_STOP_TIMEOUT_S
+        while time.monotonic() < deadline:
+            process.poll()  # reap the leader so it does not keep the group alive
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
 
     def get_job_logs(self, job_id: str, after: int = 0) -> dict[str, Any]:
         """Return log lines for a job.
@@ -803,8 +891,24 @@ class JobRunner:
         tp_size: int = -1,
         sp_size: int = -1,
         log_queue: mp.Queue | None = None,
+        attention_backend: str | None = None,
+        vsa_tile_size: int | None = None,
     ) -> Any:
+        backend = coerce_attn_backend(attention_backend)
+        if backend is None:
+            backend = get_env_variable_attn_backend()
+        resolved_backend, resolved_tile = resolve_attention_defaults(model_id,
+                                                                     workload_type,
+                                                                     backend.name if backend else None,
+                                                                     vsa_tile_size,
+                                                                     use_recipe=override_pipeline_cls_name is None)
+        logger.info(
+            "Attention settings for %s: requested_backend=%s resolved_backend=%s "
+            "requested_tile=%s resolved_tile=%s", model_id, attention_backend or "Auto", resolved_backend
+            or "platform default", vsa_tile_size, resolved_tile)
         cache_key = (
+            resolved_backend,
+            resolved_tile,
             model_id,
             workload_type,
             num_gpus,
@@ -842,7 +946,7 @@ class JobRunner:
                     logger.debug("Shutdown of the dead generator failed", exc_info=True)
 
         # Import lazily so starting the server is fast even without a GPU.
-        from fastvideo import VideoGenerator
+        from fastvideo_studio.inference_worker import StudioVideoGenerator
 
         logger.info(
             "Loading model %s (workload=%s, num_gpus=%d, offloads: "
@@ -862,7 +966,8 @@ class JobRunner:
             sp_size,
         )
 
-        gen = VideoGenerator.from_pretrained(
+        self._clear_generators()
+        gen = StudioVideoGenerator.from_pretrained(
             model_id,
             workload_type=workload_type,
             num_gpus=num_gpus,
@@ -877,6 +982,8 @@ class JobRunner:
             use_fsdp_inference=use_fsdp_inference,
             enable_torch_compile=enable_torch_compile,
             VSA_sparsity=vsa_sparsity,
+            attention_backend=resolved_backend,
+            VSA_tile_size=resolved_tile,
             tp_size=tp_size,
             sp_size=sp_size,
             log_queue=log_queue,
@@ -952,23 +1059,27 @@ class JobRunner:
             self._save_job(job)
 
             with open(job.log_file_path, "w", encoding="utf-8") as log_file:
-                job._process = subprocess.Popen(
-                    torchrun_cmd,
-                    cwd=str(repo_root),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
+                with self._jobs_lock:
+                    if job._stop_event.is_set():
+                        job.status = JobStatus.STOPPED
+                        job.finished_at = time.time()
+                        buf.phase = "stopped"
+                        self._save_job(job)
+                        return
+                    job._process = subprocess.Popen(
+                        torchrun_cmd,
+                        cwd=str(repo_root),
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        start_new_session=True,
+                    )
                 assert job._process.stdout is not None
                 for line in iter(job._process.stdout.readline, ""):
                     if job._stop_event.is_set():
-                        job._process.terminate()
-                        try:
-                            job._process.wait(timeout=30)
-                        except subprocess.TimeoutExpired:
-                            job._process.kill()
+                        self._terminate_training_process(job)
                         job.status = JobStatus.STOPPED
                         job.finished_at = time.time()
                         self._save_job(job)
@@ -1096,7 +1207,15 @@ class JobRunner:
                 tp_size=job.tp_size,
                 sp_size=job.sp_size,
                 log_queue=log_queue,
+                attention_backend=job.attention_backend,
+                vsa_tile_size=job.vsa_tile_size,
             )
+            if job._stop_event.is_set():
+                job.status = JobStatus.STOPPED
+                job.finished_at = time.time()
+                buf.phase = "stopped"
+                self._save_job(job)
+                return
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
@@ -1143,7 +1262,7 @@ class JobRunner:
                     job.output_path = str(image_files[0])
                     logger.info("Found image output: %s", job.output_path)
                 else:
-                    logger.warning("No output file found in job directory")
+                    raise RuntimeError("Generation returned without a video or image artifact")
 
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
@@ -1154,7 +1273,7 @@ class JobRunner:
                 logger.info("Job completed successfully")
             job.finished_at = time.time()
             self._save_job(job)
-            buf.phase = "done"
+            buf.phase = "stopped" if job._stop_event.is_set() else "done"
 
         except Exception as exception:
             error_msg = str(exception)
@@ -1164,6 +1283,7 @@ class JobRunner:
             job.finished_at = time.time()
             self._save_job(job)
             buf.phase = "failed"
+            self._clear_generators()
 
         finally:
             queue_listener.stop()

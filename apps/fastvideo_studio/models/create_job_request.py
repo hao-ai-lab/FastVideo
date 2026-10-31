@@ -3,7 +3,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateJobRequest(BaseModel):
@@ -31,6 +31,8 @@ class CreateJobRequest(BaseModel):
     guidance_rescale: float = 0.0
     fps: int = 24
     seed: int = 1024
+    attention_backend: str | None = None
+    vsa_tile_size: int | None = Field(default=None, gt=0)
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     dit_layerwise_offload: bool = False

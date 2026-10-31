@@ -78,6 +78,9 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, col: str, sql_t
 def _migrate_db(conn: sqlite3.Connection) -> None:
     """Add new columns to existing tables for schema migrations."""
     # Jobs table
+    _add_column_if_missing(conn, "jobs", "attention_backend", "TEXT", "NULL")
+    _add_column_if_missing(conn, "jobs", "vsa_tile_size", "INTEGER", "NULL")
+    _add_column_if_missing(conn, "jobs", "dit_layerwise_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "jobs", "vae_cpu_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "jobs", "image_encoder_cpu_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "jobs", "enable_torch_compile", "INTEGER", "0")
@@ -263,8 +266,9 @@ class Database:
                 num_latent_t, validation_dataset_file, lora_rank,
                 dmd_use_vsa, dmd_vsa_sparsity, dmd_denoising_steps,
                 real_score_guidance_scale,
-                generator_update_interval, real_score_model_path, fake_score_model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                generator_update_interval, real_score_model_path, fake_score_model_path,
+                attention_backend, vsa_tile_size, dit_layerwise_offload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -316,6 +320,9 @@ class Database:
                 job.get("generator_update_interval", 5),
                 job.get("real_score_model_path", ""),
                 job.get("fake_score_model_path", ""),
+                job.get("attention_backend"),
+                job.get("vsa_tile_size"),
+                bool(job.get("dit_layerwise_offload", False)),
             ),
         )
         self._commit()
@@ -344,6 +351,21 @@ class Database:
         sql = f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?"
         self._execute(sql, tuple(vals))
         self._commit()
+
+    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Persist validated configuration, without allowing runtime state edits."""
+        protected = {"id", "status", "created_at", "started_at", "finished_at", "error", "output_path", "log_file_path"}
+        allowed = _get_table_columns(self._conn(), "jobs") - protected
+        values = {
+            ("references_json" if key == "references" else key): (json.dumps(value) if key == "references" else value)
+            for key, value in updates.items()
+        }
+        if not values.keys() <= allowed:
+            raise ValueError("Unknown or non-configurable job fields")
+        if values:
+            assignments = ", ".join(f"{key} = ?" for key in values)
+            self._execute(f"UPDATE jobs SET {assignments} WHERE id = ?", (*values.values(), job_id))
+            self._commit()
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Returns True if a row was deleted."""
@@ -539,6 +561,7 @@ def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to job dict (snake_case, matching Job.to_dict)."""
+    columns = set(row.keys())
     int_defaults = {
         "max_train_steps": 1000,
         "train_batch_size": 1,
@@ -572,47 +595,50 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "height": row["height"],
         "width": row["width"],
         "guidance_scale": row["guidance_scale"],
-        "guidance_rescale": (float(row["guidance_rescale"]) if "guidance_rescale" in row else 0.0),
-        "fps": int(row["fps"]) if "fps" in row else 24,
+        "guidance_rescale": (float(row["guidance_rescale"]) if "guidance_rescale" in columns else 0.0),
+        "fps": int(row["fps"]) if "fps" in columns else 24,
         "seed": row["seed"],
         "num_gpus": row["num_gpus"],
+        "attention_backend": _sqlite_row_get(row, "attention_backend", None),
+        "vsa_tile_size": _sqlite_row_get(row, "vsa_tile_size", None),
+        "dit_layerwise_offload": bool(_sqlite_row_get(row, "dit_layerwise_offload", False)),
         "dit_cpu_offload": bool(row["dit_cpu_offload"]),
         "text_encoder_cpu_offload": bool(row["text_encoder_cpu_offload"]),
         "use_fsdp_inference": bool(row["use_fsdp_inference"]),
-        "negative_prompt": ((row["negative_prompt"] or "") if "negative_prompt" in row else ""),
+        "negative_prompt": ((row["negative_prompt"] or "") if "negative_prompt" in columns else ""),
         "progress": 0.0,
         "progress_msg": "",
         "phase": "initializing",
     }
     for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
-        if col in row:
+        if col in columns:
             result[col] = bool(row[col])
     for col in ("vsa_sparsity", ):
-        if col in row:
+        if col in columns:
             result[col] = float(row[col])
     for col in ("tp_size", "sp_size"):
-        if col in row:
+        if col in columns:
             result[col] = int(row[col])
     for col in (
             "data_path",
             "validation_dataset_file",
     ):
-        if col in row:
+        if col in columns:
             result[col] = (row[col] or "") or ""
     for col in int_defaults:
-        if col in row:
+        if col in columns:
             int_val_raw: Any = row[col]
             result[col] = (int(int_val_raw) if int_val_raw is not None else int_defaults[col])
-    if "learning_rate" in row:
+    if "learning_rate" in columns:
         result["learning_rate"] = float(row["learning_rate"] or 5e-5)
-    if "dmd_use_vsa" in row:
+    if "dmd_use_vsa" in columns:
         result["dmd_use_vsa"] = bool(row["dmd_use_vsa"])
     for col in float_defaults:
-        if col in row:
+        if col in columns:
             float_val_raw: Any = row[col]
             result[col] = (float(float_val_raw) if float_val_raw is not None else float_defaults[col])
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
-        if col in row:
+        if col in columns:
             result[col] = (row[col] or "") or ""
     return result
 

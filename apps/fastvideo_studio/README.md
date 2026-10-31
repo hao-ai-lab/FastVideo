@@ -102,3 +102,46 @@ Refer to `.env.example` for reference.
 | `GET`    | `/api/jobs/{id}/video`        | Stream the generated video/image           |
 | `GET`    | `/api/jobs/{id}/logs`         | Get job logs (polling, supports `?after=`) |
 | `GET`    | `/api/jobs/{id}/download_log` | Download the job's log file                |
+
+## Per-job attention settings
+
+Inference jobs expose **Attention Backend** and **VSA Tile Size**. An explicit
+job backend takes priority, followed by a server/environment override. With
+neither set, Auto uses the backend from a matching self-contained T2V serving
+recipe, then falls back to FastVideo's core selection. An unset tile uses the
+matching recipe's tile when the resolved backend agrees with that recipe.
+Unknown models, non-T2V workloads and pipeline overrides keep the core defaults.
+The form previews the Auto selection; logs record requested and resolved values.
+Auto does not change sampling steps, guidance, frame count or offload settings. A backend appearing in the list does not guarantee that the
+current model or hardware supports it. Core checkpoint checks remain enabled.
+
+When a matching text-to-video serving YAML with an explicit backend and no
+component or quantization overrides exists under `examples/serving`,
+**Apply recipe defaults** copies its attention and sampling settings into the
+form. This is an explicit replacement of those fields; opening the form or
+changing models does not silently overwrite them. GPU count and CPU offload
+remain under the user's control. FastH3 8-Step V2 uses 9 sigma-grid points
+(8 transformer forwards), guidance 1, VSA sparsity 0.8 and tile size 64.
+
+Backend and tile selections are persisted with the job, survive edit/duplicate
+and server restart, and participate in generator cache identity. Old databases
+migrate to Auto for both backend and tile size. For a matching T2V recipe,
+previously unset attention fields now resolve from that recipe at execution.
+
+![Per-job attention settings](../../docs/assets/studio-attention-settings.png)
+
+## Task execution and isolation
+
+Starting a job places it in a FIFO queue (`queued`). One persistent scheduler
+thread executes jobs serially, including training, so this Studio instance does
+not concurrently allocate the same visible GPUs. Queued jobs can be cancelled;
+running inference stops cooperatively after loading or generation completes.
+This does not reserve GPUs against other applications.
+
+Inference always uses FastVideo's multiprocessing executor, even with one GPU.
+Model parallel groups and initialization cleanup therefore live in worker
+processes rather than the API process. Studio retains one generator for reuse
+by the same effective configuration. Switching models/settings releases the
+previous workers before loading; an inference error evicts the cached generator.
+Restarting the API marks interrupted queued/running jobs failed rather than
+silently replaying them. Queued jobs cannot be edited or started twice.
