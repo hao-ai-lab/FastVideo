@@ -104,7 +104,11 @@ def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor,
     tile_m = 128
     seqlen_padded = (seqlen + tile_m - 1) // tile_m * tile_m
     if seqlen_padded != seqlen:
-        tensor_4d = F.pad(tensor_4d, (0, 0, 0, 0, 0, seqlen_padded - seqlen))
+        # F.pad fills the whole padded tensor before copying; only the tail rows need zeros.
+        padded = tensor_4d.new_empty((batch, seqlen_padded, nheads, headdim))
+        padded[:, :seqlen] = tensor_4d
+        padded[:, seqlen:].zero_()
+        tensor_4d = padded
 
     # Quantize with nheads squashed into K dimension so M=batch*seqlen (divisible by 128)
     # and K=nheads*headdim. This ensures 128-row SF tiles align with seqlen boundaries.
