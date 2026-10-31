@@ -176,7 +176,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get() and not parallel else torch.float32
+                pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
+                ) and not parallel else torch.float32
                 output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
                                             fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining
