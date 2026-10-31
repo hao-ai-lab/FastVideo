@@ -33,6 +33,7 @@ exec pytest \
   ./fastvideo/tests/layers/test_pdd_linear.py \
   ./fastvideo/tests/layers/test_lora_side_branch.py \
   ./fastvideo/tests/layers/test_triton_fused_norm.py \
+  ./fastvideo/tests/layers/test_triton_exact_modulation.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \

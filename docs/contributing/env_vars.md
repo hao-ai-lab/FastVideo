@@ -219,8 +219,7 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 | `FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D`                      | bool                                                               | `1`                                                   | performance | LTX-2 VAE uses the channels_last_3d memory format.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `FASTVIDEO_LTX2_DISABLE_AUDIO_AUTOCAST`                    | bool                                                               | `1`                                                   | performance | LTX-2 audio decoding runs without CUDA autocast. Deprecated names: `LTX2_DISABLE_AUDIO_AUTOCAST`.                                                                                                                                                                                                                                                                                                                                           |
 | `FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION` | bool                                                               | `0`                                                   | performance | Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for the 4-step Klein model.                                                                                                                                                                                                                                                                                                               |
-| `FASTVIDEO_ENABLE_FUSED_NORM`                              | bool                                                               | `0`                                                   | performance | Opt into Wan's inference-only Triton residual + LayerNorm + modulation fusion. Its reduction order changes numerical outputs; the default keeps eager reference compatibility.                                                                                                                                                                                                                                                              |
-| `FASTVIDEO_DISABLE_FUSED_NORM`                             | bool                                                               | `0`                                                   | performance | Turn off the Triton-fused residual + LayerNorm + modulate inference path that Wan blocks opt into, and use the eager path.                                                                                                                                                                                                                                                                                                                  |
+| `FASTVIDEO_ENABLE_FUSED_NORM`                              | bool                                                               | `0`                                                   | performance | Dense Wan inference fuses each LayerNorm with the residual and modulation around it into one Triton launch (fastvideo/layers/triton_fused_norm.py); the LayerNorm reduction order differs from eager. Causal (self-forcing) Wan ignores it: its rollout amplifies any non-bit-exact kernel. Off keeps LayerNorm eager and fuses only the elementwise chains around it, bit for bit (fastvideo/layers/triton_exact_modulation.py).           |
 | `FASTVIDEO_FFMPEG_BIN`                                     | str                                                                | `ffmpeg`                                              | output      | ffmpeg executable used to save video with audio.                                                                                                                                                                                                                                                                                                                                                                                            |
 | `FASTVIDEO_VIDEO_CODEC`                                    | str                                                                | `libx264`                                             | output      | ffmpeg video codec for saved videos.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `FASTVIDEO_NVENC_PRESET`                                   | str                                                                | `p1`                                                  | output      | NVENC preset when the codec is an \*_nvenc codec.                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -333,29 +332,30 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 
 Variables that FastVideo no longer reads; setting one logs a warning:
 
-| Deprecated variable                              | Reason                       |
-| ------------------------------------------------ | ---------------------------- |
-| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it             |
-| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it             |
-| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it             |
-| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it             |
-| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it             |
-| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it             |
-| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it             |
-| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed     |
-| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed     |
-| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed     |
-| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed     |
-| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed |
-| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed |
-| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed        |
-| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed        |
-| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed        |
-| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed        |
-| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed          |
-| `LONGCAT_MODEL_ROOT`                             | LongCat was removed          |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed          |
-| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed          |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed          |
-| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed          |
+| Deprecated variable                              | Reason                                                                                                    |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `FASTVIDEO_DISABLE_FUSED_NORM`                   | the default Wan path is bit-exact with eager; FASTVIDEO_ENABLE_FUSED_NORM=1 selects the fused-norm kernel |
+| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it                                                                                          |
+| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it                                                                                          |
+| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it                                                                                          |
+| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it                                                                                          |
+| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it                                                                                          |
+| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it                                                                                          |
+| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it                                                                                          |
+| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed                                                                                  |
+| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed                                                                                  |
+| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed                                                                                  |
+| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed                                                                                  |
+| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed                                                                              |
+| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed                                                                              |
+| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed                                                                                     |
+| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed                                                                                     |
+| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed                                                                                     |
+| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed                                                                                     |
+| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed                                                                                       |
+| `LONGCAT_MODEL_ROOT`                             | LongCat was removed                                                                                       |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed                                                                                       |
+| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed                                                                                       |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed                                                                                       |
+| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed                                                                                       |
 <!-- END GENERATED ENV TABLE -->
