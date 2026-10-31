@@ -39,6 +39,31 @@ they can be evaluated separately. Where the `ptx_blackwell` kernel is unavailabl
 (non-Blackwell GPUs, or a build without it), use `--vsa-kernel triton`; compare outputs and performance before adopting that
 backend. This recipe is T2AV-only, not a distilled `transformer_ref` model.
 
+## Reusing text conditioning for repeated prompts
+
+For a single-rank T2VA pipeline, set
+`pipeline_config.text_conditioning_cache_max_bytes` to a positive CPU byte
+budget. The default is zero, which recomputes conditioning. For example,
+pass `pipeline_config={"text_conditioning_cache_max_bytes": 16777216}` to
+`VideoGenerator.from_pretrained` alongside the model's normal settings.
+Repeated token IDs and tags reuse the same text features across different
+seeds; keyframe and reference inputs always keep their existing paths.
+
+The cache retains at most eight entries and only CPU tensors, evicts least
+recently used results to stay within its tensor-byte budget, and does not
+retain a result larger than that budget. Returned features are independent
+copies. Replacing or rematerializing the encoder, changing its dtype, compute device,
+autocast context or float32 matmul precision, or
+calling its root `load_weights` / `load_state_dict` invalidates old results,
+including when loading fails after a partial write. Training bypasses reuse.
+Disable the cache when modifying child modules or parameter storage directly;
+those mutations do not pass through the root loading contract.
+
+Enabling this option on multiple ranks is rejected. It skips Qwen computation
+on a cache hit; sequential loading and offload still prepare the encoder before
+the conditioning stage. It does not reduce weight residency or promise a
+latency improvement for a particular deployment.
+
 ## Export metadata and validation
 
 The export's `fastvideo_inference.json` supplies the trained ladder. The

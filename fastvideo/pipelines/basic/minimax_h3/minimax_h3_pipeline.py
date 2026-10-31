@@ -702,6 +702,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 tokenizer=self.get_module("tokenizer"),
                 processor=self.get_module("processor"),
                 ref2va=ref2va,
+                text_conditioning_cache_max_bytes=getattr(fastvideo_args.pipeline_config,
+                                                          "text_conditioning_cache_max_bytes", 0),
                 # Sequential placement reuses one pinned encoder copy. A stage-level
                 # .to("cpu") would bypass it and allocate new host weights every request.
                 manage_cpu_offload=(h3_encoder_split_enabled(fastvideo_args)
