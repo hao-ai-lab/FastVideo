@@ -486,7 +486,7 @@ class LTX2Model(WanModel):
             raise ValueError(f"text_embedding width {actual_dim} does not match the "
                              f"checkpoint's expected text context dim {expected_dim}. "
                              "The parquet was likely preprocessed with a different "
-                             "LTX-2 version (2.0 stores 3840-d, 2.3 stores 4096-d); "
+                             "LTX-2 version (2.0 stores 3840-d, 2.3 and 2.5 store 4096-d); "
                              "re-run preprocess_ltx2_overfit.py with FASTVIDEO_TEST_LTX2_OVERFIT_MODEL "
                              "set to the same checkpoint as models.student.init_from.")
 

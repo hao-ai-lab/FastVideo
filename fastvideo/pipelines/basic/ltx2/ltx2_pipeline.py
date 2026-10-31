@@ -158,6 +158,7 @@ class LTX2Pipeline(LoRAPipeline):
                     num_inference_steps_override=len(stage2_sigmas) - 1,
                     force_guidance_scale=(fastvideo_args.ltx2_refine_guidance_scale),
                     initial_audio_latents_key="ltx2_audio_latents",
+                    refine_stage=True,
                 ),
             )
 
