@@ -328,8 +328,8 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
     gate_linear = attn.to_gate_compress if attn.to_gate_compress is not None and attn._gate_active() else None
     projections = (attn.to_q, attn.to_k, attn.to_v) + ((gate_linear, ) if gate_linear is not None else ())
     with STAGES.span("qkv_proj"):
-        projected = _shared_input_projections(projections, x_tiles)
-        query, key, value = (t.unflatten(-1, (heads, dim)) for t in projected[:3])
+        query, key, value, *gate_out = _shared_input_projections(projections, x_tiles)
+        query, key, value = (t.unflatten(-1, (heads, dim)) for t in (query, key, value))
     with STAGES.span("qknorm_rope"):
         cos, sin = layout.cos[:logical], layout.sin[:logical]
         if use_fused_rope:
@@ -339,7 +339,8 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
         else:
             query = attn._apply_rotary_emb(attn.norm_q(query), (cos, sin))
             key = attn._apply_rotary_emb(attn.norm_k(key), (cos, sin))
-    gate = projected[3].unflatten(-1, (heads, dim)) if gate_linear is not None else None
+    gate = gate_out[0].unflatten(-1, (heads, dim)) if gate_out else None
+    del gate_out
     capture_root = envs.FASTVIDEO_H3_CAPTURE_QKV.get()
     if capture_root and attn._layer_idx in (0, 20, 41):
         from pathlib import Path
@@ -554,8 +555,8 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
     gate_linear = attn.to_gate_compress if attn.to_gate_compress is not None and attn._gate_active() else None
     projections = (attn.to_q, attn.to_k, attn.to_v) + ((gate_linear, ) if gate_linear is not None else ())
     with STAGES.span("qkv_proj_rope"):
-        projected = _shared_input_projections(projections, hidden_states)
-        query, key, value = (t.unflatten(-1, (heads, dim)) for t in projected[:3])
+        query, key, value, *gate_out = _shared_input_projections(projections, hidden_states)
+        query, key, value = (t.unflatten(-1, (heads, dim)) for t in (query, key, value))
         if use_fused_rope:
             from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
             cos, sin = rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype)
@@ -604,5 +605,5 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
             dist.all_gather_into_tensor(gathered, out_c.contiguous(), group=sp_group.device_group)
         with STAGES.span("gate_apply"):
             out_c_all = gathered.flatten(0, 1).transpose(0, 1)  # [n_tiles, H, D]
-            out = _apply_gate(out, out_c_all, layout.local_row_tile, projected[3][0].unflatten(-1, (heads, dim)))
+            out = _apply_gate(out, out_c_all, layout.local_row_tile, gate_out[0][0].unflatten(-1, (heads, dim)))
     return out.flatten(1, 2).unsqueeze(0)

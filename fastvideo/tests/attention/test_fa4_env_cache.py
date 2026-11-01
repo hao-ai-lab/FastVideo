@@ -80,7 +80,6 @@ def test_changed_knob_drops_the_compiled_kernel() -> None:
     assert fa4_env_cache.invalidate_fa4_jit_caches_on_env_change((fwd, bwd), {"FA4_X": "0"}) is True
     assert fwd.compile_cache == {}
 
-    # ... and flipping back is a change again, not a cache hit on arm 0.
     fwd.compile_cache["a"] = object()
     assert fa4_env_cache.invalidate_fa4_jit_caches_on_env_change((fwd, bwd), {"FA4_X": "1"}) is True
     assert fwd.compile_cache == {}
@@ -141,11 +140,9 @@ def test_real_fa4_kernel_is_recompiled_for_each_knob_value(monkeypatch) -> None:
             flash_attn_cute.flash_attn_func(q, k, v)
         return compiles["n"]
 
-    # The bug: without the guard both arms share one compiled kernel.
     monkeypatch.setattr(flash_attn_cute, "_guard_fa4_jit_cache", lambda: None)
     assert two_arms() == 1
 
-    # The fix: the knob change drops the cache, so arm 1 compiles its own kernel.
     monkeypatch.undo()
     monkeypatch.setattr(interface.cute, "compile", counting_compile)
     assert two_arms() == 2

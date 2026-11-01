@@ -35,7 +35,6 @@ def _import_blocking_quack(monkeypatch: pytest.MonkeyPatch):
     try:
         return importlib.import_module(_MODULE_NAME)
     finally:
-        # Drop the quack-less copy; later tests get a clean import.
         monkeypatch.delitem(sys.modules, _MODULE_NAME, raising=False)
 
 
@@ -43,7 +42,6 @@ def test_mxfp8_module_imports_without_quack(monkeypatch: pytest.MonkeyPatch) -> 
     module = _import_blocking_quack(monkeypatch)
     assert module.to_mx is None
     assert module.to_blocked is None
-    # The Triton quantizers are self-contained and remain usable.
     assert callable(module.quantize_mxfp8_blockwise)
     assert callable(module.swiglu_quantize_mxfp8_blockwise)
     assert callable(module.mxfp8_scaled_mm)

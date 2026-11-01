@@ -393,8 +393,9 @@ class MiniMaxH3Attention(nn.Module):
                 projected = _shared_input_projections(projections, hidden_states)
             else:
                 projected = [projection(hidden_states)[0] for projection in projections]
-            query, key, value = projected[:3]
-            gate_compress = projected[3] if gate_linear is not None else None
+            query, key, value, *gate_out = projected
+            gate_compress = gate_out[0] if gate_out else None
+            del projected, gate_out
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))

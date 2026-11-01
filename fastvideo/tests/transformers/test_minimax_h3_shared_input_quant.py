@@ -79,8 +79,6 @@ def test_shared_input_projections_leave_calibrated_nvfp4_separate(monkeypatch: p
 
     _shared_input_projections(linears, x)
 
-    # The unit-scale q/k/v group still shares one quantization; the calibrated
-    # gate prepares its own input through its layer forward.
     assert [method.quantize_calls for method in methods] == [1, 0, 0, 0]
     assert [method.apply_calls for method in methods] == [1, 1, 1, 0]
     assert [linear.own_forwards for linear in linears] == [0, 0, 0, 1]
@@ -109,8 +107,6 @@ def test_shared_fp8_projections_cover_qkv_and_gate(granularity: str) -> None:
     linears = tuple(
         ReplicatedLinear(128, 256, bias=True, quant_config=FP8Config(granularity), prefix=f"block.attn.{name}")
         for name in ("to_q", "to_k", "to_v", "to_gate_compress"))
-    # ``FP8Config`` does not tag ``to_gate_compress`` by default; force the
-    # method so the test exercises the sharing path directly.
     linears[3].quant_method = FP8QuantizeMethod(granularity)
     for layer in linears:
         layer.to(device="cuda", dtype=torch.bfloat16)
@@ -153,7 +149,6 @@ def test_shared_fp8_projections_keep_qkv_sharing_with_dense_gate() -> None:
         with patch.object(FP8QuantizeMethod, "quantize_input", autospec=True,
                           side_effect=FP8QuantizeMethod.quantize_input) as quant:
             actual = _shared_input_projections(linears, x)
-        # A dense gate must not disable the q/k/v sharing.
         assert quant.call_count == 1
         for expected, output in zip(reference, actual, strict=True):
             torch.testing.assert_close(output, expected, atol=0, rtol=0)
@@ -196,7 +191,6 @@ def test_generic_h3_attention_quantizes_qkv_and_gate_once(env_overrides, distrib
         parameter.data.normal_(std=0.1)
     for layer in (attn.to_q, attn.to_k, attn.to_v, attn.to_out):
         _install_fp8_buffers(layer, "channel")
-    # ``_gate_active`` reads the bf16 weight when it is present, so keep it.
     _install_fp8_buffers(attn.to_gate_compress, "channel", keep_weight=True)
     meta = MiniMaxH3VSAMetadataBuilder().build(current_timestep=999, patch_size=(1, 1, 1),
                                                VSA_sparsity=0.8, packed_segments=(65, 97, (4, 6, 10)),
@@ -206,8 +200,6 @@ def test_generic_h3_attention_quantizes_qkv_and_gate_once(env_overrides, distrib
     angles = torch.randn(length, 96, device="cuda")
     rope = angles.cos(), angles.sin()
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
-        # One preparation for q/k/v + gate, one for to_out. The gate used to
-        # prepare hidden_states a second time in its own projection.
         with patch.object(fp8_config, "_quantize_rowwise", side_effect=fp8_config._quantize_rowwise) as quant:
             attn(x, rope, length)
         assert quant.call_count == 2
@@ -254,7 +246,6 @@ def test_h3_attention_nvfp4_quantizes_qkv_and_gate_once(env_overrides, distribut
     angles = torch.randn(length, 96, device="cuda")
     rope = angles.cos(), angles.sin()
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
-        # One NVFP4 activation quantization for q/k/v + gate, one for to_out.
         with patch.object(nvfp4, "_nvfp4_quantize", side_effect=nvfp4._nvfp4_quantize) as quant:
             attn(x, rope, length)
         assert quant.call_count == 2
