@@ -1,6 +1,6 @@
 # Welcome to FastVideo
 
-FastVideo is an inference and post-training framework for diffusion models. It features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
+FastVideo is an inference and post-training framework for video diffusion models. One pipeline covers data preprocessing, fine-tuning, distillation, and inference. Attention backends, parallelism, and quantization are separate modules, so you can add one without changing model code.
 
 ## Key Features
 
