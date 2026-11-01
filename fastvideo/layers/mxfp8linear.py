@@ -7,7 +7,20 @@ import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
-from quack.mx_utils import to_blocked, to_mx
+
+# Quack moved these helpers from ``quack.mx_utils`` to
+# ``quack.blockscaled.quantize``, and some installs ship neither. The import is
+# optional so this module (and every module that imports the MXFP8 layer set)
+# still imports on images without a usable Quack; weight quantization raises a
+# clear ImportError when the helpers are actually needed.
+try:
+    from quack.mx_utils import to_blocked, to_mx
+except ImportError:
+    try:
+        from quack.blockscaled.quantize import to_blocked, to_mx
+    except ImportError:
+        to_blocked = None
+        to_mx = None
 
 MXFP8_BLOCK_SIZE = 32
 _BLOCKS_PER_PROGRAM = 16
@@ -31,6 +44,11 @@ def _quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor
 
 def quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Prequantize a weight with Quack and return hardware-blocked scales."""
+    if to_mx is None or to_blocked is None:
+        raise ImportError("MXFP8 weight quantization requires Quack's to_mx/to_blocked helpers "
+                          "(quack.mx_utils in older releases, quack.blockscaled.quantize in newer "
+                          "ones). Install a compatible quack to use the MXFP8 weight path; the "
+                          "Triton activation and SwiGLU quantizers do not need it.")
     _validate_mxfp8_matrix(matrix)
     return _quantize_mxfp8_weight_blockwise(matrix)
 
