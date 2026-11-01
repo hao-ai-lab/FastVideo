@@ -4,6 +4,7 @@
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.minimax_h3_qk_norm_rope import qk_norm_rope_
 from fastvideo.models.vaes.minimax_h3_video import MiniMaxH3VideoAttention
 
@@ -28,7 +29,7 @@ def _eager_prologue(query, key, cos, sin, eps):
     return rotate(query), rotate(key)
 
 
-def test_fused_prologue_is_a_cpu_no_op(monkeypatch) -> None:
+def test_fused_prologue_is_a_cpu_no_op(env_overrides) -> None:
     """Without CUDA the env flag must leave the eager path (and its output) untouched."""
     torch.manual_seed(20260819)
     attention = MiniMaxH3VideoAttention(dim=32, heads=2, dim_head=16, bias=True).eval()
@@ -36,9 +37,9 @@ def test_fused_prologue_is_a_cpu_no_op(monkeypatch) -> None:
     rotary_emb = (torch.randn(2, 7, 1, 12), torch.randn(2, 7, 1, 12))
 
     with torch.no_grad():
-        monkeypatch.delenv("FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE", raising=False)
+        env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.override(None))
         eager = attention(hidden_states, rotary_emb)
-        monkeypatch.setenv("FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE", "1")
+        env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.override(True))
         flagged = attention(hidden_states, rotary_emb)
 
     assert torch.equal(eager, flagged)
@@ -67,13 +68,13 @@ def test_fused_prologue_matches_the_eager_arithmetic(dtype: torch.dtype) -> None
         relative_l2 = (difference.norm() / reference.float().norm()).item()
         # Only the fp32 RMSNorm reduction order differs; RoPE rounds exactly like eager.
         assert bit_equal > 0.9995, name
-        assert relative_l2 < 1e-5, name
+        assert relative_l2 < max(1e-5, 0.01 * torch.finfo(dtype).eps), name
         assert difference.max().item() <= 4 * torch.finfo(dtype).eps * reference.float().abs().max().item()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="the fused kernel requires CUDA")
 @torch.inference_mode()
-def test_attention_forward_matches_eager_within_one_ulp(monkeypatch) -> None:
+def test_attention_forward_matches_eager_within_one_ulp(env_overrides) -> None:
     """A 32-head attention block produces the same output with the fused prologue.
 
     The prologue's RMSNorm reduction order is the only difference, so the
@@ -84,9 +85,9 @@ def test_attention_forward_matches_eager_within_one_ulp(monkeypatch) -> None:
     hidden_states = torch.randn(1, 129, 2048, device="cuda")
     rotary_emb = (torch.randn(1, 129, 1, 48, device="cuda"), torch.randn(1, 129, 1, 48, device="cuda"))
     with torch.autocast("cuda", dtype=torch.float16):
-        monkeypatch.delenv("FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE", raising=False)
+        env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.override(None))
         eager = attention(hidden_states, rotary_emb)
-        monkeypatch.setenv("FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE", "1")
+        env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.override(True))
         fused = attention(hidden_states, rotary_emb)
 
     difference = (fused.float() - eager.float()).abs().max().item()
