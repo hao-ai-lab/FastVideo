@@ -680,7 +680,8 @@ FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
                                      "weight always use the side branch.")
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
-                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears: auto (cudnn for MiniMax-H3 DiT "
+                                    "profiles on sm_100), cutlass or cudnn.")
 FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
     "off",
     choices=("off", "table", "auto"),
