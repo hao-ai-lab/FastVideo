@@ -484,9 +484,7 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
             <RecipeFacts
               validity={failure ? "invalid" : example ? "valid" : "loading"}
               validityText={yamlSource ? "YAML parses" : "Example settings applied"}
-              validityDetail="This page checks that the YAML parses and that edited numeric fields are finite and supported by the example. It does not run the full recipe schema or runtime topology validation."
-              fit="unknown"
-              evidence="none"
+              validityDetail="Checks that the YAML parses and that edited numbers are valid. It does not run the recipe."
               subject={yamlSource ? "configuration" : "example"}
             />
           </div>
