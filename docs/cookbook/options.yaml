@@ -97,6 +97,14 @@ runtimes:
         title: Compile transformer
         type: boolean
         default: false
+      generator.engine.quantization.transformer_quant:
+        title: Transformer quantization
+        description: >-
+          Quantizes the DiT at load time. NVFP4 needs a Blackwell GPU. FP8 runs on Hopper and Ada.
+          Leave empty to use the checkpoint's own precision.
+        type: [string, "null"]
+        enum: [null, NVFP4, FP8]
+        default: null
       # MiniMax-H3 only (fastvideo_args.video_decode_backend). TAEH3 fetches its own SHA-pinned weights.
       generator.pipeline.experimental.video_decode_backend:
         title: Video decoder
