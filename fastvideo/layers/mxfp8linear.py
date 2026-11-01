@@ -8,11 +8,7 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-# Quack moved these helpers from ``quack.mx_utils`` to
-# ``quack.blockscaled.quantize``, and some installs ship neither. The import is
-# optional so this module (and every module that imports the MXFP8 layer set)
-# still imports on images without a usable Quack; weight quantization raises a
-# clear ImportError when the helpers are actually needed.
+# Quack moved these helpers to quack.blockscaled.quantize, and some images ship neither.
 try:
     from quack.mx_utils import to_blocked, to_mx
 except ImportError:
@@ -229,14 +225,7 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
 
 
 def _as_e8m0_scales(scales: torch.Tensor) -> torch.Tensor:
-    """Present MXFP8 block scales in the dtype ``F.scaled_mm`` requires.
-
-    ``torch.nn.functional.scaled_mm`` rejects the ``uint8`` E8M0 byte buffers
-    returned by ``flashinfer.mxfp8_quantize`` with the unhelpful "Invalid
-    scaling configuration" ValueError, although they hold the same one-byte
-    exponent values. FastVideo's own Triton quantizers already return
-    ``float8_e8m0fnu``; accept both spellings at this boundary.
-    """
+    # F.scaled_mm rejects flashinfer's uint8 E8M0 scale buffers; they hold the same bytes as float8_e8m0fnu.
     if scales.dtype == torch.uint8:
         return scales.view(torch.float8_e8m0fnu)
     return scales

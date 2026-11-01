@@ -187,12 +187,7 @@ def _layout_for(meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torc
 
 
 def _prequantized_input_key(method: Any, linear: Any) -> tuple[Any, ...] | None:
-    """Key of linears that can consume the same pre-quantized activation, or None.
-
-    FP8 is keyed by granularity because the prepared activation only depends on
-    it. NVFP4 only shares the unit-scale path: calibrated and dynamic activation
-    scales are layer-specific and must prepare the input independently.
-    """
+    """Key for linears that can share one pre-quantized input: unit-scale NVFP4, or FP8 by granularity."""
     from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 
@@ -206,14 +201,9 @@ def _prequantized_input_key(method: Any, linear: Any) -> tuple[Any, ...] | None:
 
 
 def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
-    """Apply input projections, quantizing ``x`` once per compatible group.
+    """Share compatible FP8 preparation or unit-scale NVFP4 activation quantization.
 
-    H3's q/k/v (and, on VSA checkpoints, ``to_gate_compress``) all read the same
-    activations. Grouping by the prepared-activation key lets them share one FP8
-    preparation or unit-scale NVFP4 quantization instead of preparing the same
-    tensor once per projection. Calibrated or dynamic NVFP4 activation scales
-    retain independent preparation, and LoRA wrappers (which keep the quant
-    method on their ``base_layer``) keep their own forward.
+    Calibrated or dynamic NVFP4 activation scales retain independent preparation.
     """
     methods = [getattr(linear, "quant_method", None) for linear in linears]
     keys = [

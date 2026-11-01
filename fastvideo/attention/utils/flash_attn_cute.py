@@ -46,14 +46,7 @@ except ImportError:
 # Dynamo unwraps functools caches, so keep this cache inside the opaque helper.
 _SM90_OR_NEWER_BY_DEVICE: dict[int, bool] = {}
 
-# FA4 reads its tuning knobs (FA4_*/FA_*) from the environment while it traces a
-# kernel, but keys its JIT cache on shapes, dtypes and call flags only. A knob
-# that changes inside one process would therefore be served the kernel compiled
-# for the previous value -- a silent no-op that poisons in-process A/B sweeps
-# (see fastvideo/attention/utils/fa4_env_cache.py). The custom-op implementations
-# below are the single choke point for every FastVideo FA4 forward and they run
-# eagerly even under torch.compile, so drop the external JIT cache there as soon
-# as the knob fingerprint moves.
+# FA4's JIT cache key ignores its FA4_*/FA_* env knobs; the custom-op impls below run eagerly, so guard there.
 _FA4_KERNEL_OBJECTS = (_flash_attn_fwd, _flash_attn_bwd)
 
 

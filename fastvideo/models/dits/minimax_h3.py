@@ -386,9 +386,7 @@ class MiniMaxH3Attention(nn.Module):
                 return hidden_states
         gate_linear = (self.to_gate_compress if self.to_gate_compress is not None and self._gate_active() else None)
         with STAGES.span("qkv_proj"):
-            # q/k/v (and the VSA compression gate) all see the same activations.
-            # Reuse one FP8 preparation or unit-scale NVFP4 quantization per
-            # compatible group instead of quantizing the tensor per linear.
+            # q/k/v and the VSA gate see the same activations; share compatible input quantization.
             from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
             projections = (self.to_q, self.to_k, self.to_v) + ((gate_linear, ) if gate_linear is not None else ())
             if not torch.is_grad_enabled() and not torch.compiler.is_compiling():

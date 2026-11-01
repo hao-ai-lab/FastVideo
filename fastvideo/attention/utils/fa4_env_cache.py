@@ -1,26 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Keep FA4's JIT kernel cache consistent with the FA4 tuning environment.
+"""Drop FA4's JIT kernel caches when its FA4_*/FA_* tuning environment changes.
 
-``flash_attn.cute`` (FA4) reads its tuning knobs straight from the environment
-while it *traces* a kernel -- ``FA4_FP8_PV_USE_FUSED_PACK``,
-``FA4_MXFP8_USE_INLINE_PTX``, ``FA4_SFQK_TMEM_SLOT``, ``FA4_E2E_FREQ``,
-``FA_DISABLE_2CTA`` and friends -- but the key it indexes
-``_flash_attn_fwd.compile_cache`` with only covers shapes, dtypes and call
-flags. Changing a knob inside one process therefore silently reuses the kernel
-that was compiled for the previous value: the new setting is a no-op, and any
-in-process A/B sweep (or a tuning run that reuses a worker) reports numbers for
-the *first* arm. Only clearing the cache by hand, or restarting the process,
-gets the new kernel.
-
-This module fingerprints the FA4 tuning environment (everything under ``FA4_``
-plus the ``FA_`` prefix the same kernels read) and drops the external JIT
-caches whenever the fingerprint moves, so each knob value compiles its own
-kernel. The authoritative fix is to fold the knobs into FA4's compile key; this
-is the in-tree guard for the FA4 build FastVideo pins today.
-
-Only Python-level state is touched, so this is safe to call from a
-``torch.library.custom_op`` implementation (where the real FA4 call lives and
-where dynamo cannot trace it anyway).
+FA4 reads these knobs while tracing a kernel but does not include them in its compile-cache key.
 """
 
 from __future__ import annotations
@@ -32,21 +13,16 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-#: Environment prefixes that select or retune FA4 kernel code paths.
 FA4_ENV_PREFIXES = ("FA4_", "FA_")
 
-#: JIT caches hanging off the FA4 kernel entry points (fwd + backward).
 _JIT_CACHE_ATTRS = ("compile_cache", "compile_cache_pre", "compile_cache_post")
 
-# Fingerprint observed on the previous call; ``None`` until the first one.
 _last_fingerprint: tuple[tuple[str, str], ...] | None = None
 
 
 def fa4_env_fingerprint(environ: Mapping[str, str] | None = None, ) -> tuple[tuple[str, str], ...]:
     """Return the sorted ``(name, value)`` pairs of FA4 tuning env vars."""
     source = os.environ if environ is None else environ
-    # Iterate keys and look values up by name: reading every value of the
-    # process environment costs ~2x more, and this runs per attention call.
     pairs = [(name, source[name]) for name in source if name.startswith(FA4_ENV_PREFIXES)]
     pairs.sort()
     return tuple(pairs)
@@ -74,14 +50,7 @@ def invalidate_fa4_jit_caches_on_env_change(
     kernel_objects: Iterable[object],
     environ: Mapping[str, str] | None = None,
 ) -> bool:
-    """Clear FA4's JIT caches when the FA4 tuning env moved since the last call.
-
-    The first call of a process also clears: the caches may already hold a
-    kernel compiled by other code (or by an earlier import) under a different
-    environment, and clearing an empty cache is free.
-
-    Returns ``True`` when the caches were dropped.
-    """
+    """Clear FA4's JIT caches if the FA4 tuning env changed since the last call (always on the first call)."""
     global _last_fingerprint
     fingerprint = fa4_env_fingerprint(environ)
     if fingerprint == _last_fingerprint:
