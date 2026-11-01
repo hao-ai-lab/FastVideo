@@ -228,6 +228,20 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
     return quantized, blocked_scales
 
 
+def _as_e8m0_scales(scales: torch.Tensor) -> torch.Tensor:
+    """Present MXFP8 block scales in the dtype ``F.scaled_mm`` requires.
+
+    ``torch.nn.functional.scaled_mm`` rejects the ``uint8`` E8M0 byte buffers
+    returned by ``flashinfer.mxfp8_quantize`` with the unhelpful "Invalid
+    scaling configuration" ValueError, although they hold the same one-byte
+    exponent values. FastVideo's own Triton quantizers already return
+    ``float8_e8m0fnu``; accept both spellings at this boundary.
+    """
+    if scales.dtype == torch.uint8:
+        return scales.view(torch.float8_e8m0fnu)
+    return scales
+
+
 def mxfp8_scaled_mm(
     activation_values: torch.Tensor,
     activation_scales: torch.Tensor,
@@ -239,9 +253,9 @@ def mxfp8_scaled_mm(
     return F.scaled_mm(
         mat_a=activation_values,
         mat_b=weight_values.mT,
-        scale_a=activation_scales,
+        scale_a=_as_e8m0_scales(activation_scales),
         scale_recipe_a=F.ScalingType.BlockWise1x32,
-        scale_b=weight_scales,
+        scale_b=_as_e8m0_scales(weight_scales),
         scale_recipe_b=F.ScalingType.BlockWise1x32,
         swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
         swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
