@@ -319,6 +319,10 @@
         "href": "/training/minimax_h3_fp4_qad"
       },
       {
+        "label": "Pika H3 Flex NVFP4 QAD",
+        "href": "/training/pika_h3_flex_qad"
+      },
+      {
         "label": "HunyuanVideo 1.5 T2V",
         "href": "/training/hunyuan15_overfit"
       },
