@@ -139,6 +139,17 @@ def test_forward_nvfp4_uses_fused_path_and_compiles_fullgraph() -> None:
     assert torch.equal(eager, compiled)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU (about 4 GiB)")
+@pytest.mark.parametrize("seqlen", [74898, 74899])
+def test_token_mean_matches_reference_across_the_64bit_index_split(seqlen) -> None:
+    """At 56 x 128 channels the fp32 copy of K needs 64-bit indexing from 74,899 tokens on (768p/15 s H3 has 113k),
+    where torch reduces it in two halves; the fused path's mean must keep the reference's bits on both sides."""
+    gen = torch.Generator(device="cuda").manual_seed(3)
+    k = (torch.randn(1, seqlen, 56, 128, device="cuda", generator=gen) * 2 + 1).to(torch.bfloat16)
+    assert len(fused._fp32_reduction_chunks(k)) == (1 if seqlen == 74898 else 2)
+    assert torch.equal(fused.reference_token_mean(k), k.float().mean(dim=1))
+
+
 @pytest.fixture
 def fa4_runtime_available():
     with (

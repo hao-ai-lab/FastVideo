@@ -5,9 +5,9 @@ One persistent Triton kernel per tensor replaces ``precondition_qk`` followed by
 casts, mean subtraction, an fp32 Hadamard matmul, the BF16 round, ``F.pad``, flashinfer's ``nvfp4_quantize`` and the
 scale-factor permute). Each tile of BLOCK_M tokens x one head:
 
-1. (K, ``smooth_k``) subtracts the per-(batch, head, channel) token mean. The mean comes from
-   ``k.mean(dim=1, dtype=torch.float32)``, which runs the reference's own reduction (same bits as
-   ``k.float().mean(dim=1)``) without materializing an fp32 copy.
+1. (K, ``smooth_k``) subtracts the per-(batch, head, channel) token mean, computed by
+   :func:`reference_token_mean`: the reference's own ``k.float().mean(dim=1)`` reduction, bit for bit, without
+   materializing the fp32 copy.
 2. (``hadamard``) multiplies by ``hadamard_matrix(D)`` the way the reference's cuBLAS GEMM does. When torch lets
    cuBLAS use TF32 (``TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1`` in NVIDIA's PyTorch containers, so in training and
    deployment on the cluster), that is a TF32 tensor-core GEMM: operands rounded to nearest-even TF32, exact
@@ -259,6 +259,52 @@ def _num_sms(device: torch.device) -> int:
     return torch.cuda.get_device_properties(device).multi_processor_count
 
 
+_INT32_MAX = 2**31 - 1
+
+
+def _fp32_reduction_chunks(tensor_4d: torch.Tensor) -> list[tuple[int, int]]:
+    """Token ranges torch reduces separately in ``k.float().mean(dim=1)``.
+
+    A CUDA reduction whose operand needs 64-bit indexing is split (TensorIterator ``with_32bit_indexing``) by halving
+    the largest dimension, here the tokens of the contiguous fp32 copy, until every piece's byte offsets fit in int32;
+    the pieces' partial sums are added left to right. 768p/15 s H3 (113k tokens x 56 heads) splits in two.
+    """
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    row_bytes = nheads * headdim * 4
+
+    def fits(rows: int) -> bool:
+        max_offset = (batch - 1) * seqlen * row_bytes + (rows - 1) * row_bytes + (row_bytes - 4)
+        return max_offset <= _INT32_MAX and batch * rows * nheads * headdim <= _INT32_MAX
+
+    def split(start: int, rows: int) -> list[tuple[int, int]]:
+        if fits(rows):
+            return [(start, rows)]
+        first = rows // 2
+        return split(start, first) + split(start + first, rows - first)
+
+    return split(0, seqlen)
+
+
+def reference_token_mean(tensor_4d: torch.Tensor) -> torch.Tensor:
+    """``tensor_4d.float().mean(dim=1)`` bit for bit (``[B, H, D]`` fp32) without materializing the fp32 copy.
+
+    Reading BF16 with an fp32 accumulator runs the same reduction as the fp32 copy; when that copy needs 64-bit
+    indexing, torch reduces token ranges separately, adds the partial sums and scales by ``fp32(H * D) / numel``,
+    which is reproduced here. Exact for contiguous (or non-dense) inputs, whose fp32 copy is contiguous.
+    """
+    chunks = _fp32_reduction_chunks(tensor_4d)
+    if len(chunks) == 1:
+        return tensor_4d.mean(dim=1, dtype=torch.float32).contiguous()
+    total = None
+    for start, rows in chunks:
+        partial = tensor_4d[:, start:start + rows].sum(dim=1, dtype=torch.float32)
+        total = partial if total is None else total + partial
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    factor = (torch.tensor(nheads * headdim, dtype=torch.float32) /
+              torch.tensor(batch * seqlen * nheads * headdim, dtype=torch.float32)).item()
+    return (total * factor).contiguous()
+
+
 def _precondition_quantize(tensor_4d: torch.Tensor, *, subtract_mean: bool, hadamard: bool,
                            tf32: bool) -> tuple[torch.Tensor, torch.Tensor]:
     batch, seqlen, nheads, headdim = tensor_4d.shape
@@ -270,7 +316,7 @@ def _precondition_quantize(tensor_4d: torch.Tensor, *, subtract_mean: bool, hada
     # same bits without materializing the fp32 copy.
     mean = rotation = fp4  # placeholder pointers for the operands a mode does not read
     if subtract_mean:
-        mean = tensor_4d.mean(dim=1, dtype=torch.float32).contiguous().view(batch * nheads, headdim)
+        mean = reference_token_mean(tensor_4d).view(batch * nheads, headdim)
     if hadamard:
         rotation = _hadamard_operand(headdim, tensor_4d.device, tf32)
     block_m, num_warps, num_stages, ctas_per_sm = _launch_config(hadamard, tf32)
@@ -340,4 +386,7 @@ def nvfp4_fused_qk_quantize_fa4(query: torch.Tensor, key: torch.Tensor, *, smoot
     return torch.ops.fastvideo.nvfp4_fused_qk_quantize_fa4(query, key, smooth_k, hadamard)
 
 
-__all__ = ["SUPPORTED_HEAD_DIMS", "fused_qk_quant_available", "fused_qk_quant_supported", "nvfp4_fused_qk_quantize_fa4"]
+__all__ = [
+    "SUPPORTED_HEAD_DIMS", "fused_qk_quant_available", "fused_qk_quant_supported", "nvfp4_fused_qk_quantize_fa4",
+    "reference_token_mean"
+]
