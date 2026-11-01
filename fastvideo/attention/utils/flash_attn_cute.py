@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 import torch
 
+from fastvideo.attention.utils.fa4_env_cache import invalidate_fa4_jit_caches_on_env_change
 from fastvideo.logger import init_logger
 from fastvideo.platforms import current_platform
 
@@ -44,6 +45,20 @@ except ImportError:
 
 # Dynamo unwraps functools caches, so keep this cache inside the opaque helper.
 _SM90_OR_NEWER_BY_DEVICE: dict[int, bool] = {}
+
+# FA4 reads its tuning knobs (FA4_*/FA_*) from the environment while it traces a
+# kernel, but keys its JIT cache on shapes, dtypes and call flags only. A knob
+# that changes inside one process would therefore be served the kernel compiled
+# for the previous value -- a silent no-op that poisons in-process A/B sweeps
+# (see fastvideo/attention/utils/fa4_env_cache.py). The custom-op implementations
+# below are the single choke point for every FastVideo FA4 forward and they run
+# eagerly even under torch.compile, so drop the external JIT cache there as soon
+# as the knob fingerprint moves.
+_FA4_KERNEL_OBJECTS = (_flash_attn_fwd, _flash_attn_bwd)
+
+
+def _guard_fa4_jit_cache() -> None:
+    invalidate_fa4_jit_caches_on_env_change(_FA4_KERNEL_OBJECTS)
 
 
 def _check_dropout(dropout_p: float) -> None:
@@ -94,6 +109,7 @@ def _flash_attn_cute_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    _guard_fa4_jit_cache()
     # _flash_attn_fwd returns (out, lse) on its empty-sequence early path but
     # (out, lse, p, row_max) on the main path at the pinned FA4 cute ref; take
     # the first two so both arities work.
@@ -235,6 +251,7 @@ def _flash_attn_cute_varlen_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    _guard_fa4_jit_cache()
     out, lse = _flash_attn_fwd(
         q,
         k,
@@ -441,6 +458,7 @@ def _flash_attn_cute_fp4_forward(
     softmax_scale: float | None,
     causal: bool,
 ) -> torch.Tensor:
+    _guard_fa4_jit_cache()
     out = _flash_attn_fwd(
         q,
         k,
