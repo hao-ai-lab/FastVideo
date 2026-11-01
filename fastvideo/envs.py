@@ -427,7 +427,8 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
-    "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+    "modulate,qknorm_rope,swiglu. The whole-tier value mk selects the MotionKernel kernels instead of "
+    "the Sol-Engine ones. Empty, 0, or none keeps the eager implementation.")
 FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
     "",
     category="performance",
