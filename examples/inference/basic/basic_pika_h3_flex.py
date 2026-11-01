@@ -181,12 +181,9 @@ def _num_frames(args: argparse.Namespace) -> int:
 def _inputs(args: argparse.Namespace) -> InputConfig:
     if args.task == "ref2va":
         return InputConfig(references=args.reference)
-    # Keep only the keyframes the task uses, so switching --task never turns
-    # an I2VA run into FL2VA because a --last-image was also passed.
     first = args.image if args.task in ("i2va", "fl2va") else None
     last = args.last_image if args.task in ("l2va", "fl2va") else None
-    # The request adapter copies image fields verbatim; the stage loads
-    # ``image_path`` itself but requires ``last_image`` to already be a PIL image.
+    # The stage loads ``image_path`` itself but requires ``last_image`` as a PIL image.
     return InputConfig(image_path=first, last_image=load_image(last) if last else None)
 
 
