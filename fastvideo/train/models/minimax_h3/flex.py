@@ -186,8 +186,10 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
                                                  two_level_p=bool(config.get("two_level_p", False)),
                                                  smooth_k=bool(config.get("smooth_k", False)),
                                                  first_block_max_floor=None if floor is None else float(floor))
-        if install_fp4_dense_attention(self.transformer, self.fp4_numerics) == 0:
-            raise ValueError("qad.fp4_attention needs FLASH_ATTN attention layers; none were found")
+        installed = install_fp4_dense_attention(self.transformer, self.fp4_numerics)
+        if installed == 0:
+            raise ValueError("qad.fp4_attention needs dense (FlashAttention or SDPA) attention layers; none were found")
+        logger.info("Dense FP4 attention emulator installed on %d attention layers", installed)
 
     @contextlib.contextmanager
     def quantization(self, *, linears: bool = True, attention: bool = True) -> Iterator[None]:

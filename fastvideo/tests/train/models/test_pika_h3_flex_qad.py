@@ -221,6 +221,33 @@ def test_install_fp4_dense_attention_overrides_and_restores_flash_attention():
     assert all(impl.forward == original for impl, original in zip(impls, originals, strict=True))
 
 
+def test_install_fp4_dense_attention_covers_sdpa_fallback():
+    """Without flash-attn the FLASH_ATTN selection resolves to SDPA; the emulator must still be installed."""
+    from fastvideo.attention.backends.fp4_dense_qat import install_fp4_dense_attention
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+    from fastvideo.attention.backends.sdpa import SDPAImpl
+
+    class Layer(torch.nn.Module):
+
+        def __init__(self):
+            super().__init__()
+            self.distributed_attention = SimpleNamespace(attn_impl=SDPAImpl(1, 8, causal=False, softmax_scale=8**-0.5))
+
+    model = torch.nn.Sequential(Layer(), Layer())
+    impls = [layer.distributed_attention.attn_impl for layer in model]
+    originals = [impl.forward for impl in impls]
+    reference = _reference_module()
+    kernel = _ExactKernel(reference)
+    assert install_fp4_dense_attention(model, FP4AttentionNumerics(quantize_pv=False), (reference, kernel)) == 2
+    q = torch.randn(1, 130, 1, 8, dtype=torch.bfloat16)
+    assert impls[1].forward(q, q, q, None).shape == q.shape
+    assert len(kernel.calls) == 1
+    with pytest.raises(NotImplementedError, match="packed"):
+        impls[0].forward(q, q, q, SimpleNamespace(packed_sequence=object()))
+    install_fp4_dense_attention(model, None)
+    assert all(impl.forward == original for impl, original in zip(impls, originals, strict=True))
+
+
 def _write_trunk(trunk: Path, weights: dict[str, torch.Tensor]) -> None:
     trunk.mkdir(parents=True)
     names = sorted(weights)

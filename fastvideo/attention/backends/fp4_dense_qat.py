@@ -5,8 +5,9 @@ The deployed dense FP4 path (``FLASH_ATTN`` with ``nvfp4_fa4``) quantizes Q and 
 P and V in BF16. The FP4 block-sparse training kernel (``fp4_vsa_attn_qat`` with ``quantize_pv=False``) computes the
 same numerics with straight-through gradients; given every key block for every query block it is dense attention.
 
-``install_fp4_dense_attention(transformer, numerics)`` routes every ``FlashAttentionImpl`` of ``transformer`` through
-that kernel (``None`` restores FlashAttention). Inputs arrive as ``[B, L, H, D]`` after the sequence-parallel
+``install_fp4_dense_attention(transformer, numerics)`` routes every dense attention impl of ``transformer``
+(``FlashAttentionImpl``, or ``SDPAImpl`` where the ``FLASH_ATTN`` selection fell back to SDPA because flash-attn is
+not installed) through that kernel (``None`` restores the original forward). Inputs arrive as ``[B, L, H, D]`` after the sequence-parallel
 all-to-all (full sequence, local heads); they are padded to 128-token tiles, attended over the full block lists and
 cut back.
 """
@@ -34,7 +35,7 @@ def dense_block_lists(seq_len: int, batch: int, heads: int, reference: Any,
 
 
 class FP4DenseAttention:
-    """``FlashAttentionImpl.forward`` replacement: ``(q, k, v, metadata) -> [B, L, H, D]`` through the FP4 kernel."""
+    """Dense attention ``forward`` replacement: ``(q, k, v, metadata) -> [B, L, H, D]`` through the FP4 kernel."""
 
     def __init__(self, numerics: FP4AttentionNumerics, modules: tuple[Any, Any] | None = None) -> None:
         self.numerics = numerics
@@ -48,6 +49,8 @@ class FP4DenseAttention:
         return self._lists[key]
 
     def __call__(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, metadata: Any) -> torch.Tensor:
+        if getattr(metadata, "packed_sequence", None) is not None:
+            raise NotImplementedError("dense FP4 attention emulator does not support packed sequences")
         batch, seq_len, heads, _ = query.shape
         pad = -seq_len % TILE
         q, k, v = (torch.nn.functional.pad(t.to(torch.bfloat16).transpose(1, 2), (0, 0, 0, pad))
@@ -67,14 +70,23 @@ class FP4DenseAttention:
         return out[:, :, :seq_len].transpose(1, 2).to(query.dtype)
 
 
-def flash_attention_impls(transformer: torch.nn.Module) -> list[Any]:
-    """Every ``FlashAttentionImpl`` reached through the transformer's distributed attention layers."""
-    from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
+def _dense_impl_types() -> tuple[type, ...]:
+    from fastvideo.attention.backends.sdpa import SDPAImpl
 
+    try:
+        from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
+    except (ImportError, RuntimeError):  # no flash-attn install: FLASH_ATTN selection resolves to SDPA
+        return (SDPAImpl, )
+    return (FlashAttentionImpl, SDPAImpl)
+
+
+def dense_attention_impls(transformer: torch.nn.Module) -> list[Any]:
+    """Every dense (FlashAttention or SDPA) impl reached through the transformer's distributed attention layers."""
+    types_ = _dense_impl_types()
     impls = []
     for module in transformer.modules():
         impl = getattr(getattr(module, "distributed_attention", None), "attn_impl", None)
-        if isinstance(impl, FlashAttentionImpl):
+        if isinstance(impl, types_):
             impls.append(impl)
     return impls
 
@@ -82,9 +94,9 @@ def flash_attention_impls(transformer: torch.nn.Module) -> list[Any]:
 def install_fp4_dense_attention(transformer: torch.nn.Module,
                                 numerics: FP4AttentionNumerics | None,
                                 modules: tuple[Any, Any] | None = None) -> int:
-    """Route every FlashAttention layer through the dense FP4 emulator (``None`` restores FlashAttention)."""
+    """Route every dense attention layer through the FP4 emulator (``None`` restores the original forward)."""
     override = FP4DenseAttention(numerics, modules) if numerics is not None else None
-    impls = flash_attention_impls(transformer)
+    impls = dense_attention_impls(transformer)
     for impl in impls:
         if _ORIGINAL not in impl.__dict__:
             impl.__dict__[_ORIGINAL] = impl.forward
@@ -95,4 +107,4 @@ def install_fp4_dense_attention(transformer: torch.nn.Module,
     return len(impls)
 
 
-__all__ = ["FP4DenseAttention", "dense_block_lists", "flash_attention_impls", "install_fp4_dense_attention"]
+__all__ = ["FP4DenseAttention", "dense_block_lists", "dense_attention_impls", "install_fp4_dense_attention"]
