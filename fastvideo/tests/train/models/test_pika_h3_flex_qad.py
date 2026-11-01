@@ -147,11 +147,78 @@ def test_contract_must_match_the_profile_trunk(tmp_path):
         _model_stub()._read_contract(str(tmp_path))
 
 
-def test_fp4_attention_is_refused():
-    model = _model_stub()
-    model.qad_config = {"fp4_attention": {"enabled": True}, "linears": {"enabled": True}}
-    with pytest.raises(ValueError, match="dense attention"):
-        model._install_qad()
+def _reference_module():
+    from fastvideo.attention.backends.fp4_vsa_qat import _load
+    return _load("attn_qat_vsa_reference")
+
+
+class _ExactKernel:
+    """Stand-in for ``attn_qat_vsa_train``: exact softmax over the listed (here: all) blocks and valid keys."""
+
+    def __init__(self, reference):
+        self.reference = reference
+        self.calls = []
+
+    def fp4_vsa_attn_qat(self, q, k, v, q2k_idx, q2k_num, kv_valid, **numerics):
+        self.calls.append((q.shape, numerics))
+        n_blocks = q.shape[2] // 128
+        assert bool((q2k_num == n_blocks).all())
+        keys = self.reference.key_valid_mask(kv_valid, n_blocks, q.device).reshape(-1)
+        scores = (q.float() @ k.float().transpose(-1, -2)) / q.shape[-1]**0.5
+        scores = scores.masked_fill(~keys[None, None, None, :], float("-inf"))
+        return (scores.softmax(-1) @ v.float()).to(torch.bfloat16)
+
+
+def test_dense_block_lists_cover_every_key_tile():
+    from fastvideo.attention.backends.fp4_dense_qat import dense_block_lists
+    reference = _reference_module()
+    q2k_idx, q2k_num, kv_valid = dense_block_lists(300, 1, 2, reference, torch.device("cpu"))
+    assert q2k_num.shape == (1, 2, 3) and bool((q2k_num == 3).all())
+    assert sorted(q2k_idx[0, 0, 0].tolist()) == [0, 1, 2]
+    assert kv_valid.tolist() == [64, 64, 64, 64, 44, 0]
+
+
+def test_fp4_dense_attention_pads_to_tiles_and_matches_dense_attention():
+    from fastvideo.attention.backends.fp4_dense_qat import FP4DenseAttention
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+    reference = _reference_module()
+    kernel = _ExactKernel(reference)
+    attention = FP4DenseAttention(FP4AttentionNumerics(quantize=True, quantize_pv=False), (reference, kernel))
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(1, 200, 2, 16, dtype=torch.bfloat16) for _ in range(3))
+    out = attention(q, k, v, None)
+    expected = torch.nn.functional.scaled_dot_product_attention(*(t.float().transpose(1, 2) for t in (q, k, v)))
+    assert out.shape == q.shape and out.dtype == q.dtype
+    torch.testing.assert_close(out.float(), expected.transpose(1, 2), atol=2e-2, rtol=2e-2)
+    shape, numerics = kernel.calls[0]
+    assert shape == (1, 2, 256, 16) and numerics["quantize_pv"] is False and numerics["quantize"] is True
+
+
+def test_install_fp4_dense_attention_overrides_and_restores_flash_attention():
+    from fastvideo.attention.backends.fp4_dense_qat import install_fp4_dense_attention
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+    try:
+        from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
+    except (ImportError, RuntimeError) as error:  # FlashAttention is a CUDA-host dependency
+        pytest.skip(f"FlashAttention backend not importable here: {error}")
+
+    class Layer(torch.nn.Module):
+
+        def __init__(self):
+            super().__init__()
+            self.distributed_attention = SimpleNamespace(attn_impl=object.__new__(FlashAttentionImpl))
+
+    model = torch.nn.Sequential(Layer(), Layer())
+    impls = [layer.distributed_attention.attn_impl for layer in model]
+    originals = [impl.forward for impl in impls]
+    reference = _reference_module()
+    kernel = _ExactKernel(reference)
+    assert install_fp4_dense_attention(model, FP4AttentionNumerics(quantize_pv=False), (reference, kernel)) == 2
+    q = torch.randn(1, 130, 1, 8, dtype=torch.bfloat16)
+    impls[0].forward(q, q, q, None)
+    assert len(kernel.calls) == 1
+    install_fp4_dense_attention(model, None)
+    assert all(impl.forward == original for impl, original in zip(impls, originals, strict=True))
 
 
 def _write_trunk(trunk: Path, weights: dict[str, torch.Tensor]) -> None:

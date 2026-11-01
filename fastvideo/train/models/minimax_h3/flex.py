@@ -7,8 +7,9 @@ is a merged Flex model directory written by ``scripts/distill/pika_h3_flex_qad/m
 
 Differences from OmniRef:
 
-- Dense attention (``FLASH_ATTN``): Flex has no VSA compression gate, so there is no tile selection to freeze and the
-  FP4 sparse-attention emulator does not apply. QAD covers the NVFP4 linears only.
+- Dense attention (``FLASH_ATTN``): Flex has no VSA compression gate, so there is no tile selection to freeze. QAD
+  covers the NVFP4 linears and, optionally (``qad.fp4_attention``), dense FP4 attention as FlashAttention-4 NVFP4
+  deploys it (Q/K NVFP4, P and V BF16; ``fp4_dense_qat``).
 - No PDD head fusion: every rung is a plain transformer forward over Pika's clean-time knots
   (1000, 750, 500, 250, 100, 40), shifted per modality (video 12, audio 3), starting from unit noise.
 - Re-noise steps: ``x_next = (1 - sigma_next) x0 + sigma_next eps``. ``eps`` is a function of (row seed, forward,
@@ -150,9 +151,7 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
         """NVFP4 W4A4 linears with the calibrated static FFN scales; attention stays BF16 dense."""
         from fastvideo.layers.quantization.nvfp4_qad import NVFP4QADPlan, install_nvfp4_qad, load_amax_table
 
-        if dict(self.qad_config.get("fp4_attention") or {}).get("enabled", False):
-            raise ValueError("Pika H3 Flex runs dense attention; the FP4 attention emulator models VSA-H3 tiles. "
-                             "Set qad.fp4_attention.enabled: false")
+        self._install_fp4_attention(dict(self.qad_config.get("fp4_attention") or {}))
         linears = dict(self.qad_config.get("linears") or {})
         if not linears.get("enabled", True):
             return
@@ -170,19 +169,42 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
                             quantize_ffn=bool(linears.get("ffn", True)),
                             skip_blocks=tuple(int(b) for b in linears.get("skip_blocks", ())))
         self.qad_linears = install_nvfp4_qad(self.transformer, table, plan, allow_uncalibrated=table is None)
-        logger.info("Flex %s QAD student: %d NVFP4 QAD linears, BF16 dense attention, %.2fB trainable parameters",
-                    self._task, len(self.qad_linears), self.num_trainable / 1e9)
+        logger.info("Flex %s QAD student: %d NVFP4 QAD linears, %s attention, %.2fB trainable parameters", self._task,
+                    len(self.qad_linears), self.fp4_numerics or "BF16 dense", self.num_trainable / 1e9)
+
+    def _install_fp4_attention(self, config: dict[str, Any]) -> None:
+        """Dense FP4 attention as deployed by FlashAttention-4 NVFP4: Q/K in NVFP4, P and V in BF16 by default."""
+        self.fp4_numerics = None
+        if not config.get("enabled", False):
+            return
+        from fastvideo.attention.backends.fp4_dense_qat import install_fp4_dense_attention
+        from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+
+        floor = config.get("first_block_max_floor")
+        self.fp4_numerics = FP4AttentionNumerics(quantize=True,
+                                                 quantize_pv=bool(config.get("quantize_pv", False)),
+                                                 two_level_p=bool(config.get("two_level_p", False)),
+                                                 smooth_k=bool(config.get("smooth_k", False)),
+                                                 first_block_max_floor=None if floor is None else float(floor))
+        if install_fp4_dense_attention(self.transformer, self.fp4_numerics) == 0:
+            raise ValueError("qad.fp4_attention needs FLASH_ATTN attention layers; none were found")
 
     @contextlib.contextmanager
     def quantization(self, *, linears: bool = True, attention: bool = True) -> Iterator[None]:
-        """Toggle the NVFP4 linears (``attention`` is accepted for the method's contract; it is always BF16)."""
+        """Toggle the NVFP4 linears and, when installed, the dense FP4 attention (all off = the teacher)."""
+        from fastvideo.attention.backends.fp4_dense_qat import install_fp4_dense_attention
         from fastvideo.layers.quantization.nvfp4_qad import set_nvfp4_qad_enabled
 
+        fp4 = getattr(self, "fp4_numerics", None)
         set_nvfp4_qad_enabled(self.qad_linears, linears)
+        if fp4 is not None and not attention:
+            install_fp4_dense_attention(self.transformer, None)
         try:
             yield
         finally:
             set_nvfp4_qad_enabled(self.qad_linears, True)
+            if fp4 is not None:
+                install_fp4_dense_attention(self.transformer, fp4)
 
     # ------------------------------------------------------------------ Flex ladder
     @property
