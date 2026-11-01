@@ -35,6 +35,18 @@ def parse_qk_transform(name: str | None) -> tuple[bool, bool]:
     return QK_TRANSFORMS[key]
 
 
+def parse_block_indices(raw: str | None) -> frozenset[int]:
+    """``"45, 49"`` -> ``frozenset({45, 49})``; empty/``None`` -> empty set."""
+    items = [item.strip() for item in (raw or "").split(",") if item.strip()]
+    try:
+        indices = frozenset(int(item) for item in items)
+    except ValueError as error:
+        raise ValueError(f"expected a comma-separated list of block indices, got {raw!r}") from error
+    if any(index < 0 for index in indices):
+        raise ValueError(f"block indices must be non-negative, got {raw!r}")
+    return indices
+
+
 @lru_cache(maxsize=8)
 def _hadamard(n: int, device: torch.device) -> torch.Tensor:
     if n <= 0 or n & (n - 1):
@@ -64,4 +76,4 @@ def precondition_qk(query: torch.Tensor, key: torch.Tensor, *, smooth_k: bool,
     return q.to(query.dtype), k.to(key.dtype)
 
 
-__all__ = ["QK_TRANSFORMS", "hadamard_matrix", "parse_qk_transform", "precondition_qk"]
+__all__ = ["QK_TRANSFORMS", "hadamard_matrix", "parse_block_indices", "parse_qk_transform", "precondition_qk"]
