@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention.utils import fa4_env_cache
 
 
@@ -136,8 +137,8 @@ def test_real_fa4_kernel_is_recompiled_for_each_knob_value(monkeypatch) -> None:
         fa4_env_cache.reset_fa4_env_fingerprint()
         compiles["n"] = 0
         for value in ("1", "0"):
-            monkeypatch.setenv("FA_DISABLE_2CTA", value)
-            flash_attn_cute.flash_attn_func(q, k, v)
+            with envs.override_external("FA_DISABLE_2CTA", value):
+                flash_attn_cute.flash_attn_func(q, k, v)
         return compiles["n"]
 
     monkeypatch.setattr(flash_attn_cute, "_guard_fa4_jit_cache", lambda: None)

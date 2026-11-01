@@ -6,9 +6,9 @@ FA4 reads these knobs while tracing a kernel but does not include them in its co
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable, Mapping
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -22,7 +22,7 @@ _last_fingerprint: tuple[tuple[str, str], ...] | None = None
 
 def fa4_env_fingerprint(environ: Mapping[str, str] | None = None, ) -> tuple[tuple[str, str], ...]:
     """Return the sorted ``(name, value)`` pairs of FA4 tuning env vars."""
-    source = os.environ if environ is None else environ
+    source = envs.external_with_prefixes("FA4_", "FA_") if environ is None else environ
     pairs = [(name, source[name]) for name in source if name.startswith(FA4_ENV_PREFIXES)]
     pairs.sort()
     return tuple(pairs)
