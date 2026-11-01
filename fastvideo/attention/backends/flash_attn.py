@@ -291,9 +291,7 @@ class FlashAttentionImpl(AttentionImpl):
         # identical to before the knob; kwargs win over the
         # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
         self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
-        # MiniMax-H3 dense attention may opt into cuDNN's fused SDPA. It is an
-        # explicit impl argument (threaded from FASTVIDEO_MINIMAX_H3_DENSE_ATTN
-        # by the H3 model) so no other model can inherit it by accident.
+        # Explicit impl argument (set by the H3 model) so other models cannot inherit the cuDNN route.
         self.cudnn_sdpa = bool(extra_impl_args.get("cudnn_sdpa", False))
         if self.cudnn_sdpa and self.nvfp4_fa4:
             raise ValueError("cudnn_sdpa and nvfp4_fa4 select different Q/K precision; enable only one of "
@@ -493,9 +491,7 @@ class FlashAttentionImpl(AttentionImpl):
             output = self._forward_nvfp4(query, key, value)
 
         elif self.cudnn_sdpa and cudnn_sdpa_supported(query, key, value):
-            # H3's dense, unmasked, inference-only route. The helper presents
-            # the BSHD inputs to cuDNN as BHSD strided views (contiguous BSHD
-            # is silently misread by the ATen op).
+            # The ATen cuDNN op silently misreads contiguous BSHD; the helper passes BHSD strided views.
             output = cudnn_sdpa_bshd(query, key, value, scale=self.softmax_scale, causal=self.causal)
 
         elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1

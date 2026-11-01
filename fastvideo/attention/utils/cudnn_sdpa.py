@@ -20,12 +20,10 @@ import torch
 
 # cuDNN's fused attention kernels take fp16/bf16 only; the H3 DiT runs bf16.
 _CUDNN_SDPA_DTYPES = (torch.float16, torch.bfloat16)
-# cuDNN 9.x supports head sizes up to 128 on the fused SDPA path. Wider heads
-# stay on FlashAttention instead of risking an engine-selection failure.
+# cuDNN 9.x fused SDPA supports head sizes up to 128.
 _CUDNN_SDPA_MAX_HEAD_DIM = 128
 
-# Older torch builds may not register the op at all; keep the module importable
-# (the guard then reports unsupported and the backend stays on FlashAttention).
+# Older torch builds may not register the op.
 _ATEN_CUDNN_SDPA = getattr(torch.ops.aten, "_scaled_dot_product_cudnn_attention", None)
 if _ATEN_CUDNN_SDPA is not None:
     _ATEN_CUDNN_SDPA = _ATEN_CUDNN_SDPA.default
@@ -70,7 +68,6 @@ def cudnn_sdpa_bshd(
     """Dense scaled-dot-product attention on contiguous ``[B, S, H, D]`` inputs."""
     if _ATEN_CUDNN_SDPA is None:
         raise RuntimeError("torch build does not provide aten::_scaled_dot_product_cudnn_attention")
-    # compute_log_sumexp=False: inference needs only the forward result.
     output = _ATEN_CUDNN_SDPA(
         query.transpose(1, 2),
         key.transpose(1, 2),
@@ -82,5 +79,4 @@ def cudnn_sdpa_bshd(
         False,
         scale=scale,
     )[0]
-    # cuDNN returns [B, H, S, D]; restore the caller's [B, S, H, D] contract.
     return output.transpose(1, 2).contiguous()

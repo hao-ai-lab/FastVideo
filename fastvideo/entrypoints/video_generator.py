@@ -943,10 +943,6 @@ class VideoGenerator:
         needs_samples_out = batch.return_frames or batch.return_samples
         if (needs_samples_out and not batch.return_samples and not is_latent_output
                 and envs.FASTVIDEO_H3_SKIP_FP32_SAMPLES_MIRROR.get()):
-            # ``frames`` below is built from ``output_batch.output`` directly, so the
-            # fp32 [0, 1] mirror only serves the ``samples`` result, which this
-            # request did not ask for. MiniMax-H3 hands back uint8 pixels, so that
-            # mirror is 4x the decoded data (1.5 GB for a 5 s 768p clip).
             needs_samples_out = False
         # ``output_shape_from_input`` pipelines (Kandinsky6 SR) decide the output geometry from the input video, so the
         # request's height / width / num_frames say nothing about the buffer to pre-allocate.

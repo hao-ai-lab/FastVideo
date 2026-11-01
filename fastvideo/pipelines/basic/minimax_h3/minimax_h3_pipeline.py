@@ -806,8 +806,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise box["error"]
             batch.extra["audio"] = box.get("audio")
             batch.extra["audio_sample_rate"] = box.get("audio_sample_rate")
-            # The audio stage bypasses PipelineStage.__call__, so release the lazy
-            # modules it owns here, exactly as __call__ would after it returns.
+            # forward() bypassed PipelineStage.__call__, which normally releases these.
             audio_stage._release_deferred_modules(f"{getattr(audio_stage, '_pipeline_stage_name', 'audio')}|"
                                                   f"{type(audio_stage).__name__}")
         return batch
