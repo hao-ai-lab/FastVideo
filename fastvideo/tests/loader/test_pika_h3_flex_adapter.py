@@ -93,3 +93,23 @@ def test_load_adapter_requires_the_manifest(tmp_path: Path) -> None:
     (task_dir / "manifest.json").unlink()
     with pytest.raises(adapter.PikaAdapterError, match="manifest"):
         adapter.load_adapter(tmp_path, task="fl2va")
+
+
+def _write_marker(root: Path, merged: dict) -> None:
+    (root / adapter.PIKA_MERGED_MARKER).write_text(json.dumps({"format_version": 1, "merged": merged}),
+                                                   encoding="utf-8")
+
+
+def test_merged_marker_skips_the_released_adapter(tmp_path):
+    assert adapter.merged_adapter(tmp_path, "ref2va") is None
+    _write_marker(tmp_path, {"ref2va": {"trunk": "transformer_ref", "release_id": "pika-flex-ref2va-v1"}})
+    assert adapter.merged_adapter(tmp_path, "ref2va")["release_id"] == "pika-flex-ref2va-v1"
+
+
+def test_merged_marker_must_cover_the_task_and_trunk(tmp_path):
+    _write_marker(tmp_path, {"ref2va": {"trunk": "transformer_ref"}})
+    with pytest.raises(adapter.PikaAdapterError, match="does not carry the fl2va model"):
+        adapter.merged_adapter(tmp_path, "fl2va")
+    _write_marker(tmp_path, {"ref2va": {"trunk": "transformer"}})
+    with pytest.raises(adapter.PikaAdapterError, match="must sit on trunk"):
+        adapter.merged_adapter(tmp_path, "ref2va")
