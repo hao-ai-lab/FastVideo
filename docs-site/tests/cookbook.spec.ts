@@ -751,7 +751,7 @@ test("MLX Omni discovery and its original route expose the MLX launch command", 
 
 test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(37);
   for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
     const button = page.getByRole("button", { name: category, exact: true });
     const count = Number(await button.locator(".recipe-filter-count").innerText());
