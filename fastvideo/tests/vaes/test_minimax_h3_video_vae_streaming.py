@@ -3,6 +3,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.vaes.minimax_h3_video import (
     MiniMaxH3VideoVAEArchConfig,
     MiniMaxH3VideoVAEConfig,
@@ -184,24 +185,24 @@ def test_decode_to_pixels_rejects_incomplete_output(monkeypatch) -> None:
         vae.decode_to_pixels(latents, output)
 
 
-def test_tile_batch_defaults_to_eight(monkeypatch) -> None:
+def test_tile_batch_defaults_to_eight(env_overrides) -> None:
     from fastvideo.models.vaes.minimax_h3_video import _tile_batch_size
 
-    monkeypatch.delenv("FASTVIDEO_H3_VAE_TILE_BATCH", raising=False)
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(None))
     assert _tile_batch_size() == 8
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "3")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(3))
     assert _tile_batch_size() == 3
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(0))
     assert _tile_batch_size() == 1
 
 
-def test_dynamic_nvfp4_act_scale_decodes_per_tile(monkeypatch) -> None:
+def test_dynamic_nvfp4_act_scale_decodes_per_tile(env_overrides) -> None:
     from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import NVFP4DecoderLinear
     from fastvideo.models.vaes.minimax_h3_video import _tile_batch_size
 
     decoder = torch.nn.Module()
     decoder.proj = NVFP4DecoderLinear(torch.zeros(16, 16), None, None, torch.float32, act_scale="dynamic")
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "8")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(8))
     assert _tile_batch_size(decoder) == 1
     assert _tile_batch_size() == 8
 
@@ -213,7 +214,7 @@ def test_dynamic_nvfp4_act_scale_decodes_per_tile(monkeypatch) -> None:
 
 
 @torch.inference_mode()
-def test_dynamic_nvfp4_act_scale_decodes_one_tile_per_call(monkeypatch) -> None:
+def test_dynamic_nvfp4_act_scale_decodes_one_tile_per_call(env_overrides) -> None:
     from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import NVFP4DecoderLinear
 
     torch.manual_seed(20260814)
@@ -223,7 +224,7 @@ def test_dynamic_nvfp4_act_scale_decodes_one_tile_per_call(monkeypatch) -> None:
                       tile_sample_min_overlap_height=2,
                       tile_sample_min_overlap_width=2)
     latents = torch.randn(1, 4, 12, 4, 4)
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", "8")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(8))
     calls = []
     decoder_forward = vae.decoder.forward
 
@@ -247,7 +248,7 @@ def test_dynamic_nvfp4_act_scale_decodes_one_tile_per_call(monkeypatch) -> None:
 
 
 @torch.inference_mode()
-def test_batched_tile_decode_matches_per_tile(monkeypatch) -> None:
+def test_batched_tile_decode_matches_per_tile(env_overrides) -> None:
     torch.manual_seed(20260814)
     vae = _tiny_vae()
     vae.enable_tiling(tile_sample_min_height=8,
@@ -257,7 +258,7 @@ def test_batched_tile_decode_matches_per_tile(monkeypatch) -> None:
     latents = torch.randn(1, 4, 12, 4, 4)
     outputs = {}
     for tile_batch in (1, 8):
-        monkeypatch.setenv("FASTVIDEO_H3_VAE_TILE_BATCH", str(tile_batch))
+        env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(tile_batch))
         output = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
         vae.decode_to_pixels(latents, output)
         outputs[tile_batch] = output
