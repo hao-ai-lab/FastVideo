@@ -248,6 +248,77 @@ def test_install_fp4_dense_attention_covers_sdpa_fallback():
     assert all(impl.forward == original for impl, original in zip(impls, originals, strict=True))
 
 
+@pytest.mark.parametrize("name", ["smooth_k", "hadamard", "smooth_k+hadamard"])
+def test_precondition_qk_leaves_attention_unchanged(name):
+    from fastvideo.attention.utils.nvfp4_qk_precondition import parse_qk_transform, precondition_qk
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(2, 37, 3, 16, dtype=torch.float32) for _ in range(3))
+    k = k + 4.0  # shared K bias that smoothing removes
+    smooth, hadamard = parse_qk_transform(name)
+    tq, tk = precondition_qk(q, k, smooth_k=smooth, hadamard=hadamard)
+
+    def attend(a, b):
+        return torch.nn.functional.scaled_dot_product_attention(*(t.transpose(1, 2) for t in (a, b, v))).transpose(1, 2)
+
+    torch.testing.assert_close(attend(tq, tk), attend(q, k), atol=1e-5, rtol=1e-5)
+    if smooth:
+        assert float(tk.mean(dim=1).abs().max()) < 1e-4
+
+
+def test_parse_qk_transform_rejects_unknown_names():
+    from fastvideo.attention.utils.nvfp4_qk_precondition import parse_qk_transform
+    assert parse_qk_transform(None) == (False, False)
+    with pytest.raises(ValueError, match="unknown NVFP4 Q/K transform"):
+        parse_qk_transform("rotate")
+
+
+def test_fp4_dense_attention_with_qk_transform_matches_dense_attention():
+    from fastvideo.attention.backends.fp4_dense_qat import FP4DenseAttention
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+    reference = _reference_module()
+    kernel = _ExactKernel(reference)
+    attention = FP4DenseAttention(FP4AttentionNumerics(quantize=True, quantize_pv=False), (reference, kernel),
+                                  qk_transform=(True, True))
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(1, 200, 2, 16, dtype=torch.bfloat16) for _ in range(3))
+    out = attention(q, k, v, None)
+    expected = torch.nn.functional.scaled_dot_product_attention(*(t.float().transpose(1, 2) for t in (q, k, v)))
+    torch.testing.assert_close(out.float(), expected.transpose(1, 2), atol=3e-2, rtol=3e-2)
+
+
+def test_install_fp4_dense_attention_keeps_bf16_blocks_on_original_forward():
+    from fastvideo.attention.backends.fp4_dense_qat import block_index, install_fp4_dense_attention
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+    from fastvideo.attention.backends.sdpa import SDPAImpl
+
+    class Block(torch.nn.Module):
+
+        def __init__(self):
+            super().__init__()
+            self.attn = torch.nn.Module()
+            self.attn.distributed_attention = SimpleNamespace(
+                attn_impl=SDPAImpl(1, 8, causal=False, softmax_scale=8**-0.5))
+
+    model = torch.nn.Module()
+    model.transformer_blocks = torch.nn.ModuleList([Block(), Block(), Block()])
+    impls = [block.attn.distributed_attention.attn_impl for block in model.transformer_blocks]
+    originals = [impl.forward for impl in impls]
+    reference = _reference_module()
+    kernel = _ExactKernel(reference)
+    numerics = FP4AttentionNumerics(quantize_pv=False)
+    assert block_index("transformer_blocks.12._checkpoint_wrapped_module.attn") == 12
+    assert block_index("token_refiner.blocks.0.attn") is None
+    assert install_fp4_dense_attention(model, numerics, (reference, kernel), bf16_blocks=(2, )) == 2
+    assert impls[2].forward == originals[2] and impls[0].forward != originals[0]
+    q = torch.randn(1, 130, 1, 8, dtype=torch.bfloat16)
+    impls[2].forward(q, q, q, None)
+    assert kernel.calls == []
+    impls[1].forward(q, q, q, None)
+    assert len(kernel.calls) == 1
+    with pytest.raises(ValueError, match="match no transformer_blocks"):
+        install_fp4_dense_attention(model, numerics, (reference, kernel), bf16_blocks=(7, ))
+
+
 def _write_trunk(trunk: Path, weights: dict[str, torch.Tensor]) -> None:
     trunk.mkdir(parents=True)
     names = sorted(weights)

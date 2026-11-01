@@ -173,12 +173,18 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
                     len(self.qad_linears), self.fp4_numerics or "BF16 dense", self.num_trainable / 1e9)
 
     def _install_fp4_attention(self, config: dict[str, Any]) -> None:
-        """Dense FP4 attention as deployed by FlashAttention-4 NVFP4: Q/K in NVFP4, P and V in BF16 by default."""
+        """Dense FP4 attention as deployed by FlashAttention-4 NVFP4: Q/K in NVFP4, P and V in BF16 by default.
+
+        ``qk_transform`` (``none``/``smooth_k``/``hadamard``/``smooth_k+hadamard``) preconditions Q/K exactly before
+        quantization; ``bf16_blocks`` keeps those blocks' attention in BF16. Deployment must use the same settings.
+        """
         self.fp4_numerics = None
+        self.fp4_install: dict[str, Any] = {}
         if not config.get("enabled", False):
             return
         from fastvideo.attention.backends.fp4_dense_qat import install_fp4_dense_attention
         from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics
+        from fastvideo.attention.utils.nvfp4_qk_precondition import parse_qk_transform
 
         floor = config.get("first_block_max_floor")
         self.fp4_numerics = FP4AttentionNumerics(quantize=True,
@@ -186,10 +192,15 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
                                                  two_level_p=bool(config.get("two_level_p", False)),
                                                  smooth_k=bool(config.get("smooth_k", False)),
                                                  first_block_max_floor=None if floor is None else float(floor))
-        installed = install_fp4_dense_attention(self.transformer, self.fp4_numerics)
+        self.fp4_install = {
+            "qk_transform": parse_qk_transform(config.get("qk_transform")),
+            "bf16_blocks": tuple(int(b) for b in config.get("bf16_blocks") or ()),
+        }
+        installed = install_fp4_dense_attention(self.transformer, self.fp4_numerics, **self.fp4_install)
         if installed == 0:
             raise ValueError("qad.fp4_attention needs dense (FlashAttention or SDPA) attention layers; none were found")
-        logger.info("Dense FP4 attention emulator installed on %d attention layers", installed)
+        logger.info("Dense FP4 attention emulator installed on %d attention layers (qk_transform=%s, bf16_blocks=%s)",
+                    installed, config.get("qk_transform") or "none", list(self.fp4_install["bf16_blocks"]))
 
     @contextlib.contextmanager
     def quantization(self, *, linears: bool = True, attention: bool = True) -> Iterator[None]:
@@ -206,7 +217,7 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
         finally:
             set_nvfp4_qad_enabled(self.qad_linears, True)
             if fp4 is not None:
-                install_fp4_dense_attention(self.transformer, fp4)
+                install_fp4_dense_attention(self.transformer, fp4, **self.fp4_install)
 
     # ------------------------------------------------------------------ Flex ladder
     @property
