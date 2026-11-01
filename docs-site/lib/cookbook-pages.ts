@@ -55,7 +55,7 @@ export const recipePages = [
     mark: "H3",
     path: "/cookbook/minimax-h3/open-h3-regenerate-2k",
     description: "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with a three-step refiner.",
-    tags: ["Video to video", "2K", "3-step"],
+    tags: ["Video upscale", "2K", "3-step"],
   },
   {
     id: "fastwan21",
@@ -158,7 +158,7 @@ const TASK_GROUPS: Array<[RegExp, string]> = [
   [/first\/last frame to video/, "Image to video"],
   [/text or image to video/, "Text/image to video"],
   [/image to video/, "Image to video"],
-  [/super-resolution/, "Video upscale"],
+  [/super-resolution|upscale/, "Video upscale"],
   [/video/, "Text to video"],
 ];
 /** A small discovery vocabulary derived from the recipe task, not a capability claim. */

@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(36);
+  await expect(cards).toHaveCount(37);
   await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -276,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(37);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -722,7 +722,7 @@ test("MLX Omni discovery and its original route expose the MLX launch command", 
 
 test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(37);
   for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
     const button = page.getByRole("button", { name: category, exact: true });
     const count = Number(await button.locator(".recipe-filter-count").innerText());
@@ -789,4 +789,14 @@ test("WebSocket deployments expose only the serving interface", async ({ page })
   await expect(modes.getByRole("button", { name: "Python SDK", exact: true })).toHaveCount(0);
   await expect(modes.getByRole("button", { name: "CLI", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Only serving is recorded for it/)).toBeVisible();
+});
+
+test("Open-H3-Regenerate-2K is discoverable as a video upscale with its serving page", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Task", { exact: true }).selectOption("Video upscale");
+  const card = page.locator(".recipe-card").filter({ hasText: "Open-H3-Regenerate-2K" });
+  await expect(card).toHaveCount(1);
+  await card.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/open-h3-regenerate-2k\/?$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Open-H3-Regenerate-2K");
 });
