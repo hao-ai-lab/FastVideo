@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 import torch
@@ -32,6 +33,17 @@ if torch.cuda.is_available():
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
+
+# flash_attn.cute builds differ in which optional kwargs the varlen kernels take: some accept
+# max_seqlen_q/max_seqlen_k (and size the grid from them), older ones reject them. Forward an
+# optional kwarg only when the installed kernel declares it.
+_FWD_PARAMS = frozenset(inspect.signature(_flash_attn_fwd).parameters)
+_BWD_PARAMS = frozenset(inspect.signature(_flash_attn_bwd).parameters)
+
+
+def _accepted(params: frozenset[str], **kwargs) -> dict:
+    return {name: value for name, value in kwargs.items() if name in params}
+
 
 try:
     # FA2 serves the calls FA4 cute cannot on pre-sm90 GPUs (backward, GQA).
@@ -241,8 +253,6 @@ def _flash_attn_cute_varlen_forward(
         v,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
         softmax_scale=softmax_scale,
         causal=causal,
         window_size_left=None,
@@ -251,6 +261,7 @@ def _flash_attn_cute_varlen_forward(
         num_splits=1,
         pack_gqa=None,
         return_lse=True,
+        **_accepted(_FWD_PARAMS, max_seqlen_q=max_seqlen_q, max_seqlen_k=max_seqlen_k),
     )[:2]
     return out, lse
 
@@ -330,13 +341,14 @@ def _flash_attn_cute_varlen_backward_op(
         softmax_scale=softmax_scale,
         causal=causal,
         softcap=0.0,
-        window_size_left=None,
-        window_size_right=None,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
-        deterministic=deterministic,
+        **_accepted(_BWD_PARAMS,
+                    window_size_left=None,
+                    window_size_right=None,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    deterministic=deterministic),
     )
 
 
