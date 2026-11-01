@@ -55,7 +55,7 @@ print(f"SM120 kernel source: {kernel.__file__}")
 PY
     python -u examples/inference/basic/basic_fasth3_8step.py \
         --model-path "${model_path}" \
-        --prompt "A tennis player swings a racket and hits an incoming ball on an outdoor court. A stationary side view shows the entire body, racket, and ball trajectory. A clear impact sound and court ambience." \
+        --prompt "A red fox walks slowly through a snowy forest, leaving footprints in fresh snow. A stationary wide shot shows the fox's full body and detailed fur. Soft wind and crisp footsteps are audible." \
         --output "${output_root}/fasth3_sm120/${mode}" \
         --num-gpus 1 --execution-backend mp --profile strict \
         --vsa-kernel triton --no-fa4 --replicated-dit \
