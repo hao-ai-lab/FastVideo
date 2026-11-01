@@ -113,3 +113,15 @@ def test_merged_marker_must_cover_the_task_and_trunk(tmp_path):
     _write_marker(tmp_path, {"ref2va": {"trunk": "transformer"}})
     with pytest.raises(adapter.PikaAdapterError, match="must sit on trunk"):
         adapter.merged_adapter(tmp_path, "ref2va")
+
+
+def test_assemble_script_marker_name_matches_the_loader():
+    import importlib.util
+    from pathlib import Path
+
+    from fastvideo.pipelines.basic.pika_h3_flex.adapter import PIKA_MERGED_MARKER
+    script = Path(__file__).resolve().parents[3] / "scripts/distill/pika_h3_flex_qad/assemble_flex_release.py"
+    spec = importlib.util.spec_from_file_location("assemble_flex_release", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.PIKA_MERGED_MARKER == PIKA_MERGED_MARKER

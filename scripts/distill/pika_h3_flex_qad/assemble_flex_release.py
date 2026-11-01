@@ -30,15 +30,20 @@ import os
 import shutil
 from pathlib import Path
 
-from fastvideo.pipelines.basic.pika_h3_flex.adapter import PIKA_MERGED_MARKER
-
+# Kept import-free so assembly runs on CPU-only hosts; must equal
+# fastvideo.pipelines.basic.pika_h3_flex.adapter.PIKA_MERGED_MARKER (checked by the loader tests).
+PIKA_MERGED_MARKER = "pika_h3_flex_merged.json"
 CONTRACT_FILE = "pika_flex_qad.json"
+# Platform metadata that must not ship (macOS AppleDouble files, Finder state).
+JUNK = shutil.ignore_patterns("._*", ".DS_Store")
 BASE_COMPONENTS = ("vae", "audio_vae", "tokenizer", "processor", "text_encoder")
 PIKA_COMPONENTS = ("scheduler", "audio_scheduler")
 PIKA_FILES = ("modular_model_index.json", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
 
 
 def _link_or_copy(src: str, dst: str) -> None:
+    # Hugging Face snapshots hold relative symlinks into blobs/: link or copy the target, never the link.
+    src = os.path.realpath(src)
     try:
         os.link(src, dst)
     except OSError:
@@ -48,7 +53,7 @@ def _link_or_copy(src: str, dst: str) -> None:
 def place_tree(src: Path, dst: Path) -> None:
     if not src.is_dir():
         raise FileNotFoundError(f"missing component directory {src}")
-    shutil.copytree(src.resolve(), dst, copy_function=_link_or_copy)
+    shutil.copytree(src.resolve(), dst, copy_function=_link_or_copy, ignore=JUNK)
 
 
 def merged_entry(merged_dir: Path, expected_task: str, expected_trunk: str) -> dict[str, str]:
