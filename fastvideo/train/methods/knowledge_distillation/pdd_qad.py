@@ -275,7 +275,7 @@ class OmniRefPDDQADMethod(TrainingMethod):
         spec = batch["row"]
         prepared = self._row(spec)
         rollout = self._use_rollout(spec.id, iteration)
-        schedulers = self.student.schedulers()
+        schedulers = self.student.schedulers(prepared)
         timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
         accum = max(1, int(self.training_config.loop.gradient_accumulation_steps or 1))
         num_rungs = self.student.num_rungs
@@ -355,7 +355,7 @@ class OmniRefPDDQADMethod(TrainingMethod):
         per_rank = -(-self.recon_norm_rows // self.dp_size)
         for spec, counted in rows[:per_rank]:
             prepared = self._row(spec)
-            schedulers = self.student.schedulers()
+            schedulers = self.student.schedulers(prepared)
             timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
             video, audio = prepared.video, prepared.audio
             for rung in range(num_rungs):
@@ -571,7 +571,7 @@ class OmniRefPDDQADMethod(TrainingMethod):
             for position, (spec, counted) in enumerate(rows):
                 stats = counted_stats if counted else RungStats(num_rungs)
                 prepared = self._row(spec)
-                schedulers = self.student.schedulers()
+                schedulers = self.student.schedulers(prepared)
                 timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
                 video, audio = prepared.video, prepared.audio
                 for rung in range(num_rungs):
@@ -651,7 +651,7 @@ class OmniRefPDDQADMethod(TrainingMethod):
         diff = torch.zeros((), device=self.student.device, dtype=torch.float64)
         if rows:
             prepared = self._row(rows[0][0])
-            schedulers = self.student.schedulers()
+            schedulers = self.student.schedulers(prepared)
             timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
             with torch.no_grad(), self.student.quantization(linears=False, attention=False):
                 for rung in (0, self.student.num_rungs - 1):
@@ -699,7 +699,7 @@ class OmniRefPDDQADMethod(TrainingMethod):
         with self.student.quantization(linears=False, attention=False), calibrating(self.student.qad_linears):
             for spec in mine:
                 prepared = self._row(spec)
-                schedulers = self.student.schedulers()
+                schedulers = self.student.schedulers(prepared)
                 timesteps = (schedulers[0].timesteps, schedulers[1].timesteps)
                 video, audio = prepared.video, prepared.audio
                 for rung in range(self.student.num_rungs):
