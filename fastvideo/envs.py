@@ -725,11 +725,6 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
                                      "tile.")
-FASTVIDEO_H3_VAE_COMPILE_BLOCKS = EnvBool(False,
-                                          category="performance",
-                                          doc="Run the MiniMax-H3 video VAE decoder transformer blocks through one "
-                                          "regional torch.compile graph: Inductor fuses the fp32 residual scale/add "
-                                          "pairs, the RMSNorm+cast and the SwiGLU silu*mul.")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
                                           category="performance",
                                           doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
@@ -765,6 +760,21 @@ FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
                                                category="performance",
                                                doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
                                                "projections.")
+FASTVIDEO_H3_VAE_COMPILE_BLOCKS = EnvBool(False,
+                                          category="performance",
+                                          doc="Run the MiniMax-H3 video VAE decoder transformer blocks through one "
+                                          "regional torch.compile graph: Inductor fuses the fp32 residual scale/add "
+                                          "pairs, the RMSNorm+cast and the SwiGLU silu*mul.")
+FASTVIDEO_H3_SKIP_FP32_SAMPLES_MIRROR = EnvBool(
+    False,
+    category="performance",
+    doc="Do not allocate or fill the fp32 [0, 1] ``samples`` mirror when a request asks for frames but not "
+    "samples and the decode already returned uint8 pixels (``result.samples`` is then None).")
+FASTVIDEO_H3_OVERLAP_AUDIO_DECODE = EnvBool(
+    True,
+    category="performance",
+    doc="Decode the MiniMax-H3 audio latents on a second CUDA stream while the video VAE decodes, instead of "
+    "serially after it; the waveform is bitwise identical. 0 decodes serially.")
 FASTVIDEO_H3_VAE_UINT8_PIXELS = EnvBool(True,
                                         category="performance",
                                         doc="Quantize single-GPU MiniMax-H3 video VAE output to uint8 on the GPU per "
