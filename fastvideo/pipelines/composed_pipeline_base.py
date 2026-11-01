@@ -21,7 +21,7 @@ from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs, dit_compile_uses_cudagraphs
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -327,6 +327,14 @@ class ComposedPipelineBase(ABC):
                     )
             if any(name in self.modules for name in ("transformer", "transformer_refine", "transformer_2")):
                 logger.info("Torch Compile enabled for DiT")
+                if (self.fastvideo_args.dit_layerwise_offload and dit_compile_uses_cudagraphs(self.fastvideo_args)
+                        and not getattr(self, "_warned_cudagraph_offload", False)):
+                    self._warned_cudagraph_offload = True
+                    logger.warning(
+                        "The DiT torch.compile records CUDA graphs (%s), but dit_layerwise_offload copies the DiT "
+                        "weights to new GPU memory on every forward, so the graphs are recorded again each step "
+                        "instead of replayed (slower than the default mode). Set dit_layerwise_offload=False.",
+                        dit_compile_kwargs)
 
         if compile_text_encoder and any(_want(name) for name in ("text_encoder", "text_encoder_2")):
             for name in ("text_encoder", "text_encoder_2"):
