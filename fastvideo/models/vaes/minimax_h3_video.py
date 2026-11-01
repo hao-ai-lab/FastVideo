@@ -439,6 +439,20 @@ class MiniMaxH3VideoTransformerBlock(nn.Module):
         return hidden_states + self.ff(norm_hidden_states) * self.scale2
 
 
+def _run_decoder_block(
+    block: nn.Module,
+    hidden_states: torch.Tensor,
+    rotary_emb: tuple[torch.Tensor, torch.Tensor],
+) -> torch.Tensor:
+    """One decoder transformer block; ``FASTVIDEO_H3_VAE_COMPILE_BLOCKS`` compiles this region.
+
+    The function takes the block as an argument instead of compiling ``block.forward``
+    per block, so Dynamo traces one block-sized graph and every transformer block and
+    temporal chunk replays it (the parameters are graph inputs, not guards).
+    """
+    return block(hidden_states, rotary_emb)
+
+
 class MiniMaxH3VideoViTDecoder3d(nn.Module):
 
     def __init__(
@@ -479,6 +493,35 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.gradient_checkpointing = False
         self.fused_blocks_forward: Callable[[nn.ModuleList, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
                                             torch.Tensor | None] | None = None
+        self._compiled_block_forward: Callable[[nn.Module, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+                                               torch.Tensor] | None = None
+        if envs.FASTVIDEO_H3_VAE_COMPILE_BLOCKS.get():
+            self.install_compiled_blocks()
+
+    def install_compiled_blocks(self) -> int:
+        """Compile the decoder block region once, for every block and temporal chunk.
+
+        Eager runs the blocks' pointwise fat as separate passes: an fp32 RMSNorm
+        kernel plus an activation-dtype cast, ``attn * scale1`` and the fp32 residual
+        add, ``silu`` plus ``mul`` for the SwiGLU, and ``ff * scale2`` plus the second
+        residual add. Inductor fuses each pair into one pass. Returns the number of
+        transformer blocks now served by the compiled region (0 when already installed).
+        """
+        if self._compiled_block_forward is not None:
+            return 0
+        self._compiled_block_forward = torch.compile(_run_decoder_block, dynamic=False)
+        return len(self.transformer_blocks)
+
+    def set_compiled_blocks(self, enabled: bool) -> int:
+        """Switch the blocks between the compiled region and the eager loop.
+
+        Returns the number of blocks whose forward changed (in either direction).
+        """
+        if enabled:
+            return self.install_compiled_blocks()
+        switched = self._compiled_block_forward is not None
+        self._compiled_block_forward = None
+        return len(self.transformer_blocks) if switched else 0
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Decode one latent spatial input through the H3 video transformer."""
@@ -508,9 +551,12 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
                                           rotary_emb) if self.fused_blocks_forward is not None else None
         if fused is not None:
             hidden_states = fused
+        compiled_block_forward = self._compiled_block_forward
         for block in self.transformer_blocks if fused is None else ():
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = checkpoint(block, hidden_states, rotary_emb, use_reentrant=False)
+            elif compiled_block_forward is not None:
+                hidden_states = compiled_block_forward(block, hidden_states, rotary_emb)
             else:
                 hidden_states = block(hidden_states, rotary_emb)
 

@@ -718,6 +718,11 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
                                      "tile.")
+FASTVIDEO_H3_VAE_COMPILE_BLOCKS = EnvBool(False,
+                                          category="performance",
+                                          doc="Run the MiniMax-H3 video VAE decoder transformer blocks through one "
+                                          "regional torch.compile graph: Inductor fuses the fp32 residual scale/add "
+                                          "pairs, the RMSNorm+cast and the SwiGLU silu*mul.")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
                                           category="performance",
                                           doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
