@@ -14,7 +14,8 @@ does not expose a step-count flag.  ``--lossless-accel`` turns on the existing
 training-free FastVideo switches (bit-identical kernels, reference memo,
 parallel VAE tiles) before the generator starts.  ``--nvfp4-decoder`` and
 ``--nvfp4-text-encoder`` opt into the existing Blackwell FP4 weight paths;
-they change weights, not the six-forward sampler.  Kernel/VSA work is separate.
+``--nvfp4-dit h3_dit`` loads a packed NVFP4 DiT export (e.g.
+FastVideo/Pika-H3-Flex-NVFP4-QAD).  They change weights, not the six-forward sampler.  Kernel/VSA work is separate.
 
 ``--resolution`` (480p/768p), ``--aspect`` (one of Pika's eleven buckets), and
 ``--duration`` (5-15 s) pick the bucket and the ``17n + 5`` frame count;
@@ -59,6 +60,7 @@ from fastvideo.api import (
     OutputConfig,
     ParallelismConfig,
     PipelineSelection,
+    QuantizationConfig,
     SamplingConfig,
 )
 from fastvideo.models.vision_utils import load_image
@@ -130,6 +132,9 @@ def parse_args() -> argparse.Namespace:
                         help="Blackwell-only NVFP4 H3 decoder (quality-36L or fast-8L decoder-nvfp4.safetensors)")
     parser.add_argument("--nvfp4-text-encoder",
                         help="Blackwell-only serialized NVFP4 Qwen3-VL text_encoder directory")
+    parser.add_argument("--nvfp4-dit",
+                        choices=("h3_dit", "h3_dit_ffn"),
+                        help="load a packed NVFP4 DiT export with this layer profile (h3_dit: attention + FFN linears)")
     parser.add_argument("--output", default="outputs/pika_h3_flex")
     args = parser.parse_args()
 
@@ -226,6 +231,8 @@ def main() -> None:
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=offload,
                 compile=CompileConfig(enabled=args.compile),
+                quantization=(QuantizationConfig(transformer_quant="NVFP4", layer_profile=args.nvfp4_dit)
+                              if args.nvfp4_dit else None),
             ),
             pipeline=_pipeline(args),
         ))
