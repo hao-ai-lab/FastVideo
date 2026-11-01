@@ -55,12 +55,13 @@ def test_weight_quantization_without_quack_raises_actionable_error(monkeypatch: 
         module.quantize_mxfp8_weight_blockwise(torch.zeros(32, 64, dtype=torch.bfloat16))
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Quack's MXFP8 helpers compile for CUDA tensors")
 def test_weight_quantization_with_quack_matches_blocked_layout() -> None:
     pytest.importorskip("quack")
     module = importlib.import_module(_MODULE_NAME)
     if module.to_mx is None:
         pytest.skip("the installed quack has neither mx_utils nor blockscaled.quantize")
-    values, scales = module.quantize_mxfp8_weight_blockwise(torch.randn(64, 128, dtype=torch.bfloat16))
+    values, scales = module.quantize_mxfp8_weight_blockwise(torch.randn(64, 128, dtype=torch.bfloat16, device="cuda"))
     assert values.shape == (64, 128)
     assert values.dtype == torch.float8_e4m3fn
     assert scales.dtype == torch.float8_e8m0fnu
