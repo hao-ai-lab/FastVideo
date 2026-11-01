@@ -34,6 +34,7 @@ def fake_cuda(monkeypatch):
     monkeypatch.setattr(torch.cuda, "Stream", lambda *args, **kwargs: _FakeStream())
     monkeypatch.setattr(torch.cuda, "stream", lambda *args, **kwargs: _FakeStream())
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
 
 def _pipeline(video: MiniMaxH3VideoDecodingStage, audio: MiniMaxH3AudioDecodingStage) -> MiniMaxH3Pipeline:
@@ -98,8 +99,8 @@ def test_audio_decode_overlaps_the_video_decode(monkeypatch, fake_cuda) -> None:
     assert "minimax_h3_layout" in result.extra
 
 
-def test_audio_decode_stays_serial_by_default(monkeypatch, fake_cuda) -> None:
-    monkeypatch.delenv("FASTVIDEO_H3_OVERLAP_AUDIO_DECODE", raising=False)
+def test_audio_decode_stays_serial_when_disabled(monkeypatch, fake_cuda) -> None:
+    monkeypatch.setenv("FASTVIDEO_H3_OVERLAP_AUDIO_DECODE", "0")
     order: list[str] = []
     video = _fake_video(order, hold=0.05)
     audio = _fake_audio(order, hold=0.05)
@@ -132,3 +133,16 @@ def test_audio_decode_runs_after_video_when_listed_first(monkeypatch, fake_cuda)
     _pipeline(video, audio)._run_stage_sequence(("audio_decoding_stage", "video_decoding_stage"), batch, None)
 
     assert order == ["audio_start", "audio_end", "video_start", "video_end"]
+
+
+def test_audio_decode_stays_serial_without_cuda(monkeypatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_H3_OVERLAP_AUDIO_DECODE", "1")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    order: list[str] = []
+    video = _fake_video(order, hold=0.05)
+    audio = _fake_audio(order, hold=0.05)
+    batch = ForwardBatch(data_type="video", latents=torch.zeros(1), extra={})
+
+    _pipeline(video, audio)._run_stage_sequence(("video_decoding_stage", "audio_decoding_stage"), batch, None)
+
+    assert order == ["video_start", "video_end", "audio_start", "audio_end"]

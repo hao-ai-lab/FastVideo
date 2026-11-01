@@ -766,22 +766,13 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 
     def _run_stage_sequence(self, names: tuple[str, ...], batch: ForwardBatch,
                             fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        """Run named stages in order, decoding audio beside the video decode on request.
-
-        The audio VAE decode depends only on the audio latents, which are final once
-        denoising returns, so ``FASTVIDEO_H3_OVERLAP_AUDIO_DECODE`` starts it on a
-        second CUDA stream when the video decoding stage begins instead of running it
-        serially after the ~2 s video decode. The audio stage then leaves the loop.
-        Both stages keep their arithmetic; only their scheduling changes. The audio
-        stage mutates the batch (it clears the runtime tensors when it returns), so the
-        thread works on a shallow copy with its own ``extra`` dict and the results are
-        merged back on the main thread.
-        """
+        """Run named stages in order; with ``FASTVIDEO_H3_OVERLAP_AUDIO_DECODE`` on CUDA, decode audio on a side
+        stream while the video VAE decodes."""
         stages = [self._stage_name_mapping[name] for name in names]
         audio_stage = next((stage for stage in stages if isinstance(stage, MiniMaxH3AudioDecodingStage)), None)
         video_stage = next((stage for stage in stages if isinstance(stage, MiniMaxH3VideoDecodingStage)), None)
-        if (not envs.FASTVIDEO_H3_OVERLAP_AUDIO_DECODE.get() or audio_stage is None or video_stage is None
-                or stages.index(audio_stage) < stages.index(video_stage)):
+        if (not envs.FASTVIDEO_H3_OVERLAP_AUDIO_DECODE.get() or not torch.cuda.is_available() or audio_stage is None
+                or video_stage is None or stages.index(audio_stage) < stages.index(video_stage)):
             for stage in stages:
                 batch = stage(batch, fastvideo_args)
             return batch
@@ -885,8 +876,6 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise
         if not envs.FASTVIDEO_H3_OVERLAP_AUDIO_DECODE.get():
             return super().forward(batch, fastvideo_args)
-        # The base forward iterates the same stages in insertion order; use the
-        # sequence runner so the audio decode can overlap the video decode.
         try:
             return self._run_stage_sequence(tuple(self._stage_name_mapping), batch, fastvideo_args)
         except BaseException:
