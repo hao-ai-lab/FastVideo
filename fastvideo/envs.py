@@ -346,6 +346,13 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
     category="attention",
     doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
     "floating-point reduction order, so it is an inference-only opt-in.")
+FASTVIDEO_MINIMAX_H3_DENSE_ATTN = EnvChoice(
+    "flash",
+    choices=("flash", "cudnn"),
+    category="attention",
+    doc="Kernel for MiniMax-H3 dense DiT self-attention: flash keeps the selected FlashAttention backend; with "
+    "FLASH_ATTN, cudnn sends the no-mask, no-grad dense call through cuDNN's fused SDPA. cuDNN has a different "
+    "reduction order, so this is an inference-only opt-in.")
 FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",

@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 import fastvideo.envs as envs
+from fastvideo.attention.utils.cudnn_sdpa import cudnn_sdpa_bshd, cudnn_sdpa_supported
 from fastvideo.attention.utils.flash_attn_default import (
     fa_version,
     flash_attn_func_compilable,
@@ -290,6 +291,13 @@ class FlashAttentionImpl(AttentionImpl):
         # identical to before the knob; kwargs win over the
         # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
         self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
+        # MiniMax-H3 dense attention may opt into cuDNN's fused SDPA. It is an
+        # explicit impl argument (threaded from FASTVIDEO_MINIMAX_H3_DENSE_ATTN
+        # by the H3 model) so no other model can inherit it by accident.
+        self.cudnn_sdpa = bool(extra_impl_args.get("cudnn_sdpa", False))
+        if self.cudnn_sdpa and self.nvfp4_fa4:
+            raise ValueError("cudnn_sdpa and nvfp4_fa4 select different Q/K precision; enable only one of "
+                             "FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn and FASTVIDEO_NVFP4_FA4=1")
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
@@ -483,6 +491,12 @@ class FlashAttentionImpl(AttentionImpl):
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
+
+        elif self.cudnn_sdpa and cudnn_sdpa_supported(query, key, value):
+            # H3's dense, unmasked, inference-only route. The helper presents
+            # the BSHD inputs to cuDNN as BHSD strided views (contiguous BSHD
+            # is silently misread by the ATen op).
+            output = cudnn_sdpa_bshd(query, key, value, scale=self.softmax_scale, causal=self.causal)
 
         elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1
               and query.shape[1] == key.shape[1] == value.shape[1]):

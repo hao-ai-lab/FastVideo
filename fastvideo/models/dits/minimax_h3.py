@@ -205,6 +205,7 @@ class MiniMaxH3Attention(nn.Module):
         prefix: str,
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_rope: bool = False,
         vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
@@ -261,6 +262,7 @@ class MiniMaxH3Attention(nn.Module):
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
         )
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
@@ -656,6 +658,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
         vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
@@ -671,6 +674,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
             exact_rope="rope" in exact_kernels,
             vsa_fp4=vsa_fp4,
         )
@@ -933,6 +937,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
+                cudnn_sdpa=envs.FASTVIDEO_MINIMAX_H3_DENSE_ATTN.get() == "cudnn",
                 exact_kernels=self.enabled_exact_kernels,
                 vsa_fp4=config.vsa_fp4,
             ) for index in range(arch.num_layers)
