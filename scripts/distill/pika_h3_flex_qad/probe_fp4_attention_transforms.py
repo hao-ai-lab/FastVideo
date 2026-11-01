@@ -83,7 +83,9 @@ class Probe:
 
         def forward(impl: Any, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, metadata: Any) -> Any:
             out = original(impl, query, key, value, metadata)
-            if getattr(metadata, "packed_sequence", None) is None and query.dim() == 4 and query.shape[-1] % 16 == 0:
+            # The NVFP4 VAE decoder captures its blocks in a CUDA graph; measuring there would sync mid-capture.
+            if (getattr(metadata, "packed_sequence", None) is None and query.dim() == 4 and query.shape[-1] % 16 == 0
+                    and not torch.cuda.is_current_stream_capturing()):
                 with torch.no_grad():
                     probe.measure(impl, query, key, value, out)
             return out
@@ -98,7 +100,7 @@ class Probe:
         if key not in self._rotations:
             self._rotations[key] = hadamard(q.shape[-1], q.device)
         q, k, v = (t.to(torch.bfloat16) for t in (q, k, v))
-        record: dict[str, Any] = {"layer": layer, "forward": call, "tokens": int(q.shape[1])}
+        record: dict[str, Any] = {"layer": layer, "forward": call, "tokens": int(q.shape[1]), "heads": int(q.shape[2])}
         for name, (smooth, rotate) in VARIANTS.items():
             tq, tk = transform(q, k, smooth, self._rotations[key] if rotate else None)
             record[name] = rel_l2(fa4_nvfp4(tq, tk, v, impl.softmax_scale), out)
@@ -138,9 +140,18 @@ def main() -> None:
     probe = Probe()
     probe.install()
     sys.argv = [str(EXAMPLE), *example_args]
-    runpy.run_path(str(EXAMPLE), run_name="__main__")
+    try:
+        runpy.run_path(str(EXAMPLE), run_name="__main__")
+    finally:  # keep the DiT measurements even if decoding fails
+        write_report(probe, example_args, args.out)
+
+
+def write_report(probe: Probe, example_args: list[str], out: str) -> None:
+    if not probe.records:
+        print("no attention calls measured")
+        return
     report = {"args": example_args, "summary": probe.summary(), "records": probe.records}
-    Path(args.out).write_text(json.dumps(report, indent=1))
+    Path(out).write_text(json.dumps(report, indent=1))
     s = report["summary"]
     print(json.dumps({k: s[k] for k in ("calls", "layers", "overall", "best", "per_forward")}, indent=1))
     print("worst layers under", s["best"], json.dumps(s["worst_layers_under_best"]))
