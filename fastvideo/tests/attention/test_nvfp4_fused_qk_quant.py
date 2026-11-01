@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Fused NVFP4 Q/K preconditioning + quantization vs the reference path.
+
+The fused kernel (``fastvideo.attention.utils.nvfp4_fused_qk_quant``) must produce the same FP4 codes, the same
+scale-factor bytes in FlashAttention-4's layout, and therefore the same FA4 NVFP4 attention output as
+``precondition_qk`` followed by ``_nvfp4_quantize_for_fa4``. GPU tests need Blackwell (sm_100a/sm_103a), flashinfer
+and the FA4 NVFP4 kernel; the selection tests run anywhere.
+"""
+from unittest.mock import patch
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+import fastvideo.envs as envs  # noqa: E402
+from fastvideo.attention.utils.nvfp4_qk_precondition import parse_qk_transform, precondition_qk  # noqa: E402
+
+flash_attn_module = pytest.importorskip(
+    "fastvideo.attention.backends.flash_attn",
+    reason="no usable flash-attention package installed",
+    exc_type=ImportError,
+)
+fused = pytest.importorskip("fastvideo.attention.utils.nvfp4_fused_qk_quant")
+
+TRANSFORMS = ["none", "smooth_k", "hadamard", "smooth_k+hadamard"]
+
+
+def _blackwell_fa4_fp4() -> bool:
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in [(10, 0), (10, 3)]:
+        return False
+    try:
+        import flashinfer.quantization  # noqa: F401
+    except ImportError:
+        return False
+    return flash_attn_module._FA4_FP4_AVAILABLE and fused.fused_qk_quant_available()
+
+
+requires_blackwell = pytest.mark.skipif(not _blackwell_fa4_fp4(),
+                                        reason="needs Blackwell, flashinfer, Triton and FA4 NVFP4")
+
+
+@pytest.fixture
+def tf32_matmul(request):
+    previous = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = request.param
+    yield request.param
+    torch.backends.cuda.matmul.allow_tf32 = previous
+
+
+def _inputs(batch, seqlen, heads, dim, *, strided=False, seed=0):
+    gen = torch.Generator(device="cuda").manual_seed(seed)
+    if strided:  # Q/K/V sliced out of one packed buffer, as a fused QKV projection produces them
+        qkv = torch.randn(batch, seqlen, 3, heads, dim, device="cuda", dtype=torch.bfloat16, generator=gen)
+        q, k, v = qkv.unbind(2)
+    else:
+        q, k, v = (torch.randn(batch, seqlen, heads, dim, device="cuda", dtype=torch.bfloat16, generator=gen)
+                   for _ in range(3))
+    # A per-channel K offset (what smooth_k removes) and a few outlier channels (what the Hadamard spreads).
+    k = k.clone()
+    k[..., :4] *= 8.0
+    k += 4.0 * torch.randn(batch, 1, heads, dim, device="cuda", dtype=torch.bfloat16, generator=gen)
+    if strided:
+        buffer = torch.empty(batch, seqlen, 2, heads, dim, device="cuda", dtype=torch.bfloat16)
+        buffer[:, :, 1] = k
+        k = buffer[:, :, 1]
+    return q, k, v
+
+
+def _reference(q, k, transform):
+    smooth_k, hadamard = parse_qk_transform(transform)
+    q, k = precondition_qk(q, k, smooth_k=smooth_k, hadamard=hadamard)
+    return (*flash_attn_module._nvfp4_quantize_for_fa4(q), *flash_attn_module._nvfp4_quantize_for_fa4(k))
+
+
+def _fused(q, k, transform):
+    smooth_k, hadamard = parse_qk_transform(transform)
+    return fused.nvfp4_fused_qk_quantize_fa4(q, k, smooth_k=smooth_k, hadamard=hadamard)
+
+
+def _codes(fp4):
+    data = fp4.view(torch.uint8)
+    return torch.stack([data & 0xF, data >> 4], dim=-1)
+
+
+def _attention(q4, q_sf, k4, k_sf, v):
+    out = flash_attn_module.flash_attn_fp4_func(q4[:, :v.shape[1]], k4[:, :v.shape[1]], v, q_sf, k_sf,
+                                                softmax_scale=v.shape[-1]**-0.5, causal=False)
+    return out[0] if isinstance(out, tuple) else out
+
+
+SHAPES = [
+    pytest.param((1, 1000, 4, 128, False), id="odd_seqlen"),
+    pytest.param((2, 300, 2, 64, False), id="batch2_d64"),
+    pytest.param((1, 777, 3, 128, True), id="strided"),
+]
+
+
+@requires_blackwell
+@pytest.mark.parametrize("tf32_matmul", [True], indirect=True)
+@pytest.mark.parametrize("shape", SHAPES)
+@pytest.mark.parametrize("transform", TRANSFORMS)
+def test_fused_matches_reference_bit_exactly_under_tf32(transform, shape, tf32_matmul) -> None:
+    """Under TF32 matmuls (NVIDIA PyTorch containers) the fused path is bit-identical to the reference."""
+    batch, seqlen, heads, dim, strided = shape
+    q, k, v = _inputs(batch, seqlen, heads, dim, strided=strided)
+    ref, out = _reference(q, k, transform), _fused(q, k, transform)
+    for r, o in zip(ref, out, strict=True):
+        assert r.shape == o.shape and r.dtype == o.dtype and r.stride() == o.stride()
+        assert torch.equal(r.view(torch.uint8), o.view(torch.uint8))
+    for fp4, length in ((out[0], seqlen), (out[2], seqlen)):
+        assert not _codes(fp4)[:, length:].any(), "rows padding seqlen to 128 must hold zero codes"
+    assert torch.equal(_attention(*out, v), _attention(*ref, v))
+
+
+@requires_blackwell
+@pytest.mark.parametrize("tf32_matmul", [False], indirect=True)
+@pytest.mark.parametrize("transform", ["hadamard", "smooth_k+hadamard"])
+def test_fused_matches_reference_under_fp32(transform, tf32_matmul) -> None:
+    """With TF32 off only fp32 summation order differs from cuBLAS's fp32 GEMM: codes/scales agree to >= 99.99%."""
+    q, k, v = _inputs(1, 4000, 8, 128, seed=1)
+    ref, out = _reference(q, k, transform), _fused(q, k, transform)
+    for r, o in ((ref[0], out[0]), (ref[2], out[2])):
+        assert (_codes(r) == _codes(o)).float().mean().item() >= 0.9999
+    for r, o in ((ref[1], out[1]), (ref[3], out[3])):
+        assert r.stride() == o.stride()
+        assert (r == o).float().mean().item() >= 0.9999
+
+
+@requires_blackwell
+def test_forward_nvfp4_uses_fused_path_and_compiles_fullgraph() -> None:
+    impl = flash_attn_module.FlashAttentionImpl(num_heads=4, head_size=128, causal=False, softmax_scale=128**-0.5,
+                                                num_kv_heads=4, nvfp4_fa4=True,
+                                                nvfp4_qk_transform="smooth_k+hadamard")
+    assert impl.nvfp4_fused_qk_quant
+    q, k, v = _inputs(1, 1000, 4, 128, seed=2)
+    with patch.object(flash_attn_module, "precondition_qk", side_effect=AssertionError("unfused path taken")):
+        eager = impl._forward_nvfp4(q, k, v)
+        compiled = torch.compile(impl._forward_nvfp4, fullgraph=True)(q, k, v)
+    assert torch.equal(eager, compiled)
+
+
+@pytest.fixture
+def fa4_runtime_available():
+    with (
+        patch.object(flash_attn_module, "_FA4_FP4_AVAILABLE", True),
+        patch("torch.cuda.get_device_capability", return_value=(10, 0)),
+    ):
+        yield
+
+
+def _impl(**extra):
+    return flash_attn_module.FlashAttentionImpl(num_heads=2, head_size=64, causal=False, softmax_scale=0.125,
+                                                num_kv_heads=2, nvfp4_fa4=True, **extra)
+
+
+@pytest.mark.parametrize("transform", TRANSFORMS)
+def test_fused_path_selected_only_with_a_transform(transform, env_overrides, fa4_runtime_available) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT.override(None))
+    with patch.object(flash_attn_module, "fused_qk_quant_available", return_value=True):
+        assert _impl(nvfp4_qk_transform=transform).nvfp4_fused_qk_quant == (transform != "none")
+
+
+def test_fused_path_env_opt_out(env_overrides, fa4_runtime_available) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT.override(False))
+    with patch.object(flash_attn_module, "fused_qk_quant_available", return_value=True):
+        assert _impl(nvfp4_qk_transform="smooth_k+hadamard").nvfp4_fused_qk_quant is False
+
+
+def test_fused_path_off_for_non_default_flashinfer_recipe(env_overrides) -> None:
+    env_overrides.enter_context(envs.override_external("FLASHINFER_DISABLE_FP4_QUANT_FAST_MATH", "1"))
+    assert fused.fused_qk_quant_available() is False
