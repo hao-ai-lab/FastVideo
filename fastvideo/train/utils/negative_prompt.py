@@ -28,10 +28,12 @@ if TYPE_CHECKING:
 
 
 def _release_encoder_memory() -> None:
-    """Free the just-deleted text encoder's weights now instead of whenever the garbage collector runs.
+    """Free the just-deleted text encoder's weights now instead of at the next full garbage collection.
 
-    Encoder modules can sit in reference cycles, so ``del`` alone leaves their GPU storage alive for the
-    rest of training (about 21 GiB for the Wan2.1 UMT5 encoder, measured on GB10).
+    Parallel layers store their bound ``weight_loader`` on each parameter (``set_weight_attrs``), so every
+    layer and its parameters form a reference cycle that ``del`` cannot break. ``gc.collect()`` frees the
+    weights (21.2 GiB allocated for the Wan2.1 UMT5 encoder on GB10); ``empty_cache()`` then returns the
+    cached blocks to the device, which on unified memory is also host memory.
     """
     gc.collect()
     if torch.cuda.is_available():

@@ -9,12 +9,15 @@ from fastvideo.train.utils.negative_prompt import _release_encoder_memory
 
 
 class _Cyclic(torch.nn.Module):
-    """A module that references itself, as hooks and wrappers around encoders can."""
+    """A layer whose parameter holds the layer's bound weight loader, as ``set_weight_attrs`` does."""
 
     def __init__(self) -> None:
         super().__init__()
         self.weight = torch.nn.Parameter(torch.ones(4))
-        self.self_ref = self
+        self.weight.weight_loader = self.weight_loader
+
+    def weight_loader(self, param: torch.nn.Parameter, loaded_weight: torch.Tensor) -> None:
+        param.data.copy_(loaded_weight)
 
 
 def test_release_frees_cyclic_encoder_immediately() -> None:
