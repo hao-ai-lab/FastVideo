@@ -394,6 +394,35 @@ test("source-backed controls update the copied command without changing models",
   await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--num-gpus '2'");
 });
 
+test("Pika H3 Flex knobs select the tier, bucket, duration, task, and NVFP4 decoder", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3");
+  const pika = page.locator(".recipe-card").filter({ hasText: "Pika H3 Flex" });
+  await expect(pika.locator("img")).toHaveAttribute("src", /\/pika\.webp$/);
+  await expect(pika).toContainText("Pika");
+  await pika.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/models\/pika-h3-flex-t2va$/);
+  const command = page.getByLabel("Inference command", { exact: true });
+  await expect(command).toContainText("FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1");
+  await chip(page, "Resolution", "480p");
+  await chip(page, "Aspect ratio", "9:16");
+  await chip(page, "Duration", "10 s (243 frames)");
+  await chip(page, "VAE decoder", "NVFP4 36L quality");
+  await expect(command).toContainText("--resolution '480p'");
+  await expect(command).toContainText("--aspect '9:16'");
+  await expect(command).toContainText("--duration '10'");
+  await expect(command).toContainText("--nvfp4-decoder './fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors'");
+  await page
+    .getByRole("group", { name: "Recipe variant", exact: true })
+    .getByRole("button", { name: "Pika H3 Flex keyframes", exact: true })
+    .click();
+  await expect(command).toContainText("--task fl2va --offload resident");
+  await chip(page, "Task", "First frame (I2VA)");
+  await chip(page, "Memory", "Lazy load + offload");
+  await expect(command).toContainText("--task 'i2va'");
+  await expect(command).toContainText("--offload 'lazy'");
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
+});
+
 test("Wan I2V requires an image for CLI and SDK examples without changing server defaults", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
   await chip(page, "Run mode", "CLI");

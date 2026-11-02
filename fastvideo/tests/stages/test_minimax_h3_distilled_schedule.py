@@ -92,7 +92,7 @@ def _run_tiny_stage(monkeypatch, steps, grid_points, *, video_shift=10.0, offloa
 
 
 @pytest.mark.parametrize("steps,grid_points,error", [
-    (DMD_STEPS, 8, "8 DMD forwards require 9"),
+    (DMD_STEPS, 8, "DMD num_inference_steps .* 8 forwards require 9"),
     ([1001], 2, "strictly decreasing integers"),
 ])
 def test_invalid_dmd_schedule_keeps_offloaded_transformer_on_cpu(monkeypatch, steps, grid_points, error):
@@ -190,7 +190,7 @@ def test_invalid_ladders_are_rejected(monkeypatch, rungs):
 
 @pytest.mark.parametrize("grid_points", [5, 8, 10, 50])
 def test_explicit_eight_forward_ladder_requires_nine_grid_points(monkeypatch, grid_points):
-    with pytest.raises(ValueError, match="8 DMD forwards require 9"):
+    with pytest.raises(ValueError, match="DMD num_inference_steps .* 8 forwards require 9"):
         _run_tiny_stage(monkeypatch, DMD_STEPS, grid_points)
 
 

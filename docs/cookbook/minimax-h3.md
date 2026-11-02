@@ -72,6 +72,32 @@
     </div>
   </details>
 
+<details  id="pika-h3-flex">
+  <summary>Pika H3 Flex</summary>
+  <div >
+      <p>Pika H3 Flex is Pika's post-trained MiniMax-H3: the H3 components plus a rank-128 adapter that FastVideo applies automatically, sampled with a fixed six-forward re-noise ladder. One recipe page covers T2VA, the keyframe tasks (I2VA, L2VA, FL2VA), and Ref2VA. Its builder selects the resolution tier (480p or 768p), the aspect bucket, the duration (5, 10, or 15 s), and the optional Blackwell NVFP4 decoder and text encoder. The <a href="../../inference/pika_h3_flex/">Pika H3 Flex runbook</a> has the full sampling and geometry contract.</p>
+      <pre><code>FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 \
+python examples/inference/basic/basic_pika_h3_flex.py --task t2va --offload resident \
+    --resolution 768p --aspect 16:9 --duration 5 \
+    --prompt "A paper boat drifts down a rainy city street at night."</code></pre>
+      <table>
+        <thead>
+          <tr>
+            <th>T2VA on one GB200, 768p 16:9, 5 s, warm, all resident</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Official <code>pika-h3-pro</code> CLI</td><td>59.7 s</td></tr>
+          <tr><td>FastVideo BF16</td><td>26.2 s</td></tr>
+          <tr><td>+ NVFP4 <code>quality-36L</code> decoder (40.5 dB PSNR vs BF16 decoder)</td><td>18.0 s</td></tr>
+          <tr><td>+ NVFP4 <code>fast-8L</code> decoder</td><td>17.4 s</td></tr>
+        </tbody>
+      </table>
+      <p>The BF16 run peaked at about 129 GiB resident on GB200; the official CLI's sampling peak was 71.7 GiB. With the NVFP4 text encoder, I2VA took 27.37 s, FL2VA 28.95 s, and Ref2VA with two image references 51.17 s, at 104.9 to 108.5 GiB peak. The example's default <code>--offload lazy</code> fits smaller devices but reloads components per request (48.06 s for the same T2VA request on GB200). FlashAttention-4 needs <code>FASTVIDEO_FA4=1</code> even when it is installed. Without it, attention uses FA3 or FA2 if one is installed and otherwise falls back to SDPA, which is slow and can run out of memory at 768p. GB10 has no FA4, so drop the prefix on DGX Spark.</p>
+  </div>
+</details>
+
 <details  id="cookbook-setup">
   <summary>Setup</summary>
   <div >
