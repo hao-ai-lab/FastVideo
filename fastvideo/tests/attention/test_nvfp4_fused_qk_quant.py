@@ -150,6 +150,27 @@ def test_token_mean_matches_reference_across_the_64bit_index_split(seqlen) -> No
     assert torch.equal(fused.reference_token_mean(k), k.float().mean(dim=1))
 
 
+
+@pytest.mark.parametrize(("shape", "reproducible"), [
+    ((1, 113000, 56, 128), True),
+    ((2, 1000, 56, 128), True),
+    ((2, 40000, 56, 128), False),
+    ((2, 80000, 56, 128), False),
+])
+def test_batched_inputs_that_split_the_token_mean_take_the_unfused_path(shape, reproducible) -> None:
+    k = torch.empty(shape, dtype=torch.bfloat16, device="meta")
+    assert fused._token_mean_reproducible(k) is reproducible
+    if not reproducible:
+        with pytest.raises(ValueError, match="not reproduced"):
+            fused._fp32_reduction_chunks(k)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
+def test_batched_token_mean_matches_reference() -> None:
+    gen = torch.Generator(device="cuda").manual_seed(5)
+    k = (torch.randn(2, 4096, 56, 128, device="cuda", generator=gen) * 2 + 1).to(torch.bfloat16)
+    assert torch.equal(fused.reference_token_mean(k), k.float().mean(dim=1))
+
 @pytest.fixture
 def fa4_runtime_available():
     with (
