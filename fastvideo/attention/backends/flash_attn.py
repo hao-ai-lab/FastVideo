@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 import fastvideo.envs as envs
+from fastvideo.attention.utils.cudnn_sdpa import cudnn_sdpa_bshd, cudnn_sdpa_supported
 from fastvideo.attention.utils.flash_attn_default import (
     fa_version,
     flash_attn_func_compilable,
@@ -104,7 +105,11 @@ def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor,
     tile_m = 128
     seqlen_padded = (seqlen + tile_m - 1) // tile_m * tile_m
     if seqlen_padded != seqlen:
-        tensor_4d = F.pad(tensor_4d, (0, 0, 0, 0, 0, seqlen_padded - seqlen))
+        # F.pad fills the whole padded tensor before copying; only the tail rows need zeros.
+        padded = tensor_4d.new_empty((batch, seqlen_padded, nheads, headdim))
+        padded[:, :seqlen] = tensor_4d
+        padded[:, seqlen:].zero_()
+        tensor_4d = padded
 
     # Quantize with nheads squashed into K dimension so M=batch*seqlen (divisible by 128)
     # and K=nheads*headdim. This ensures 128-row SF tiles align with seqlen boundaries.
@@ -286,6 +291,11 @@ class FlashAttentionImpl(AttentionImpl):
         # identical to before the knob; kwargs win over the
         # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
         self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
+        # Explicit impl argument (set by the H3 model) so other models cannot inherit the cuDNN route.
+        self.cudnn_sdpa = bool(extra_impl_args.get("cudnn_sdpa", False))
+        if self.cudnn_sdpa and self.nvfp4_fa4:
+            raise ValueError("cudnn_sdpa and nvfp4_fa4 select different Q/K precision; enable only one of "
+                             "FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn and FASTVIDEO_NVFP4_FA4=1")
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
@@ -479,6 +489,10 @@ class FlashAttentionImpl(AttentionImpl):
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
+
+        elif self.cudnn_sdpa and cudnn_sdpa_supported(query, key, value):
+            # The ATen cuDNN op silently misreads contiguous BSHD; the helper passes BHSD strided views.
+            output = cudnn_sdpa_bshd(query, key, value, scale=self.softmax_scale, causal=self.causal)
 
         elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1
               and query.shape[1] == key.shape[1] == value.shape[1]):
