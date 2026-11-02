@@ -133,14 +133,21 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         self.scheduler = scheduler
         self.audio_scheduler = audio_scheduler
 
-    def _set_dmd_schedule(self, steps: list[int], grid_points: int, device: torch.device) -> None:
-        """Run the trained rungs, shifting the shared noise clock once per modality."""
+    def _set_shifted_schedule(
+        self,
+        steps: list[int],
+        grid_points: int,
+        device: torch.device,
+        *,
+        label: str = "MiniMax-H3 DMD",
+    ) -> None:
+        """Build one modality-shifted sigma grid from explicit clean-time rungs."""
         if (not steps or any(type(step) is not int or not 0 < step <= 1000 for step in steps)
                 or any(left <= right for left, right in zip(steps, steps[1:], strict=False))):
-            raise ValueError("MiniMax-H3 DMD rungs must be strictly decreasing integers in (0, 1000].")
+            raise ValueError(f"{label} rungs must be strictly decreasing integers in (0, 1000].")
         if grid_points != len(steps) + 1:
-            raise ValueError("MiniMax-H3 num_inference_steps counts sigma-grid points: "
-                             f"{len(steps)} DMD forwards require {len(steps) + 1} grid points, got {grid_points}.")
+            raise ValueError(f"{label} num_inference_steps counts sigma-grid points: "
+                             f"{len(steps)} forwards require {len(steps) + 1} grid points, got {grid_points}.")
         base = torch.tensor([step / 1000.0 for step in steps] + [0.0], dtype=torch.float32)
         for scheduler in (self.scheduler, self.audio_scheduler):
             shift = float(scheduler.shift)
@@ -148,6 +155,38 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # Explicit sigmas are already shifted. Scheduler timesteps are H3
             # clean time (1 - sigma); passing integer rungs to step() is wrong.
             scheduler.set_timesteps(sigmas=sigmas, device=device)
+
+    def _set_dmd_schedule(self, steps: list[int], grid_points: int, device: torch.device) -> None:
+        """Run the trained rungs, shifting the shared noise clock once per modality."""
+        self._set_shifted_schedule(steps, grid_points, device, label="MiniMax-H3 DMD")
+
+    def _configure_schedules(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+        device: torch.device,
+    ) -> PDDSamplingPlan | None:
+        """Install this checkpoint's sigma schedules and return a PDD plan, if any.
+
+        Families with a fixed sampler (Pika H3 Flex) override this hook; the
+        default keeps MiniMax-H3's PDD and DMD checkpoint contracts.
+        """
+        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        pdd_plan = self._pdd_sampling_plan(fastvideo_args, device)
+        if pdd_plan is not None:
+            # One runtime step fuses one block of heads into their weighted
+            # mean velocity; the ordinary Euler step over the block's two node
+            # sigmas then applies the block's total increment per modality.
+            self.scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["video"].to(torch.float32), device=device)
+            self.audio_scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["audio"].to(torch.float32), device=device)
+            logger.info("MiniMax-H3 PDD denoising: %d fused block(s) %s over a %d-interval fine grid.",
+                        pdd_plan.num_steps, pdd_plan.block_sizes, pdd_plan.pdd_steps)
+        elif dmd_steps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+        else:
+            self._set_dmd_schedule(dmd_steps, batch.num_inference_steps, device)
+        return pdd_plan
 
     def _pdd_sampling_plan(self, fastvideo_args: FastVideoArgs, device: torch.device) -> PDDSamplingPlan | None:
         """The fused-block plan of a PDD checkpoint, or None for any other checkpoint.
@@ -207,21 +246,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             and not fastvideo_args.use_fsdp_inference)
         device = get_local_torch_device()
 
-        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
-        pdd_plan = self._pdd_sampling_plan(fastvideo_args, device)
-        if pdd_plan is not None:
-            # One runtime step fuses one block of heads into their weighted
-            # mean velocity; the ordinary Euler step over the block's two node
-            # sigmas then applies the block's total increment per modality.
-            self.scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["video"].to(torch.float32), device=device)
-            self.audio_scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["audio"].to(torch.float32), device=device)
-            logger.info("MiniMax-H3 PDD denoising: %d fused block(s) %s over a %d-interval fine grid.",
-                        pdd_plan.num_steps, pdd_plan.block_sizes, pdd_plan.pdd_steps)
-        elif dmd_steps is None:
-            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
-            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        else:
-            self._set_dmd_schedule(dmd_steps, batch.num_inference_steps, device)
+        pdd_plan = self._configure_schedules(batch, fastvideo_args, device)
         video_timesteps = self.scheduler.timesteps
         audio_timesteps = self.audio_scheduler.timesteps
         if video_timesteps is None or audio_timesteps is None:

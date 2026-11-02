@@ -49,6 +49,15 @@ export const recipePages = [
     featured: true,
   },
   {
+    id: "open-h3-regenerate-2k",
+    family: "MiniMax H3",
+    title: "Open-H3-Regenerate-2K",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/open-h3-regenerate-2k",
+    description: "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with a three-step refiner.",
+    tags: ["Video upscale", "2K", "3-step"],
+  },
+  {
     id: "fastwan21",
     family: "Wan",
     title: "FastWan2.1 1.3B",
@@ -105,6 +114,7 @@ export interface SourceRecipe {
 export const sourceRecipes = sourceCatalog.recipes as SourceRecipe[];
 const familyInfo: Record<string, { title: string; path: string; logo: string; category: string }> = {
   minimax_h3: { title: "MiniMax H3", path: "minimax-h3", logo: "minimax", category: "Video" },
+  pika_h3_flex: { title: "MiniMax H3", path: "minimax-h3", logo: "pika", category: "Video" },
   wan: { title: "Wan", path: "wan", logo: "wan-ai", category: "Video" },
   ltx2: { title: "LTX", path: "ltx", logo: "ltx", category: "Video" },
   hunyuan: { title: "Hunyuan", path: "hunyuan", logo: "tencent-hunyuan", category: "Video" },
@@ -124,6 +134,7 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
+  "Efficient-Large-Model/Open-H3-Regenerate-2K": "open-h3-regenerate-2k",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
@@ -148,7 +159,7 @@ const TASK_GROUPS: Array<[RegExp, string]> = [
   [/first\/last frame to video/, "Image to video"],
   [/text or image to video/, "Text/image to video"],
   [/image to video/, "Image to video"],
-  [/super-resolution/, "Video upscale"],
+  [/super-resolution|upscale/, "Video upscale"],
   [/video/, "Text to video"],
 ];
 /** A small discovery vocabulary derived from the recipe task, not a capability claim. */
@@ -167,6 +178,7 @@ const mappedModels = [...new Set(sourceRecipes.map((recipe) => recipe.model))].m
   const providers: Record<string, string> = {
     fastvideo: "FastVideo",
     minimax: "MiniMax",
+    pika: "Pika",
     "wan-ai": "Wan AI",
     ltx: "Lightricks",
     "tencent-hunyuan": "Tencent",
