@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessRecipe, assessWeightsRecipe, capacityHardware, weightsFor } from "../lib/memory-assessment.ts";
+import {
+  assessRecipe,
+  assessWeightsRecipe,
+  capacityHardware,
+  hostMemoryGb,
+  weightsFor,
+} from "../lib/memory-assessment.ts";
 import { buildCapacityCatalog } from "../../docs/js/build-cookbook-capacity.mjs";
 import { assessCapacity } from "../../docs/js/cookbook-memory.mjs";
 
@@ -74,5 +80,16 @@ test("the UI adapter preserves GB, GiB, usable budgets and host memory through t
     assert.notEqual(result.status, "unknown");
     assert.equal(result.requiredGiB, raw.requiredGiB);
     assert.equal(result.capacityGiB, unit === "GiB" ? 70 : 70e9 / 1024 ** 3);
+    const hostGiB = unit === "GiB" ? 128 : 128e9 / 1024 ** 3;
+    assert.ok(Math.abs(raw.host.capacityGiB - hostGiB) < 1e-9);
+    const { host_ram_gb: _ram, ...withoutHost } = target;
+    const edited = assessCapacity({
+      model,
+      example,
+      config: dense,
+      hardware: capacityHardware(withoutHost),
+      hostMemoryGb: hostMemoryGb(target, 128),
+    });
+    assert.ok(Math.abs(edited.host.capacityGiB - hostGiB) < 1e-9);
   }
 });

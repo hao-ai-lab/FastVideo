@@ -96,6 +96,12 @@ export default function RecipeFacts({
                   ? "Output is hidden until the highlighted fields are fixed."
                   : "Values are still being checked.")}
           </p>
+          {!memory && (
+            <p>
+              <strong>{label}.</strong> FastVideo has no capacity model for this recipe, so it does not estimate memory
+              use here.
+            </p>
+          )}
           {memory?.notes?.map((note) => (
             <p key={note}>{note}</p>
           ))}

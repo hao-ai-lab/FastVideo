@@ -42,6 +42,12 @@ export interface AssessmentHardware {
 
 const GIB = 1024 ** 3;
 
+/** Decimal GB for a host-memory amount entered in the device's memory unit. */
+export function hostMemoryGb(hardware: AssessmentHardware, amount: number | undefined): number | undefined {
+  if (!amount) return undefined;
+  return hardware.memory_unit === "GiB" ? (amount * GIB) / 1e9 : amount;
+}
+
 export function capacityHardware(hardware: AssessmentHardware) {
   return {
     ...hardware,
@@ -52,7 +58,7 @@ export function capacityHardware(hardware: AssessmentHardware) {
         ? { usable: { value: hardware.usable_budget_gb, unit: hardware.memory_unit ?? "GB" } }
         : {}),
     },
-    host_memory_gb: hardware.host_ram_gb,
+    host_memory_gb: hostMemoryGb(hardware, hardware.host_ram_gb),
   };
 }
 
@@ -149,7 +155,7 @@ export function assessRecipe({
       hardware: capacityHardware(hardware),
       config,
       memoryBudgetGiB: budgetGb ? (hardware.memory_unit === "GiB" ? budgetGb : (budgetGb * 1e9) / GIB) : undefined,
-      hostMemoryGb: hostGb,
+      hostMemoryGb: hostMemoryGb(hardware, hostGb),
     }) as MemoryAssessment;
     return {
       status: (result.status ?? "unknown") as MemoryStatus,
