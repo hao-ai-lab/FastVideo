@@ -14,7 +14,8 @@ does not expose a step-count flag.  ``--lossless-accel`` turns on the existing
 training-free FastVideo switches (bit-identical kernels, reference memo,
 parallel VAE tiles) before the generator starts.  ``--nvfp4-decoder`` and
 ``--nvfp4-text-encoder`` opt into the existing Blackwell FP4 weight paths;
-``--nvfp4-dit h3_dit`` loads a packed NVFP4 DiT export (e.g.
+``--weights nvfp4-qad`` (or ``nvfp4-qad-fp4-attention``) selects FastVideo's NVFP4 QAD release;
+``--nvfp4-dit h3_dit`` loads any packed NVFP4 DiT export (e.g.
 FastVideo/Pika-H3-Flex-NVFP4-QAD).  They change weights, not the six-forward sampler.  Kernel/VSA work is separate.
 
 ``--nvfp4-attention`` turns on FlashAttention-4 NVFP4 attention (Q/K in NVFP4, P/V in BF16; Blackwell and FA4 only)
@@ -104,9 +105,32 @@ def _reference(value: str) -> MiniMaxH3Reference:
     return MiniMaxH3Reference(source=source, media_type=media_type)
 
 
+# --weights picks a release; explicit flags still win. The NVFP4 QAD releases need a Blackwell GPU.
+WEIGHT_PRESETS = {
+    "bf16": {
+        "model_path": "Pika-Labs/Pika-H3-Flex"
+    },
+    "nvfp4-qad": {
+        "model_path": "FastVideo/Pika-H3-Flex-NVFP4-QAD",
+        "nvfp4_dit": "h3_dit"
+    },
+    "nvfp4-qad-fp4-attention": {
+        "model_path": "FastVideo/Pika-H3-Flex-NVFP4-FP4Attn-QAD",
+        "nvfp4_dit": "h3_dit",
+        "nvfp4_attention": "smooth_k+hadamard",
+        "nvfp4_attention_bf16_blocks": "45,49"
+    },
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model-path", default="Pika-Labs/Pika-H3-Flex")
+    parser.add_argument("--weights",
+                        choices=tuple(WEIGHT_PRESETS),
+                        default="bf16",
+                        help="bf16: Pika's release; nvfp4-qad: FastVideo's NVFP4 QAD release; "
+                        "nvfp4-qad-fp4-attention: NVFP4 QAD with FP4 attention (both need Blackwell)")
+    parser.add_argument("--model-path", help="local model directory or Hub repo (overrides --weights)")
     parser.add_argument("--task", choices=TASKS, default="t2va")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--image", help="first frame (i2va/fl2va)")
@@ -150,6 +174,9 @@ def parse_args() -> argparse.Namespace:
                         help="comma-separated transformer_blocks indices that keep BF16 attention, e.g. 45,49")
     parser.add_argument("--output", default="outputs/pika_h3_flex")
     args = parser.parse_args()
+    for name, value in WEIGHT_PRESETS[args.weights].items():
+        if not getattr(args, name):
+            setattr(args, name, value)
     if args.nvfp4_attention_bf16_blocks and not args.nvfp4_attention:
         parser.error("--nvfp4-attention-bf16-blocks needs --nvfp4-attention")
     try:
