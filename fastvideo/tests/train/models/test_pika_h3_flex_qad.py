@@ -417,7 +417,7 @@ def test_calibration_candidates_accept_a_single_row(tmp_path):
     row = {"id": "r1", "amax": {"b0.ff.fc_in": [2.0, 1.0, 3.0]}}
     (tmp_path / "collect-shard0-dp0.jsonl").write_text(json.dumps(row) + "\n")
     calibrate.run_candidates(argparse.Namespace(output_dir=str(tmp_path), outlier_rows=8))
-    assert json.loads((tmp_path / "amax-max.json").read_text()) == {"b0.ff.fc_in": 2.0}
+    assert json.loads((tmp_path / "amax-max.json").read_text()) == {"b0.ff.fc_in": 3.0}
 
 def test_calibration_choice_all_tokens_or_balanced():
     calibrate = _calibrate_module()
