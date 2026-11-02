@@ -297,6 +297,56 @@ def test_registry_resolves_the_release_to_the_regenerate_pipeline(tmp_path):
     assert (preset, family) == ("open_h3_regenerate_2k", "open_h3_regenerate_2k")
 
 
+def test_serve_config_forwards_the_nvfp4_decoder_option(monkeypatch):
+    from fastvideo import fastvideo_args as fva
+    from fastvideo.api import ComponentConfig, EngineConfig, GeneratorConfig, PipelineSelection
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+
+    captured = {}
+
+    class _Captured:
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _Captured(**kwargs)
+
+    monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
+    generator_config_to_fastvideo_args(
+        GeneratorConfig(model_path="Efficient-Large-Model/Open-H3-Regenerate-2K",
+                        engine=EngineConfig(num_gpus=1),
+                        pipeline=PipelineSelection(components=ComponentConfig(),
+                                                   experimental={
+                                                       "draft_size": "768p",
+                                                       "h3_vae_nvfp4_decoder": "/tmp/decoder-nvfp4.safetensors",
+                                                   })))
+    assert captured["h3_vae_nvfp4_decoder"] == "/tmp/decoder-nvfp4.safetensors"
+    assert captured["draft_size"] == "768p"
+
+
+def test_generate_dotted_override_sets_the_nvfp4_decoder_option(tmp_path):
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.entrypoints.cli.generate import GenerateSubcommand, build_generate_run_config
+    from fastvideo.utils import FlexibleArgumentParser
+
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text("generator:\n  model_path: Efficient-Large-Model/Open-H3-Regenerate-2K\n"
+                           "request:\n  prompt: hello\n", encoding="utf-8")
+    parser = FlexibleArgumentParser()
+    GenerateSubcommand().subparser_init(parser.add_subparsers(dest="subparser"))
+    args, unknown = parser.parse_known_args([
+        "generate", "--config", str(config_path), "--generator.pipeline.experimental.h3_vae_nvfp4_decoder",
+        "/tmp/decoder-nvfp4.safetensors"
+    ])
+
+    config = build_generate_run_config(args, unknown)
+
+    assert config.generator.pipeline.experimental["h3_vae_nvfp4_decoder"] == "/tmp/decoder-nvfp4.safetensors"
+    assert generator_config_to_fastvideo_args(config.generator).h3_vae_nvfp4_decoder == "/tmp/decoder-nvfp4.safetensors"
+
+
 class _OffloadedTransformer(_ConstantVelocityTransformer):
 
     def __init__(self, velocity, fail=False):
