@@ -114,6 +114,24 @@ the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
 reduction order relative to fixed-length FA4, so treat it as a speed/quality
 evaluation option rather than an exact-parity mode.
 
+### cuDNN SDPA for H3 dense attention (opt-in)
+
+With the `FLASH_ATTN` backend, MiniMax-H3's dense, unmasked, inference-only DiT
+self-attention can use cuDNN's fused SDPA engine instead of FlashAttention:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn
+```
+
+It keeps the same precision contract (bf16 operands, fp32 softmax/accumulation,
+bf16 output) but uses a different reduction order, so treat it as a
+speed/quality option rather than an exact-parity mode. Training calls, compiled
+regions, head sizes above 128, non-contiguous inputs, and the sparse VSA blocks
+stay on their existing paths. Standalone kernel timings at 37.7k and 109k tokens
+are within measurement noise of FA4; an in-model A/B on one GB200 measured a
+2.2% faster DiT forward. Requires CUDA and a torch build with
+`aten::_scaled_dot_product_cudnn_attention` (cuDNN 9.x).
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**

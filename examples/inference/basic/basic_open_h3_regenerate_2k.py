@@ -42,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attention-backend", default="TORCH_SDPA")
     parser.add_argument("--draft-size", choices=("768p", "576p"), default="768p",
                         help="size the draft is encoded at; 576p for drafts from other video models")
+    parser.add_argument("--vae-decoder", default=None,
+                        help="NVFP4 decoder-nvfp4.safetensors that replaces the VAE decoder at load "
+                        "(Blackwell only, see docs/inference/open_h3_regenerate_2k.md)")
     parser.add_argument("--refine-transformer", default=None,
                         help="refine on another MiniMax-H3 DiT (e.g. a FastH3 export) instead of the release's own")
     parser.add_argument("--refine-transformer-quant", default=None,
@@ -57,6 +60,14 @@ def main() -> None:
     if (args.video is None) == (args.draft_latent is None):
         raise SystemExit("pass exactly one of --video or --draft-latent")
     args.output.mkdir(parents=True, exist_ok=True)
+    experimental = {
+        "attention_backend": args.attention_backend,
+        "draft_size": args.draft_size,
+    }
+    if args.vae_decoder:
+        experimental["h3_vae_nvfp4_decoder"] = args.vae_decoder
+    experimental["refine_transformer_dir"] = args.refine_transformer
+    experimental["draft_latent_path"] = args.draft_latent
     engine = EngineConfig(num_gpus=1,
                           offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False))
     if args.refine_transformer_quant:
@@ -67,12 +78,7 @@ def main() -> None:
             engine=engine,
             pipeline=PipelineSelection(
                 components=ComponentConfig(),
-                experimental={
-                    "attention_backend": args.attention_backend,
-                    "draft_size": args.draft_size,
-                    "refine_transformer_dir": args.refine_transformer,
-                    "draft_latent_path": args.draft_latent,
-                },
+                experimental=experimental,
             ),
         ))
     try:

@@ -222,6 +222,7 @@ class MiniMaxH3Attention(nn.Module):
         prefix: str,
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_rope: bool = False,
         mk_qkv: bool = False,
         vsa_fp4: dict[str, Any] | None = None,
@@ -280,6 +281,7 @@ class MiniMaxH3Attention(nn.Module):
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
         )
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
@@ -403,16 +405,18 @@ class MiniMaxH3Attention(nn.Module):
                 with STAGES.span("out_proj"):
                     hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
+        gate_linear = (self.to_gate_compress if self.to_gate_compress is not None and self._gate_active() else None)
         with STAGES.span("qkv_proj"):
-            # All three projections see the same activations. Reuse their FP8
-            # quantization when the loaded methods have identical granularity.
+            # q/k/v and the VSA gate see the same activations; share compatible input quantization.
             from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
+            projections = (self.to_q, self.to_k, self.to_v) + ((gate_linear, ) if gate_linear is not None else ())
             if not torch.is_grad_enabled() and not torch.compiler.is_compiling():
-                query, key, value = _shared_input_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+                projected = _shared_input_projections(projections, hidden_states)
             else:
-                query, _ = self.to_q(hidden_states)
-                key, _ = self.to_k(hidden_states)
-                value, _ = self.to_v(hidden_states)
+                projected = [projection(hidden_states)[0] for projection in projections]
+            query, key, value, *gate_out = projected
+            gate_compress = gate_out[0] if gate_out else None
+            del projected, gate_out
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
@@ -448,8 +452,7 @@ class MiniMaxH3Attention(nn.Module):
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
         extra_attention_kwargs = {}
-        if self.to_gate_compress is not None and self._gate_active():
-            gate_compress, _ = self.to_gate_compress(hidden_states)
+        if gate_compress is not None:
             extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
                 -1, (self.num_attention_heads, self.attention_head_dim))
         with STAGES.span("attention"):
@@ -691,6 +694,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
         vsa_fp4: dict[str, Any] | None = None,
         mk_tier: bool = False,
@@ -707,6 +711,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
             exact_rope="rope" in exact_kernels,
             vsa_fp4=vsa_fp4,
             mk_qkv=mk_tier,
@@ -989,6 +994,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
+                cudnn_sdpa=envs.FASTVIDEO_MINIMAX_H3_DENSE_ATTN.get() == "cudnn",
                 exact_kernels=self.enabled_exact_kernels,
                 vsa_fp4=config.vsa_fp4,
                 mk_tier=self.use_mk_kernels,
