@@ -14,7 +14,7 @@ scale-factor permute). Each tile of BLOCK_M tokens x one head:
    products, fp32 accumulation. The kernel issues the same TF32 MMA, which reproduces cuBLAS bit for bit. With TF32
    off, the fp32 operand is split exactly into three BF16 terms multiplied by the +/-1 matrix and scaled by fp32
    ``1/sqrt(D)``; only fp32 summation order then differs from cuBLAS's fp32 GEMM.
-3. Rounds to BF16, as the reference (and the QAD emulator) do before quantizing.
+3. Rounds to BF16, as the reference does before quantizing.
 4. Quantizes per 16 channels exactly like flashinfer's default (fast-math) ``nvfp4_quantize`` with a unit global
    scale: ``sf = e4m3(amax * rcp.approx(6))``, ``code = cvt.rn.satfinite.e2m1(x * rcp.approx(sf))``.
 5. Writes the packed FP4 data as ``(batch, seqlen_padded, nheads, headdim // 2)`` and the scale factors straight into
@@ -66,7 +66,7 @@ def fused_qk_quant_supported(query: torch.Tensor, key: torch.Tensor) -> bool:
     return (query.is_cuda and key.is_cuda and query.dtype == torch.bfloat16 and key.dtype == torch.bfloat16
             and query.dim() == 4 and key.dim() == 4 and query.shape[0] == key.shape[0]
             and query.shape[-1] == key.shape[-1] and query.shape[-1] in SUPPORTED_HEAD_DIMS and query.stride(-1) == 1
-            and key.stride(-1) == 1)
+            and key.stride(-1) == 1 and _token_mean_reproducible(key))
 
 
 def _padded(seqlen: int) -> int:
@@ -262,6 +262,17 @@ def _num_sms(device: torch.device) -> int:
 _INT32_MAX = 2**31 - 1
 
 
+def _fits_32bit_indexing(batch: int, seqlen: int, rows: int, row_bytes: int, row_numel: int) -> bool:
+    max_offset = (batch - 1) * seqlen * row_bytes + (rows - 1) * row_bytes + (row_bytes - 4)
+    return max_offset <= _INT32_MAX and batch * rows * row_numel <= _INT32_MAX
+
+
+def _token_mean_reproducible(tensor_4d: torch.Tensor) -> bool:
+    """Batched inputs whose fp32 copy needs 64-bit indexing split differently in torch; those take the unfused path."""
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    return batch == 1 or _fits_32bit_indexing(batch, seqlen, seqlen, nheads * headdim * 4, nheads * headdim)
+
+
 def _fp32_reduction_chunks(tensor_4d: torch.Tensor) -> list[tuple[int, int]]:
     """Token ranges torch reduces separately in ``k.float().mean(dim=1)``.
 
@@ -271,13 +282,11 @@ def _fp32_reduction_chunks(tensor_4d: torch.Tensor) -> list[tuple[int, int]]:
     """
     batch, seqlen, nheads, headdim = tensor_4d.shape
     row_bytes = nheads * headdim * 4
-
-    def fits(rows: int) -> bool:
-        max_offset = (batch - 1) * seqlen * row_bytes + (rows - 1) * row_bytes + (row_bytes - 4)
-        return max_offset <= _INT32_MAX and batch * rows * nheads * headdim <= _INT32_MAX
+    if not _token_mean_reproducible(tensor_4d):
+        raise ValueError(f"the split fp32 token mean of a batched {tuple(tensor_4d.shape)} input is not reproduced")
 
     def split(start: int, rows: int) -> list[tuple[int, int]]:
-        if fits(rows):
+        if _fits_32bit_indexing(batch, seqlen, rows, row_bytes, nheads * headdim):
             return [(start, rows)]
         first = rows // 2
         return split(start, first) + split(start + first, rows - first)
@@ -300,7 +309,7 @@ def reference_token_mean(tensor_4d: torch.Tensor) -> torch.Tensor:
         partial = tensor_4d[:, start:start + rows].sum(dim=1, dtype=torch.float32)
         total = partial if total is None else total + partial
     batch, seqlen, nheads, headdim = tensor_4d.shape
-    factor = (torch.tensor(nheads * headdim, dtype=torch.float32) /
+    factor = (torch.tensor(batch * nheads * headdim, dtype=torch.float32) /
               torch.tensor(batch * seqlen * nheads * headdim, dtype=torch.float32)).item()
     return (total * factor).contiguous()
 

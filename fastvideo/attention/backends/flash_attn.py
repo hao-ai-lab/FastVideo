@@ -291,8 +291,6 @@ class FlashAttentionImpl(AttentionImpl):
         if qk_transform is None:
             qk_transform = envs.FASTVIDEO_NVFP4_FA4_QK_TRANSFORM.get()
         self.nvfp4_smooth_k, self.nvfp4_hadamard = parse_qk_transform(qk_transform)
-        # With a transform on, one fused kernel per tensor does transform + quantize (same FP4 codes and scale
-        # bytes as the reference precondition_qk + _nvfp4_quantize_for_fa4, which stays as fallback and oracle).
         self.nvfp4_fused_qk_quant = ((self.nvfp4_smooth_k or self.nvfp4_hadamard)
                                      and envs.FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT.get() and fused_qk_quant_available())
         # PV-mode knob for the FA4-FP4 path. Resolved + validated
