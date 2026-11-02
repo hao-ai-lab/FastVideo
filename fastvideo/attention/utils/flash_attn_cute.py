@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 import torch
 
+from fastvideo.attention.utils.fa4_env_cache import invalidate_fa4_jit_caches_on_env_change
 from fastvideo.logger import init_logger
 from fastvideo.platforms import current_platform
 
@@ -33,6 +35,17 @@ else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
 
+# flash_attn.cute builds differ in which optional kwargs the varlen kernels take: some accept
+# max_seqlen_q/max_seqlen_k (and size the grid from them), older ones reject them. Forward an
+# optional kwarg only when the installed kernel declares it.
+_FWD_PARAMS = frozenset(inspect.signature(_flash_attn_fwd).parameters)
+_BWD_PARAMS = frozenset(inspect.signature(_flash_attn_bwd).parameters)
+
+
+def _accepted(params: frozenset[str], **kwargs) -> dict:
+    return {name: value for name, value in kwargs.items() if name in params}
+
+
 try:
     # FA2 serves the calls FA4 cute cannot on pre-sm90 GPUs (backward, GQA).
     # Optional so FA4-only installs can still import this module.
@@ -44,6 +57,13 @@ except ImportError:
 
 # Dynamo unwraps functools caches, so keep this cache inside the opaque helper.
 _SM90_OR_NEWER_BY_DEVICE: dict[int, bool] = {}
+
+# FA4's JIT cache key ignores its FA4_*/FA_* env knobs; the custom-op impls below run eagerly, so guard there.
+_FA4_KERNEL_OBJECTS = (_flash_attn_fwd, _flash_attn_bwd)
+
+
+def _guard_fa4_jit_cache() -> None:
+    invalidate_fa4_jit_caches_on_env_change(_FA4_KERNEL_OBJECTS)
 
 
 def _check_dropout(dropout_p: float) -> None:
@@ -94,6 +114,7 @@ def _flash_attn_cute_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    _guard_fa4_jit_cache()
     # _flash_attn_fwd returns (out, lse) on its empty-sequence early path but
     # (out, lse, p, row_max) on the main path at the pinned FA4 cute ref; take
     # the first two so both arities work.
@@ -235,14 +256,13 @@ def _flash_attn_cute_varlen_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    _guard_fa4_jit_cache()
     out, lse = _flash_attn_fwd(
         q,
         k,
         v,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
         softmax_scale=softmax_scale,
         causal=causal,
         window_size_left=None,
@@ -251,6 +271,7 @@ def _flash_attn_cute_varlen_forward(
         num_splits=1,
         pack_gqa=None,
         return_lse=True,
+        **_accepted(_FWD_PARAMS, max_seqlen_q=max_seqlen_q, max_seqlen_k=max_seqlen_k),
     )[:2]
     return out, lse
 
@@ -330,13 +351,14 @@ def _flash_attn_cute_varlen_backward_op(
         softmax_scale=softmax_scale,
         causal=causal,
         softcap=0.0,
-        window_size_left=None,
-        window_size_right=None,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=max_seqlen_q,
-        max_seqlen_k=max_seqlen_k,
-        deterministic=deterministic,
+        **_accepted(_BWD_PARAMS,
+                    window_size_left=None,
+                    window_size_right=None,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    deterministic=deterministic),
     )
 
 
@@ -441,6 +463,7 @@ def _flash_attn_cute_fp4_forward(
     softmax_scale: float | None,
     causal: bool,
 ) -> torch.Tensor:
+    _guard_fa4_jit_cache()
     out = _flash_attn_fwd(
         q,
         k,
