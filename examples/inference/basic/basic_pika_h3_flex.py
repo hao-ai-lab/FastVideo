@@ -105,7 +105,6 @@ def _reference(value: str) -> MiniMaxH3Reference:
     return MiniMaxH3Reference(source=source, media_type=media_type)
 
 
-# --weights picks a release; explicit flags still win. The NVFP4 QAD releases need a Blackwell GPU.
 WEIGHT_PRESETS = {
     "bf16": {
         "model_path": "Pika-Labs/Pika-H3-Flex"
@@ -170,12 +169,11 @@ def parse_args() -> argparse.Namespace:
                         choices=tuple(QK_TRANSFORMS),
                         help="FA4 NVFP4 Q/K attention with this exact Q/K preconditioning (default: BF16 attention)")
     parser.add_argument("--nvfp4-attention-bf16-blocks",
-                        default="",
                         help="comma-separated transformer_blocks indices that keep BF16 attention, e.g. 45,49")
     parser.add_argument("--output", default="outputs/pika_h3_flex")
     args = parser.parse_args()
     for name, value in WEIGHT_PRESETS[args.weights].items():
-        if not getattr(args, name):
+        if getattr(args, name) is None:
             setattr(args, name, value)
     if args.nvfp4_attention_bf16_blocks and not args.nvfp4_attention:
         parser.error("--nvfp4-attention-bf16-blocks needs --nvfp4-attention")
@@ -262,7 +260,7 @@ def _apply_nvfp4_attention(args: argparse.Namespace) -> None:
         return
     envs.FASTVIDEO_NVFP4_FA4.set(True)
     envs.FASTVIDEO_NVFP4_FA4_QK_TRANSFORM.set(args.nvfp4_attention)
-    envs.FASTVIDEO_NVFP4_FA4_BF16_BLOCKS.set(args.nvfp4_attention_bf16_blocks)
+    envs.FASTVIDEO_NVFP4_FA4_BF16_BLOCKS.set(args.nvfp4_attention_bf16_blocks or "")
     envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
 
 
