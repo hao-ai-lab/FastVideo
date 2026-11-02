@@ -732,6 +732,12 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(8,
                                      "always decode per tile. On GB200 at 768x1344, 8 tiles per call decodes 107 "
                                      "frames in 3.7 s instead of 5.4 s and 362 frames in 12.8 s instead of 18.3 s "
                                      "(+0.7 GiB peak). 1 decodes per tile.")
+FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE = EnvBool(False,
+                                              category="performance",
+                                              doc="Fuse the MiniMax-H3 video VAE decoder per-head QK RMSNorm and "
+                                              "partial RoPE into one Triton pass per attention layer (same "
+                                              "fp32/inference-dtype arithmetic; the RMSNorm reduction order differs, "
+                                              "like the DiT FASTVIDEO_MINIMAX_H3_FUSIONS qknorm_rope).")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
                                           category="performance",
                                           doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
