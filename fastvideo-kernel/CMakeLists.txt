@@ -114,7 +114,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (10, 0), (10, 3), (12, 0), (12, 1)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (10, 0), (10, 3), (10, 7), (12, 0), (12, 1)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -153,6 +153,14 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
             "fastvideo-kernel: sm_121a requires CUDA Toolkit 13.0+, but found "
             "${CUDAToolkit_VERSION}. Architecture-specific sm_120a code is not "
             "compatible with sm_121; use CUDA 13 or remove 12.1a from "
+            "TORCH_CUDA_ARCH_LIST.")
+    endif()
+    string(REGEX MATCH "(^|[; ,])((10\\.7a)|(107a)|(sm_107a))([; ,]|$)"
+        _FV_HAS_107A "${TORCH_CUDA_ARCH_LIST}")
+    if(_FV_HAS_107A AND CUDAToolkit_VERSION VERSION_LESS 13.4)
+        message(FATAL_ERROR
+            "fastvideo-kernel: sm_107a requires CUDA Toolkit 13.4+, but found "
+            "${CUDAToolkit_VERSION}. Use CUDA 13.4 or remove 10.7a from "
             "TORCH_CUDA_ARCH_LIST.")
     endif()
 endif()
@@ -494,6 +502,16 @@ if(BUILD_CXX_KERNELS)
                                     csrc/attention/block_sparse_bwd_blk128_blackwell.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
+    # VSA block-sparse attention FORWARD on Rubin (sm_107a), 128-token blocks, [B, H, S, D].
+    # Its own image: not in _VSA_FWD_GENCODE, which would also build the Blackwell kernels for it.
+    set(ENABLE_VSA_SM107A OFF)
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.7a|107a|sm_107a)([; ,]|$)")
+        set(ENABLE_VSA_SM107A ON)
+        message(STATUS "fastvideo-kernel: building block_sparse_ptx_sm107a (sm_107a; 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_binding_ptx_sm107a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_binding_ptx_sm107a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_107a,code=sm_107a")
+    endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
@@ -512,6 +530,9 @@ if(BUILD_CXX_KERNELS)
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
     if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_PTX_BLACKWELL)
+    endif()
+    if(ENABLE_VSA_SM107A)
+        list(APPEND COMPILE_DEFS FASTVIDEO_KERNEL_COMPILE_BLOCK_SPARSE_VSA_PTX_SM107A)
     endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)

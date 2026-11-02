@@ -82,3 +82,18 @@ def test_build_script_rejects_sm121_before_cmake_on_cuda_12(tmp_path: Path) -> N
 
     assert result.returncode != 0
     assert "sm_121a requires CUDA Toolkit 13.0+" in result.stderr
+
+
+def test_build_script_maps_sm107_on_cuda_13_4(tmp_path: Path) -> None:
+    result, result_dir = _run_build(tmp_path, "10.7", "13.4")
+
+    assert result.returncode == 0, result.stderr
+    assert (result_dir / "arch").read_text() == "10.7a"
+    assert "-DCMAKE_CUDA_ARCHITECTURES=107" in (result_dir / "cmake_args").read_text()
+
+
+def test_build_script_rejects_sm107_before_cmake_below_cuda_13_4(tmp_path: Path) -> None:
+    result, _ = _run_build(tmp_path, "10.7", "13.0")
+
+    assert result.returncode != 0
+    assert "sm_107a requires CUDA Toolkit 13.4+" in result.stderr

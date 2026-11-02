@@ -1,4 +1,4 @@
-// primitives.cuh -- device primitives for the sm_100a/sm_103a VSA block-sparse attention
+// primitives.cuh -- device primitives for the sm_100a/sm_103a/sm_107a VSA block-sparse attention
 // forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
 // tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
 #pragma once
@@ -1011,3 +1011,135 @@ __device__ __forceinline__
 void griddepcontrol_launch_dependents() {
   asm volatile("griddepcontrol.launch_dependents;\n" ::: "memory");
 }
+
+__device__ __forceinline__ void tcgen05_st_32x32b_x8(
+    uint32_t tmem_addr, const uint32_t (&r)[8]) {
+  asm volatile("tcgen05.st.sync.aligned.32x32b.x8.b32 "
+               "[%0], {%1,%2,%3,%4,%5,%6,%7,%8};\n"
+               :: "r"(tmem_addr),
+                  "r"(r[0]),"r"(r[1]),"r"(r[2]),"r"(r[3]),
+                  "r"(r[4]),"r"(r[5]),"r"(r[6]),"r"(r[7]));
+}
+
+__device__ __forceinline__
+void prefetch_tensormap(const void* tensormap_ptr) {
+  asm volatile("prefetch.tensormap [%0];\n" :: "l"(tensormap_ptr) : "memory");
+}
+
+enum class SmemSwizzleSm107a : uint32_t {
+  None = 0,
+  B128_32atom = 1,
+  B128 = 2,
+  B64  = 4,
+  B32  = 6,
+};
+
+__device__ __host__ __forceinline__ uint64_t build_smem_desc_sm107a(
+    uint32_t smem_addr,
+    uint32_t stride_byte_offset,
+    uint32_t leading_byte_offset,
+    SmemSwizzleSm107a swizzle = SmemSwizzleSm107a::B128,
+    uint32_t base_offset = 0) {
+  uint64_t d = 0;
+  d |= static_cast<uint64_t>((smem_addr >> 4) & 0x7FFF);
+  d |= static_cast<uint64_t>((leading_byte_offset >> 4) & 0x7FFF) << 16;
+  d |= static_cast<uint64_t>((stride_byte_offset >> 4) & 0x3FFF) << 32;
+  d |= static_cast<uint64_t>(1) << 46;
+  d |= (static_cast<uint64_t>(base_offset) & 0x7) << 49;
+  d |= static_cast<uint64_t>(static_cast<uint32_t>(swizzle) & 0x7) << 61;
+  return d;
+}
+
+template <int N>
+__device__ __forceinline__ void tcgen05_ld_red_32x32b_max_f32(
+    uint32_t tmem_addr, float& redval, uint32_t (&r)[N]) {
+  static_assert(N == 32 || N == 64, "tcgen05_ld_red_32x32b_max_f32: N must be 32 or 64");
+#if defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)) || \
+                               (__CUDA_ARCH__ == 1070 && defined(__CUDA_ARCH_FEAT_SM107_ALL)))
+  if constexpr (N == 32) {
+    asm volatile("tcgen05.ld.red.sync.aligned.32x32b.x32.max.f32 "
+                 "{%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,"
+                 "%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,"
+                 "%20,%21,%22,%23,%24,%25,%26,%27,%28,%29,"
+                 "%30,%31}, %32, [%33];\n"
+                 : "=r"(r[0]),"=r"(r[1]),"=r"(r[2]),"=r"(r[3]),
+                   "=r"(r[4]),"=r"(r[5]),"=r"(r[6]),"=r"(r[7]),
+                   "=r"(r[8]),"=r"(r[9]),"=r"(r[10]),"=r"(r[11]),
+                   "=r"(r[12]),"=r"(r[13]),"=r"(r[14]),"=r"(r[15]),
+                   "=r"(r[16]),"=r"(r[17]),"=r"(r[18]),"=r"(r[19]),
+                   "=r"(r[20]),"=r"(r[21]),"=r"(r[22]),"=r"(r[23]),
+                   "=r"(r[24]),"=r"(r[25]),"=r"(r[26]),"=r"(r[27]),
+                   "=r"(r[28]),"=r"(r[29]),"=r"(r[30]),"=r"(r[31]),
+                   "=f"(redval)
+                 : "r"(tmem_addr));
+  }
+  else if constexpr (N == 64) {
+    asm volatile("tcgen05.ld.red.sync.aligned.32x32b.x64.max.f32 "
+                 "{%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,"
+                 "%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,"
+                 "%20,%21,%22,%23,%24,%25,%26,%27,%28,%29,"
+                 "%30,%31,%32,%33,%34,%35,%36,%37,%38,%39,"
+                 "%40,%41,%42,%43,%44,%45,%46,%47,%48,%49,"
+                 "%50,%51,%52,%53,%54,%55,%56,%57,%58,%59,"
+                 "%60,%61,%62,%63}, %64, [%65];\n"
+                 : "=r"(r[0]),"=r"(r[1]),"=r"(r[2]),"=r"(r[3]),
+                   "=r"(r[4]),"=r"(r[5]),"=r"(r[6]),"=r"(r[7]),
+                   "=r"(r[8]),"=r"(r[9]),"=r"(r[10]),"=r"(r[11]),
+                   "=r"(r[12]),"=r"(r[13]),"=r"(r[14]),"=r"(r[15]),
+                   "=r"(r[16]),"=r"(r[17]),"=r"(r[18]),"=r"(r[19]),
+                   "=r"(r[20]),"=r"(r[21]),"=r"(r[22]),"=r"(r[23]),
+                   "=r"(r[24]),"=r"(r[25]),"=r"(r[26]),"=r"(r[27]),
+                   "=r"(r[28]),"=r"(r[29]),"=r"(r[30]),"=r"(r[31]),
+                   "=r"(r[32]),"=r"(r[33]),"=r"(r[34]),"=r"(r[35]),
+                   "=r"(r[36]),"=r"(r[37]),"=r"(r[38]),"=r"(r[39]),
+                   "=r"(r[40]),"=r"(r[41]),"=r"(r[42]),"=r"(r[43]),
+                   "=r"(r[44]),"=r"(r[45]),"=r"(r[46]),"=r"(r[47]),
+                   "=r"(r[48]),"=r"(r[49]),"=r"(r[50]),"=r"(r[51]),
+                   "=r"(r[52]),"=r"(r[53]),"=r"(r[54]),"=r"(r[55]),
+                   "=r"(r[56]),"=r"(r[57]),"=r"(r[58]),"=r"(r[59]),
+                   "=r"(r[60]),"=r"(r[61]),"=r"(r[62]),"=r"(r[63]),
+                   "=f"(redval)
+                 : "r"(tmem_addr));
+  }
+#else
+  __trap();
+#endif
+}
+
+__device__ __forceinline__ uint32_t ex2_approx_f16x2(uint32_t a) {
+  uint32_t d;
+  asm volatile("ex2.approx.f16x2 %0, %1;\n" : "=r"(d) : "r"(a));
+  return d;
+}
+
+__device__ __forceinline__ uint32_t ex2_approx_bf16x2(uint32_t a) {
+  uint32_t d;
+  asm volatile("ex2.approx.ftz.bf16x2 %0, %1;\n" : "=r"(d) : "r"(a));
+  return d;
+}
+
+enum class F32Rnd { kRn, kRz, kRm, kRp };
+#define PL_MIXP_RND(X, ...) X(kRn, ".rn", __VA_ARGS__) X(kRz, ".rz", __VA_ARGS__) X(kRm, ".rm", __VA_ARGS__) \
+  X(kRp, ".rp", __VA_ARGS__)
+#define PL_MIXP_UP(R, RS, OPN, TS)                                                                        \
+  if constexpr (R_ == F32Rnd::R) {                                                                       \
+    if constexpr (OP == 2) asm(OPN RS ".f32x2" TS ".f32x2.f32x2 %0, %1, %2, %3;\n" : "=l"(d) : "r"(a), "l"(b), "l"(c)); \
+    else asm(OPN RS ".f32x2" TS ".f32x2 %0, %1, %2;\n" : "=l"(d) : "r"(a), "l"(c));                      \
+  }
+
+template <int OP, F32Rnd R_, bool BF16>
+__device__ __forceinline__ uint64_t mixed_f32x2_h2(uint32_t a, uint64_t b, uint64_t c) {
+  uint64_t d = 0;
+  if constexpr (OP == 0 && !BF16) { PL_MIXP_RND(PL_MIXP_UP, "add", ".f16x2") }
+  else if constexpr (OP == 0) { PL_MIXP_RND(PL_MIXP_UP, "add", ".bf16x2") }
+  else if constexpr (OP == 1 && !BF16) { PL_MIXP_RND(PL_MIXP_UP, "sub", ".f16x2") }
+  else if constexpr (OP == 1) { PL_MIXP_RND(PL_MIXP_UP, "sub", ".bf16x2") }
+  else if constexpr (!BF16) { PL_MIXP_RND(PL_MIXP_UP, "fma", ".f16x2") }
+  else { PL_MIXP_RND(PL_MIXP_UP, "fma", ".bf16x2") }
+  (void)b;
+  return d;
+}
+template <F32Rnd R = F32Rnd::kRn, bool BF16 = false>
+__device__ __forceinline__ uint64_t add_f32x2_h2(uint32_t a, uint64_t c) { return mixed_f32x2_h2<0, R, BF16>(a, 0, c); }
+#undef PL_MIXP_UP
+#undef PL_MIXP_RND
