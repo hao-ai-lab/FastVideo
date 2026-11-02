@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 import numpy as np
 import torch
@@ -48,7 +48,7 @@ def _on_first_rank(fn: Callable[[], T], what: str) -> T:
     next collective until it times out.
     """
     rank, world_size = _sp_rank_and_size()
-    outcome: tuple[bool, object] | None = None
+    outcome: tuple[bool, Any] | None = None
     if rank == 0:
         try:
             outcome = (True, fn())
@@ -58,10 +58,11 @@ def _on_first_rank(fn: Callable[[], T], what: str) -> T:
             raise
     if world_size > 1:
         outcome = get_sp_group().broadcast_object(outcome, src=0)
+    assert outcome is not None
     ok, value = outcome
     if not ok:
         raise RuntimeError(f"The first sequence-parallel rank failed to {what}: {value}")
-    return value
+    return cast(T, value)
 
 
 class PAN2Guardrails:
@@ -105,7 +106,7 @@ class PAN2Guardrails:
                 torch.cuda.empty_cache()
 
     def _passes(self, check: Callable[[], bool]) -> bool:
-        return bool(_on_first_rank(lambda: bool(check()), "run the guardrail check"))
+        return bool(_on_first_rank(check, "run the guardrail check"))
 
     def check_prompt(self, prompt: str) -> None:
 
@@ -156,5 +157,9 @@ class PAN2VideoGuardrailStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         # `batch.output` is `[B, 3, T, H, W]` in [0, 1]; `pixels_to_uint8` quantizes as the generator does.
         for video in batch.output:
-            self.guardrails.check_video(lambda video=video: pixels_to_uint8(video).permute(1, 2, 3, 0).cpu().numpy())
+
+            def frames(video: torch.Tensor = video) -> np.ndarray:
+                return pixels_to_uint8(video).permute(1, 2, 3, 0).cpu().numpy()
+
+            self.guardrails.check_video(frames)
         return batch

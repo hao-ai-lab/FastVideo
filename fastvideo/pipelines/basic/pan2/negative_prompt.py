@@ -6,7 +6,9 @@ the clip, as the reference sampler does for records without a negative prompt of
 """
 
 import json
+from typing import Any
 
+# yapf: disable
 PAN2_DEFAULT_NEGATIVE_PROMPT = {
     "video_style": "low quality, blur, softness, reduced detail, noise, compression, clipped highlights, "
     "blurred sidebar, black border, letterboxing, watermark, subtitle, AIGC text, oily waxy "
@@ -149,13 +151,14 @@ PAN2_DEFAULT_NEGATIVE_PROMPT = {
         ],
     },
 }
+# yapf: enable
 
 
 def render_pan2_default_negative_prompt(num_frames: int, fps: float) -> str:
     """The default negative prompt as compact one-line JSON, with every time range spanning the clip."""
     span = f"0 to {(num_frames - 1) / fps:g}"
 
-    def fill(node):
+    def fill(node: Any) -> Any:
         if isinstance(node, dict):
             return {key: span if key == "time_range_sec" else fill(value) for key, value in node.items()}
         if isinstance(node, list):

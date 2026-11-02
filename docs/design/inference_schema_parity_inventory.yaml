@@ -307,6 +307,21 @@ surfaces:
       i2v_skip_first_latent_cfg:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel_parallel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      dit_fused_kernels:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      enable_guardrails:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      offload_guardrail_models:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
