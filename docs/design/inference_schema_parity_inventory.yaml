@@ -153,6 +153,12 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      draft_size:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_start_sigma:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig
