@@ -791,6 +791,14 @@ test("WebSocket deployments expose only the serving interface", async ({ page })
   await expect(page.getByText(/Only serving is recorded for it/)).toBeVisible();
 });
 
+test("video-to-video deployments expose only the serving interface", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/open-h3-regenerate-2k");
+  const modes = page.getByRole("group", { name: "Run mode" });
+  await expect(modes.getByRole("button")).toHaveCount(1);
+  await expect(modes.getByRole("button", { name: "Serving", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Send it to the server as video_reference/)).toBeVisible();
+});
+
 test("Open-H3-Regenerate-2K is discoverable as a video upscale with its serving page", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   await page.getByLabel("Task", { exact: true }).selectOption("Video upscale");
