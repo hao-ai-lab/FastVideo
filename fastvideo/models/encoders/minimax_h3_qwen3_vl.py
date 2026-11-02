@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.layernorm import RMSNorm
@@ -403,6 +404,28 @@ class MiniMaxH3Qwen3VLVisionMLP(nn.Module):
         return self.linear_fc2(F.gelu(self.linear_fc1(hidden_states), approximate="tanh"))
 
 
+def _vision_attention_groups(
+    sequence_lengths: list[int],
+    max_batch_size: int,
+) -> tuple[tuple[int, int], ...]:
+    """Partition consecutive equal-length segments into bounded (length, count) groups.
+
+    Every segment remains independent in SDPA's batch dimension. Groups retain
+    the original token order without padding or combining attention contexts.
+    """
+    if max_batch_size < 1:
+        raise ValueError("FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE must be at least 1")
+    groups: list[tuple[int, int]] = []
+    for length in sequence_lengths:
+        if length < 1:
+            raise ValueError("Vision attention sequence lengths must be positive")
+        if groups and groups[-1][0] == length and groups[-1][1] < max_batch_size:
+            groups[-1] = (length, groups[-1][1] + 1)
+        else:
+            groups.append((length, 1))
+    return tuple(groups)
+
+
 class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
@@ -418,8 +441,22 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         hidden_states: torch.Tensor,
         sequence_lengths: list[int],
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_groups: tuple[tuple[int, int], ...] | None = None,
     ) -> torch.Tensor:
+        if attention_groups is None:
+            max_batch_size = envs.FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE.get()
+            attention_groups = _vision_attention_groups(sequence_lengths, max_batch_size)
+        elif any(length < 1 or count < 1 for length, count in attention_groups) or [
+                length for length, count in attention_groups for _ in range(count)
+        ] != sequence_lengths:
+            raise ValueError("Vision attention groups must match sequence_lengths in order")
+        # The experimental batch route is inference-only; preserve training's
+        # single-segment kernel choices and backward behavior.
+        if torch.is_grad_enabled():
+            attention_groups = tuple((length, 1) for length in sequence_lengths)
         sequence_length = hidden_states.shape[0]
+        if sum(sequence_lengths) != sequence_length:
+            raise ValueError("Vision attention sequence lengths must sum to the token count")
         query, key, value = self.qkv(hidden_states).view(sequence_length, 3, self.num_heads, self.head_dim).unbind(1)
         cos, sin = position_embeddings
         query_dtype, key_dtype = query.dtype, key.dtype
@@ -428,21 +465,30 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         query = (query.float() * cos + _rotate_half(query.float()) * sin).to(query_dtype)
         key = (key.float() * cos + _rotate_half(key.float()) * sin).to(key_dtype)
 
-        query_chunks = query.split(sequence_lengths, dim=0)
-        key_chunks = key.split(sequence_lengths, dim=0)
-        value_chunks = value.split(sequence_lengths, dim=0)
         outputs = []
-        for query_chunk, key_chunk, value_chunk in zip(query_chunks, key_chunks, value_chunks, strict=True):
+        offset = 0
+        for length, count in attention_groups:
+            end = offset + length * count
+            if count == 1:
+                # Preserve the original singleton batch strides and SDPA route.
+                query_group = query[offset:end].transpose(0, 1).unsqueeze(0)
+                key_group = key[offset:end].transpose(0, 1).unsqueeze(0)
+                value_group = value[offset:end].transpose(0, 1).unsqueeze(0)
+            else:
+                query_group = query[offset:end].reshape(count, length, self.num_heads, self.head_dim).transpose(1, 2)
+                key_group = key[offset:end].reshape(count, length, self.num_heads, self.head_dim).transpose(1, 2)
+                value_group = value[offset:end].reshape(count, length, self.num_heads, self.head_dim).transpose(1, 2)
             output = F.scaled_dot_product_attention(
-                query_chunk.transpose(0, 1).unsqueeze(0),
-                key_chunk.transpose(0, 1).unsqueeze(0),
-                value_chunk.transpose(0, 1).unsqueeze(0),
+                query_group,
+                key_group,
+                value_group,
                 dropout_p=0.0,
                 is_causal=False,
                 scale=self.scaling,
             )
-            outputs.append(output.transpose(1, 2))
-        hidden_states = torch.cat(outputs, dim=1).reshape(sequence_length, -1)
+            outputs.extend(output.transpose(1, 2).unbind(0))
+            offset = end
+        hidden_states = torch.cat(outputs, dim=0).reshape(sequence_length, -1)
         return self.proj(hidden_states)
 
 
@@ -460,8 +506,10 @@ class MiniMaxH3Qwen3VLVisionBlock(nn.Module):
         hidden_states: torch.Tensor,
         sequence_lengths: list[int],
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_groups: tuple[tuple[int, int], ...] | None = None,
     ) -> torch.Tensor:
-        hidden_states = hidden_states + self.attn(self.norm1(hidden_states), sequence_lengths, position_embeddings)
+        hidden_states = hidden_states + self.attn(self.norm1(hidden_states), sequence_lengths, position_embeddings,
+                                                 attention_groups)
         return hidden_states + self.mlp(self.norm2(hidden_states))
 
 
@@ -514,17 +562,21 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         )
 
     def forward(self, pixels: torch.Tensor, grid_thw: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        max_batch_size = envs.FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE.get()
+        sequence_lengths = [
+            int(value) for value in torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
+        ]
+        attention_groups = _vision_attention_groups(sequence_lengths, max_batch_size)
+        if torch.is_grad_enabled():
+            attention_groups = tuple((length, 1) for length in sequence_lengths)
         hidden_states = self.patch_embed(pixels)
         hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw).to(hidden_states.dtype)
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)
         embedding = torch.cat((rotary, rotary), dim=-1)
         position_embeddings = (embedding.cos(), embedding.sin())
-        sequence_lengths = [
-            int(value) for value in torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
-        ]
         deepstack_features = []
         for layer_index, block in enumerate(self.blocks):
-            hidden_states = block(hidden_states, sequence_lengths, position_embeddings)
+            hidden_states = block(hidden_states, sequence_lengths, position_embeddings, attention_groups)
             if layer_index in self.deepstack_visual_indexes:
                 merger_index = self.deepstack_visual_indexes.index(layer_index)
                 deepstack_features.append(self.deepstack_merger_list[merger_index](hidden_states))

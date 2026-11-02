@@ -404,6 +404,13 @@ FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
 
 # ================== Performance ==================
 
+FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE = EnvInt(
+    1,
+    category="performance",
+    doc="Experimental MiniMax-H3 inference maximum number of consecutive equal-length visual segments per SDPA "
+    "call. Must be at least 1; 1 preserves single-segment calls. Try 8 to batch reference-video frames. "
+    "Grad-enabled execution keeps single-segment calls.")
+
 # Non-fullgraph-traceable attention backends such as VSA degrade to eager with
 # one warning; see _regional_compile_unsupported_reason in
 # fastvideo/models/loader/fsdp_load.py.
