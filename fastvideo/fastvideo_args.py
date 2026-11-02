@@ -1030,6 +1030,8 @@ class FastVideoArgs:
             kwargs['workload_type'] = WorkloadType.from_string(kwargs['workload_type'])
 
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
+        # PipelineConfig also has a disable_autocast field and pops it from kwargs, but the stages read this one.
+        kwargs.setdefault('disable_autocast', kwargs['pipeline_config'].disable_autocast)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
         # args live in PipelineConfig and must not be forwarded to the
