@@ -318,7 +318,7 @@ def test_fastvideo_args_strategy_literals_match_module() -> None:
 
 @pytest.fixture
 def tile_parallel():
-    with envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.override(True):
+    with envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.override(True), envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(1):
         yield
 
 

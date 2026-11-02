@@ -536,8 +536,15 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
-def _tile_batch_size() -> int:
-    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+def _has_dynamic_nvfp4_act_scale(module: nn.Module) -> bool:
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import nvfp4_linears
+
+    return any(layer.act_scale == "dynamic" for layer in nvfp4_linears(module))
+
+
+def _tile_batch_size(decoder: nn.Module | None = None) -> int:
+    if decoder is not None and _has_dynamic_nvfp4_act_scale(decoder):
+        return 1
     return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
 
 
@@ -838,7 +845,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
             ratio = self.spatial_compression_ratio
             rows = []
-            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+            per_call = _tile_batch_size(self.decoder)
+            if per_call > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
                 # Every tile of the grid has one shape, and the ViT decoder
                 # treats batch entries independently: decode the grid in a few
                 # large calls instead of one small call per tile.
@@ -850,7 +858,6 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                         for x_position, x_length in zip(x_indices, x_lengths)
                     ]
                     decoded: list[torch.Tensor] = []
-                    per_call = _tile_batch_size()
                     for start in range(0, len(latent_tiles), per_call):
                         batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
                         # Clone before retaining: under the reduce-overhead compile the decoder output lives in
