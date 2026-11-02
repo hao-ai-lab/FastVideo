@@ -355,6 +355,13 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
     category="attention",
     doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
     "floating-point reduction order, so it is an inference-only opt-in.")
+FASTVIDEO_MINIMAX_H3_DENSE_ATTN = EnvChoice(
+    "flash",
+    choices=("flash", "cudnn"),
+    category="attention",
+    doc="Kernel for MiniMax-H3 dense DiT self-attention: flash keeps the selected FlashAttention backend; with "
+    "FLASH_ATTN, cudnn sends the no-mask, no-grad dense call through cuDNN's fused SDPA. cuDNN has a different "
+    "reduction order, so this is an inference-only opt-in.")
 FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
@@ -683,7 +690,8 @@ FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
                                      "weight always use the side branch.")
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
-                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears: auto (cudnn for MiniMax-H3 DiT "
+                                    "profiles on sm_100), cutlass or cudnn.")
 FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
     "off",
     choices=("off", "table", "auto"),
@@ -774,6 +782,21 @@ FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
                                                category="performance",
                                                doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
                                                "projections.")
+FASTVIDEO_H3_VAE_COMPILE_BLOCKS = EnvBool(False,
+                                          category="performance",
+                                          doc="Run the MiniMax-H3 video VAE decoder transformer blocks through one "
+                                          "regional torch.compile graph: Inductor fuses the fp32 residual scale/add "
+                                          "pairs, the RMSNorm+cast and the SwiGLU silu*mul.")
+FASTVIDEO_H3_VAE_UINT8_PIXELS = EnvBool(True,
+                                        category="performance",
+                                        doc="Quantize single-GPU MiniMax-H3 video VAE output to uint8 on the GPU per "
+                                        "chunk and stream uint8 into the host buffer; frames are bitwise identical "
+                                        "to the fp32 path. 0 streams fp32.")
+FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH = EnvInt(1,
+                                            category="performance",
+                                            doc="Spatial tiles per MiniMax-H3 video VAE encoder call (reference and "
+                                            "keyframe encodes); 1 encodes per tile. Batched tiles differ from "
+                                            "per-tile encoding only in reduction order.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
