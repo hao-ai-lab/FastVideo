@@ -136,7 +136,6 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
                          data=data,
                          frozen_bf16=frozen_bf16)
 
-    # ------------------------------------------------------------------ construction hooks
     def _read_contract(self, model_path: str) -> Any:
         contract = FlexContract.read(model_path)
         if contract.task != self._task or contract.trunk != self._transformer_module_type:
@@ -220,7 +219,6 @@ class MiniMaxH3FlexRef2VAModel(MiniMaxH3OmniRefPDDModel):
             if fp4 is not None:
                 install_fp4_dense_attention(self.transformer, fp4, **self.fp4_install)
 
-    # ------------------------------------------------------------------ Flex ladder
     @property
     def plan(self) -> Any:  # pragma: no cover - PDD-only
         raise AttributeError("Pika H3 Flex has no PDD plan")

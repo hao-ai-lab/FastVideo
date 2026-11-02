@@ -52,7 +52,6 @@ _ASSET = re.compile(r"(asset-[0-9a-f]{32})")
 _PATCH = (1, 2, 2)
 
 
-# ---------------------------------------------------------------------- planning (CPU)
 def load_source_rows(manifest: Path) -> dict[tuple[str, str], dict[str, Any]]:
     """Encoded source entries keyed by (id, resolution)."""
     entries = {}
@@ -140,6 +139,8 @@ def plan_rows(src_rows: dict[tuple[str, str], dict[str, Any]], retier_ids: set[t
             specs.append(spec("retier", entry, own_refs(entry, ref_count(entry["parquet"])), []))
     by_asset: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for (entry_id, res), entry in src_rows.items():
+        if entry_id.split(":", 1)[-1] in exclude_sources:
+            continue
         kind = "continue" if entry["case"] in CONTINUE_CASES else "image"
         by_asset[(asset_of(entry_id), res, kind)].append(entry)
     sources = {"audio_reference": ("first_frame", ), "mixed_image_video": CONTINUE_CASES,
@@ -201,7 +202,6 @@ def apply_prompt_edits(prompt: str, edits: list[tuple[str, bool]]) -> str:
     return prompt
 
 
-# ---------------------------------------------------------------------- FL2VA rows (keyframe anchors)
 # FL2VA task -> (source case whose image references are the exact keyframes, reference index per anchor).
 FL2VA_SOURCES = {
     "t2va": ("first_frame", ()),
@@ -251,7 +251,6 @@ def plan_fl2va_rows(src_rows: dict[tuple[str, str], dict[str, Any]], counts: dic
     return specs
 
 
-# ---------------------------------------------------------------------- stored-latent decoding (GPU)
 _COLUMNS = ("caption", "vae_latent_bytes", "vae_latent_shape", "audio_latent_bytes", "audio_latent_shape",
             "reference_video_latent_rows_bytes", "reference_video_latent_rows_shape",
             "reference_audio_latent_rows_bytes", "reference_audio_latent_rows_shape", "reference_media_types",
@@ -526,7 +525,6 @@ def encode_fl2va_spec(row_spec: dict[str, Any], model_path: str) -> dict[str, An
     return record
 
 
-# ---------------------------------------------------------------------- drivers
 def run_plan(args: argparse.Namespace, overrides: list[str]) -> None:
     from fastvideo.train.models.minimax_h3.omniref_data import load_eval_rows
 

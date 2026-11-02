@@ -106,7 +106,6 @@ def choose_table(mse: dict[str, dict[str, list[float]]], candidates: dict[str, d
     return table, report
 
 
-# ---------------------------------------------------------------------- GPU passes
 def _sum_over_sp(tensor: torch.Tensor, op: Any) -> torch.Tensor:
     from fastvideo.distributed import get_sp_group, get_sp_world_size
     if get_sp_world_size() > 1:
@@ -224,7 +223,6 @@ def mse_row(teacher: Any, prepared: Any, hooks: FFNHooks, candidates: dict[str, 
         walk_teacher(teacher, prepared, hooks)
 
 
-# ---------------------------------------------------------------------- drivers
 def _build(args: argparse.Namespace) -> tuple[Any, list[Any]]:
     """The QAD config's bf16 teacher and its training-row plan (the student is built without quantization)."""
     from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
@@ -256,6 +254,24 @@ def _shard(rows: list[Any], shard: int, num_shards: int) -> list[Any]:
     return ordered[shard * dp_size + dp_rank::num_shards * dp_size]
 
 
+def _lockstep(rows: list[Any], filler: Any, skip: Any) -> Iterator[tuple[int, Any, bool]]:
+    """``(index, row, record)`` with the same forwards on every data-parallel group.
+
+    The teacher gathers its weights across all ranks, so a group that runs out of rows, or skips a row it already
+    recorded, still runs a forward (``record`` False) until every group is done with that index.
+    """
+    device = torch.device("cuda", torch.cuda.current_device())
+    count = torch.tensor([len(rows)], device=device)
+    dist.all_reduce(count, op=dist.ReduceOp.MAX)
+    for index in range(int(count.item())):
+        mine = rows[index] if index < len(rows) else None
+        record = mine is not None and not skip(mine)
+        pending = torch.tensor([int(record)], device=device)
+        dist.all_reduce(pending, op=dist.ReduceOp.MAX)
+        if pending.item():
+            yield index, mine if mine is not None else filler, record
+
+
 def _is_writer() -> bool:
     from fastvideo.distributed import get_sp_group
     return get_sp_group().rank_in_group == 0
@@ -269,12 +285,11 @@ def run_collect(args: argparse.Namespace) -> None:
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"collect-shard{args.shard}-dp{_dp()[0]}.jsonl"
     done = {json.loads(line)["id"] for line in path.read_text().splitlines()} if path.exists() else set()
-    for index, spec in enumerate(rows):
-        if spec.id in done:
-            continue
+    filler = rows[-1] if rows else plan[0]
+    for index, spec, record in _lockstep(rows, filler, lambda row: row.id in done):
         prepared = teacher.load_row(spec)
         amax = collect_row(teacher, prepared, hooks)
-        if _is_writer():
+        if record and _is_writer():
             record = {"id": spec.id, "case": spec.case, "resolution": spec.resolution, "amax": amax,
                       "tokens": int(prepared.layout.sequence_length)}
             with path.open("a") as handle:
@@ -297,8 +312,11 @@ def run_candidates(args: argparse.Namespace) -> None:
     out = Path(args.output_dir)
     rows = _read_rows(out, "collect-*.jsonl")
     table = candidate_table(rows)
-    half = candidate_table(rows[:len(rows) // 2])
-    gaps = {key: 1 - half[key]["max"] / table[key]["max"] for key in table}
+    if len(rows) > 1:
+        half = candidate_table(rows[:len(rows) // 2])
+        gaps = {key: 1 - half[key]["max"] / table[key]["max"] for key in table}
+    else:
+        gaps = {}
     (out / "candidates.json").write_text(json.dumps(table, indent=1))
     (out / "amax-max.json").write_text(json.dumps({k: v["max"] for k, v in table.items()}, indent=1))
     (out / "outlier_rows.json").write_text(json.dumps(outlier_row_ids(rows, args.outlier_rows)))
@@ -320,12 +338,15 @@ def run_mse(args: argparse.Namespace) -> None:
         if spec.id not in collected and per_group.get(key, 0) < args.mse_rows_per_group:
             per_group[key] = per_group.get(key, 0) + 1
             fresh.append(spec)
+    if not fresh:
+        raise ValueError("every planned row was used by collect, so MSE would score only the outlier rows; "
+                         "collect a subset with --max-rows")
     rows = _shard(fresh + [spec for spec in plan if spec.id in outliers], args.shard, args.num_shards)
     hooks = FFNHooks(teacher.transformer)
     sums: dict[str, dict[str, torch.Tensor]] = {}
-    for index, spec in enumerate(rows):
-        mse_row(teacher, teacher.load_row(spec), hooks, candidates, sums)
-        if _is_writer():
+    for index, spec, record in _lockstep(rows, rows[-1] if rows else fresh[0], lambda row: False):
+        mse_row(teacher, teacher.load_row(spec), hooks, candidates, sums if record else {})
+        if record and _is_writer():
             print(f"mse {index + 1}/{len(rows)} {spec.id}", flush=True)
     reduced = {key: {name: _sum_over_sp(value, dist.ReduceOp.SUM).tolist() for name, value in entry.items()}
                for key, entry in sums.items()}

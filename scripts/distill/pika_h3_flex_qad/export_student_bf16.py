@@ -57,11 +57,17 @@ def main() -> None:
             print(key, getattr(student[key], "size", None))
         print(len(student), "student tensors")
         return
+    if not student:
+        raise SystemExit(f"{args.dcp} has no {PREFIX}* tensors; is it a student QAD checkpoint?")
     by_diffusers = {diffusers_name(k): k for k in student}
     base = Path(args.base) / args.trunk
+    index = json.loads((base / "diffusion_pytorch_model.safetensors.index.json").read_text())
+    unmatched = sorted(set(by_diffusers) - set(index["weight_map"]))
+    if unmatched:
+        raise SystemExit(f"{len(unmatched)} student tensors have no {args.trunk} weight in {base}, e.g. "
+                         f"{unmatched[:3]}; check --trunk and --base")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    index = json.loads((base / "diffusion_pytorch_model.safetensors.index.json").read_text())
     shards = sorted(set(index["weight_map"].values()))
     replaced = same = missing = 0
     max_untrained_diff = 0.0
