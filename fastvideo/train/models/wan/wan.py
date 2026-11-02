@@ -77,6 +77,7 @@ class WanModel(ModelBase):
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
+        activation_memory_plan: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             trainable=trainable,
@@ -84,6 +85,9 @@ class WanModel(ModelBase):
             attention_backend=attention_backend,
         )
         self._init_from = str(init_from)
+        self._activation_memory_plan = activation_memory_plan
+        if activation_memory_plan and enable_gradient_checkpointing_type:
+            raise ValueError("A role cannot combine an activation memory plan with a manual checkpointing policy")
 
         # _load_transformer implementations receive the resolved type and do
         # not fall back to training.model themselves.
@@ -139,7 +143,13 @@ class WanModel(ModelBase):
         # Checkpoint the blocks before FSDP wraps them. __init__ already
         # resolved the type against training.model.
         pre_fsdp_transform = None
-        if trainable and enable_gradient_checkpointing_type:
+        if self._activation_memory_plan:
+            from fastvideo.train.utils.activation_memory import apply_activation_memory_plan
+
+            if not trainable:
+                raise ValueError("Activation memory policies apply to trainable roles")
+            pre_fsdp_transform = partial(apply_activation_memory_plan, policies=self._activation_memory_plan)
+        elif trainable and enable_gradient_checkpointing_type:
             pre_fsdp_transform = partial(
                 apply_activation_checkpointing,
                 checkpointing_type=enable_gradient_checkpointing_type,

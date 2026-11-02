@@ -597,6 +597,13 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            activation_memory_budget_gib=get_optional_float(m,
+                                                            "activation_memory_budget_gib",
+                                                            where="training.model.activation_memory_budget_gib"),
+            activation_memory_host_budget_gib=get_optional_float(
+                m, "activation_memory_host_budget_gib", where="training.model.activation_memory_host_budget_gib"),
+            activation_memory_profile=str(m.get("activation_memory_profile", "") or ""),
+            activation_memory_plan_output=str(m.get("activation_memory_plan_output", "") or ""),
             allow_low_precision_master_weights=bool(m.get("allow_low_precision_master_weights", False)),
             minimax_h3_activation_offload_min_tokens=int(m.get("minimax_h3_activation_offload_min_tokens", 0)),
             minimax_h3_student_compile=m.get("minimax_h3_student_compile", "off"),
