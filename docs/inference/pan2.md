@@ -18,12 +18,13 @@ from the `pan2_t2v` and `pan2_i2v` presets:
 |---|---|
 | Resolution | 704x1248 (height and width must be multiples of 32) |
 | Frames | 313, 13 s at 24 fps (`num_frames - 1` must be a multiple of 4) |
-| Steps | 50, uniform sigmas from 1 to 0 with the checkpoint's flow shift (9 for `IFM/PAN2-TEST`, the reference sampler's value) |
+| Steps | 50, uniform sigmas from 1 to 0 with the checkpoint's flow shift (9 for `IFM/PAN2`, the reference sampler's value) |
 | Guidance | 2.5, classifier-free guidance, the reference launcher's default (3 before 2026-10-23). Image-to-video keeps the first latent frame out of guidance (`i2v_skip_first_latent_cfg`, on by default, as in the reference sampler) |
 | Negative prompt | The release's structured negative caption (`negative_prompt.json` of the PAN2 repository) with its three `time_range_sec` values set to the clip length, `0 to 20` for 481 frames at 24 fps, as in the reference sampler. It is used whenever the request's negative prompt is empty; a single space gives the empty unconditional prompt PAN 2 trained with |
 
-PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON. Short raw
-prompts work, with weaker results.
+PAN 2 is trained on the structured captions its prompt rewriter produces, serialized as one-line JSON: the style,
+lighting and camera, each subject, the first frame, and timed events. `basic_pan2.py` runs the release's own
+text-to-video caption, a 10 s clip. Short raw prompts, like the one in the snippet below, work with weaker results.
 
 ## Usage
 
@@ -55,12 +56,12 @@ stored pixels: an EXIF orientation tag does not rotate it.
 ## Guardrails
 
 PAN 2 runs with guardrails by default, as in its vLLM-Omni and Diffusers integrations. The
-[`pan2-guardrail`](https://github.com/MBZUAI-IFM/PAN2-guardrail) package checks every prompt before any compute and every
+[`pan2-guardrail`](https://github.com/ifm-ai/pan2-guardrail) package checks every prompt before any compute and every
 generated video after decoding. A blocked prompt or video raises `PAN2GuardrailViolationError`. Install the package
 before loading the pipeline:
 
 ```bash
-pip install git+https://github.com/MBZUAI-IFM/PAN2-guardrail
+pip install git+https://github.com/ifm-ai/pan2-guardrail
 ```
 
 | Setting | Default | What it does |
@@ -99,7 +100,7 @@ PAN2 sampling turns these on by default (`PAN2PipelineConfig`); pass any of them
 | `vae_decode_kernel_parallel` | With 2, 4 or 8 GPUs, splits that decode over them instead of decoding the whole video on each: a 20 s video takes 3.0 s on one B300, 1.55 s on two, 0.79 s on four and 0.47 s on eight. |
 | `dit_fused_kernels` | Runs the DiT's fused Triton kernels for Q/K RMSNorm + RoPE and LayerNorm + modulation. Their rounding differs slightly from the unfused path. |
 
-On Blackwell GPUs (sm_100 and newer) with FlashAttention-4 (`flash_attn.cute`) installed, PAN2 also attends with FA4 unless `FASTVIDEO_FA4` is set: 288 s instead of 670 s with the Torch SDPA fallback for 241 frames on one B300. Set `FASTVIDEO_FA4=0` to keep the backend FastVideo picks otherwise.
+On Blackwell GPUs (sm_100 and newer) with FlashAttention-4 (`flash_attn.cute`) installed, PAN2 also attends with FA4 unless `FASTVIDEO_FA4` is set: 288 s instead of 670 s with the Torch SDPA fallback for 241 frames on one B300. Set `FASTVIDEO_FA4=0` to keep the backend FastVideo picks otherwise. PAN2 sets the variable only while it loads, but the attention modules keep FA4 for the rest of the process, so a later pipeline in the same process also attends with it.
 
 On GPUs with room for every component (B200, B300), keep the text encoder resident as well:
 `text_encoder_cpu_offload=False`.
@@ -111,9 +112,6 @@ video tokens; each rank still holds the DiT weights. Increasing `num_gpus` alone
 For devices that cannot hold the DiT, see [CPU offloading](offloading.md) for `dit_cpu_offload` and
 `dit_layerwise_offload`. Hardware recipes and timings reported by vLLM-Omni use its own offload implementation;
 they have not been validated for FastVideo.
-
-The full `IFM/PAN2` checkpoint is not public yet. Local parity tests use the public random-weight
-`wuqing157/tiny-pan2-modular-pipe` checkpoint; it verifies the integration and produces noise rather than useful video.
 
 ## Differences from the vLLM-Omni integration
 

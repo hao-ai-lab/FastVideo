@@ -129,7 +129,7 @@ def test_pan2_serving_matches_its_preset_and_runs_image_to_video_from_a_referenc
     for reference in (None, {"image_url": str(image)}):
         request = VideoGenerationRequest(prompt="a red fox", image_reference=reference)
         adapted = build_generation_request(
-            "pan2_test",
+            "pan2_request",
             request,
             _args(config, "t2v"),
             served_model_name=config.server.served_model_name or "",

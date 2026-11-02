@@ -35,8 +35,8 @@ class PAN2PipelineConfig(PipelineConfig):
     # Run the DiT's fused Triton kernels (Q/K RMSNorm + RoPE, LayerNorm + modulation): 21% less denoising time on 8
     # B300s, as far from the eager path's samples as bf16 rounding differences carry them.
     dit_fused_kernels: bool = True
-    # Unset: the checkpoint's scheduler config decides, which is shift 9 for IFM/PAN2-TEST, the reference sampler's
-    # fixed value. A fixed default here would override the released shift with whatever a test checkpoint declares.
+    # Unset: the checkpoint's scheduler config decides, which is shift 9 for IFM/PAN2, the reference sampler's
+    # fixed value. A fixed default here would override the shift the checkpoint declares.
     flow_shift: float | None = None
     # Image-to-video: the first latent frame (the conditioning image) takes the positive prediction instead of the
     # guided one, as the reference sampler does by default (``--i2v_skip_first_latent_cfg``).

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """PAN2 video generation: text-to-video, and image-to-video from a first frame."""
 
+import contextlib
+import importlib
 import sys
 
 import torch
@@ -29,11 +31,11 @@ logger = init_logger(__name__)
 _FA4_READERS = ("fastvideo.attention.utils.flash_attn_default", "fastvideo.attention.utils.flash_attn_no_pad")
 
 
-def default_to_flash_attention_4() -> bool:
-    """Turns FlashAttention-4 on for PAN2 on Blackwell GPUs, where it is about 2.3x faster than the SDPA fallback.
+def flash_attention_4_by_default() -> bool:
+    """Whether PAN2 turns FlashAttention-4 on, which on Blackwell GPUs is about 2.3x faster than the SDPA fallback.
 
     Only when FASTVIDEO_FA4 is unset, the GPU is sm_100 or newer, FA4 imports, and no attention module has read the
-    variable yet. Returns whether FA4 was turned on.
+    variable yet.
     """
     if envs.FASTVIDEO_FA4.is_set() or not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10:
         return False
@@ -46,8 +48,6 @@ def default_to_flash_attention_4() -> bool:
         logger.warning("PAN2 defaults to FlashAttention-4 on this GPU, but attention was set up before the pipeline; "
                        "set FASTVIDEO_FA4=1 to use it.")
         return False
-    envs.FASTVIDEO_FA4.set(True)
-    logger.info("PAN2 uses FlashAttention-4 on this GPU; set FASTVIDEO_FA4=0 to turn it off.")
     return True
 
 
@@ -58,9 +58,19 @@ class PAN2Pipeline(ComposedPipelineBase):
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def __init__(self, *args, **kwargs) -> None:
-        # Before the modules load: the attention backend reads FASTVIDEO_FA4 when it is imported.
-        default_to_flash_attention_4()
-        super().__init__(*args, **kwargs)
+        if not flash_attention_4_by_default():
+            super().__init__(*args, **kwargs)
+            return
+        # FASTVIDEO_FA4 is set only while the pipeline loads: the attention modules read it when they are imported
+        # and keep that choice, so other code in the process does not see the variable. Those modules are shared, so a
+        # later pipeline in the same process still runs the attention they chose.
+        logger.info("PAN2 uses FlashAttention-4 on this GPU; set FASTVIDEO_FA4=0 to turn it off.")
+        with envs.FASTVIDEO_FA4.override(True):
+            for name in _FA4_READERS:
+                # flash_attn_no_pad also needs the flash_attn FA2 package.
+                with contextlib.suppress(ImportError):
+                    importlib.import_module(name)
+            super().__init__(*args, **kwargs)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         pipeline_config = getattr(fastvideo_args, "pipeline_config", None)

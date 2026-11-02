@@ -55,30 +55,41 @@ def blackwell(monkeypatch):
 
 
 def test_pan2_turns_flash_attention_4_on_for_blackwell(blackwell):
-    assert pan2_pipeline.default_to_flash_attention_4() is True
-    assert envs.FASTVIDEO_FA4.get() is True
+    assert pan2_pipeline.flash_attention_4_by_default() is True
+    assert not envs.FASTVIDEO_FA4.is_set()
+
+
+def test_flash_attention_4_is_set_only_while_the_pipeline_loads(blackwell):
+    seen = []
+    blackwell.setattr(pan2_pipeline.importlib, "import_module", lambda name: seen.append((name, envs.FASTVIDEO_FA4.get())))
+    blackwell.setattr(pan2_pipeline.ComposedPipelineBase, "__init__",
+                      lambda self, *args, **kwargs: seen.append(("init", envs.FASTVIDEO_FA4.get())))
+    pan2_pipeline.PAN2Pipeline()
+    # The attention modules are imported, and the pipeline loads, with FA4 on; the variable is unset again after.
+    assert seen == [(name, True) for name in pan2_pipeline._FA4_READERS] + [("init", True)]
+    assert not envs.FASTVIDEO_FA4.is_set()
 
 
 @pytest.mark.parametrize("value", [False, True])
 def test_an_explicit_fastvideo_fa4_is_kept(blackwell, value):
     envs.FASTVIDEO_FA4.set(value)
-    assert pan2_pipeline.default_to_flash_attention_4() is False
+    assert pan2_pipeline.flash_attention_4_by_default() is False
     assert envs.FASTVIDEO_FA4.get() is value
 
 
 def test_hopper_keeps_the_default_backend(blackwell):
     blackwell.setattr(torch.cuda, "get_device_capability", lambda *args: (9, 0))
-    assert pan2_pipeline.default_to_flash_attention_4() is False
+    assert pan2_pipeline.flash_attention_4_by_default() is False
     assert not envs.FASTVIDEO_FA4.is_set()
 
 
 def test_without_fa4_installed_the_default_backend_stays(blackwell):
     blackwell.setitem(sys.modules, "fastvideo.attention.utils.flash_attn_cute", None)
-    assert pan2_pipeline.default_to_flash_attention_4() is False
+    assert pan2_pipeline.flash_attention_4_by_default() is False
     assert not envs.FASTVIDEO_FA4.is_set()
 
 
 def test_attention_set_up_before_the_pipeline_is_not_switched(blackwell):
     blackwell.setitem(sys.modules, pan2_pipeline._FA4_READERS[0], types.ModuleType("already imported"))
-    assert pan2_pipeline.default_to_flash_attention_4() is False
+    assert pan2_pipeline.flash_attention_4_by_default() is False
     assert not envs.FASTVIDEO_FA4.is_set()

@@ -404,7 +404,6 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 video under video_samples_pan2/",
       "limitations": [
-        "The full IFM/PAN2 checkpoint is not public yet; numerical parity is checked with a public random-weight checkpoint.",
         "The example keeps the 29B DiT resident in bf16 and offloads only the text encoder. GPU memory requirements have not been established for this recipe; set PAN2_NUM_GPUS to shard video tokens with sequence parallelism, which does not shard the DiT weights."
       ]
     },
