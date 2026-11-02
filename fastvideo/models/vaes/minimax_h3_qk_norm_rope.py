@@ -9,12 +9,6 @@ One Triton pass per decoder attention layer replaces the eager prologue of
     q = cat([q_rot * cos + rotate_half(q_rot) * sin, q_pass])
     k = cat([k_rot * cos + rotate_half(k_rot) * sin, k_pass])
 
-i.e. two casts, two fp32 RMSNorm kernels, four ``torch.cat`` copies, two negations
-and four mul/add kernels per layer per temporal chunk. The fused kernel reads Q and
-K once, normalizes in fp32, rounds to the activation dtype exactly as the eager path
-does, applies the rotate-half RoPE with the same per-op rounding, and writes the
-result back in place.
-
 The arithmetic is the eager arithmetic (fp32 RMSNorm, RoPE on the activation dtype);
 only the fp32 RMSNorm reduction order differs, because ``tl.sum`` reduces the 64
 per-head values with a different tree than ``at::native`` layer norm.
