@@ -195,6 +195,8 @@ by the bf16 teacher over its six forwards:
 
 1. `collect` (torchrun): forward pre-hooks record each row's per-layer input
    amax, split into target video, target audio and conditioning tokens.
+   `--max-rows` takes the first rows of the plan; leave rows uncollected for
+   `mse`, which stops if every planned row was collected.
 2. `candidates` (CPU): per layer, the max over rows plus clipped alternatives
    (per-row p99/p90, and 0.7/0.5/0.35/0.25 of the max).
 3. `mse` (torchrun): on disjoint rows plus the rows that set the maxima, each
@@ -206,7 +208,7 @@ by the bf16 teacher over its six forwards:
 ```bash
 torchrun --nproc_per_node 4 scripts/distill/pika_h3_flex_qad/calibrate_flex_nvfp4.py collect \
   --config examples/train/configs/knowledge_distillation/pika_h3_flex/ref2va_nvfp4_qad.yaml \
-  --output-dir calib/ref2va --shard $NODE --num-shards $NODES \
+  --output-dir calib/ref2va --shard $NODE --num-shards $NODES --max-rows $COLLECT_ROWS \
   --training.distributed.num_gpus 4 --training.distributed.hsdp_shard_dim 4
 python scripts/distill/pika_h3_flex_qad/calibrate_flex_nvfp4.py candidates --output-dir calib/ref2va
 torchrun --nproc_per_node 4 scripts/distill/pika_h3_flex_qad/calibrate_flex_nvfp4.py mse \
