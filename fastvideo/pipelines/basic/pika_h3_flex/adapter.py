@@ -234,6 +234,33 @@ def load_adapter(source: str | os.PathLike[str], *, task: str, revision: str | N
     )
 
 
+PIKA_MERGED_MARKER = "pika_h3_flex_merged.json"
+
+
+def merged_adapter(model_dir: str | os.PathLike[str], task: str) -> dict[str, Any] | None:
+    """The marker entry when ``model_dir``'s trunk for ``task`` already contains the Pika adapter, else None.
+
+    Exported checkpoints (e.g. NVFP4 QAD releases) merge the adapter into the trunk before quantizing it, so
+    applying the released adapter again would adapt the model twice. Such a checkpoint ships
+    ``pika_h3_flex_merged.json``: ``{"format_version": 1, "merged": {"<task>": {"trunk": ..., "release_id": ...,
+    "adapter_sha256": ...}}}``. A marker that does not cover ``task`` is an error: that trunk is absent or unadapted.
+    """
+    path = Path(model_dir) / PIKA_MERGED_MARKER
+    if not path.is_file():
+        return None
+    marker = _load_manifest(path)
+    if _as_int(marker.get("format_version"), "format_version") != PIKA_ADAPTER_FORMAT_VERSION:
+        raise PikaAdapterError(f"Unsupported {PIKA_MERGED_MARKER} format {marker.get('format_version')!r}.")
+    merged = marker.get("merged")
+    if not isinstance(merged, Mapping) or task not in merged:
+        raise PikaAdapterError(f"{str(path)!r} declares merged Pika adapters for {sorted(merged or {})}, not "
+                               f"{task!r}; this checkpoint does not carry the {task} model.")
+    entry = merged[task]
+    if not isinstance(entry, Mapping) or entry.get("trunk") != expected_trunk(task):
+        raise PikaAdapterError(f"{str(path)!r}: the merged {task} adapter must sit on trunk {expected_trunk(task)!r}.")
+    return dict(entry)
+
+
 def adapter_hf_patterns(task: str | None = None) -> list[str]:
     """The adapter files the pipeline must include in a partial Hub snapshot."""
     tasks = tuple(TASK_TO_TRUNK) if task is None else (task, )
@@ -251,6 +278,7 @@ __all__ = [
     "PIKA_ADAPTER_RANK",
     "PIKA_BASE_REPO",
     "PIKA_MANIFEST_FILENAME",
+    "PIKA_MERGED_MARKER",
     "PIKA_SAMPLING_CONTRACT",
     "PIKA_TARGET_MODULES",
     "PikaAdapter",
@@ -259,6 +287,7 @@ __all__ = [
     "adapter_hf_patterns",
     "expected_trunk",
     "load_adapter",
+    "merged_adapter",
     "task_for_pipeline",
     "validate_adapter_manifest",
 ]
