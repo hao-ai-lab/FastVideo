@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import pytest
+import fastvideo.envs as envs
 import torch
 from torch.testing import assert_close
 
@@ -124,7 +125,7 @@ def test_decode_to_pixels_uint8_matches_fp32_quantization(device: str) -> None:
 
 
 @torch.inference_mode()
-def test_batched_tile_encode_matches_per_tile(monkeypatch) -> None:
+def test_batched_tile_encode_matches_per_tile(monkeypatch, env_overrides) -> None:
     torch.manual_seed(20260810)
     vae = _tiny_vae()
     vae.enable_tiling(tile_sample_min_height=16,
@@ -133,9 +134,9 @@ def test_batched_tile_encode_matches_per_tile(monkeypatch) -> None:
                       tile_sample_min_overlap_width=8)
     pixels = torch.rand(1, 3, 1, 32, 32)
 
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.override(1))
     per_tile = vae.encode(vae.normalize_pixels(pixels)).latent_dist.parameters
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH", "8")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.override(8))
     batched = vae.encode(vae.normalize_pixels(pixels)).latent_dist.parameters
 
     assert_close(batched, per_tile, atol=1e-5, rtol=1e-5)

@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import copy
 import gc
 import json
 import math
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -655,16 +653,14 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             self._restore_denoise_modules(fastvideo_args)
         if not self._denoise_stages_ready:
             self._add_denoise_stages(ref2va=self._ref2va)
-        return self._run_stage_sequence(
-            (
+        for name in (
                 "latent_preparation_stage",
                 "denoising_stage",
                 "video_decoding_stage",
                 "audio_decoding_stage",
-            ),
-            batch,
-            fastvideo_args,
-        )
+        ):
+            batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        return batch
 
     def _input_video_geometry(self, fastvideo_args: FastVideoArgs) -> Any:
         """Read canvas scalars from checkpoint JSON, not a live VAE proxy."""
@@ -764,53 +760,6 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if self._denoise_modules_loaded():
             self._add_denoise_stages(ref2va=ref2va)
 
-    def _run_stage_sequence(self, names: tuple[str, ...], batch: ForwardBatch,
-                            fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        """Run named stages in order; with ``FASTVIDEO_H3_OVERLAP_AUDIO_DECODE`` on CUDA, decode audio on a side
-        stream while the video VAE decodes."""
-        stages = [self._stage_name_mapping[name] for name in names]
-        audio_stage = next((stage for stage in stages if isinstance(stage, MiniMaxH3AudioDecodingStage)), None)
-        video_stage = next((stage for stage in stages if isinstance(stage, MiniMaxH3VideoDecodingStage)), None)
-        if (not envs.FASTVIDEO_H3_OVERLAP_AUDIO_DECODE.get() or not torch.cuda.is_available() or audio_stage is None
-                or video_stage is None or stages.index(audio_stage) < stages.index(video_stage)):
-            for stage in stages:
-                batch = stage(batch, fastvideo_args)
-            return batch
-
-        box: dict[str, Any] = {}
-        stream = torch.cuda.Stream(device=torch.cuda.current_device())
-
-        def run_audio() -> None:
-            local = copy.copy(batch)
-            local.extra = dict(batch.extra)
-            try:
-                with torch.cuda.stream(stream):
-                    local = audio_stage.forward(local, fastvideo_args)
-                    stream.synchronize()
-                box["audio"] = local.extra.get("audio")
-                box["audio_sample_rate"] = local.extra.get("audio_sample_rate")
-            except BaseException as error:  # noqa: BLE001 - re-raised on the main thread
-                box["error"] = error
-
-        thread: threading.Thread | None = None
-        for stage in stages:
-            if stage is audio_stage:
-                continue
-            if stage is video_stage:
-                thread = threading.Thread(target=run_audio, name="minimax-h3-audio-decode", daemon=True)
-                thread.start()
-            batch = stage(batch, fastvideo_args)
-        if thread is not None:
-            thread.join()
-            if "error" in box:
-                raise box["error"]
-            batch.extra["audio"] = box.get("audio")
-            batch.extra["audio_sample_rate"] = box.get("audio_sample_rate")
-            # forward() bypassed PipelineStage.__call__, which normally releases these.
-            audio_stage._release_deferred_modules(f"{getattr(audio_stage, '_pipeline_stage_name', 'audio')}|"
-                                                  f"{type(audio_stage).__name__}")
-        return batch
-
     def _forward_encoder_split(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         encoder_worker = h3_is_encoder_worker(fastvideo_args)
         batch = self._stage_name_mapping["input_preparation_stage"](batch, fastvideo_args)
@@ -834,16 +783,14 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             # gigabytes for a response the executor never reads.
             return ForwardBatch(data_type=batch.data_type)
         h3_receive_condition(batch, fastvideo_args)
-        return self._run_stage_sequence(
-            (
+        for name in (
                 "latent_preparation_stage",
                 "denoising_stage",
                 "video_decoding_stage",
                 "audio_decoding_stage",
-            ),
-            batch,
-            fastvideo_args,
-        )
+        ):
+            batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        return batch
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if not self.post_init_called:
@@ -873,13 +820,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             except BaseException:
                 self._release_all_lazy_modules()
                 raise
-        if not envs.FASTVIDEO_H3_OVERLAP_AUDIO_DECODE.get():
-            return super().forward(batch, fastvideo_args)
-        try:
-            return self._run_stage_sequence(tuple(self._stage_name_mapping), batch, fastvideo_args)
-        except BaseException:
-            self._release_all_lazy_modules()
-            raise
+        return super().forward(batch, fastvideo_args)
 
 
 class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):

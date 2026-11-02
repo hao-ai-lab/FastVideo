@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import fastvideo.envs as envs
 import torch
 
 from fastvideo.pipelines.basic.minimax_h3 import encoder_split
@@ -74,8 +75,8 @@ def test_reference_video_encode_keeps_pixels_on_cpu() -> None:
     assert rows[0].shape == (7 * 4 * 4, 4)
 
 
-def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", "0")
+def test_decode_stage_uses_cpu_output_buffer(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(False))
     latent_shape = (1, 4, 2, 4, 4)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
@@ -129,8 +130,8 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
     assert torch.equal(result.output, expected)
 
 
-def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", "0")
+def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(False))
     latent_shape = (1, 4, 2, 4, 4)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
@@ -179,7 +180,7 @@ def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
     }
 
 
-def test_decode_stage_streams_uint8_by_default(monkeypatch) -> None:
+def test_decode_stage_streams_uint8_by_default(monkeypatch, env_overrides) -> None:
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
@@ -201,7 +202,7 @@ def test_decode_stage_streams_uint8_by_default(monkeypatch) -> None:
             observed["dtype"] = output.dtype
             output.fill_(63)
 
-    monkeypatch.delenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", raising=False)
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(None))
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     result = MiniMaxH3VideoDecodingStage(VAE()).forward(
         batch,
@@ -221,10 +222,10 @@ def test_decode_stage_streams_uint8_by_default(monkeypatch) -> None:
 @pytest.mark.parametrize("uint8_pixels", [False, True])
 @pytest.mark.parametrize("unified_memory", [True, False])
 def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory,
-                                                                     uint8_pixels) -> None:
+                                                                     uint8_pixels, env_overrides) -> None:
     """On unified memory, same-geometry requests reuse one pre-touched CPU buffer; returned
     frames never alias it. Discrete GPUs allocate per request and hold nothing between them."""
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_UINT8_PIXELS", "1" if uint8_pixels else "0")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(uint8_pixels))
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     allocations = []

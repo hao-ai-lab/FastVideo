@@ -941,9 +941,6 @@ class VideoGenerator:
         # *do* ask for the latent samples via ``return_frames=True``.
         # ``skip_pixel_prealloc`` also gates the slow-path warning.
         needs_samples_out = batch.return_frames or batch.return_samples
-        if (needs_samples_out and not batch.return_samples and not is_latent_output
-                and envs.FASTVIDEO_H3_SKIP_FP32_SAMPLES_MIRROR.get()):
-            needs_samples_out = False
         # ``output_shape_from_input`` pipelines (Kandinsky6 SR) decide the output geometry from the input video, so the
         # request's height / width / num_frames say nothing about the buffer to pre-allocate.
         output_shape_from_input = bool(getattr(fastvideo_args.pipeline_config, "output_shape_from_input", False))

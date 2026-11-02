@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+import fastvideo.envs as envs
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -551,9 +552,9 @@ def test_decoder_forward_uses_the_compiled_block_region() -> None:
     assert torch.equal(actual, expected)
 
 
-def test_regional_block_compile_flag_installs_on_construction(monkeypatch) -> None:
+def test_regional_block_compile_flag_installs_on_construction(monkeypatch, env_overrides) -> None:
     """The env flag is read when the decoder is built, like the other VAE load-time knobs."""
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_COMPILE_BLOCKS", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_COMPILE_BLOCKS.override(True))
     compiled_block = Mock(name="compiled_block")
     with patch("fastvideo.models.vaes.minimax_h3_video.torch.compile", return_value=compiled_block) as compile_mock:
         decoder = _tiny_h3_decoder()
