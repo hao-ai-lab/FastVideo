@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
+import type { MemoryAssessment } from "@/lib/capacity";
 
 export type Validity = "valid" | "invalid" | "loading";
 export type Fit = "fits" | "tight" | "exceeds" | "unsupported" | "unknown";
-export type Evidence = "recorded" | "none" | "stale";
 
 const validityLabel: Record<Validity, string> = {
   valid: "Configuration valid",
@@ -12,48 +12,51 @@ const validityLabel: Record<Validity, string> = {
 const fitLabel: Record<Fit, string> = {
   fits: "Fits estimate",
   tight: "Tight fit",
-  exceeds: "Likely exceeds memory",
-  unsupported: "Unsupported combination",
-  unknown: "Fit unknown",
+  exceeds: "Exceeds memory",
+  unsupported: "Unsupported",
+  unknown: "Memory not estimated",
 };
-const evidenceLabel: Record<Evidence, string> = {
-  recorded: "Run evidence available",
-  none: "No recorded run",
-  stale: "Run evidence does not match these settings",
+const weightsLabel: Record<Fit, string> = {
+  fits: "Weights fit",
+  tight: "Weights fit, little headroom",
+  exceeds: "Weights exceed memory",
+  unsupported: "Weights unsupported",
+  unknown: "Weights not estimated",
 };
 
 /**
- * Three separate facts: the recipe schema accepts the values, a memory estimate
- * covers the configuration, and a recorded run matches it. No positive claim is
- * made until the shared API supplies the corresponding fact.
+ * Two facts, each with its own evidence: the recipe schema accepts the values,
+ * and the analytical estimate covers the selected device. Neither is a promise
+ * that the recipe runs.
  */
 export default function RecipeFacts({
   validity,
-  fit = "unknown",
-  evidence = "none",
+  memory,
   subject = "configuration",
-  detail,
   validityText,
   validityDetail,
+  detail,
 }: {
   validity: Validity;
-  fit?: Fit;
-  evidence?: Evidence;
+  memory?: MemoryAssessment;
   subject?: "configuration" | "example";
-  detail?: string;
   validityText?: string;
   validityDetail?: string;
+  detail?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const id = `recipe-facts-${validity}-${fit}-${evidence}`;
+  const id = useId();
+  const fit: Fit = memory?.status ?? "unknown";
+  const estimated = fit === "fits" || fit === "tight" || fit === "exceeds";
+  const weightsBasis = memory?.basis === "weights";
+  const label = weightsBasis ? weightsLabel[fit] : fitLabel[fit];
   return (
     <div className="recipe-facts">
-      <div className="recipe-fact-list" aria-label="Recipe facts">
+      <div className="recipe-fact-list" aria-label="Recipe checks">
         <span data-state={validity}>
           {validity === "valid" ? (validityText ?? `Valid ${subject}`) : validityLabel[validity]}
         </span>
-        <span data-state={fit}>{fitLabel[fit]}</span>
-        <span data-state={evidence}>{evidenceLabel[evidence]}</span>
+        <span data-state={fit}>{label}</span>
       </div>
       <button
         type="button"
@@ -70,24 +73,19 @@ export default function RecipeFacts({
             <strong>{validityLabel[validity]}.</strong>{" "}
             {validityDetail ??
               (validity === "valid"
-                ? "Selected values pass the recipe schema and runtime topology checks."
+                ? "These values pass the recipe schema and runtime topology checks."
                 : validity === "invalid"
-                  ? "Output is withheld until the highlighted fields are corrected."
+                  ? "Output is hidden until the highlighted fields are fixed."
                   : "Values are still being checked.")}
           </p>
           <p>
-            <strong>{fitLabel[fit]}.</strong>{" "}
-            {fit === "unknown"
-              ? "No memory estimate covers this deployment, device, and request yet. This is not a fit claim."
-              : "The shared capacity API supplied this estimate; it is not a measured guarantee."}
-          </p>
-          <p>
-            <strong>{evidenceLabel[evidence]}.</strong>{" "}
-            {evidence === "none"
-              ? "Successful runs on other checkpoints, settings, software revisions, or GPU layouts do not establish this configuration."
-              : evidence === "stale"
-                ? "A recorded run exists, but edited settings fall outside what it covers."
-                : "A recorded run matches the deployment and settings shown."}
+            <strong>{label}.</strong>{" "}
+            {weightsBasis
+              ? `${memory?.reason ?? ""} Resident weights need ${memory?.requiredGiB?.toFixed(1)} GiB of ${memory?.capacityGiB?.toFixed(1)} GiB available.`
+              : estimated
+                ? `The analytical estimate needs ${memory?.requiredGiB?.toFixed(1)} GiB of ${memory?.capacityGiB?.toFixed(1)} GiB available. It models weights, encoders, and the configured workload. It is not a measured guarantee.`
+                : (memory?.reason ??
+                  "FastVideo has no capacity model for this checkpoint, so it does not estimate memory use here.")}
           </p>
           {detail && <p>{detail}</p>}
         </div>

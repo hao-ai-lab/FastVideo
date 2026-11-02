@@ -85,10 +85,10 @@ from fastvideo_kernel import video_sparse_attn
 # topk: Number of blocks to attend
 
 output = video_sparse_attn(
-    q, k, v, 
-    block_sizes,
-    block_sizes,
-    topk=32
+    q, k, v,
+    variable_block_sizes,
+    q_variable_block_sizes,
+    topk=32,
 )
 ```
 

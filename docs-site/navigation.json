@@ -142,20 +142,16 @@
         "href": "/cookbook"
       },
       {
-        "label": "H3 server and playground",
-        "href": "/cookbook/openai-api"
-      },
-      {
         "label": "MiniMax H3",
         "display": "group",
-        "collapsed": false,
+        "collapsed": true,
         "items": [
           {
             "label": "MiniMax H3",
             "href": "/cookbook/minimax-h3/models/minimax-h3-t2v"
           },
           {
-            "label": "FastH3 OmniRef",
+            "label": "FastH3 Omni v1",
             "href": "/cookbook/minimax-h3/fasth3-omniref"
           },
           {
@@ -165,10 +161,6 @@
           {
             "label": "FastH3 Trim",
             "href": "/cookbook/minimax-h3/fasth3-trim"
-          },
-          {
-            "label": "FastH3 Preview V0.2",
-            "href": "/cookbook/minimax-h3/fasth3-preview"
           },
           {
             "label": "FastH3 4-Step V1",
@@ -187,7 +179,7 @@
       {
         "label": "Wan",
         "display": "group",
-        "collapsed": false,
+        "collapsed": true,
         "items": [
           {
             "label": "FastWan2.1 1.3B",
