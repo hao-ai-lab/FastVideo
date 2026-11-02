@@ -878,9 +878,7 @@ function configurableModes(index: Index | undefined, modelId: string): string[] 
   if (!deployments?.length) return undefined;
   const servingOnly = (deployment: { runtime: string; workload: string }) =>
     deployment.runtime.includes("mlx") || deployment.runtime.includes("streaming") || deployment.workload === "v2v";
-  return deployments.some((deployment) => !servingOnly(deployment))
-    ? ["Python SDK", "CLI", "Serving"]
-    : ["Serving"];
+  return deployments.some((deployment) => !servingOnly(deployment)) ? ["Python SDK", "CLI", "Serving"] : ["Serving"];
 }
 
 /** Mirrors the source recipe page: Python SDK and CLI always, serving when a recipe declares it. */
