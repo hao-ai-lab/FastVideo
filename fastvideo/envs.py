@@ -222,6 +222,15 @@ def unset_external(name: str) -> None:
     os.environ.pop(name, None)
 
 
+def external_with_prefixes(*prefixes: str) -> dict[str, str]:
+    """Return the variables outside the registry whose names start with one of ``prefixes``.
+
+    For tools that read an open-ended family of variables, such as FA4's ``FA4_*`` tuning knobs. The contract test
+    checks each prefix against its read allowlist.
+    """
+    return {name: value for name, value in os.environ.items() if name.startswith(prefixes)}
+
+
 @contextmanager
 def override_external(name: str, value: str | None) -> Iterator[None]:
     """Set, or unset when ``value`` is None, a variable outside the registry, and restore it on exit.

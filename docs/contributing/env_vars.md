@@ -13,7 +13,9 @@ test in the same pull request.
    them directly with `os.environ.get("NAME")`, and the name must be in the external-variable allowlist
    (`EXTERNAL_ALLOWLIST` in the contract test). When FastVideo sets such a variable for the other tool, it calls
    `envs.set_external`, `envs.setdefault_external`, or `envs.unset_external`, and the name must be in
-   `EXTERNAL_WRITE_ALLOWLIST`. Variables that FastVideo's CI and CI tooling define (for example `TEST_SCOPE` and
+   `EXTERNAL_WRITE_ALLOWLIST`. Code that needs every variable of a family that another tool owns, such as FA4's
+   `FA4_*` tuning knobs, calls `envs.external_with_prefixes("FA4_")` with literal prefixes that the allowlist
+   covers. Variables that FastVideo's CI and CI tooling define (for example `TEST_SCOPE` and
    `PERF_RUN_SOURCE`) keep their names, and test code under `fastvideo/tests/` reads them directly; they are listed
    in `CI_ONLY_VARIABLES` in the contract test, together with the file that sets each one.
 2. **Read with `envs.NAME.get()`, write with `envs.NAME.set()`, and change a value in tests with
