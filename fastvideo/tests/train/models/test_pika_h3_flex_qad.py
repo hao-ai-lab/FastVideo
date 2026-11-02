@@ -410,6 +410,15 @@ def test_calibration_candidates_and_outliers():
     assert set(calibrate.outlier_row_ids(rows, 2)) == {"r1", "r100"}
 
 
+
+def test_calibration_candidates_accept_a_single_row(tmp_path):
+    import argparse
+    calibrate = _calibrate_module()
+    row = {"id": "r1", "amax": {"b0.ff.fc_in": [2.0, 1.0, 3.0]}}
+    (tmp_path / "collect-shard0-dp0.jsonl").write_text(json.dumps(row) + "\n")
+    calibrate.run_candidates(argparse.Namespace(output_dir=str(tmp_path), outlier_rows=8))
+    assert json.loads((tmp_path / "amax-max.json").read_text()) == {"b0.ff.fc_in": 2.0}
+
 def test_calibration_choice_all_tokens_or_balanced():
     calibrate = _calibrate_module()
     candidates = {"b0.ff.fc_in": {"max": 10.0, "0.5x_max": 5.0}}
@@ -487,6 +496,18 @@ def test_builder_plan_retiers_only_480p_and_keeps_ids():
     assert len(specs) == 1 and specs[0]["id"] == first["id"] and specs[0]["case"] == "first_frame"
     assert specs[0]["references"] == [{"kind": "stored", "parquet": "a.pq", "index": 0, "audio": True}]
 
+
+
+def test_builder_plan_keeps_held_out_siblings_out_of_references():
+    builder = _builder_module()
+    counts = {"sb.pq": 3, "ok.pq": 9, "held.pq": 9}
+    board = _entry("storyboard", f"{_ASSET_A}_f1_x", "sb.pq")
+    allowed = _entry("first_frame", f"{_ASSET_A}_f2_x", "ok.pq")
+    held_out = _entry("first_frame", f"{_ASSET_A}_f9_x", "held.pq")
+    src_rows = {(entry["id"], "480p"): entry for entry in (board, allowed, held_out)}
+    specs = builder.plan_rows(src_rows, set(), {"480p": 1}, 0, {f"{_ASSET_A}_f9_x"}, counts.get)
+    assert any(row["case"] == "many_images" for row in specs)
+    assert all(ref.get("parquet") != "held.pq" for row in specs for ref in row["references"])
 
 def test_fl2va_prompt_keeps_the_description_and_defines_the_keyframes():
     builder = _builder_module()
