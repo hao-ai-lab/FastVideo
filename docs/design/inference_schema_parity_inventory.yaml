@@ -88,7 +88,7 @@ surfaces:
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
-      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; model-specific optimization not yet represented in the typed public schema."
+      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; represented as ComponentConfig.h3_vae_nvfp4_decoder."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
@@ -452,6 +452,9 @@ surfaces:
       kv_cache_device:
         target: generator.pipeline.experimental.kv_cache_device
         sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      pika_resolution_tier:
+        target: generator.pipeline.experimental.pika_resolution_tier
+        sources: [fastvideo.configs.pipelines.pika_h3_flex.PikaH3FlexPipelineConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -465,6 +468,7 @@ surfaces:
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
       pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      pika_denoising_steps: "Pika H3 Flex six-forward re-noise ladder fixed by the adapter contract; check_pipeline_config rejects any other value."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."

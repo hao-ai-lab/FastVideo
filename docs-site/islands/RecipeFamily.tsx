@@ -6,7 +6,7 @@ export default function RecipeFamily({ family }: { family: string }) {
     (model) =>
       !model.hidden &&
       (model.recipes.some((recipe) => recipe.family === family) ||
-        (family === "minimax_h3" && model.family === "FastH3")),
+        (family === "minimax_h3" && (model.family === "FastH3" || model.familyPath === "/cookbook/minimax-h3"))),
   );
   return (
     <div className="recipe-directory not-prose">
