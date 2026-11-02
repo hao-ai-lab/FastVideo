@@ -7,7 +7,16 @@ import asyncio
 import math
 import os
 from typing import Any
+from urllib.parse import urlparse
 
+from fastvideo.entrypoints.openai.media_policy import (
+    MediaPolicy,
+    MediaPolicyError,
+    discard,
+    fetch_media,
+    resolve_local_media,
+)
+from fastvideo.entrypoints.openai.state import get_media_policy, get_media_reference_max_bytes
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     explicit_request_updates,
@@ -19,9 +28,10 @@ from fastvideo.entrypoints.openai.protocol import (
     FileImageReference,
     FileVideoReference,
     UrlImageReference,
+    UrlVideoReference,
     VideoGenerationRequest,
 )
-from fastvideo.entrypoints.openai.utils import save_image_to_path
+from fastvideo.entrypoints.openai.utils import image_suffix, save_base64_image_to_path
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vision_utils import load_image
 from fastvideo.registry import get_preset_selection
@@ -29,6 +39,13 @@ from fastvideo.registry import get_preset_selection
 
 class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
+
+
+OPEN_H3_REGENERATE_2K_FAMILY = "open_h3_regenerate_2k"
+OPEN_H3_REGENERATE_2K_SIZE = (2560, 1440)
+OPEN_H3_REGENERATE_2K_NUM_FRAMES = 124
+
+_VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"})
 
 
 def _as_list(value: Any | list[Any] | None) -> list[Any]:
@@ -54,50 +71,158 @@ def _image_sources(request: VideoGenerationRequest) -> list[str]:
     return sources
 
 
+def discard_materialized_media(paths: list[str]) -> None:
+    for path in paths:
+        discard(path)
+
+
+async def _download_media(source: str,
+                          target: str,
+                          *,
+                          max_bytes: int | None = None,
+                          policy: MediaPolicy | None = None) -> None:
+    try:
+        await fetch_media(source,
+                          target,
+                          max_bytes=get_media_reference_max_bytes() if max_bytes is None else max_bytes,
+                          policy=get_media_policy() if policy is None else policy)
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
+
+
+def _local_media(source: str, policy: MediaPolicy) -> str:
+    try:
+        return resolve_local_media(source, policy)
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
+
+
+async def _materialize_video(source: str,
+                             target_base: str,
+                             *,
+                             max_bytes: int | None = None,
+                             policy: MediaPolicy | None = None) -> str:
+    policy = get_media_policy() if policy is None else policy
+    source = source.strip()
+    if not source:
+        raise RequestAdaptationError("Video references must not be empty.")
+    if source.lower().startswith(("http://", "https://")):
+        suffix = os.path.splitext(urlparse(source).path)[1].lower()
+        if suffix not in _VIDEO_SUFFIXES:
+            suffix = ".mp4"
+        target = f"{target_base}{suffix}"
+        try:
+            await _download_media(source, target, max_bytes=max_bytes, policy=policy)
+        except RequestAdaptationError:
+            raise
+        except Exception as error:
+            raise RequestAdaptationError(f"Unable to fetch video reference: {error}") from error
+        return target
+    if source.lower().startswith("data:"):
+        raise RequestAdaptationError("Data video references are not supported; provide a URL or local path.")
+    return _local_media(source, policy)
+
+
+async def _materialize_image_url(source: str, target_base: str, *, max_bytes: int | None, policy: MediaPolicy) -> str:
+    target = f"{target_base}{image_suffix(source)}"
+    try:
+        await _download_media(source, target, max_bytes=max_bytes, policy=policy)
+    except RequestAdaptationError:
+        raise
+    except Exception as error:
+        raise RequestAdaptationError(f"Unable to fetch image reference: {error}") from error
+    return target
+
+
 async def prepare_reference_media(
     request_id: str,
     request: VideoGenerationRequest,
     output_dir: str,
-) -> None:
-    """Materialize and decode image references before a job reaches workers."""
+    *,
+    max_bytes: int | None = None,
+    policy: MediaPolicy | None = None,
+) -> list[str]:
+    """Materialize media references and return the files created for this request."""
+    policy = get_media_policy() if policy is None else policy
     _image_sources(request)
+    _video_sources(request)
     uploads_dir = os.path.join(os.path.abspath(output_dir), "uploads")
+    created: list[str] = []
+
+    def track(path: str) -> str:
+        if path not in created:
+            created.append(path)
+        return path
+
+    def is_remote(source: str) -> bool:
+        return source.lower().startswith(("http://", "https://", "data:image"))
 
     async def materialize(source: str, index: int) -> str:
         source = source.strip()
         if not source:
             raise RequestAdaptationError("Image references must not be empty.")
-        if source.lower().startswith(("http://", "https://", "data:image")):
-            target = os.path.join(uploads_dir, f"{request_id}_{index}")
+        target = os.path.join(uploads_dir, f"{request_id}_{index}")
+        if source.startswith("data:image"):
             try:
-                local_path = await save_image_to_path(source, target)
+                local_path = track(await save_base64_image_to_path(source, target))
             except Exception as error:
-                raise RequestAdaptationError(f"Unable to fetch image reference: {error}") from error
+                raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
+        elif is_remote(source):
+            local_path = track(await _materialize_image_url(source, target, max_bytes=max_bytes, policy=policy))
         else:
-            local_path = os.path.abspath(os.path.expanduser(source))
-            if not os.path.isfile(local_path):
-                raise RequestAdaptationError(f"Image reference does not exist: {source}")
+            local_path = _local_media(source, policy)
         try:
             await asyncio.to_thread(load_image, local_path)
         except Exception as error:
             raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
         return local_path
 
-    index = 0
-    references = _as_list(request.image_reference)
-    for reference in references:
-        if isinstance(reference, UrlImageReference):
-            reference.image_url = await materialize(reference.image_url, index)
+    try:
+        index = 0
+        for reference in _as_list(request.image_reference):
+            if isinstance(reference, UrlImageReference):
+                reference.image_url = await materialize(reference.image_url, index)
+                index += 1
+        if request.input_reference:
+            request.input_reference = await materialize(request.input_reference, index)
             index += 1
-    if request.input_reference:
-        request.input_reference = await materialize(request.input_reference, index)
-        index += 1
-    elif request.input_reference == "":
-        request.input_reference = None
-    if request.reference_url:
-        request.reference_url = await materialize(request.reference_url, index)
-    elif request.reference_url == "":
-        request.reference_url = None
+        elif request.input_reference == "":
+            request.input_reference = None
+        if request.reference_url:
+            request.reference_url = await materialize(request.reference_url, index)
+        elif request.reference_url == "":
+            request.reference_url = None
+
+        for index, reference in enumerate(_as_list(request.video_reference)):
+            if isinstance(reference, UrlVideoReference):
+                remote = is_remote(reference.video_url)
+                reference.video_url = await _materialize_video(reference.video_url,
+                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"),
+                                                               max_bytes=max_bytes,
+                                                               policy=policy)
+                if remote:
+                    track(reference.video_url)
+        if request.video_path:
+            remote = is_remote(request.video_path)
+            request.video_path = await _materialize_video(request.video_path,
+                                                          os.path.join(uploads_dir, f"{request_id}_video_path"),
+                                                          max_bytes=max_bytes,
+                                                          policy=policy)
+            if remote:
+                track(request.video_path)
+        if request.video_url:
+            remote = is_remote(request.video_url)
+            request.video_url = await _materialize_video(request.video_url,
+                                                         os.path.join(uploads_dir, f"{request_id}_video_url"),
+                                                         max_bytes=max_bytes,
+                                                         policy=policy)
+            if remote:
+                track(request.video_url)
+    except BaseException:
+        # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
+        discard_materialized_media(created)
+        raise
+    return created
 
 
 def _video_sources(request: VideoGenerationRequest) -> list[str]:
@@ -260,6 +385,13 @@ def _apply_reference_inputs(
     if request.task is not None and model_family != "minimax_h3":
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
 
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if len(videos) != 1 or images or audios:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K takes exactly one video_reference (the 768P draft) "
+                                         "and no image or audio references.")
+        kwargs["video_path"] = videos[0]
+        return
+
     if model_family == "minimax_h3" and (videos or audios):
         raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
                                      "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
@@ -288,6 +420,9 @@ def build_generation_request(
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
     validate_model_and_lora(request, args, served_model_name)
+    workload_type = getattr(args, "workload_type", "")
+    workload_value = str(getattr(workload_type, "value", workload_type) or "")
+    is_audio = workload_value.endswith("2a")
     kwargs: dict[str, Any] = {}
     if default_request is not None:
         kwargs.update(explicit_request_updates(default_request))
@@ -323,7 +458,7 @@ def build_generation_request(
         num_frames = request.num_frames if "num_frames" in body_set else request.video_params.num_frames
         if num_frames is not None:
             kwargs["num_frames"] = num_frames
-    elif "seconds" in body_set and request.seconds is not None:
+    elif not is_audio and "seconds" in body_set and request.seconds is not None:
         kwargs["num_frames"] = int(request.seconds) * int(kwargs["fps"])
 
     direct_fields = (
@@ -336,12 +471,25 @@ def build_generation_request(
         "enable_teacache",
         "max_sequence_length",
         "boundary_ratio",
+        "audio_start_in_s",
+        "audio_end_in_s",
     )
     for name in direct_fields:
         if name in body_set:
             value = getattr(request, name)
             if value is not None:
                 kwargs[name] = value
+    if is_audio and "seconds" in body_set and request.seconds is not None and "audio_end_in_s" not in body_set:
+        start = float(kwargs.get("audio_start_in_s") or 0.0)
+        kwargs["audio_start_in_s"] = start
+        kwargs["audio_end_in_s"] = start + float(int(request.seconds))
+    if is_audio:
+        if {"size", "width", "height", "video_params"} & body_set:
+            raise RequestAdaptationError("Audio generation does not accept size, width, height, or video_params.")
+        start = float(kwargs.get("audio_start_in_s") or 0.0)
+        end = kwargs.get("audio_end_in_s")
+        if end is not None and float(end) <= start:
+            raise RequestAdaptationError(f"audio_end_in_s ({end}) must be greater than audio_start_in_s ({start}).")
     if "n" in body_set or "num_outputs_per_prompt" in body_set:
         kwargs["num_videos_per_prompt"] = request.resolved_num_outputs
 
@@ -355,6 +503,8 @@ def build_generation_request(
         raise RequestAdaptationError("short_edge requires aspect_ratio.")
     _apply_aspect_ratio(kwargs, request, model_family=model_family)
     _apply_reference_inputs(kwargs, request, args, model_family=model_family)
+    if model_family == "mmaudio" and not workload_value.endswith("t2a") and not kwargs.get("video_path"):
+        raise RequestAdaptationError("MMAudio video-to-audio generation requires video_reference or video_path.")
 
     extension_fields = ("flow_shift", "sound_duration", "start_time_seconds")
     for name in extension_fields:
@@ -382,6 +532,16 @@ def build_generation_request(
         raise RequestAdaptationError(f"width must be a positive integer, got {width!r}")
     if height is not None and (not isinstance(height, int) or height <= 0):
         raise RequestAdaptationError(f"height must be a positive integer, got {height!r}")
+
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if (width, height) not in ((None, None), OPEN_H3_REGENERATE_2K_SIZE):
+            raise RequestAdaptationError("Open-H3-Regenerate-2K always renders 2560x1440; omit size/width/height "
+                                         f"or pass 2560x1440, got {width}x{height}.")
+        if kwargs.get("num_frames", OPEN_H3_REGENERATE_2K_NUM_FRAMES) != OPEN_H3_REGENERATE_2K_NUM_FRAMES:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K regenerates the draft's first 121 frames (24 fps); "
+                                         "omit seconds and num_frames.")
+        if kwargs["fps"] != 24:
+            raise RequestAdaptationError(f"Open-H3-Regenerate-2K requires fps=24, got {kwargs['fps']}.")
 
     if model_family == "minimax_h3":
         from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -411,7 +571,9 @@ def build_generation_request(
                                          f"got {requested_num_frames}, next valid value is {aligned_num_frames}.")
         kwargs["num_frames"] = aligned_num_frames
 
-    output_path = os.path.join(os.path.abspath(output_dir), "videos", f"{request_id}.mp4")
+    media_dir = "audio" if is_audio else "videos"
+    extension = ".wav" if is_audio else ".mp4"
+    output_path = os.path.join(os.path.abspath(output_dir), media_dir, f"{request_id}{extension}")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     kwargs.update({
         "output_path": output_path,

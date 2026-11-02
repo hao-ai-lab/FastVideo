@@ -113,7 +113,7 @@ this hardware, for reasons specific to it:
 | bf16 VAE decode | ~1.14×, lossless; ~5–7% e2e on few-step | ✅ default for Wan |
 | VSA (video sparse attention) | works out of the box (Triton kernel auto-selects on `sm_121`) | ✅ automatic |
 | Building FlashAttention | **no speedup** — Torch SDPA already hits an efficient flash kernel on `sm_121`, and FA2 ties it | ❌ not worth building |
-| `torch.compile` of the VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end |
+| `torch.compile` of the Wan VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end (the H3 ViT decoder compiles well, see [FastH3](#fasth3-decode-gemms-and-attention-on-gb10)) |
 | Linear (fp8 / nvfp4) quantization on long-sequence models (e.g. Cosmos) | ~nothing — see below | ❌ wrong lever here |
 | FP4 attention (`ATTN_QAT_INFER`) | works on `sm_121` (runtime allowlist landed in #1647; kernel build is #1598); helps, but needs a QAT-trained checkpoint | ⚠️ opt-in — see below |
 | FP4 linear on short-sequence models (LTX2) | up to −24% denoise at 1080p (#1594) | ⚠️ model/resolution-dependent |
@@ -248,10 +248,12 @@ in a local directory. It declares the trained eight-forward ladder and
 video/audio shifts of 10/3. The recipes use `num_inference_steps: 9` for
 nine sigma points and eight DiT forwards.
 
-On GB10 with FlashInfer 0.6.18, FastVideo fences activation quantization before
-releasing its padded input. Without this completion fence, identical H3
-requests produced different DiT latents and occasionally corrupt video.
-The fence applies to `sm_121`; other architectures retain asynchronous execution.
+On GB10 (FlashInfer 0.6.18 and 0.7.0), FastVideo completes each NVFP4
+activation quantization on the host before its GEMM. Without this completion
+fence, identical H3 requests produced different DiT latents and occasionally
+corrupt video. The fence costs no measurable denoise time, because the GPU stays
+saturated. It applies to `sm_121`; other architectures retain asynchronous
+execution.
 
 Run `examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml` from the
 repository root. It uses 832x480, 124 frames and seed 1234, VSA sparsity 0.8 with
@@ -259,9 +261,10 @@ repository root. It uses 832x480, 124 frames and seed 1234, VSA sparsity 0.8 wit
 It does not use frame dropping or spatial upscaling.
 
 ```bash
+FASTVIDEO_H3_VSA_FP4=1 \
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
-FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
-FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
+FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 FASTVIDEO_STAGE_LOGGING=1 \
@@ -276,7 +279,7 @@ H3 permits frame counts of `17n+5`; 124 is the nearest legal count above
 five seconds and 243 is the nearest above ten seconds.
 
 For Trim, use `basic_fasth3_spark_pruned_nvfp4.yaml` with the same environment.
-Both recipes keep the encoder, DiT and VAEs resident, disable compilation,
+Both recipes keep the encoder, DiT and VAEs resident, compile only the VAE decoder,
 and use `h3_dit_vsa`. On two Sparks, use the corresponding
 `basic_fasth3_spark_pair_{pruned,v2}_nvfp4.yaml` after following the
 [pair setup guide](spark_pair.md). The pair uses SP2/TP1 and parallel VAE
@@ -308,6 +311,112 @@ Set the environment from the generation command above before benchmarking.
 The prompt JSON must contain `latency-ceramics-005` and
 `latency-harbor-005`. Pass `--width 1344 --height 768` for the native 768p
 protocol. Use the Trim repository and config for its corresponding run.
+
+### FastH3 decode, GEMMs and attention on GB10
+
+The recipes decode with the light VAE's dense weights
+(`FASTVIDEO_H3_VAE_INT8_OVERLAY=0`), 12 spatial tiles per decoder call and a
+compiled decoder (`compile.vae_enabled: true`). The INT8 ConvRot overlay that
+ships next to the VAE is slower on GB10 and stops tile batching from helping.
+Decoder-only timings on identical 832x480, 124-frame latents (one GB10):
+
+| Light VAE decoder | 1 tile per call | 12 tiles per call | PSNR vs FP32 decode |
+|---|---:|---:|---:|
+| INT8 ConvRot overlay, fp16 autocast | 42.2 s | 43.5 s | 63.4 dB |
+| Dense, fp16 autocast | 24.4 s | 14.4 s | 77.5 dB |
+| Dense, fp16 autocast, compiled | 21.6 s | 9.8 s | 77.7 dB |
+
+The first one or two calls in a process include decoder compiles; later calls
+in the same process reuse them.
+
+NVFP4 linears use FlashInfer's cuDNN backend (`FASTVIDEO_NVFP4_MM_BACKEND=cudnn`).
+The CUTLASS backend used on RTX Blackwell is much slower on GB10 for the
+FFN projections, and both backends return identical outputs. FlashInfer
+`mm_fp4` with 19,392 activation rows (FastH3 at 832x480, 124 frames):
+
+| Projection (K→N) | `cutlass` | `cudnn` | `auto` |
+|---|---:|---:|---:|
+| attention q/k/v, gate (5376→7168) | 5.5 ms | 10.0 ms | 10.0 ms |
+| attention out (7168→5376) | 5.5 ms | 4.6 ms | 8.3 ms |
+| FFN in (5376→28672) | 52.9 ms | 19.6 ms | 20.0 ms |
+| FFN out (14336→5376) | 26.6 ms | 8.9 ms | 9.0 ms |
+
+`FASTVIDEO_H3_VSA_FP4=1` runs VSA-H3's block-sparse attention on the FP4
+SageAttention3 kernel, as on RTX Blackwell. It needs `fastvideo-kernel` built for
+`12.1a` on GB10 or `12.0a` on sm_120. A missing extension raises an error;
+select BF16 VSA explicitly by setting `h3_vsa_fp4.enabled: false` in the YAML. On a captured FastH3 Trim
+attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
+against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
+reference (0.002 for Triton BF16).
+
+The FastH3-QAD-v2 recipes, `basic_fasth3_spark_qad_v2_nvfp4.yaml` and
+`basic_fasth3_spark_pair_qad_v2_nvfp4.yaml`, select
+`FastVideo/FastH3-QAD-v2` explicitly. The older
+`v2` files continue to select V2. Both recipes enable FP4 in YAML through
+`pipeline.experimental.h3_vsa_fp4.enabled`; shell flags are not required for
+that selection. FastH3-QAD-v2 keeps its 64-token tiles and sparsity 0.8, and protects
+text and audio query rows with FP8 Q/K and BF16 dense attention. These are
+inference settings. The published FastH3-QAD-v2 checkpoint used linears-only QAD with
+BF16 attention, so this does not reproduce its training attention numerics.
+
+The earlier unprotected FP4 path is faster (on a 5090, 480p5 8L
+measured about 12.6 s versus 19 s on bf16 VSA) but changes the output. On V2 at
+832x480 with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s) and
+the clips scored LPIPS 0.39-0.55 against the BF16-attention clips. Validate clips
+before a quality comparison. On a 32 GB RTX 5090 the measured recipe also sets
+`FASTVIDEO_H3_ENCODER_LAYERWISE=1` and `FASTVIDEO_H3_PARK_MODULES=vae,audio_vae`.
+
+Measured on one Spark (832x480, 124 frames, seed 1234, the ceramics release
+prompt), timing warm `generate()` calls in one process through finished MP4
+output:
+
+| Model and configuration | End to end | Denoise | Video decode |
+|---|---:|---:|---:|
+| Trim, previous recipe (CUTLASS, INT8 overlay, 1 tile per call) | 121-122 s | 77-78 s | 43 s |
+| Trim, current recipe | 68 s | 58 s | 9.5 s |
+| Trim, current recipe + `FASTVIDEO_H3_VSA_FP4=1` | 54 s | 43 s | 9.6 s |
+| V2, previous recipe | 139-141 s | 95-96 s | 42-43 s |
+| V2, current recipe | 79 s | 68 s | 9.6 s |
+
+Within each configuration, repeated calls produced bit-identical frames
+except the previous V2 recipe, whose repeated calls diverged.
+
+Row splitting is off globally. The single-Spark cuDNN recipe opts into
+`FASTVIDEO_NVFP4_MM_ROW_SPLIT=table` for the shapes measured on GB10. Leave it
+off on other GPUs unless a matched benchmark validates the split there.
+
+### Optional NVFP4 video decoder
+
+`FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
+decoder distilled with quantization-aware training and exported by
+`scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py`. At load the
+INT8 overlay is skipped, the VAE is depth-cut to the decoder's block count
+(the 26-layer light VAE hosts an 8-block decoder; a 36-block decoder needs
+the full `MiniMaxAI/MiniMax-H3` `vae/` in the stack's `vae/` folder), and
+only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
+2.3 GiB). The decode stage runs bf16 autocast for these decoders, the
+precision they were trained in. The decoder GEMMs use the cuDNN backend on
+GB10; outputs match CUTLASS bit for bit.
+
+The variable also accepts `.safetensors` files written by
+`fastvideo.models.vaes.minimax_h3_nvfp4_checkpoint`: either the same bf16
+master weights, or pre-packed NVFP4 weights from
+`scripts/distill/minimax_h3_nvfp4_decoder/export_packed.py`. A packed file is
+read straight onto the GPU and never materializes the full-precision weights
+of the quantized linears; it decodes bit-identically to packing the bf16 file
+at load.
+
+V2 at 832x480, 124 frames, seed 1234, one Spark, warm calls:
+
+| Video decoder | End to end | Denoise | Video decode | Peak allocated |
+|---|---:|---:|---:|---:|
+| Light VAE, INT8 overlay, 1 tile per call, eager | 112.4 s | 68.4 s | 42.7 s | 59.4 GiB |
+| Light VAE, dense, 12 tiles per call, compiled (recipe) | 78.9 s | 68.1 s | 9.6 s | 64.3 GiB |
+| 8-block NVFP4 decoder | 70.9 s | 68.2 s | 1.6 s | 58.0 GiB |
+
+The 8-block decoder decodes the same with or without `compile.vae_enabled`
+and does not need tile batching. Its output is lossy against the light VAE
+(31 dB PSNR on this clip); review clips before using it.
 
 ### Released model measurements
 

@@ -201,6 +201,23 @@ def test_regional_compile_prepare_prefers_specialized_hook() -> None:
     assert impl.regional_devices == [expected_device]
 
 
+def test_h3_regional_compile_resolves_nvfp4_activation_policies(env_overrides) -> None:
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_ACT_AMAX.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_DYNAMIC_ACT.override(""))
+    model = _gate_model(2.0)
+    method = object.__new__(NVFP4QuantizeMethod)
+    method.layer_prefix = "minimax_h3.transformer_blocks.0.attn.to_q"
+    model.transformer_blocks[0].attn.to_q.quant_method = method
+
+    assert not method._static_sf_checked
+    assert not hasattr(method, "_dynamic_act_cached")
+    assert _prepare_model_for_compile(model, regional=True) is None
+    assert method._static_sf_checked
+    assert method._dynamic_act_cached is False
+
+
 def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_weight() -> None:
     model = _gate_model(2.0)
     attention = model.transformer_blocks[0].attn
@@ -429,6 +446,36 @@ def test_compile_model_regions_injects_fullgraph_and_precision_casts(monkeypatch
 def test_compile_model_regions_rejects_mode_kwargs() -> None:
     with pytest.raises(ValueError, match="mode"):
         _compile_model_regions(_Toy(), {"mode": "reduce-overhead"})
+
+
+def test_variable_rank_lora_regions_do_not_share_a_recompile_budget() -> None:
+    from fastvideo.layers.lora.linear import get_lora_layer
+    from fastvideo.tests.layers.test_lora_side_branch import _packed_linear, IN
+
+    class AdapterBlock(nn.Module):
+        def __init__(self, rank):
+            super().__init__()
+            self.proj = get_lora_layer(_packed_linear())
+            self.proj.set_lora_weights(torch.randn(rank, IN), torch.randn(12, rank))
+
+        def forward(self, x):
+            return self.proj(x)[0]
+
+    model = nn.Module()
+    model.blocks = nn.ModuleList([AdapterBlock(rank) for rank in (2, 3, 4)])
+    model._compile_conditions = [lambda name, module: name.startswith("blocks.") and name.count(".") == 1]
+    x = torch.randn(2, 5, IN, dtype=torch.bfloat16)
+    torch._dynamo.reset()
+    try:
+        with torch.inference_mode():
+            expected = [block(x) for block in model.blocks]
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(recompile_limit=2):
+                _compile_model_regions(model, {"backend": "eager"}, isolate_regions=True)
+                for block, reference in zip(model.blocks, expected, strict=True):
+                    torch.testing.assert_close(block(x), reference, rtol=0, atol=0)
+    finally:
+        torch._dynamo.reset()
 
 
 def test_compile_model_regions_requires_conditions_and_matches(monkeypatch) -> None:

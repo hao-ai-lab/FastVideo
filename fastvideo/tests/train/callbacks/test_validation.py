@@ -510,6 +510,100 @@ class TestH3ValidationContract:
         assert {key: artifacts[key] for key in scalar_metrics} == scalar_metrics
 
 
+class TestStudentSamplingContract:
+    """Validation samples a PDD or sparse Ref2VA student the way training runs it."""
+
+    @staticmethod
+    def _pdd_transformer(pdd_steps: int = 32) -> torch.nn.Module:
+        transformer = torch.nn.Identity()
+        transformer.pdd_steps = pdd_steps
+        return transformer
+
+    @staticmethod
+    def _schedulers(video_shift: float = 12.0, audio_shift: float = 3.0):
+        return {"scheduler": SimpleNamespace(shift=video_shift), "audio_scheduler": SimpleNamespace(shift=audio_shift)}
+
+    @staticmethod
+    def _callback(*, sparsity: float = 0.9, ref_keep_rate: float | None = 0.1, shifts=(12.0, 3.0)) -> ValidationCallback:
+        cb = _make_callback()
+        cb.training_config = SimpleNamespace(
+            model_path="unused",
+            pipeline_config=SimpleNamespace(),
+            vsa_sparsity=sparsity,
+            vsa_ref_keep_rate=ref_keep_rate,
+            data=SimpleNamespace(preprocessed_data_type="ref2va"),
+        )
+        cb.method = SimpleNamespace(student=SimpleNamespace(video_scheduler_shift=shifts[0],
+                                                            audio_scheduler_shift=shifts[1]))
+        return cb
+
+    def _resolve(self, cb: ValidationCallback, transformer: torch.nn.Module, steps: int, schedulers=None):
+        config = SimpleNamespace(pdd_step_indices=None, vsa_ref_keep_rate=None)
+        pipeline = SimpleNamespace(get_module=(schedulers or self._schedulers()).get)
+        resolved = cb._student_sampling_pipeline_config(config,
+                                                        transformer=transformer,
+                                                        num_inference_steps=steps,
+                                                        pipeline=pipeline)
+        return config, resolved
+
+    def test_pdd_student_samples_its_balanced_fused_partition(self) -> None:
+        config, resolved = self._resolve(self._callback(), self._pdd_transformer(), 8)
+        assert resolved.pdd_step_indices == tuple(range(0, 33, 4))
+        assert resolved.vsa_ref_keep_rate == 0.1
+        # The training-side config is never mutated.
+        assert config.pdd_step_indices is None and config.vsa_ref_keep_rate is None
+
+    def test_sparse_ref2va_keep_rate_defaults_to_the_target_keep_fraction(self) -> None:
+        _, resolved = self._resolve(self._callback(sparsity=0.75, ref_keep_rate=None), torch.nn.Identity(), 50)
+        assert resolved.vsa_ref_keep_rate == 0.25
+        assert resolved.pdd_step_indices is None
+
+    def test_other_students_keep_the_training_config(self) -> None:
+        config, resolved = self._resolve(self._callback(sparsity=0.0), torch.nn.Identity(), 50)
+        assert resolved is config
+
+    def test_pdd_validation_refuses_a_different_sampling_clock(self) -> None:
+        with pytest.raises(ValueError, match="video_scheduler_shift=10.0"):
+            self._resolve(self._callback(shifts=(10.0, 3.0)), self._pdd_transformer(), 8)
+
+    def test_validation_forward_receives_the_pdd_partition(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = []
+        schedulers = self._schedulers()
+
+        class FakePipeline:
+            fastvideo_args = SimpleNamespace(pipeline_config=SimpleNamespace())
+            get_module = staticmethod(schedulers.get)
+
+            def forward(self, batch, inference_args):
+                seen.append(inference_args.pipeline_config.pdd_step_indices)
+                return SimpleNamespace(output=torch.zeros(1, 3, 1, 2, 2), extra={})
+
+        cb = self._callback()
+        cb.rank_in_sp_group = 0
+        monkeypatch.setattr("fastvideo.train.callbacks.validation.ValidationDataset",
+                            lambda filename: [{"caption": "prompt-0"}])
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.make_inference_args",
+            lambda *args, **kwargs: SimpleNamespace(
+                pipeline_config=SimpleNamespace(dmd_denoising_steps=None, pdd_step_indices=None,
+                                                vsa_ref_keep_rate=None),
+                dit_cpu_offload=True,
+            ),
+        )
+        monkeypatch.setattr(cb, "_get_pipeline", lambda *, transformer: FakePipeline())
+        monkeypatch.setattr(cb, "_get_sampling_param", SamplingParam)
+        monkeypatch.setattr(
+            cb,
+            "_prepare_validation_batch",
+            lambda sampling_param, validation_batch, num_inference_steps: SimpleNamespace(prompt=validation_batch[
+                "caption"], ),
+        )
+
+        cb._run_validation_for_steps(8, transformer=self._pdd_transformer())
+
+        assert seen == [tuple(range(0, 33, 4))]
+
+
 class TestAttnQatInferValidation:
 
     def test_context_swaps_and_restores_qat_attention(

@@ -98,6 +98,18 @@ def test_local_tests_stays_out_of_ci():
                                                    "reference or move the tests into a fastvideo/tests/ lane.")
 
 
+SPARK_CAPABLE_LANES = frozenset({
+    "unit", "dreamverse", "encoder", "vae", "transformer", "kernel-tests", "lora-inference", "lora-extraction",
+    "inference-vmoba", "api-server", "eval", "train-framework", "golden-gate"
+})
+SPARK_BACKEND_TAG = "${FV_SPARK_BACKEND:-slurm}"
+
+
+def _expected_agents(step_key: str) -> dict[str, str]:
+    backend = SPARK_BACKEND_TAG if step_key in SPARK_CAPABLE_LANES else "slurm"
+    return {"queue": "ci-runner", "backend": backend}
+
+
 def _pipeline_steps() -> list[dict[str, object]]:
     pipeline = yaml.safe_load((REPO_ROOT / ".buildkite/pipeline.yml").read_text())
     return pipeline["steps"]
@@ -121,7 +133,7 @@ def test_all_gpu_ci_routes_use_the_trusted_slurm_dispatcher():
         step = by_key[step_key]
         assert step["command"] == f"/opt/fastvideo-ci-runner/{command}"
         assert step["timeout_in_minutes"] == 90
-        assert step["agents"] == {"queue": "ci-runner"}
+        assert step["agents"] == _expected_agents(step_key)
         assert step["env"] == {"TEST_TYPE": runner_type}
         assert "soft_fail" not in step
         if step_key in {"ssim", "training"}:
@@ -238,15 +250,21 @@ def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
     assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
 
 
-def test_full_ssim_has_a_weekly_slurm_schedule():
-    workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").read_text()
+def test_full_suite_has_a_weekly_slurm_schedule():
+    workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-full-suite.yml").read_text()
     ssim_step = next(step for step in _pipeline_steps() if step["key"] == "ssim")
 
+    assert not (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").exists()
     assert 'cron: "0 5 * * 0"' in workflow
-    assert 'TEST_SCOPE: "scheduled"' in workflow
-    assert 'TEST_TYPE: "ssim"' in workflow
+    assert "workflow_dispatch:" in workflow
+    assert 'TEST_SCOPE: "full"' in workflow
+    assert 'FULL_SUITE: "true"' in workflow
+    assert 'TEST_TYPE: "all"' in workflow
+    assert 'PR_TITLE: "Scheduled full suite"' in workflow
+    assert "Weekly full suite on main" in workflow
     assert "modal" not in workflow.lower()
-    assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
+    # The full suite includes the complete SSIM matrix.
+    assert 'build.env("TEST_SCOPE") == "full"' in str(ssim_step["if"])
 
 
 def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
@@ -346,13 +364,25 @@ def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
                     assert not comparisons
 
 
+def test_spark_routing_covers_only_known_lanes():
+    steps = _pipeline_steps()
+    keys = {step["key"] for step in steps}
+    assert SPARK_CAPABLE_LANES <= keys
+    cluster_only = keys - SPARK_CAPABLE_LANES
+    assert cluster_only == {
+        "ssim", "training", "distillation", "self-forcing", "lora-training", "training-vsa", "performance"
+    }
+    for step in steps:
+        assert step["agents"]["queue"] == "ci-runner"
+
+
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
     pipeline_text = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
     steps = _pipeline_steps()
 
     assert ".buildkite/scripts/pr_test.sh" not in pipeline_text
     assert "monorepo-diff" not in pipeline_text
-    assert all(step.get("agents") == {"queue": "ci-runner"} for step in steps)
+    assert all(step.get("agents") == _expected_agents(step["key"]) for step in steps)
     assert all("plugins" not in step for step in steps)
     assert all(str(step.get("command", "")).startswith("/opt/fastvideo-ci-runner/") for step in steps)
 

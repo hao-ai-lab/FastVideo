@@ -98,3 +98,15 @@ test("Wan I2V inference requires a source image and preserves the serving baseli
   const existing = parse(inferenceOutput({ ...result, config: withDefaults }).yaml);
   assert.deepEqual(existing.request.inputs, withDefaults.default_request.inputs);
 });
+
+test("OmniRef inference writes the source image as an ordered Ref2VA reference", () => {
+  const config = parse(
+    readFileSync(new URL("../../examples/serving/openai_fasth3_omniref_rtx5090.yaml", import.meta.url), "utf8"),
+  );
+  const result = { config, command: "fastvideo serve --config config.yaml" };
+  assert.throws(() => inferenceOutput(result), /source image path/);
+  const saved = parse(inferenceOutput(result, " /data/reference.png ").yaml);
+  assert.deepEqual(saved.request.inputs.references, [{ source: "/data/reference.png", media_type: "image" }]);
+  assert.equal(saved.request.inputs.image_path, undefined);
+  assert.equal(saved.generator.pipeline.components.override_pipeline_cls_name, "MiniMaxH3Ref2VAModularPipeline");
+});

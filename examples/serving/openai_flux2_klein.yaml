@@ -1,0 +1,24 @@
+# OpenAI-compatible image server for FLUX.2-klein (4-step distilled).
+#   fastvideo serve --config examples/serving/openai_flux2_klein.yaml
+generator:
+  model_path: black-forest-labs/FLUX.2-klein-4B
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: true
+      text_encoder: true
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: t2i
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_flux2_klein
+  served_model_name: flux2-klein

@@ -5,6 +5,7 @@ The modular trainer owns these policies under ``fastvideo.train``, which keeps
 model plugins within one training package.
 """
 
+from contextlib import nullcontext
 from enum import Enum
 from typing import Any
 
@@ -170,3 +171,12 @@ def _warn_nothing_retained() -> None:
                    "that block recomputes in full, as under 'full'. Its attention backend does not reach a "
                    "retained dispatcher op; see fastvideo/train/utils/activation_checkpoint.py for the paths "
                    "'ops' can retain.")
+
+
+def activation_offload_context(token_count: int, min_tokens: int):
+    """Optionally save grad-tracked forward activations in pinned CPU memory."""
+    if min_tokens < 0:
+        raise ValueError("activation offload token threshold must be non-negative")
+    if min_tokens and token_count >= min_tokens and torch.is_grad_enabled():
+        return torch.autograd.graph.save_on_cpu(pin_memory=True)
+    return nullcontext()

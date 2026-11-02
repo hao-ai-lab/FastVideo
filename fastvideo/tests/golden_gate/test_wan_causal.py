@@ -7,6 +7,9 @@ Only block 0 is loaded. Five tiny forwards replace a full causal video render.
 
 from dataclasses import replace
 
+import importlib.util
+
+import pytest
 import torch
 
 from fastvideo.tests.golden_gate._harness import DEFAULT_SEED, _component_dir, distributed_runtime, load_layer_state
@@ -71,6 +74,8 @@ def causal_outputs(device):
 
 
 def test_wan_causal_golden_gate(distributed_runtime):
+    if importlib.util.find_spec("flash_attn") is None:
+        pytest.skip("wan_causal pins the FLASH_ATTN backend; flash_attn is not installed (e.g. the GB10 image)")
     with deterministic_forward("FLASH_ATTN") as device:
         outputs, identity = causal_outputs(device)
         assert_tensor_golden("wan_causal", outputs, identity=identity, attention_backend="FLASH_ATTN")

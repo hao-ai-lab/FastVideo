@@ -1,0 +1,38 @@
+# OpenAI-compatible media server for Stable Audio Open 1.0 text-to-audio.
+#   fastvideo serve --config examples/serving/openai_stable_audio.yaml
+# Audio uses the /v1/videos job endpoints and returns media_type audio/wav.
+# Requires the optional Stable Audio inference dependencies listed in
+# examples/inference/basic/basic_stable_audio.py.
+generator:
+  model_path: FastVideo/stable-audio-open-1.0-Diffusers
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      text_encoder: false
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: t2a
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_stable_audio
+  served_model_name: stable-audio
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    audio_start_in_s: 0.0
+    audio_end_in_s: 10.0
+    num_inference_steps: 100
+    guidance_scale: 7.0
+    seed: 0
+  output:
+    return_frames: false

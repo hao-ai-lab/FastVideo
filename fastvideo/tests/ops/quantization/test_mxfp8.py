@@ -9,9 +9,13 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from quack.mx_utils import to_blocked, to_mx
 
-from fastvideo.layers.mxfp8linear import (
+# quack ships with the FA4 CuTe overlay; the GB10 image does not install it.
+quack_mx_utils = pytest.importorskip("quack.mx_utils", reason="quack (FA4 CuTe overlay) is not installed")
+to_blocked = quack_mx_utils.to_blocked
+to_mx = quack_mx_utils.to_mx
+
+from fastvideo.layers.mxfp8linear import (  # noqa: E402
     quantize_mxfp8_blockwise,
     quantize_mxfp8_weight_blockwise,
     swiglu_quantize_mxfp8_blockwise,

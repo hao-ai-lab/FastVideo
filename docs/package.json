@@ -4,13 +4,14 @@
   "scripts": {
     "build:assets": "node js/build-cookbook-assets.mjs",
     "prebuild:catalog": "npm run build:assets",
-    "build:catalog": "node js/build-cookbook-config.mjs",
+    "build:catalog": "node js/build-cookbook-config.mjs && node js/build-cookbook-capacity.mjs",
+    "check:capacity": "node js/build-cookbook-capacity.mjs --check",
     "pretest:cookbook": "npm run build:assets",
     "test:cookbook": "node --test tests/*.test.mjs",
     "lint:cookbook": "cd .. && docs/node_modules/.bin/eslint --config docs/eslint.config.mjs docs/js/cookbook-*.mjs docs/js/build-cookbook-*.mjs docs/tests/*.test.mjs docs/eslint.config.mjs docs/prettier.config.mjs",
     "format:cookbook": "prettier --config prettier.config.mjs --write \"js/cookbook-*.mjs\" \"js/build-cookbook-*.mjs\" \"tests/*.test.mjs\" eslint.config.mjs prettier.config.mjs",
     "format:check": "prettier --config prettier.config.mjs --check \"js/cookbook-*.mjs\" \"js/build-cookbook-*.mjs\" \"tests/*.test.mjs\" eslint.config.mjs prettier.config.mjs",
-    "check:cookbook": "npm run lint:cookbook && npm run format:check"
+    "check:cookbook": "npm run lint:cookbook && npm run format:check && npm run check:capacity"
   },
   "dependencies": {
     "ajv": "8.20.0",

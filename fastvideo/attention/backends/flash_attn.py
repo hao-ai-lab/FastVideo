@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 import fastvideo.envs as envs
+from fastvideo.attention.utils.cudnn_sdpa import cudnn_sdpa_bshd, cudnn_sdpa_supported
 from fastvideo.attention.utils.flash_attn_default import (
     fa_version,
     flash_attn_func_compilable,
@@ -24,6 +25,7 @@ from fastvideo.attention.backends.abstract import (
     AttentionImpl,
     AttentionMetadata,
     AttentionMetadataBuilder,
+    PackedSequenceMetadata,
 )
 from fastvideo.attention.backends.attn_qat_infer import _resolve_fa4_pv_mode
 from fastvideo.logger import init_logger
@@ -103,7 +105,11 @@ def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor,
     tile_m = 128
     seqlen_padded = (seqlen + tile_m - 1) // tile_m * tile_m
     if seqlen_padded != seqlen:
-        tensor_4d = F.pad(tensor_4d, (0, 0, 0, 0, 0, seqlen_padded - seqlen))
+        # F.pad fills the whole padded tensor before copying; only the tail rows need zeros.
+        padded = tensor_4d.new_empty((batch, seqlen_padded, nheads, headdim))
+        padded[:, :seqlen] = tensor_4d
+        padded[:, seqlen:].zero_()
+        tensor_4d = padded
 
     # Quantize with nheads squashed into K dimension so M=batch*seqlen (divisible by 128)
     # and K=nheads*headdim. This ensures 128-row SF tiles align with seqlen boundaries.
@@ -285,6 +291,11 @@ class FlashAttentionImpl(AttentionImpl):
         # identical to before the knob; kwargs win over the
         # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
         self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
+        # Explicit impl argument (set by the H3 model) so other models cannot inherit the cuDNN route.
+        self.cudnn_sdpa = bool(extra_impl_args.get("cudnn_sdpa", False))
+        if self.cudnn_sdpa and self.nvfp4_fa4:
+            raise ValueError("cudnn_sdpa and nvfp4_fa4 select different Q/K precision; enable only one of "
+                             "FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn and FASTVIDEO_NVFP4_FA4=1")
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
@@ -324,6 +335,106 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
+        packed_sequence = getattr(attn_metadata, "packed_sequence", None) if attn_metadata is not None else None
+        if packed_sequence is not None:
+            if not isinstance(packed_sequence, PackedSequenceMetadata):
+                raise TypeError("packed_sequence must be PackedSequenceMetadata")
+            if getattr(attn_metadata, "attn_mask", None) is not None:
+                raise ValueError("Packed FlashAttention uses cumulative document lengths and cannot also take "
+                                 "an attention mask")
+            if self.nvfp4_fa4:
+                raise NotImplementedError("NVFP4 FA4 does not yet support packed variable-length attention")
+            if query.shape[0] != 1 or key.shape[0] != 1 or value.shape[0] != 1:
+                raise ValueError("Packed FlashAttention expects flattened Q/K/V with physical batch size 1")
+            if packed_sequence.cu_seqlens_q.device != query.device:
+                raise ValueError("Packed FlashAttention cumulative lengths must be on the Q/K/V device")
+            if fa_version == "4" and packed_sequence.sequence_capacity is not None:
+                # Do not inspect host document lengths, max lengths, or pad_tokens
+                # on this branch: even a validation guard on those ints would
+                # specialize every regional graph to the real (unpadded) shape.
+                capacity = packed_sequence.sequence_capacity
+                if query.shape[1] != capacity:
+                    raise ValueError("Packed FlashAttention query length does not match sequence_capacity")
+                if key.shape[1] != capacity or value.shape[1] != capacity:
+                    raise ValueError("Packed FlashAttention key/value lengths do not match sequence_capacity")
+                query_padding = (torch.arange(capacity, device=query.device) >= packed_sequence.cu_seqlens_q[-1])
+                query_padding = query_padding.view(1, capacity, 1, 1)
+                if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad):
+                    key_padding = (torch.arange(capacity, device=key.device) >= packed_sequence.cu_seqlens_kv[-1])
+                    key_padding = key_padding.view(1, capacity, 1, 1)
+                    # FA4 need not write trailing dQ/dK/dV storage. masked_fill's
+                    # backward discards even NaNs in those rows; multiplying by
+                    # a validity mask would let NaN * 0 escape. No Q/K/V copies
+                    # are needed for the no-grad dense teacher.
+                    query = query.masked_fill(query_padding, 0)
+                    key = key.masked_fill(key_padding, 0)
+                    value = value.masked_fill(key_padding, 0)
+                assert flash_attn_varlen_func_compilable is not None
+                output = flash_attn_varlen_func_compilable(
+                    query.squeeze(0),
+                    key.squeeze(0),
+                    value.squeeze(0),
+                    packed_sequence.cu_seqlens_q,
+                    packed_sequence.cu_seqlens_kv,
+                    capacity,
+                    capacity,
+                    dropout_p=0.0,
+                    softmax_scale=self.softmax_scale,
+                    causal=self.causal,
+                ).unsqueeze(0)
+                # The kernel visits only documents named by cu_seqlens; its
+                # unused output storage is uninitialized, not necessarily zero.
+                return output.masked_fill(query_padding, 0)
+
+            if query.shape[1] != packed_sequence.total_query_tokens + packed_sequence.pad_tokens:
+                raise ValueError("Packed FlashAttention query length does not match its document lengths plus padding: "
+                                 f"{query.shape[1]} != {packed_sequence.total_query_tokens} "
+                                 f"+ {packed_sequence.pad_tokens}")
+            if (key.shape[1] != packed_sequence.total_key_value_tokens + packed_sequence.pad_tokens
+                    or value.shape[1] != key.shape[1]):
+                raise ValueError("Packed FlashAttention key/value lengths do not match their document lengths")
+            # The non-opt-in FA4 path and FA2/FA3 fallbacks retain exact-length
+            # kernel inputs. Slice out padding, then restore zero query rows.
+            if fa_version == "4":
+                assert flash_attn_varlen_func_compilable is not None
+                output = flash_attn_varlen_func_compilable(
+                    query[:, :packed_sequence.total_query_tokens].squeeze(0),
+                    key[:, :packed_sequence.total_key_value_tokens].squeeze(0),
+                    value[:, :packed_sequence.total_key_value_tokens].squeeze(0),
+                    packed_sequence.cu_seqlens_q,
+                    packed_sequence.cu_seqlens_kv,
+                    packed_sequence.max_seqlen_q,
+                    packed_sequence.max_seqlen_kv,
+                    dropout_p=0.0,
+                    softmax_scale=self.softmax_scale,
+                    causal=self.causal,
+                ).unsqueeze(0)
+                if packed_sequence.pad_tokens:
+                    return F.pad(output, (0, 0, 0, 0, 0, packed_sequence.pad_tokens))
+                return output
+
+            # Correct fallback for FA2/FA3 installations. Host lengths avoid a
+            # device synchronization; Dynamo can statically unroll a stable
+            # pack signature. The optimized H3 training path uses FA4 above.
+            outputs = []
+            query_start = 0
+            key_start = 0
+            for query_length, key_length in zip(packed_sequence.query_lengths,
+                                                packed_sequence.key_value_lengths,
+                                                strict=True):
+                outputs.append(
+                    flash_attn_func_compilable(
+                        query[:, query_start:query_start + query_length],
+                        key[:, key_start:key_start + key_length],
+                        value[:, key_start:key_start + key_length],
+                        softmax_scale=self.softmax_scale,
+                        causal=self.causal,
+                    ))
+                query_start += query_length
+                key_start += key_length
+            output = torch.cat(outputs, dim=1)
+            return F.pad(output, (0, 0, 0, 0, 0, packed_sequence.pad_tokens)) if packed_sequence.pad_tokens else output
+
         if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None):
             # Route through the *_compilable wrappers so dynamo sees one
             # traceable node for each masked entry point (the unpad/pad
@@ -378,6 +489,10 @@ class FlashAttentionImpl(AttentionImpl):
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
+
+        elif self.cudnn_sdpa and cudnn_sdpa_supported(query, key, value):
+            # The ATen cuDNN op silently misreads contiguous BSHD; the helper passes BHSD strided views.
+            output = cudnn_sdpa_bshd(query, key, value, scale=self.softmax_scale, causal=self.causal)
 
         elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1
               and query.shape[1] == key.shape[1] == value.shape[1]):

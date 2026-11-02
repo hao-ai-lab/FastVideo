@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +74,23 @@ def parse_base_model_revision(value: Any) -> tuple[str, str]:
         if separator and repo.strip() and revision.strip() and "@" not in revision:
             return repo, revision
     raise ValueError(f"FastH3 base_model_revision={value!r} must be hf://<repo id>@<revision>.")
+
+
+def build_pdd_inference_file(**trained_fields: Any) -> dict[str, Any]:
+    """The fastvideo_inference.json of a FastH3 Ref2VA PDD export: the code-fixed fields plus *trained_fields*.
+
+    *trained_fields* must supply exactly the remaining PDD fields, so a writer
+    cannot drift from what ``resolve_checkpoint_settings`` reads back.
+    """
+    overlap = sorted(_PDD_FIXED_FIELDS.keys() & trained_fields.keys())
+    inference_file = {**_PDD_FIXED_FIELDS, **trained_fields}
+    missing = sorted(_PDD_INFERENCE_FIELDS - inference_file.keys())
+    unknown = sorted(inference_file.keys() - _PDD_INFERENCE_FIELDS)
+    if overlap or missing or unknown:
+        raise ValueError(f"A FastH3 PDD {FASTH3_INFERENCE_FILE} takes exactly the trained fields; fixed {overlap}, "
+                         f"missing {missing}, unknown {unknown}.")
+    parse_base_model_revision(inference_file["base_model_revision"])
+    return inference_file
 
 
 def _require_fraction(name: str, value: Any, *, allow_zero: bool) -> None:
@@ -155,6 +173,11 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MiniMaxH3Qwen3VLConfig(), ))
 
     flow_shift: float | None = None
+    # Modular-trainer noise clocks; None trains with H3's released 12 (video)
+    # and 3 (audio). Inference always samples with the checkpoint's own
+    # scheduler configs, so a run value that differs from them raises there.
+    video_scheduler_shift: float | None = None
+    audio_scheduler_shift: float | None = None
     embedded_cfg_scale: float | None = None
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
@@ -175,6 +198,10 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
         if self.flow_shift is not None:
             raise ValueError("MiniMax-H3 uses separate checkpoint-defined video/audio scheduler shifts; "
                              "flow_shift must remain unset.")
+        for modality, shift in (("video", self.video_scheduler_shift), ("audio", self.audio_scheduler_shift)):
+            if shift is not None and (isinstance(shift, bool) or not isinstance(shift, int | float)
+                                      or not math.isfinite(shift) or shift <= 0):
+                raise ValueError(f"MiniMax-H3 {modality}_scheduler_shift must be positive and finite, got {shift!r}.")
 
     def resolve_checkpoint_settings(self, fastvideo_args: FastVideoArgs) -> None:
         """Apply a FastH3 Ref2VA PDD checkpoint's fastvideo_inference.json to this run.
@@ -263,4 +290,10 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
         return sampling_param
 
 
-__all__ = ["FASTH3_INFERENCE_FILE", "FASTH3_INFERENCE_SCHEMA", "MiniMaxH3PipelineConfig", "parse_base_model_revision"]
+__all__ = [
+    "FASTH3_INFERENCE_FILE",
+    "FASTH3_INFERENCE_SCHEMA",
+    "MiniMaxH3PipelineConfig",
+    "build_pdd_inference_file",
+    "parse_base_model_revision",
+]

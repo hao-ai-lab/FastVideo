@@ -473,7 +473,14 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
+    def fake_run_server(fastvideo_args,
+                        host,
+                        port,
+                        output_dir,
+                        default_request,
+                        served_model_name=None,
+                        media_reference_max_bytes=None,
+                        media_policy=None):
         captured["fastvideo_args"] = fastvideo_args
         captured["host"] = host
         captured["port"] = port
@@ -512,8 +519,17 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     def fake_generator_config_to_fastvideo_args(config):
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
+    def fake_run_server(fastvideo_args,
+                        host,
+                        port,
+                        output_dir,
+                        default_request,
+                        served_model_name=None,
+                        media_reference_max_bytes=None,
+                        media_policy=None):
         captured["default_request"] = default_request
+        captured["media_reference_max_bytes"] = media_reference_max_bytes
+        captured["media_policy"] = media_policy
 
     monkeypatch.setattr(
         "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
@@ -526,6 +542,9 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     default_request = captured["default_request"]
     assert default_request.prompt == "hello"
     assert default_request.sampling.seed == 42
+    # Without server.media_roots or allow_private_media_urls the CLI passes the closed policy.
+    assert captured["media_policy"].roots == ()
+    assert captured["media_policy"].allow_private_urls is False
 
 
 def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch):

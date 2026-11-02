@@ -28,11 +28,13 @@ from fastvideo.entrypoints.openai.protocol import (
 )
 from fastvideo.entrypoints.openai.request_adapter import (
     build_generation_request,
+    discard_materialized_media,
     prepare_reference_media,
     validate_model_and_lora,
 )
 from fastvideo.entrypoints.openai.state import (
     get_default_request,
+    get_media_reference_max_bytes,
     get_output_dir,
     get_served_model_name,
     get_server_args,
@@ -113,6 +115,8 @@ def _build_generation_kwargs(
             "enable_teacache",
             "max_sequence_length",
             "boundary_ratio",
+            "audio_start_in_s",
+            "audio_end_in_s",
     ):
         if name in body_set and getattr(req, name) is not None:
             kwargs[name] = getattr(req, name)
@@ -122,9 +126,11 @@ def _build_generation_kwargs(
         kwargs["image_path"] = req.input_reference
 
     kwargs.pop("output_path", None)
-    output_dir = os.path.join(os.path.abspath(get_output_dir()), "videos")
+    is_audio = _is_audio_workload()
+    output_dir = os.path.join(os.path.abspath(get_output_dir()), "audio" if is_audio else "videos")
     os.makedirs(output_dir, exist_ok=True)
-    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
+    extension = ".wav" if is_audio else ".mp4"
+    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}{extension}")
     kwargs["save_video"] = True
     return kwargs
 
@@ -135,13 +141,27 @@ def _result_value(result: Any, name: str, default: Any = None) -> Any:
     return getattr(result, name, default)
 
 
-def _remove_artifact(file_path: str | None) -> None:
-    if not file_path or not os.path.isfile(file_path):
-        return
+def _is_audio_workload() -> bool:
     try:
-        os.unlink(file_path)
-    except OSError:
-        logger.warning("Failed to delete video artifact %s", file_path, exc_info=True)
+        args = get_server_args()
+    except AssertionError:
+        return False
+    workload_type = getattr(args, "workload_type", "")
+    return str(getattr(workload_type, "value", workload_type) or "").endswith("2a")
+
+
+def _media_type_for_path(path: str) -> str:
+    return "audio/wav" if path.lower().endswith(".wav") else "video/mp4"
+
+
+def _remove_artifact(file_path: str | None) -> None:
+    if file_path:
+        discard_materialized_media([file_path])
+
+
+def _remove_artifacts(file_path: str | None, materialized: list[str]) -> None:
+    _remove_artifact(file_path)
+    discard_materialized_media(materialized)
 
 
 def _stage_durations(result: Any) -> dict[str, float]:
@@ -162,8 +182,14 @@ def _make_video_job(
     generation_request: GenerationRequest,
 ) -> dict[str, Any]:
     sampling = request_to_sampling_param(generation_request, model_path=get_server_args().model_path)
-    size = f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None
-    seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
+    is_audio = _is_audio_workload()
+    size = None if is_audio else (f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None)
+    if is_audio and sampling.audio_end_in_s is not None:
+        start = sampling.audio_start_in_s or 0.0
+        seconds = max(1, int(round(sampling.audio_end_in_s - start)))
+    else:
+        seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
+    media_type = "audio/wav" if is_audio else "video/mp4"
     return {
         "id": request_id,
         "object": "video",
@@ -175,6 +201,7 @@ def _make_video_job(
         "size": size,
         "seconds": str(max(1, seconds)),
         "quality": req.quality or "default",
+        "media_type": media_type,
         # ``file_path`` is a FastVideo compatibility extension. vLLM-Omni's
         # public job shape uses ``file_name`` after completion.
         "file_path": None,
@@ -185,6 +212,7 @@ def _make_video_job(
 async def _run_generation(
     request_id: str,
     generation_request: GenerationRequest,
+    materialized_media: list[str] | None = None,
 ) -> None:
     started = 0.0
     video_path = generation_request.output.output_path
@@ -242,11 +270,8 @@ async def _run_generation(
     finally:
         if request_id in _DELETED_VIDEO_IDS:
             _DELETED_VIDEO_IDS.discard(request_id)
-            if video_path and os.path.isfile(video_path):
-                try:
-                    os.unlink(video_path)
-                except OSError:
-                    logger.warning("Failed to clean up deleted video artifact %s", video_path, exc_info=True)
+            _remove_artifact(video_path)
+        discard_materialized_media(materialized_media or [])
 
 
 def _track_video_job(request_id: str, task: asyncio.Task[None]) -> None:
@@ -329,12 +354,16 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
         raise HTTPException(status_code=400, detail=f"Invalid request body: {error}") from error
 
 
-async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
+async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> tuple[GenerationRequest, list[str]]:
+    materialized_media: list[str] = []
     try:
         get_serving_engine().validate_video_request(request)
         validate_model_and_lora(request, get_server_args(), get_served_model_name())
-        await prepare_reference_media(request_id, request, get_output_dir())
-        return await asyncio.to_thread(
+        materialized_media = await prepare_reference_media(request_id,
+                                                           request,
+                                                           get_output_dir(),
+                                                           max_bytes=get_media_reference_max_bytes())
+        generation_request = await asyncio.to_thread(
             build_generation_request,
             request_id,
             request,
@@ -343,7 +372,9 @@ async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> Ge
             output_dir=get_output_dir(),
             default_request=get_default_request(),
         )
+        return generation_request, materialized_media
     except Exception as error:
+        discard_materialized_media(materialized_media)
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
@@ -353,47 +384,59 @@ async def create_video(raw_request: Request) -> VideoResponse:
     """Create an asynchronous video generation job."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_gen_{generate_request_id()}"
-    generation_request = await _adapt_request(request_id, request)
-    job = _make_video_job(request_id, request, generation_request)
-    await VIDEO_STORE.upsert(request_id, job)
-    task = asyncio.create_task(_run_generation(request_id, generation_request), name=f"video-job-{request_id}")
+    generation_request, materialized_media = await _adapt_request(request_id, request)
+    try:
+        job = _make_video_job(request_id, request, generation_request)
+        await VIDEO_STORE.upsert(request_id, job)
+    except Exception:
+        discard_materialized_media(materialized_media)
+        raise
+    task = asyncio.create_task(_run_generation(request_id, generation_request, materialized_media),
+                               name=f"video-job-{request_id}")
+    task.add_done_callback(lambda _: discard_materialized_media(materialized_media))
     _track_video_job(request_id, task)
     return VideoResponse(**job)
 
 
 @router.post("/sync")
 async def create_video_sync(raw_request: Request) -> FileResponse:
-    """Generate synchronously and return raw MP4 bytes with vLLM headers."""
+    """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_sync-{generate_request_id()}"
-    generation_request = await _adapt_request(request_id, request)
+    generation_request, materialized_media = await _adapt_request(request_id, request)
     started = time.perf_counter()
+    response: FileResponse | None = None
     try:
-        result = await get_serving_engine().generate(generation_request)
-    except Exception as error:
-        logger.exception("Sync video generation failed for %s", request_id)
-        raise HTTPException(status_code=500, detail=f"Video generation failed: {error}") from error
-    if isinstance(result, list):
-        if not result:
-            raise HTTPException(status_code=500, detail="FastVideo returned no generation results")
-        result = result[0]
-    elapsed = time.perf_counter() - started
-    video_path = _result_value(result, "video_path") or generation_request.output.output_path
-    if not video_path or not os.path.exists(video_path):
-        raise HTTPException(status_code=500, detail="FastVideo did not produce an MP4 file")
-    return FileResponse(
-        video_path,
-        media_type="video/mp4",
-        filename=os.path.basename(video_path),
-        headers={
-            "X-Request-Id": request_id,
-            "X-Model": get_served_model_name(),
-            "X-Inference-Time-S": f"{elapsed:.3f}",
-            "X-Stage-Durations": json.dumps(_stage_durations(result), separators=(",", ":")),
-            "X-Peak-Memory-MB": f"{float(_result_value(result, 'peak_memory_mb', 0.0) or 0.0):.3f}",
-        },
-        background=BackgroundTask(_remove_artifact, video_path),
-    )
+        try:
+            result = await get_serving_engine().generate(generation_request)
+        except Exception as error:
+            logger.exception("Sync video generation failed for %s", request_id)
+            raise HTTPException(status_code=500, detail=f"Video generation failed: {error}") from error
+        if isinstance(result, list):
+            if not result:
+                raise HTTPException(status_code=500, detail="FastVideo returned no generation results")
+            result = result[0]
+        elapsed = time.perf_counter() - started
+        video_path = _result_value(result, "video_path") or generation_request.output.output_path
+        if not video_path or not os.path.exists(video_path):
+            raise HTTPException(status_code=500, detail="FastVideo did not produce a media file")
+        response = FileResponse(
+            video_path,
+            media_type=_media_type_for_path(video_path),
+            filename=os.path.basename(video_path),
+            headers={
+                "X-Request-Id": request_id,
+                "X-Model": get_served_model_name(),
+                "X-Inference-Time-S": f"{elapsed:.3f}",
+                "X-Stage-Durations": json.dumps(_stage_durations(result), separators=(",", ":")),
+                "X-Peak-Memory-MB": f"{float(_result_value(result, 'peak_memory_mb', 0.0) or 0.0):.3f}",
+            },
+            background=BackgroundTask(_remove_artifacts, video_path, materialized_media),
+        )
+        return response
+    finally:
+        if response is None:
+            discard_materialized_media(materialized_media)
 
 
 @router.get("", response_model=VideoListResponse)
@@ -470,7 +513,9 @@ async def download_video_content(video_id: str = Path(...), variant: str | None 
         raise HTTPException(status_code=404, detail="Generation is still in-progress")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Generated video file not found on disk")
-    return FileResponse(path=file_path, media_type="video/mp4", filename=os.path.basename(file_path))
+    return FileResponse(path=file_path,
+                        media_type=_media_type_for_path(file_path),
+                        filename=os.path.basename(file_path))
 
 
 __all__ = [

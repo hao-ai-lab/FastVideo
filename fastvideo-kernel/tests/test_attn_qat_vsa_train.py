@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Block-sparse FP4 Attn-QAT (VSA tiles 64 and 128): the PyTorch specification and the Triton kernel.
+"""Block-sparse FP4 Attn-QAT (VSA tile 128): the PyTorch specification and the Triton kernel.
 
-CPU tests pin the reference emulator (E2M1/E4M3 rounding, list builder, quadrant
-masks, online softmax, dV weights). GPU tests (any CUDA GPU with Triton; run on
-GB200) compare the Triton forward and STE backward with the reference.
+CPU tests pin the reference emulator (E2M1/E4M3 rounding, list builder, online
+softmax, dV weights). GPU tests (any CUDA GPU with Triton; run on GB200)
+compare the Triton forward and STE backward with the reference.
 """
 from __future__ import annotations
 
@@ -129,117 +129,6 @@ def test_two_level_p_is_closer_to_exact_than_single_level():
     assert errors[True] < errors[False]
 
 
-# ----------------------------------------------------------------------------- tile 64: quadrant masks
-def _problem64(n_tiles: int, heads: int = 2, keep: float = 0.4, seed: int = 0, device: str = "cpu"):
-    """A 64-token VSA problem: two tiles share one 128-token kernel block."""
-    gen = torch.Generator().manual_seed(seed)
-    tile_valid = torch.full((n_tiles, ), 64, dtype=torch.int32)
-    if n_tiles > 2:
-        tile_valid[-1] = 21
-        tile_valid[n_tiles // 2] = 40
-    tile_mask = torch.rand(1, heads, n_tiles, n_tiles, generator=gen) < keep
-    tile_mask[..., 0] = True
-    q2k_idx, q2k_num, kv_valid, q2k_quad = ref.tile_mask_to_fp4_blocks(tile_mask, 64, tile_valid)
-    n_blocks = q2k_idx.shape[-1]
-    seq_len = n_blocks * ref.BLOCK
-    token_valid = torch.zeros(seq_len, dtype=torch.bool)
-    for tile in range(n_tiles):
-        token_valid[tile * 64:(tile + 1) * 64] = torch.arange(64) < tile_valid[tile]
-    q, k, v = (torch.randn(1, heads, seq_len, 128, generator=gen) * token_valid[None, None, :, None]
-               for _ in range(3))
-    k = k + 0.5 * torch.randn(1, heads, 1, 128, generator=gen) * token_valid[None, None, :, None]
-    move = lambda t: t.to(device)  # noqa: E731
-    return (move(q.bfloat16()), move(k.bfloat16()), move(v.bfloat16()), move(q2k_idx), move(q2k_num),
-            move(kv_valid), move(q2k_quad), move(tile_mask), move(tile_valid))
-
-
-def _dense_quad_mask(q2k_idx: torch.Tensor, q2k_num: torch.Tensor, q2k_quad: torch.Tensor, seq_len: int) -> torch.Tensor:
-    """``[B, H, S, S]`` token mask: listed blocks intersected with their selected 64x64 quadrants."""
-    batch, heads, n_blocks, _ = q2k_idx.shape
-    mask = torch.zeros(batch, heads, seq_len, seq_len, dtype=torch.bool, device=q2k_idx.device)
-    half = torch.arange(ref.BLOCK, device=q2k_idx.device) // ref.HALF
-    for b in range(batch):
-        for h in range(heads):
-            for m in range(n_blocks):
-                for slot in range(int(q2k_num[b, h, m])):
-                    n = int(q2k_idx[b, h, m, slot])
-                    quad = int(q2k_quad[b, h, m, slot])
-                    qvalid = ((quad >> (half[:, None] * 2 + half[None, :])) & 1).bool()
-                    mask[b, h, m * ref.BLOCK:(m + 1) * ref.BLOCK, n * ref.BLOCK:(n + 1) * ref.BLOCK] = qvalid
-    return mask
-
-
-def test_tile64_lists_a_block_for_any_selected_quadrant():
-    _, _, _, q2k_idx, q2k_num, kv_valid, q2k_quad, tile_mask, tile_valid = _problem64(6, heads=2, seed=2)
-    n_blocks = q2k_idx.shape[-1]
-    half_mask = tile_mask & (tile_valid > 0)[None, None, None, :]
-    for h in range(2):
-        for m in range(n_blocks):
-            listed = q2k_idx[0, h, m, :int(q2k_num[0, h, m])].tolist()
-            assert listed == sorted(listed, reverse=True)
-            expected = torch.nonzero(half_mask[0, h, 2 * m:2 * m + 2, :].any(dim=0).view(-1, 2).any(dim=1)).flatten()
-            assert listed == sorted(expected.tolist(), reverse=True)
-    assert kv_valid.numel() == 2 * n_blocks
-
-
-def test_tile64_quadrant_bits_match_the_half_tile_mask():
-    _, _, _, q2k_idx, q2k_num, _, q2k_quad, tile_mask, tile_valid = _problem64(6, heads=2, seed=3)
-    half_mask = tile_mask & (tile_valid > 0)[None, None, None, :]
-    weights = torch.tensor([[1, 2], [4, 8]])
-    for h in range(2):
-        for m in range(q2k_idx.shape[2]):
-            for slot in range(int(q2k_num[0, h, m])):
-                n = int(q2k_idx[0, h, m, slot])
-                quads = half_mask[0, h, 2 * m:2 * m + 2, 2 * n:2 * n + 2]
-                expected = int((quads.to(torch.int32) * weights).sum())
-                assert int(q2k_quad[0, h, m, slot]) == expected
-
-
-def test_tile128_route_is_the_general_route_without_quadrants():
-    gen = torch.Generator().manual_seed(4)
-    tile_mask = torch.rand(1, 2, 5, 5, generator=gen) < 0.5
-    tile_valid = torch.tensor([128, 128, 77, 0, 128], dtype=torch.int32)
-    q2k_idx, q2k_num, kv_valid, q2k_quad = ref.tile_mask_to_fp4_blocks(tile_mask, 128, tile_valid)
-    old_idx, old_num, old_valid = ref.tile128_mask_to_fp4_blocks(tile_mask, tile_valid)
-    assert q2k_quad is None
-    assert torch.equal(q2k_idx, old_idx) and torch.equal(q2k_num, old_num) and torch.equal(kv_valid, old_valid)
-
-
-def test_tile64_first_listed_block_can_be_empty_for_one_half():
-    """Regression: an empty half in the first visited block must not poison later blocks."""
-    n_tiles = 4
-    gen = torch.Generator().manual_seed(7)
-    seq_len = (n_tiles // 2) * ref.BLOCK
-    q, k, v = (torch.randn(1, 1, seq_len, 128, generator=gen).bfloat16() for _ in range(3))
-    tile_mask = torch.zeros(1, 1, n_tiles, n_tiles, dtype=torch.bool)
-    tile_mask[0, 0, 1, 2] = True  # query tile 1 lists block 1 (empty for query tile 0)
-    tile_mask[0, 0, 0, 0] = True  # query tile 0 lists block 0 (valid)
-    tile_mask[0, 0, 2, 2] = True
-    tile_mask[0, 0, 3, 3] = True
-    tile_valid = torch.full((n_tiles, ), 64, dtype=torch.int32)
-    q2k_idx, q2k_num, kv_valid, q2k_quad = ref.tile_mask_to_fp4_blocks(tile_mask, 64, tile_valid)
-    assert int(q2k_num[0, 0, 0]) == 2 and int(q2k_idx[0, 0, 0, 0]) == 1
-    assert int(q2k_quad[0, 0, 0, 0]) & 3 == 0  # first slot is block 1, empty for query half 0
-
-    out = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize=False)
-    assert torch.isfinite(out).all()
-    mask = _dense_quad_mask(q2k_idx, q2k_num, q2k_quad, seq_len)
-    scores = (q.float() @ k.float().transpose(-1, -2)) / math.sqrt(128)
-    expected = torch.softmax(scores.masked_fill(~mask, -math.inf), dim=-1) @ v.float()
-    torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
-
-
-def test_tile64_quadrant_mask_is_exact_masked_softmax():
-    q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, _, _ = _problem64(5, seed=5)
-    out = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize=False)
-    mask = _dense_quad_mask(q2k_idx, q2k_num, q2k_quad, q.shape[2])
-    valid = ref.key_valid_mask(kv_valid, q2k_idx.shape[-1], q.device).reshape(-1)
-    mask = mask & valid[None, None, None, :]
-    scores = (q.float() @ k.float().transpose(-1, -2)) / math.sqrt(128)
-    expected = torch.softmax(scores.masked_fill(~mask, -math.inf), dim=-1) @ v.float()
-    torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
-
-
 # ----------------------------------------------------------------------------- Triton (GPU)
 def _triton():
     return _module("attn_qat_vsa_train")
@@ -250,35 +139,23 @@ def _rel(a: torch.Tensor, b: torch.Tensor) -> float:
 
 
 @needs_gpu
-@pytest.mark.parametrize("two_level_p,smooth_k", [(False, False), (True, True)])
-def test_triton_tile64_forward_matches_reference(two_level_p, smooth_k):
-    q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, _, _ = _problem64(6, heads=2, seed=10, device="cuda")
-    expected = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad,
-                                               two_level_p=two_level_p, smooth_k=smooth_k)
-    out = _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad=q2k_quad,
-                                     two_level_p=two_level_p, smooth_k=smooth_k)
-    exact = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize=False)
-    assert _rel(out, expected) < 2e-3 < 0.1 * _rel(expected, exact)
+@pytest.mark.parametrize("prefix_precision", [None, "fp8"])
+def test_inference_matches_training_without_running_maxima(monkeypatch, prefix_precision):
+    train = _triton()
+    q, k, v, idx, counts, valid, _, _ = _problem(4, heads=2, device="cuda")
+    q.requires_grad_(True)
+    options = dict(prefix_precision=prefix_precision, num_prefix_tiles=1 if prefix_precision else None)
+    expected = train.fp4_vsa_attn_qat(q, k, v, idx, counts, valid, **options).detach()
+    original = torch.empty
 
+    def allocate(shape, **kwargs):
+        assert len(shape) != 5, "inference must not allocate per-block running maxima"
+        return original(shape, **kwargs)
 
-@needs_gpu
-@pytest.mark.parametrize("two_level_p", [False, True])
-def test_triton_tile64_backward_matches_ste_reference(two_level_p):
-    q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, _, _ = _problem64(6, heads=2, seed=11, device="cuda")
-    q, k, v = (t.clone().requires_grad_(True) for t in (q, k, v))
-    out = _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad=q2k_quad,
-                                     two_level_p=two_level_p)
-    grad_out = torch.randn_like(out)
-    dq, dk, dv = torch.autograd.grad(out, (q, k, v), grad_out)
-    _, weights = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad,
-                                                 two_level_p=two_level_p, return_dv_weights=True)
-    q_hat, k_hat, v_hat = ref.fake_quant_qkv(q.detach(), k.detach(), v.detach())
-    token_mask = _dense_quad_mask(q2k_idx, q2k_num, q2k_quad, q.shape[2])
-    valid = ref.key_valid_mask(kv_valid, q2k_idx.shape[-1], q.device).reshape(-1)
-    token_mask = token_mask & valid[None, None, None, :]
-    expected = ref.ste_gradients_reference(q_hat, k_hat, v_hat, token_mask, weights, grad_out, 1 / math.sqrt(128))
-    for name, got, want in zip("qkv", (dq, dk, dv), expected, strict=True):
-        assert _rel(got, want) < 2e-2, name
+    monkeypatch.setattr(torch, "empty", allocate)
+    with torch.no_grad():
+        actual = train.fp4_vsa_attn_qat(q, k, v, idx, counts, valid, **options)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 @needs_gpu
@@ -328,6 +205,24 @@ def test_triton_backward_matches_ste_reference(two_level_p):
 
 
 @needs_gpu
+def test_triton_qk_only_is_exact_softmax_on_quantized_qk():
+    """QK-only mode = exact sparse softmax over NVFP4 Q/K with BF16 V; STE gradients reach Q, K and V."""
+    q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(5, heads=2, seed=10, device="cuda")
+    q, k, v = (t.clone().requires_grad_(True) for t in (q, k, v))
+    out = _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, quantize_pv=False, smooth_k=True)
+    k_smooth = (k - k.mean(dim=-2, keepdim=True)).detach()
+    q_hat, k_hat, _ = ref.fake_quant_qkv(q.detach(), k_smooth, v.detach())
+    expected = ref.fp4_vsa_attention_reference(q_hat.bfloat16(), k_hat.bfloat16(), v.detach(), q2k_idx, q2k_num,
+                                               kv_valid, quantize=False)
+    full = _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, smooth_k=True)
+    assert _rel(out, expected) < 5e-3 < _rel(full, expected)
+    grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+    assert all(bool(g.float().norm() > 0) for g in grads)
+    with pytest.raises(ValueError):
+        _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, quantize_pv=False, two_level_p=True)
+
+
+@needs_gpu
 def test_triton_dv_reaches_every_head_on_long_sequences():
     """Regression for the GB10 Attn-QAT bug: re-quantized normalized P underflowed and zeroed dV per head."""
     q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(64, heads=4, keep=0.9, seed=8, device="cuda")
@@ -346,3 +241,63 @@ def test_triton_fake_quant_is_bit_identical_to_reference():
     want = ref.fake_quant_qkv(q, k, v)
     for name, a, b in zip("qkv", got, want, strict=True):
         assert torch.equal(a.float(), b.to(torch.bfloat16).float()), name
+
+
+def _bias_reference(q, k, v, token_mask, bias):
+    """fp32 softmax((q k^T + bias[key]) / sqrt(D)) v over ``token_mask``."""
+    s = (q.float() @ k.float().transpose(-1, -2) + bias[..., None, :]) / math.sqrt(q.shape[-1])
+    p = torch.softmax(s.masked_fill(~token_mask, float("-inf")), -1).nan_to_num(0.0)
+    return p @ v.float()
+
+
+@needs_gpu
+def test_triton_key_bias_matches_reference():
+    """The eval-only per-key score bias (Q-smoothing correction) enters the scores before the softmax."""
+    q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(5, heads=2, seed=11, device="cuda")
+    bias = 3.0 * torch.randn(1, 2, 1, q.shape[2], device="cuda")
+    out = _triton()._FP4VSAAttnQAT.apply(q, k, v, q2k_idx, q2k_num, kv_valid, False, True, False, None,
+                                         1 / math.sqrt(128), True, bias, None)
+    token_mask = ref.dense_block_mask(q2k_idx, q2k_num, q.shape[2], kv_valid)
+    assert _rel(out, _bias_reference(q, k, v, token_mask, bias[:, :, 0])) < 5e-3
+
+
+@pytest.mark.parametrize("n_groups", [1, 2])
+def test_query_smoothing_correction_is_exact(n_groups):
+    q, k, *_ = _problem(4, heads=2, seed=12)
+    groups = torch.tensor([0, 0, 1, 1], dtype=torch.int32) if n_groups == 2 else torch.zeros(4, dtype=torch.int32)
+    q_c, bias = _triton()._smooth_queries(q, k, groups, n_groups)
+    row_group = groups.repeat_interleave(ref.BLOCK).long()
+    rebuilt = q_c @ k.float().transpose(-1, -2) + bias[:, :, row_group]
+    assert _rel(rebuilt, q.float() @ k.float().transpose(-1, -2)) < 1e-5
+    assert q_c[:, :, row_group == 0].mean(-2).abs().max() < 1e-5
+
+
+def test_hadamard_is_orthogonal():
+    h = _triton()._hadamard(128, torch.device("cpu"))
+    assert torch.allclose(h @ h.T, torch.eye(128), atol=1e-6)
+
+
+@needs_gpu
+def test_triton_qk_variants_reduce_to_known_modes():
+    """Hadamard = QK-only on rotated inputs; BF16 prefix rows = exact rows; all-prefix = no quantization."""
+    q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(6, heads=2, seed=13, device="cuda")
+    fn = _triton().fp4_vsa_attn_qat
+    qk = dict(quantize_pv=False, smooth_k=True)
+    rot = _triton()._hadamard(128, q.device)
+    k_s = k - k.mean(dim=-2, keepdim=True)
+    q_hat, k_hat, _ = ref.fake_quant_qkv(q.float() @ rot, k_s.float() @ rot, v)
+    expected = ref.fp4_vsa_attention_reference(q_hat.bfloat16(), k_hat.bfloat16(), v, q2k_idx, q2k_num, kv_valid,
+                                               quantize=False)
+    assert _rel(fn(q, k, v, q2k_idx, q2k_num, kv_valid, hadamard=True, **qk), expected) < 5e-3
+    exact = fn(q, k, v, q2k_idx, q2k_num, kv_valid, quantize=False, smooth_k=True)
+    plain = fn(q, k, v, q2k_idx, q2k_num, kv_valid, **qk)
+    mixed = fn(q, k, v, q2k_idx, q2k_num, kv_valid, prefix_precision="bf16", num_prefix_tiles=2, **qk)
+    rows = 2 * ref.BLOCK
+    assert _rel(mixed[:, :, :rows], exact[:, :, :rows]) < 1e-3
+    assert _rel(mixed[:, :, rows:], plain[:, :, rows:]) < 1e-3
+    all_hp = fn(q, k, v, q2k_idx, q2k_num, kv_valid, prefix_precision="bf16", num_prefix_tiles=6, **qk)
+    assert _rel(all_hp, exact) < 1e-3
+    smoothed = fn(q, k, v, q2k_idx, q2k_num, kv_valid, smooth_q="global", **qk)
+    assert _rel(smoothed, exact) < 0.5
+    with pytest.raises(ValueError):
+        fn(q, k, v, q2k_idx, q2k_num, kv_valid, hadamard=True)  # P.V quantized: not a Q/K-only mode

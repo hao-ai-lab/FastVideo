@@ -225,7 +225,10 @@ python examples/inference/basic/basic_fasth3_omniref_pdd.py \
 ```
 
 See [FastH3 distilled checkpoint schedules](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3-distilled.md#ref2va-pdd-students)
-for the contract and the reference-video sparsity policy.
+for the contract and the reference-video sparsity policy. For the consumer NVFP4
+stack (RTX 5090, RTX PRO 6000, DGX Spark; FP8 on the RTX 4090) add
+`--profile <name>`, and see
+[FastH3 OmniRef inference](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3_omniref.md).
 
 ## Basic Walkthrough
 

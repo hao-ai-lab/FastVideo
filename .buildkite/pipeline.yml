@@ -23,6 +23,8 @@ notify:
 # dispatcher, and every test payload executes inside the Slinky Slurm tray.
 # fastvideo/tests/modal remains available only for an explicit manual rollback;
 # no active pipeline or slash-command route invokes it.
+# Agent tag `backend` routes a lane: Spark-capable lanes default to slurm and move to a
+# DGX Spark runner when FV_SPARK_BACKEND=spark4; the rest are pinned to slurm.
 # Buildkite hands jobs to free agents in the order they appear here. Golden-gate comes first
 # because every later merge lane waits for it; the fastcheck lanes follow from longest to
 # shortest measured runtime, so the longest lane never starts last and stretches the build.
@@ -47,6 +49,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: Unit Tests"
     key: "unit"
@@ -70,6 +73,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: Kernel Tests"
     key: "kernel-tests"
@@ -93,6 +97,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: DreamVerse App Tests"
     key: "dreamverse"
@@ -116,6 +121,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: Encoder Tests"
     key: "encoder"
@@ -139,6 +145,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: VAE Tests"
     key: "vae"
@@ -162,6 +169,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":microscope: Transformer Tests"
     key: "transformer"
@@ -185,6 +193,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":bar_chart: SSIM Tests"
     key: "ssim"
@@ -212,6 +221,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: LoRA Inference Tests"
     key: "lora-inference"
@@ -234,6 +244,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: LoRA Extraction Tests"
     key: "lora-extraction"
@@ -256,6 +267,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Training Tests"
     key: "training"
@@ -280,6 +292,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Distillation DMD Tests"
     key: "distillation"
@@ -302,6 +315,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Self-Forcing Tests"
     key: "self-forcing"
@@ -324,6 +338,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: LoRA Training Tests"
     key: "lora-training"
@@ -348,6 +363,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Training Tests VSA"
     key: "training-vsa"
@@ -372,6 +388,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: Inference Tests VMoBA"
     key: "inference-vmoba"
@@ -394,6 +411,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Performance Tests"
     key: "performance"
@@ -416,6 +434,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "slurm"
 
   - label: ":test_tube: API Server Tests"
     key: "api-server"
@@ -438,6 +457,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Train Framework Tests"
     key: "train-framework"
@@ -460,6 +480,7 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
 
   - label: ":test_tube: Eval Metrics Tests"
     key: "eval"
@@ -482,3 +503,4 @@ steps:
           limit: 2
     agents:
       queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"

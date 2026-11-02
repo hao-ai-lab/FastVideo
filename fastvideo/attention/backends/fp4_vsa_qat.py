@@ -34,6 +34,11 @@ def _load(name: str) -> ModuleType:
         return importlib.import_module(f"fastvideo_kernel.triton_kernels.{name}")
     except ImportError:
         pass
+    except KeyError:
+        # An earlier failed `fastvideo_kernel` import leaves a None entry in
+        # sys.modules, and the machinery then raises KeyError instead of
+        # ImportError. Same meaning for us: fall back to this checkout's tree.
+        pass
     if _PRIVATE_PACKAGE not in sys.modules:
         if not (_KERNEL_DIR / f"{name}.py").is_file():
             raise ImportError(f"{name}.py is neither in the installed fastvideo_kernel nor in {_KERNEL_DIR}")
@@ -54,12 +59,18 @@ class FP4AttentionNumerics:
     """Numeric mode of the deployed kernel; mirror whatever inference ships.
 
     ``quantize=False`` keeps the emulator's sparse structure with exact
-    softmax (a BF16, grad-capable tile-128 route).
+    softmax (a BF16, grad-capable tile-128 route). ``quantize_pv=False``
+    quantizes Q/K only, with P and V in BF16 (FA4 NVFP4-QK + BF16 PV).
     """
     quantize: bool = True
+    quantize_pv: bool = True
     two_level_p: bool = False
     smooth_k: bool = False
     first_block_max_floor: float | None = None
+    # Q/K-only error-reduction studies (forward-only except ``hadamard``); see ``fp4_vsa_attn_qat``.
+    hadamard: bool = False
+    smooth_q: str | None = None
+    prefix_precision: str | None = None
 
 
 class FP4VSAFineAttention:
@@ -71,30 +82,26 @@ class FP4VSAFineAttention:
 
     def __call__(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, mask: torch.Tensor,
                  metadata: Any) -> torch.Tensor:
-        tile_elems = int(metadata.tile_elems)
-        if tile_elems not in (64, 128):
-            raise ValueError(f"the FP4 VSA emulator models 64- or 128-token tiles, got {tile_elems}")
-        q2k_idx, q2k_num, kv_valid, q2k_quad = self._reference.tile_mask_to_fp4_blocks(
-            mask, tile_elems, metadata.variable_block_sizes)
+        if int(metadata.tile_elems) != 128:
+            raise ValueError(f"the FP4 VSA emulator models 128-token tiles only, got {metadata.tile_elems}")
+        q2k_idx, q2k_num, kv_valid = self._reference.tile128_mask_to_fp4_blocks(mask, metadata.variable_block_sizes)
         q, k, v = (t.transpose(1, 2) for t in (query, key, value))
-        seq_len = q.shape[2]
-        padded = (seq_len + 127) // 128 * 128
-        if padded != seq_len:
-            pad = padded - seq_len
-            q, k, v = (torch.nn.functional.pad(t, (0, 0, 0, pad)) for t in (q, k, v))
+        num_prefix_tiles = int(getattr(metadata, "num_prefix_tiles", 0) or 0)
         out = self._train.fp4_vsa_attn_qat(q,
                                            k,
                                            v,
                                            q2k_idx,
                                            q2k_num,
                                            kv_valid,
-                                           q2k_quad=q2k_quad,
                                            quantize=self.numerics.quantize,
+                                           quantize_pv=self.numerics.quantize_pv,
                                            two_level_p=self.numerics.two_level_p,
                                            smooth_k=self.numerics.smooth_k,
-                                           first_block_max_floor=self.numerics.first_block_max_floor)
-        if padded != seq_len:
-            out = out[:, :, :seq_len]
+                                           first_block_max_floor=self.numerics.first_block_max_floor,
+                                           hadamard=self.numerics.hadamard,
+                                           smooth_q=self.numerics.smooth_q,
+                                           prefix_precision=self.numerics.prefix_precision,
+                                           num_prefix_tiles=num_prefix_tiles)
         return out.transpose(1, 2)
 
 

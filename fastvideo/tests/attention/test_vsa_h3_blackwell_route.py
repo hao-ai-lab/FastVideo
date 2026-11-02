@@ -2,10 +2,12 @@
 """Checks for the VSA-H3 tile-64 ptx_blackwell route and odd-tile transport.
 
 The opt-in third kernel route (``FASTVIDEO_VSA_PTX_BLACKWELL=1``) must (a) stay off by
-default, (b) engage only when the extension is present, the device qualifies,
-and the forward carries no grad, (c) add one zero-valid partner for an odd
-logical tile count, and (d) strip that partner before any fallback or returned
-output. Most probes are monkeypatched; the final test is a GB200 route receipt.
+default, (b) engage only when the extension is present and the device qualifies,
+with grad-tracking forwards going only through the kernel's registered autograd
+operator (Triton otherwise), (c) add one zero-valid partner for an odd logical
+tile count on that route, and (d) strip that partner before any fallback or
+returned output. Most probes are monkeypatched, including whether the installed
+kernel exports the autograd operator; the final test is a GB200 route receipt.
 """
 
 import logging
@@ -16,6 +18,7 @@ import torch
 import fastvideo.attention.backends.video_sparse_attn_h3 as vsa_h3
 import fastvideo.envs as envs
 import fastvideo.logger as fastvideo_logger
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.attention.backends.video_sparse_attn_h3 import (VSA_PTX_BLACKWELL_ENV, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder,
                                                                _ptx_blackwell_unavailable_reason)
@@ -98,6 +101,17 @@ class _FakeTriton:
         return q.clone(), None
 
 
+class _FakePtxBlackwellOp:
+    """Stands in for the kernel's registered autograd entry, block_sparse_attn_ptx_blackwell_op."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes):
+        self.calls.append(dict(q=q, q2k_num=q2k_num, vbs=variable_block_sizes))
+        return q.clone(), None
+
+
 @pytest.fixture()
 def routed(monkeypatch):
     """Backend with both kernel entries faked; returns (fakes, run)."""
@@ -106,6 +120,9 @@ def routed(monkeypatch):
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fake_triton)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    # A kernel without the autograd operator; tests that need it install a fake.
+    # Never let the installed in-tree CUDA op decide a CPU test's route.
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_ptx_blackwell_op", None)
     meta = _build_meta()
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
@@ -373,7 +390,7 @@ def test_default_off_routes_triton(routed, env_overrides):
     assert fake_sm.calls == []
 
 
-def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeypatch, env_overrides):
+def test_unprepared_training_compile_without_autograd_op_keeps_triton_route(routed, monkeypatch, env_overrides):
     fake_sm, fake_triton, run, _ = routed
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
@@ -381,6 +398,20 @@ def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeyp
     run(requires_grad=True)
 
     assert fake_triton.calls == 1
+    assert fake_sm.calls == []
+
+
+def test_unprepared_training_compile_routes_grad_forwards_to_the_autograd_op(routed, monkeypatch, env_overrides):
+    fake_sm, fake_triton, run, _ = routed
+    fake_op = _FakePtxBlackwellOp()
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_ptx_blackwell_op", fake_op)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+
+    run(requires_grad=True)
+
+    assert len(fake_op.calls) == 1
+    assert fake_triton.calls == 0
     assert fake_sm.calls == []
 
 
@@ -427,7 +458,7 @@ def test_ptx_blackwell_engagement_receipt_logs_once_without_stacklevel_conflict(
                         {"stacklevel": 2})]
 
 
-def test_env_on_grad_inputs_fall_back_to_triton(routed, env_overrides):
+def test_env_on_grad_inputs_without_autograd_op_fall_back_to_triton(routed, env_overrides):
     fake_sm, fake_triton, run, _ = routed
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     run(requires_grad=True)
@@ -436,6 +467,21 @@ def test_env_on_grad_inputs_fall_back_to_triton(routed, env_overrides):
     # ...but the same process still routes no-grad forwards to ptx_blackwell
     run(requires_grad=False)
     assert len(fake_sm.calls) == 1
+
+
+def test_env_on_grad_inputs_use_only_the_autograd_op(routed, monkeypatch, env_overrides):
+    fake_sm, fake_triton, run, meta = routed
+    fake_op = _FakePtxBlackwellOp()
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_ptx_blackwell_op", fake_op)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+
+    out = run(requires_grad=True)
+
+    # Training never calls the raw forward-only entry while tracking grads.
+    assert len(fake_op.calls) == 1 and fake_sm.calls == []
+    assert fake_triton.calls == 0
+    assert fake_op.calls[0]["vbs"].dtype == torch.int32
+    assert out.shape == (1, meta.variable_block_sizes.numel() * 64, _HEADS, _DIM)
 
 
 def test_env_on_unsupported_warns_once_and_falls_back(routed, monkeypatch, env_overrides):
@@ -477,19 +523,25 @@ def test_env_on_no_grad_context_detaches_route_from_leaf_flags(routed, env_overr
 
 
 @pytest.mark.parametrize(
-    ("env_enabled", "requires_grad", "extra_tiles"),
+    ("env_enabled", "requires_grad", "autograd_op", "extra_tiles"),
     [
-        (False, False, 0),
-        (True, False, 1),
-        (True, True, 0),
+        (False, False, True, 0),
+        (True, False, False, 1),
+        (True, True, False, 0),
+        (True, True, True, 1),
     ],
 )
-def test_preprocess_adds_partner_only_for_odd_no_grad_ptx_blackwell(
+def test_preprocess_adds_partner_only_for_odd_ptx_blackwell_routes(
+    monkeypatch,
     env_overrides,
     env_enabled,
     requires_grad,
+    autograd_op,
     extra_tiles,
 ):
+    # A grad-tracking forward takes the ptx_blackwell route only through the
+    # kernel's autograd operator, so only then does it need the partner tile.
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_ptx_blackwell_op", _FakePtxBlackwellOp() if autograd_op else None)
     if env_enabled:
         env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     else:
@@ -767,6 +819,7 @@ def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, e
     layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
     torch.nn.Module.__init__(layer)
     layer.attn_impl = impl
+    layer.backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3  # set by __init__; read by forward
     layer._compile_forward_enabled = True
     builder = MiniMaxH3VSAMetadataBuilder()
     counter = CompileCounter()
