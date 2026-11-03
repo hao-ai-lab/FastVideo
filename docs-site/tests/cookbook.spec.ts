@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(36);
+  await expect(cards).toHaveCount(38);
   await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -276,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -392,6 +392,35 @@ test("source-backed controls update the copied command without changing models",
   await page.goto("/FastVideo/cookbook/minimax-h3/models/minimax-h3-t2v");
   await chip(page, "GPU count", "2");
   await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--num-gpus '2'");
+});
+
+test("Pika H3 Flex knobs select the tier, bucket, duration, task, and NVFP4 decoder", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3");
+  const pika = page.locator(".recipe-card").filter({ hasText: "Pika H3 Flex" });
+  await expect(pika.locator("img")).toHaveAttribute("src", /\/pika\.webp$/);
+  await expect(pika).toContainText("Pika");
+  await pika.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/models\/pika-h3-flex-t2va$/);
+  const command = page.getByLabel("Inference command", { exact: true });
+  await expect(command).toContainText("FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1");
+  await chip(page, "Resolution", "480p");
+  await chip(page, "Aspect ratio", "9:16");
+  await chip(page, "Duration", "10 s (243 frames)");
+  await chip(page, "VAE decoder", "NVFP4 36L quality");
+  await expect(command).toContainText("--resolution '480p'");
+  await expect(command).toContainText("--aspect '9:16'");
+  await expect(command).toContainText("--duration '10'");
+  await expect(command).toContainText("--nvfp4-decoder './fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors'");
+  await page
+    .getByRole("group", { name: "Recipe variant", exact: true })
+    .getByRole("button", { name: "Pika H3 Flex keyframes", exact: true })
+    .click();
+  await expect(command).toContainText("--task fl2va --offload resident");
+  await chip(page, "Task", "First frame (I2VA)");
+  await chip(page, "Memory", "Lazy load + offload");
+  await expect(command).toContainText("--task 'i2va'");
+  await expect(command).toContainText("--offload 'lazy'");
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
 });
 
 test("Wan I2V requires an image for CLI and SDK examples without changing server defaults", async ({ page }) => {
@@ -722,7 +751,7 @@ test("MLX Omni discovery and its original route expose the MLX launch command", 
 
 test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
   for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
     const button = page.getByRole("button", { name: category, exact: true });
     const count = Number(await button.locator(".recipe-filter-count").innerText());
@@ -789,4 +818,22 @@ test("WebSocket deployments expose only the serving interface", async ({ page })
   await expect(modes.getByRole("button", { name: "Python SDK", exact: true })).toHaveCount(0);
   await expect(modes.getByRole("button", { name: "CLI", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Only serving is recorded for it/)).toBeVisible();
+});
+
+test("video-to-video deployments expose only the serving interface", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/open-h3-regenerate-2k");
+  const modes = page.getByRole("group", { name: "Run mode" });
+  await expect(modes.getByRole("button")).toHaveCount(1);
+  await expect(modes.getByRole("button", { name: "Serving", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Send it to the server as video_reference/)).toBeVisible();
+});
+
+test("Open-H3-Regenerate-2K is discoverable as a video upscale with its serving page", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Task", { exact: true }).selectOption("Video upscale");
+  const card = page.locator(".recipe-card").filter({ hasText: "Open-H3-Regenerate-2K" });
+  await expect(card).toHaveCount(1);
+  await card.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/open-h3-regenerate-2k\/?$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Open-H3-Regenerate-2K");
 });

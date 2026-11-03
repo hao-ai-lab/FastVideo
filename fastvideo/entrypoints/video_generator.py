@@ -1041,10 +1041,16 @@ class VideoGenerator:
             # `samples` above is just the pinned-CPU mirror of `output_batch.output` (`samples.copy_(output)` or
             # `output.cpu()`) with no intervening preprocessing, so reading `output_batch.output` here is the same
             # data. See `_quantize_video_frames_to_uint8` for why this quantizes on-device and its OOM fallback.
-            vid_u8 = _quantize_video_frames_to_uint8(output_batch.output)
-            frames = [
-                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
-            ]
+            src_frames = output_batch.output
+            if (isinstance(src_frames, torch.Tensor) and src_frames.dim() == 5 and src_frames.dtype == torch.uint8
+                    and src_frames.shape[0] == 1 and src_frames.shape[2] > 1):
+                frames = list(src_frames[0].permute(1, 2, 3, 0).contiguous().cpu().numpy())
+            else:
+                vid_u8 = _quantize_video_frames_to_uint8(src_frames)
+                frames = [
+                    torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy()
+                    for x in vid_u8
+                ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:

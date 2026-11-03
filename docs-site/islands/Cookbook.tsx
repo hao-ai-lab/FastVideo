@@ -368,12 +368,16 @@ function Editor({
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
-  const modes = mlx || catalog.runtime.interface === "websocket" ? ["serving"] : ["sdk", "inference", "serving"];
+  const videoInput = catalog.workload === "v2v";
+  const modes =
+    mlx || catalog.runtime.interface === "websocket" || videoInput ? ["serving"] : ["sdk", "inference", "serving"];
   const modeNote = mlx
     ? "Apple Silicon runs through the native MLX server in this recipe. There is no CUDA CLI or Python SDK launch for this deployment."
     : catalog.runtime.interface === "websocket"
       ? "This deployment uses the native WebSocket server. Only serving is recorded for it."
-      : "";
+      : videoInput
+        ? "This deployment needs a draft video. Send it to the server as video_reference; generated CLI and Python SDK configs cannot carry it yet."
+        : "";
   const advancedGroups = groups.filter(
     (group) => group === "server" || group.includes("parallelism") || group.startsWith("streaming"),
   );
@@ -872,10 +876,9 @@ function modelModes(index: Index | undefined, model: DirectoryModel): string[] |
 function configurableModes(index: Index | undefined, modelId: string): string[] | undefined {
   const deployments = index?.models.find((model) => model.id === modelId)?.deployments;
   if (!deployments?.length) return undefined;
-  const servingOnly = (runtime: string) => runtime.includes("mlx") || runtime.includes("streaming");
-  return deployments.some((deployment) => !servingOnly(deployment.runtime))
-    ? ["Python SDK", "CLI", "Serving"]
-    : ["Serving"];
+  const servingOnly = (deployment: { runtime: string; workload: string }) =>
+    deployment.runtime.includes("mlx") || deployment.runtime.includes("streaming") || deployment.workload === "v2v";
+  return deployments.some((deployment) => !servingOnly(deployment)) ? ["Python SDK", "CLI", "Serving"] : ["Serving"];
 }
 
 /** Mirrors the source recipe page: Python SDK and CLI always, serving when a recipe declares it. */

@@ -15,6 +15,7 @@ plain typographic tile instead — that tile is a UI placeholder, not a logo.
 | `black-forest-labs.webp` | [Official Black Forest Labs Hugging Face organization avatar](https://huggingface.co/black-forest-labs) | FLUX family card and page header |
 | `qwen.webp` | [Official Qwen Hugging Face organization avatar](https://huggingface.co/Qwen) | Qwen-Image-2.1 family card and page header |
 | `minimax.webp` | [Official MiniMax Hugging Face organization avatar](https://huggingface.co/MiniMaxAI) | MiniMax H3 family card and page header |
+| `pika.webp` | [Official Pika-Labs Hugging Face organization avatar](https://huggingface.co/Pika-Labs) | Pika H3 Flex card and page header |
 | `stabilityai.webp` | [Official Stability AI Hugging Face organization avatar](https://huggingface.co/stabilityai) | Stable Diffusion and Stable Audio cards and page headers |
 | `fastvideo.webp` | [Official FastVideo Hugging Face organization avatar](https://huggingface.co/FastVideo) | Matrix Game and MMAudio cards (converted weights published by this org) |
 

@@ -482,6 +482,15 @@ class MiniMaxH3VideoTransformerBlock(nn.Module):
         return hidden_states + self.ff(norm_hidden_states) * self.scale2
 
 
+def _run_decoder_block(
+    block: nn.Module,
+    hidden_states: torch.Tensor,
+    rotary_emb: tuple[torch.Tensor, torch.Tensor],
+) -> torch.Tensor:
+    # Takes the block as an argument so one compiled graph serves every block (parameters are graph inputs).
+    return block(hidden_states, rotary_emb)
+
+
 class MiniMaxH3VideoViTDecoder3d(nn.Module):
 
     def __init__(
@@ -522,6 +531,25 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.gradient_checkpointing = False
         self.fused_blocks_forward: Callable[[nn.ModuleList, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
                                             torch.Tensor | None] | None = None
+        self._compiled_block_forward: Callable[[nn.Module, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+                                               torch.Tensor] | None = None
+        if envs.FASTVIDEO_H3_VAE_COMPILE_BLOCKS.get():
+            self.install_compiled_blocks()
+
+    def install_compiled_blocks(self) -> int:
+        """Compile the shared decoder-block region; returns the number of blocks it now serves (0 if installed)."""
+        if self._compiled_block_forward is not None:
+            return 0
+        self._compiled_block_forward = torch.compile(_run_decoder_block, dynamic=False)
+        return len(self.transformer_blocks)
+
+    def set_compiled_blocks(self, enabled: bool) -> int:
+        """Switch between the compiled region and the eager loop; returns the number of blocks switched."""
+        if enabled:
+            return self.install_compiled_blocks()
+        switched = self._compiled_block_forward is not None
+        self._compiled_block_forward = None
+        return len(self.transformer_blocks) if switched else 0
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Decode one latent spatial input through the H3 video transformer."""
@@ -551,9 +579,12 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
                                           rotary_emb) if self.fused_blocks_forward is not None else None
         if fused is not None:
             hidden_states = fused
+        compiled_block_forward = self._compiled_block_forward
         for block in self.transformer_blocks if fused is None else ():
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = checkpoint(block, hidden_states, rotary_emb, use_reentrant=False)
+            elif compiled_block_forward is not None:
+                hidden_states = compiled_block_forward(block, hidden_states, rotary_emb)
             else:
                 hidden_states = block(hidden_states, rotary_emb)
 
@@ -842,8 +873,21 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             self.tile_sample_min_width,
             self.tile_sample_min_overlap_width,
         )
+        per_call = envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.get()
         rows = []
-        for y_position, y_length in zip(y_indices, y_lengths):
+        if per_call > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+            tiles = [
+                x[..., y_position:y_position + y_length, x_position:x_position + x_length]
+                for y_position, y_length in zip(y_indices, y_lengths)
+                for x_position, x_length in zip(x_indices, x_lengths)
+            ]
+            encoded: list[torch.Tensor] = []
+            for start in range(0, len(tiles), per_call):
+                batch = torch.cat(tiles[start:start + per_call], dim=0)
+                encoded.extend(self.quant_conv(self.encoder(batch)).split(x.shape[0], dim=0))
+            columns = len(x_indices)
+            rows = [encoded[index:index + columns] for index in range(0, len(encoded), columns)]
+        for y_position, y_length in zip(y_indices, y_lengths) if not rows else ():
             row = []
             for x_position, x_length in zip(x_indices, x_lengths):
                 tile = x[..., y_position:y_position + y_length, x_position:x_position + x_length]
@@ -1077,6 +1121,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         before releasing the buffer.
         """
         target = output[:, :, frame_start:frame_start + pixels.shape[2]]
+        if output.dtype == torch.uint8:
+            pixels = (pixels * 255).clamp_(0, 255).to(torch.uint8)
         if pixels.device.type == "cuda":
             pixels = pixels.contiguous()
             for batch_index in range(pixels.shape[0]):
@@ -1195,11 +1241,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         return DecoderOutput(sample=decoded)
 
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-        """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
+        """Stream decoded ``[0, 1]`` pixels into a caller-owned CPU buffer.
+
+        ``output`` is float32, or uint8 when the caller asks for the quantized
+        stream (``FASTVIDEO_H3_VAE_UINT8_PIXELS``); uint8 quantizes each chunk on
+        the GPU with the fp32 host path's exact mul/clamp/truncate arithmetic.
+        """
         expected_shape = self.decoded_pixel_shape(z.shape)
-        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+        if (output.device.type != "cpu" or output.dtype not in (torch.float32, torch.uint8)
+                or tuple(output.shape) != expected_shape):
             raise ValueError(
-                "`output` must be a CPU float32 tensor with shape "
+                "`output` must be a CPU float32 or uint8 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
         try:
             if self.use_slicing and z.shape[0] > 1:
