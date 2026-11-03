@@ -25,9 +25,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Compare [project].version with the previous commit
+      - name: Compare [project].version with the version before this push
         id: check
         shell: python
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           import os
           import subprocess
@@ -36,11 +38,18 @@ jobs:
           def version(text: str) -> str | None:
               return tomllib.loads(text).get("project", {}).get("version")
 
+          def git(*args: str) -> subprocess.CompletedProcess:
+              return subprocess.run(["git", *args], capture_output=True, text=True)
+
+          # A push can carry several commits; compare with the tip before the push, not HEAD~1.
+          base = os.environ.get("BEFORE_SHA", "").strip()
+          if not base or set(base) == {"0"} or git("fetch", "--no-tags", "--depth=1", "origin", base).returncode:
+              base = "HEAD~1"
           new = version(open("pyproject.toml", encoding="utf-8").read())
-          previous = subprocess.run(["git", "show", "HEAD~1:pyproject.toml"], capture_output=True, text=True)
+          previous = git("show", f"{base}:pyproject.toml")
           old = version(previous.stdout) if previous.returncode == 0 else None
           changed = new is not None and new != old
-          print(f"previous version: {old}, current version: {new}, changed: {changed}")
+          print(f"base: {base}, previous version: {old}, current version: {new}, changed: {changed}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"changed={str(changed).lower()}\n")
 

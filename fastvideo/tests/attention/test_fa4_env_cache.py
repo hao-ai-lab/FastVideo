@@ -98,6 +98,35 @@ def test_unrelated_environment_changes_do_not_drop_kernels() -> None:
     assert list(fwd.compile_cache) == ["a"]
 
 
+class _JITCacheLike:
+    """Shape of ``flash_attn.cute.cache_utils.JITCache`` at the pinned FA4 ref: not a dict."""
+
+    def __init__(self, entries: dict) -> None:
+        self.cache = dict(entries)
+
+    def __contains__(self, key) -> bool:
+        return key in self.cache
+
+    def clear(self) -> None:
+        self.cache.clear()
+
+
+def test_jit_cache_objects_are_cleared_through_their_own_clear() -> None:
+    """The pinned FA4 wraps its compile cache in a JITCache; a dict-only check cleared nothing."""
+    fwd = SimpleNamespace(compile_cache=_JITCacheLike({"a": object(), "b": object()}))
+    bwd = SimpleNamespace(compile_cache=_JITCacheLike({}), compile_cache_pre=_JITCacheLike({"c": object()}))
+
+    assert fa4_env_cache.clear_fa4_jit_caches((fwd, bwd)) == 3
+    assert fwd.compile_cache.cache == {}
+    assert bwd.compile_cache_pre.cache == {}
+
+    fwd.compile_cache.cache["a"] = object()
+    assert fa4_env_cache.invalidate_fa4_jit_caches_on_env_change((fwd, ), {"FA_X": "1"}) is True
+    fwd.compile_cache.cache["a"] = object()
+    assert fa4_env_cache.invalidate_fa4_jit_caches_on_env_change((fwd, ), {"FA_X": "0"}) is True
+    assert "a" not in fwd.compile_cache
+
+
 def test_missing_or_non_dict_caches_are_ignored() -> None:
     bare = SimpleNamespace()
     non_dict = SimpleNamespace(compile_cache=["not", "a", "dict"])
