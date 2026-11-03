@@ -28,14 +28,34 @@ def fa4_env_fingerprint(environ: Mapping[str, str] | None = None, ) -> tuple[tup
     return tuple(pairs)
 
 
+def _cached_entries(cache: object) -> dict | None:
+    """The in-memory entries of an FA4 JIT cache, or None if ``cache`` is not one.
+
+    Older FA4 builds keep a plain dict; the pinned ref wraps it in ``cache_utils.JITCache``
+    (entries under ``.cache``), which is not a dict, so checking only for dicts cleared nothing.
+    """
+    if isinstance(cache, dict):
+        return cache
+    entries = getattr(cache, "cache", None)
+    if isinstance(entries, dict) and callable(getattr(cache, "clear", None)):
+        return entries
+    return None
+
+
 def clear_fa4_jit_caches(kernel_objects: Iterable[object]) -> int:
-    """Drop every FA4 JIT cache on ``kernel_objects``; return entries dropped."""
+    """Drop every FA4 JIT cache on ``kernel_objects``; return entries dropped.
+
+    Clearing goes through the cache's own ``clear()``. For FA4's opt-in persistent cache
+    (FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1) that also purges its on-disk kernels, whose keys
+    omit the tuning env as well; it only happens when compiled kernels are held in memory.
+    """
     cleared = 0
     for kernel_object in kernel_objects:
         for attribute in _JIT_CACHE_ATTRS:
             cache = getattr(kernel_object, attribute, None)
-            if isinstance(cache, dict) and cache:
-                cleared += len(cache)
+            entries = _cached_entries(cache)
+            if entries:
+                cleared += len(entries)
                 cache.clear()
     return cleared
 
