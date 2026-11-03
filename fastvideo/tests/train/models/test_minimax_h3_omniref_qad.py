@@ -591,6 +591,7 @@ def test_step0_cache_round_trip_and_fingerprint(tmp_path):
     save_step0(path, inputs, metrics)
     # Settings that cannot change step 0 (eval cadence) do not invalidate the cache.
     same = step0_fingerprint_inputs({**method, "eval_every": 40}, data, qad, "ab" * 32, 30, **models)
+    assert step0_fingerprint_inputs(method, data, qad, "ab" * 32, 30, **models, compression={}) == inputs
     cached = load_step0(path, same)
     assert cached is not None and "eval/seconds" not in cached and cached["eval/score"] == 0.31
     summary, recon_norm, tolerances = restore_step0(cached, 2, recon=True, noise_floor=True, min_tolerance=0.02)
@@ -609,6 +610,8 @@ def test_step0_cache_round_trip_and_fingerprint(tmp_path):
                     step0_fingerprint_inputs(method, data, qad, "ab" * 32, 30, **{**models, "student_init_from": "/x"}),
                     step0_fingerprint_inputs(method, data, qad, "ab" * 32, 30, **{**models, "teacher_init_from": "/x"}),
                     step0_fingerprint_inputs({**method, "audio_weight": 2.0}, data, qad, "ab" * 32, 30, **models),
-                    step0_fingerprint_inputs(method, data, provisional, "ab" * 32, 30, **models)):
+                    step0_fingerprint_inputs(method, data, provisional, "ab" * 32, 30, **models),
+                    step0_fingerprint_inputs(method, data, qad, "ab" * 32, 30, **models,
+                                             compression={"start": 12, "end": 36, "mode": "pool2"})):
         with pytest.raises(ValueError, match="other inputs"):
             load_step0(path, changed)

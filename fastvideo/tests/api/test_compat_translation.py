@@ -233,3 +233,12 @@ def _stub_fastvideo_args_from_kwargs(monkeypatch):
             self.kwargs = kw
 
     monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _Captured)
+
+
+def test_disable_autocast_reaches_fastvideo_args(monkeypatch) -> None:
+    """``PipelineConfig.from_kwargs`` pops ``disable_autocast`` too; the denoising stages read the FastVideoArgs copy."""
+    from fastvideo import registry
+    monkeypatch.setattr(registry, "get_pipeline_config_cls_from_name", lambda model_path: None)
+    for value in (True, False):
+        config = legacy_from_pretrained_to_config("/models/any", {"disable_autocast": value})
+        assert generator_config_to_fastvideo_args(config).disable_autocast is value
