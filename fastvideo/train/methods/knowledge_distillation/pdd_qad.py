@@ -489,7 +489,8 @@ class OmniRefPDDQADMethod(TrainingMethod):
                                         self.student.amax_sha256,
                                         len(self.student.eval_rows),
                                         student_init_from=self.student._init_from,
-                                        teacher_init_from=self.teacher._init_from)
+                                        teacher_init_from=self.teacher._init_from,
+                                        compression=getattr(self.student, "_compression_cfg", None))
 
     def _load_step0(self) -> dict[str, float] | None:
         if not self.step0_cache:
