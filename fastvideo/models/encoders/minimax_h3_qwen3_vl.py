@@ -1,28 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native Qwen3-VL conditioner used by MiniMax H3."""
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-import fastvideo.envs as envs
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear, RowParallelLinear
 from fastvideo.layers.quantization.base_config import QuantizationConfig
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.encoders.minimax_h3_checkpoint_fp8 import MiniMaxH3SerializedFP8Config
 from fastvideo.models.encoders.minimax_h3_checkpoint_nvfp4 import MiniMaxH3SerializedNVFP4Config
 from fastvideo.models.loader.weight_utils import default_weight_loader
+from fastvideo.platforms import AttentionBackendEnum
 
 
 _VISION_INTERPOLATION_WORKSPACE_BYTES = 64 * 1024 * 1024
+logger = init_logger(__name__)
 
 
 def _rotate_half(tensor: torch.Tensor) -> torch.Tensor:
@@ -433,24 +437,34 @@ def _can_use_vision_flash_attn_2(tensor: torch.Tensor, head_dim: int) -> bool:
             and torch.cuda.get_device_capability(tensor.device)[0] >= 8)
 
 
-def _vision_flash_attn_varlen(*args, **kwargs) -> torch.Tensor:
+@lru_cache(maxsize=1)
+def _get_vision_flash_attn_varlen() -> Callable[..., torch.Tensor] | None:
     # Follow Qwen2.5-VL's FA2 API without importing CUDA extensions on CPU or
     # coupling this encoder to the process-wide DiT/FA4 backend selection.
+    # Availability is cached for this process; restart after installing FA2.
     try:
         from flash_attn import flash_attn_varlen_func
-    except ImportError as exc:
-        raise ImportError("H3 vision flash_attn_2 requires a compatible flash-attn installation; "
-                          "install it or use FASTVIDEO_H3_VISION_ATTN_BACKEND=sdpa") from exc
-    return flash_attn_varlen_func(*args, **kwargs)
+    except (ImportError, OSError) as exc:
+        if not isinstance(exc, ModuleNotFoundError) or exc.name != "flash_attn":
+            logger.warning("H3 packed vision attention is unavailable (%s); using per-frame SDPA. "
+                           "Install a compatible flash-attn build to enable packed attention.", exc)
+        return None
+    return flash_attn_varlen_func
+
+
+def _vision_attention_implementation(config: MiniMaxH3Qwen3VLConfig) -> str:
+    # Honor the component's dense SDPA override. DiT-only backends (e.g. H3
+    # VSA) are unsupported here and fall back to this encoder's dense policy.
+    return "sdpa" if effective_attention_backend(config) == AttentionBackendEnum.TORCH_SDPA else "auto"
 
 
 class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig, *, attn_implementation: str | None = None) -> None:
         super().__init__()
-        self.attn_implementation = (envs.FASTVIDEO_H3_VISION_ATTN_BACKEND.get()
+        self.attn_implementation = (_vision_attention_implementation(config)
                                     if attn_implementation is None else attn_implementation)
-        if self.attn_implementation not in ("sdpa", "flash_attn_2"):
+        if self.attn_implementation not in ("sdpa", "auto"):
             raise ValueError(f"Unsupported H3 vision attention backend: {self.attn_implementation}")
         self.num_heads = config.vision_num_heads
         self.head_dim = config.vision_hidden_size // self.num_heads
@@ -478,7 +492,10 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         query = (query.float() * cos + _rotate_half(query.float()) * sin).to(query_dtype)
         key = (key.float() * cos + _rotate_half(key.float()) * sin).to(key_dtype)
 
-        if self.attn_implementation == "flash_attn_2" and _can_use_vision_flash_attn_2(query, self.head_dim):
+        flash_attn_varlen = None
+        if self.attn_implementation == "auto" and _can_use_vision_flash_attn_2(query, self.head_dim):
+            flash_attn_varlen = _get_vision_flash_attn_varlen()
+        if flash_attn_varlen is not None:
             if attention_metadata is None:
                 attention_metadata = _vision_attention_metadata(sequence_lengths, query.device)
             if (attention_metadata.sequence_lengths != tuple(sequence_lengths)
@@ -486,7 +503,7 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
                 raise ValueError("Packed vision attention metadata must match sequence lengths and device")
             # cu_seqlens preserves frame isolation for both equal and unequal
             # lengths. No padding, reordering, or dense block-diagonal mask.
-            hidden_states = _vision_flash_attn_varlen(
+            hidden_states = flash_attn_varlen(
                 query, key, value,
                 attention_metadata.cu_seqlens, attention_metadata.cu_seqlens,
                 attention_metadata.max_seqlen, attention_metadata.max_seqlen,
@@ -538,7 +555,7 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.config = config
-        self.attn_implementation = envs.FASTVIDEO_H3_VISION_ATTN_BACKEND.get()
+        self.attn_implementation = _vision_attention_implementation(config)
         self.spatial_merge_size = config.vision_spatial_merge_size
         self.patch_embed = MiniMaxH3Qwen3VLVisionPatchEmbed(config)
         self.pos_embed = nn.Embedding(config.vision_num_position_embeddings, config.vision_hidden_size)
@@ -591,7 +608,8 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         hidden_states = self.patch_embed(pixels)
         attention_metadata = None
         head_dim = self.config.vision_hidden_size // self.config.vision_num_heads
-        if self.attn_implementation == "flash_attn_2" and _can_use_vision_flash_attn_2(hidden_states, head_dim):
+        if (self.attn_implementation == "auto" and _can_use_vision_flash_attn_2(hidden_states, head_dim)
+                and _get_vision_flash_attn_varlen() is not None):
             attention_metadata = _vision_attention_metadata(sequence_lengths, hidden_states.device)
         hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw).to(hidden_states.dtype)
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)

@@ -12,6 +12,8 @@ projection. It does not measure checkpoint quality or end-to-end H3 latency.
 Metadata is built outside timing, matching its reuse across the vision blocks.
 Each backend uses identical weights and inputs; timings exclude warmup.
 An untimed setup call on each backend also excludes lazy import/kernel setup.
+The packed setup call wraps the resolved external kernel to verify execution;
+ineligible inputs or an unavailable optional package are reported as skipped.
 """
 
 from __future__ import annotations
@@ -22,9 +24,11 @@ import importlib.metadata
 import json
 import statistics
 import time
+from unittest.mock import patch
 
 import torch
 
+import fastvideo.models.encoders.minimax_h3_qwen3_vl as vision
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
     MiniMaxH3Qwen3VLArchConfig,
     MiniMaxH3Qwen3VLConfig,
@@ -32,6 +36,7 @@ from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import (
     MiniMaxH3Qwen3VLVisionAttention,
     _can_use_vision_flash_attn_2,
+    _get_vision_flash_attn_varlen,
     _vision_attention_metadata,
 )
 from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -89,11 +94,19 @@ def main() -> None:
     reference = None
     with torch.inference_mode():
         for backend in backends:
-            if backend == "flash_attn_2" and not _can_use_vision_flash_attn_2(hidden, args.hidden_size // args.heads):
-                results.append({"backend": backend, "status": "skipped",
-                                "reason": "Inputs are ineligible for FA2; refusing to label an SDPA fallback as FA2"})
-                continue
-            model = MiniMaxH3Qwen3VLVisionAttention(config, attn_implementation=backend)
+            kernel = None
+            if backend == "flash_attn_2":
+                if not _can_use_vision_flash_attn_2(hidden, args.hidden_size // args.heads):
+                    results.append({"backend": backend, "status": "skipped",
+                                    "reason": "Inputs are ineligible for FA2; refusing to label an SDPA fallback as FA2"})
+                    continue
+                kernel = _get_vision_flash_attn_varlen()
+                if kernel is None:
+                    results.append({"backend": backend, "status": "skipped",
+                                    "reason": "Optional flash-attn package/extension is unavailable; production uses SDPA"})
+                    continue
+            model = MiniMaxH3Qwen3VLVisionAttention(
+                config, attn_implementation="sdpa" if backend == "sdpa" else "auto")
             model.load_state_dict(weights)
             model = model.to(device=device, dtype=dtype).eval()
             metadata = _vision_attention_metadata(lengths, device) if backend == "flash_attn_2" else None
@@ -104,7 +117,22 @@ def main() -> None:
                 with context:
                     return model(hidden, lengths, positions, metadata)
 
-            setup_output = run()
+            packed_setup_calls = 0
+            if kernel is not None:
+                # Count execution without retaining setup Q/K/V in mock call
+                # records, which would inflate the later CUDA memory peak.
+                def counted_kernel(*kernel_args, **kernel_kwargs):
+                    nonlocal packed_setup_calls
+                    packed_setup_calls += 1
+                    return kernel(*kernel_args, **kernel_kwargs)
+
+                with patch.object(vision, "_get_vision_flash_attn_varlen", new=lambda: counted_kernel):
+                    setup_output = run()
+                if packed_setup_calls != 1:
+                    raise RuntimeError("Packed benchmark did not execute exactly one external FA2 call")
+                del counted_kernel
+            else:
+                setup_output = run()
             if reference is None:
                 reference = setup_output
             del setup_output
@@ -133,6 +161,7 @@ def main() -> None:
                 "backend": backend,
                 "status": "measured",
                 "attention_calls_per_forward": len(lengths) if backend == "sdpa" else 1,
+                "verified_packed_kernel_setup_calls": packed_setup_calls,
                 "sdpa_backend": args.sdpa_backend if backend == "sdpa" else None,
                 "median_wall_ms": statistics.median(timings),
                 "wall_ms": timings,

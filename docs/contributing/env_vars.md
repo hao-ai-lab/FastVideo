@@ -209,7 +209,6 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 | `FASTVIDEO_MLX_WINDOW`                                     | int                                                                | `0`                                                   | attention   | MLX FastWan windowed attention size in tokens. 0 uses full attention.                                                                                                                                                                                                                                                                                                                                                                       |
 | `FASTVIDEO_MLX_WINDOW_SINK`                                | int                                                                | `0`                                                   | attention   | Number of sink tokens that MLX windowed attention always attends to.                                                                                                                                                                                                                                                                                                                                                                        |
 | `FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT`                     | bool                                                               | `0`                                                   | attention   | VIDEO_SPARSE_ATTN keeps the original tile scatter and BSHD-&gt;BHSD transposes instead of the fused Triton layout kernel that no-grad SM100 BF16 head_dim-128 forwards with 64-token tiles use by default.                                                                                                                                                                                                                                  |
-| `FASTVIDEO_H3_VISION_ATTN_BACKEND`                         | one of sdpa, flash_attn_2                                          | `sdpa`                                                | performance | Experimental MiniMax-H3 vision attention backend, selected at model construction. sdpa keeps per-frame calls; flash_attn_2 packs all frames with variable lengths on compatible CUDA FP16/BF16 inference. Other devices, dtypes and grad-enabled calls retain SDPA. Requires a compatible flash-attn installation; import and kernel failures propagate. Independent of the DiT attention backend.                                          |
 | `FASTVIDEO_INFERENCE_TORCH_COMPILE`                        | bool                                                               | `0`                                                   | performance | Compile each DiT transformer block with fullgraph torch.compile at inference. Same as FastVideoArgs.inference_torch_compile=True.                                                                                                                                                                                                                                                                                                           |
 | `FASTVIDEO_VAE_PARALLEL_DECODE`                            | bool                                                               | `0`                                                   | performance | MiniMax-H3 VAE decode splits its temporal chunks across the sequence-parallel ranks instead of running serially on the output rank. Same as FastVideoArgs.vae_parallel_decode=True.                                                                                                                                                                                                                                                         |
 | `FASTVIDEO_VAE_PARALLEL_ENCODE`                            | bool                                                               | `0`                                                   | performance | MiniMax-H3 reference-video VAE encode splits its temporal chunks across the sequence-parallel ranks. Same as FastVideoArgs.vae_parallel_encode=True.                                                                                                                                                                                                                                                                                        |
@@ -345,30 +344,31 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 
 Variables that FastVideo no longer reads; setting one logs a warning:
 
-| Deprecated variable                              | Reason                                                             |
-| ------------------------------------------------ | ------------------------------------------------------------------ |
-| `FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE`            | use FASTVIDEO_H3_VISION_ATTN_BACKEND for optional packed attention |
-| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it                                                   |
-| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it                                                   |
-| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it                                                   |
-| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it                                                   |
-| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it                                                   |
-| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it                                                   |
-| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it                                                   |
-| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed                                           |
-| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed                                           |
-| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed                                           |
-| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed                                           |
-| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed                                       |
-| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed                                       |
-| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed                                              |
-| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed                                              |
-| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed                                              |
-| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed                                              |
-| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed                                                |
-| `LONGCAT_MODEL_ROOT`                             | LongCat was removed                                                |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed                                                |
-| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed                                                |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed                                                |
-| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed                                                |
+| Deprecated variable                              | Reason                                                          |
+| ------------------------------------------------ | --------------------------------------------------------------- |
+| `FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE`            | H3 vision attention now follows the component attention backend |
+| `FASTVIDEO_H3_VISION_ATTN_BACKEND`               | H3 vision attention now follows the component attention backend |
+| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it                                                |
+| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it                                                |
+| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it                                                |
+| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it                                                |
+| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it                                                |
+| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it                                                |
+| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it                                                |
+| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed                                        |
+| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed                                        |
+| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed                                        |
+| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed                                        |
+| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed                                    |
+| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed                                    |
+| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed                                           |
+| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed                                           |
+| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed                                           |
+| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed                                           |
+| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed                                             |
+| `LONGCAT_MODEL_ROOT`                             | LongCat was removed                                             |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed                                             |
+| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed                                             |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed                                             |
+| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed                                             |
 <!-- END GENERATED ENV TABLE -->
