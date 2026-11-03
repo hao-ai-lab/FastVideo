@@ -392,6 +392,12 @@ FASTVIDEO_NVFP4_FA4_QK_TRANSFORM = EnvChoice(
     "smooth_k subtracts each head's token-mean of K, hadamard rotates Q and K by the head-dim Hadamard matrix. "
     "Must match the qk_transform the model was QAD-trained with. An explicit nvfp4_qk_transform attention "
     "implementation argument takes precedence.")
+FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT = EnvBool(
+    True,
+    category="attention",
+    doc="With FASTVIDEO_NVFP4_FA4_QK_TRANSFORM other than none, apply the transform and the NVFP4 quantization in one "
+    "fused Triton kernel per tensor (same FP4 codes and scale factors as the unfused path). Set it to 0 to use the "
+    "unfused PyTorch transform and flashinfer quantization.")
 FASTVIDEO_NVFP4_FA4_BF16_BLOCKS = EnvStr(
     "",
     category="attention",
