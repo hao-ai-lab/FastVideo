@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -68,10 +69,14 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
         self.vae = vae
-        self._output_buffer: tuple[tuple[tuple[int, ...], bool], torch.Tensor] | None = None
+        self._output_buffer: tuple[tuple[tuple[int, ...], bool, torch.dtype], torch.Tensor] | None = None
         self._unified_memory: bool | None = None
 
-    def _pixel_buffer(self, shape: tuple[int, ...], pin_memory: bool, device: torch.device) -> torch.Tensor:
+    def _pixel_buffer(self,
+                      shape: tuple[int, ...],
+                      pin_memory: bool,
+                      device: torch.device,
+                      dtype: torch.dtype = torch.float32) -> torch.Tensor:
         """The CPU FP32 pixel buffer, reused across requests of the same geometry on unified memory.
 
         The stage returns a uint8 copy, so the buffer never escapes. Reuse matters on
@@ -84,11 +89,11 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         if self._unified_memory is None:
             self._unified_memory = current_platform.has_unified_memory(device.index or 0)
         if not self._unified_memory:
-            return allocate_cpu_tensor_with_pin_fallback(shape, dtype=torch.float32, pin_memory=pin_memory)
-        key = (tuple(shape), bool(pin_memory))
+            return allocate_cpu_tensor_with_pin_fallback(shape, dtype=dtype, pin_memory=pin_memory)
+        key = (tuple(shape), bool(pin_memory), dtype)
         if self._output_buffer is None or self._output_buffer[0] != key:
             self._output_buffer = None
-            buffer = allocate_cpu_tensor_with_pin_fallback(shape, dtype=torch.float32, pin_memory=pin_memory)
+            buffer = allocate_cpu_tensor_with_pin_fallback(shape, dtype=dtype, pin_memory=pin_memory)
             if not buffer.is_pinned():
                 buffer.zero_()
             self._output_buffer = (key, buffer)
@@ -170,8 +175,10 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
+                pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
+                ) and not parallel else torch.float32
                 output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
-                                            fastvideo_args.pin_cpu_memory, device)
+                                            fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             # fp16 for the release decoders; NVFP4 decoders were trained under bf16.
@@ -194,6 +201,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 # cast it to uint8 immediately anyway; the clamp matches the
                 # post-decode handling of VAE output slightly outside [0, 1].
                 output = output.mul_(255).clamp_(0, 255).to(torch.uint8)
+            elif self._output_buffer is not None and output is self._output_buffer[1]:
+                output = output.clone()
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:

@@ -488,6 +488,7 @@ test("sample requests follow shared workload media", () => {
     t2i: { endpoint: /\/v1\/images\/generations/, output: /--output output\.json/, reference: null },
     t2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: null },
     v2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: "video_reference" },
+    v2v: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.mp4/, reference: "video_reference" },
   };
   for (const [workload, expected] of Object.entries(expectations)) {
     const data = catalog();

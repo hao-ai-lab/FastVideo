@@ -6,9 +6,9 @@ load stands down when lazy owns deferral). Two boxes connected
 by the QSFP ConnectX-7 cables can run **one clip faster** and can hold a
 **longer clip** (up to the FastH3 15 s cap).
 
-Copy-paste commands for both counts are on the
-[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): FastH3 V1 → NVIDIA DGX
-Spark → 1 Spark or 2 Sparks.
+The [MiniMax H3 cookbook](../../cookbook/minimax-h3.md) covers one Spark. For
+two, run `examples/inference/basic/basic_fasth3_spark_pair.yaml`; it has no
+serving baseline.
 
 This is FastVideo sequence parallel (`sp_size=2`) over Ray, not a third-party
 xDiT vendor. Do not install xDiT for this path.
@@ -156,7 +156,7 @@ lightweight video VAE. Use the environment above plus the release kernel
 settings, then run one of these configs from the head:
 
 ```bash
-export FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass
+export FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn
 export FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1
 export FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
