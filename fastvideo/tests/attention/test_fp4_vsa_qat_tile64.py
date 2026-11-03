@@ -53,3 +53,19 @@ def test_tile64_rejects_prefix_options_counted_in_128_token_tiles() -> None:
     attention = FP4VSAFineAttention(FP4AttentionNumerics(quantize=True, prefix_precision="fp8"))
     with pytest.raises(ValueError, match="128-token prefix tiles"):
         attention(q, k, v, mask, metadata)
+
+
+def test_stale_installed_kernel_modules_fall_back_to_the_checkout(monkeypatch) -> None:
+    import fastvideo.attention.backends.fp4_vsa_qat as fp4_vsa_qat
+
+    def stale_attn(q, k, v, q2k_idx, q2k_num, kv_valid=None, *, quantize=True):
+        raise AssertionError("the stale kernel must not be used")
+
+    stale = {
+        "attn_qat_vsa_reference": SimpleNamespace(tile128_mask_to_fp4_blocks=None),
+        "attn_qat_vsa_train": SimpleNamespace(fp4_vsa_attn_qat=stale_attn),
+    }
+    monkeypatch.setattr(fp4_vsa_qat, "_load_installed", stale.get)
+    reference, train = fp4_vsa_qat.load_qat_vsa_modules()
+    assert hasattr(reference, "tile_mask_to_fp4_blocks")
+    assert train.fp4_vsa_attn_qat is not stale_attn

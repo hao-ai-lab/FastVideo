@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""VSA-H3 tile-128 fine attention with the deployed sparse-FP4 numerics, for quantization-aware training.
+"""VSA-H3 fine attention (64- or 128-token tiles) with the deployed sparse-FP4 numerics, for quantization-aware training.
 
 ``FP4VSAFineAttention`` plugs into ``MiniMaxH3VSAImpl.fine_attention_override``:
 VSA-H3's own selection (tile pooling, top-k mask, gated compression branch)
@@ -9,13 +9,14 @@ emulates ``attn_qat_infer``'s sparse FP4 kernel on any CUDA GPU (forward) and
 provides straight-through gradients (backward).
 
 Training images may carry a prebuilt ``fastvideo_kernel`` that predates these
-modules; ``load_qat_vsa_modules`` then loads them from this checkout's
-``fastvideo-kernel/python`` tree under a private package name.
+modules or their current API; ``load_qat_vsa_modules`` then loads both from this
+checkout's ``fastvideo-kernel/python`` tree under a private package name.
 """
 from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,16 +30,19 @@ _KERNEL_DIR = Path(
     __file__).resolve().parents[3] / "fastvideo-kernel" / "python" / "fastvideo_kernel" / "triton_kernels"
 
 
-def _load(name: str) -> ModuleType:
+def _load_installed(name: str) -> ModuleType | None:
     try:
         return importlib.import_module(f"fastvideo_kernel.triton_kernels.{name}")
     except ImportError:
-        pass
+        return None
     except KeyError:
         # An earlier failed `fastvideo_kernel` import leaves a None entry in
         # sys.modules, and the machinery then raises KeyError instead of
         # ImportError. Same meaning for us: fall back to this checkout's tree.
-        pass
+        return None
+
+
+def _load_checkout(name: str) -> ModuleType:
     if _PRIVATE_PACKAGE not in sys.modules:
         if not (_KERNEL_DIR / f"{name}.py").is_file():
             raise ImportError(f"{name}.py is neither in the installed fastvideo_kernel nor in {_KERNEL_DIR}")
@@ -49,9 +53,22 @@ def _load(name: str) -> ModuleType:
     return importlib.import_module(f"{_PRIVATE_PACKAGE}.{name}")
 
 
+def _has_current_api(reference: ModuleType, train: ModuleType) -> bool:
+    attn = getattr(train, "fp4_vsa_attn_qat", None)
+    return (hasattr(reference, "tile_mask_to_fp4_blocks") and attn is not None
+            and "q2k_quad" in inspect.signature(attn).parameters)
+
+
 def load_qat_vsa_modules() -> tuple[ModuleType, ModuleType]:
-    """``(attn_qat_vsa_reference, attn_qat_vsa_train)``; the second needs Triton."""
-    return _load("attn_qat_vsa_reference"), _load("attn_qat_vsa_train")
+    """``(attn_qat_vsa_reference, attn_qat_vsa_train)``; the second needs Triton.
+
+    The installed pair is used only when both modules have the current API; otherwise both come from the checkout,
+    so the reference and the kernel always match.
+    """
+    reference, train = _load_installed("attn_qat_vsa_reference"), _load_installed("attn_qat_vsa_train")
+    if reference is not None and train is not None and _has_current_api(reference, train):
+        return reference, train
+    return _load_checkout("attn_qat_vsa_reference"), _load_checkout("attn_qat_vsa_train")
 
 
 @dataclass(frozen=True)
