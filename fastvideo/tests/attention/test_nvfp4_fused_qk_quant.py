@@ -135,7 +135,8 @@ def test_hadamard_without_tf32_takes_the_reference_path(tf32_matmul) -> None:
 
 
 @requires_blackwell
-def test_forward_nvfp4_uses_fused_path_and_compiles_fullgraph() -> None:
+@pytest.mark.parametrize("tf32_matmul", [True], indirect=True)
+def test_forward_nvfp4_uses_fused_path_and_compiles_fullgraph(tf32_matmul) -> None:
     impl = flash_attn_module.FlashAttentionImpl(num_heads=4, head_size=128, causal=False, softmax_scale=128**-0.5,
                                                 num_kv_heads=4, nvfp4_fa4=True,
                                                 nvfp4_qk_transform="smooth_k+hadamard")
