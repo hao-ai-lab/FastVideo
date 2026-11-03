@@ -981,8 +981,6 @@ FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
 DEPRECATED_VARIABLES = {
-    "FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE": "H3 vision attention now follows the component attention backend",
-    "FASTVIDEO_H3_VISION_ATTN_BACKEND": "H3 vision attention now follows the component attention backend",
     "FASTVIDEO_TARGET_DEVICE": "no code reads it",
     "FASTVIDEO_USE_PRECOMPILED": "no code reads it",
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL": "no code reads it",

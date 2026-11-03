@@ -340,31 +340,29 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 
 Variables that FastVideo no longer reads; setting one logs a warning:
 
-| Deprecated variable                              | Reason                                                          |
-| ------------------------------------------------ | --------------------------------------------------------------- |
-| `FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE`            | H3 vision attention now follows the component attention backend |
-| `FASTVIDEO_H3_VISION_ATTN_BACKEND`               | H3 vision attention now follows the component attention backend |
-| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it                                                |
-| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it                                                |
-| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it                                                |
-| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it                                                |
-| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it                                                |
-| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it                                                |
-| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it                                                |
-| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed                                        |
-| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed                                        |
-| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed                                        |
-| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed                                        |
-| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed                                    |
-| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed                                    |
-| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed                                           |
-| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed                                           |
-| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed                                           |
-| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed                                           |
-| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed                                             |
-| `LONGCAT_MODEL_ROOT`                             | LongCat was removed                                             |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed                                             |
-| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed                                             |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed                                             |
-| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed                                             |
+| Deprecated variable                              | Reason                       |
+| ------------------------------------------------ | ---------------------------- |
+| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it             |
+| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it             |
+| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it             |
+| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it             |
+| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it             |
+| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it             |
+| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it             |
+| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed     |
+| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed     |
+| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed     |
+| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed     |
+| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed |
+| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed |
+| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed        |
+| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed        |
+| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed        |
+| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed        |
+| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed          |
+| `LONGCAT_MODEL_ROOT`                             | LongCat was removed          |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed          |
+| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed          |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed          |
+| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed          |
 <!-- END GENERATED ENV TABLE -->
