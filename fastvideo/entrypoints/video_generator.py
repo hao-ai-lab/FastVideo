@@ -750,20 +750,6 @@ class VideoGenerator:
         prompt: str,
         output_video_name: str | None = None,
     ) -> str:
-        """Build a unique, sanitized output file path.
-
-        Image workloads preserve explicit PNG, JPEG, or WebP extensions and
-        otherwise default to ``.png``. Video workloads use ``.mp4``.
-
-        - If ``output_path`` already carries the correct extension, treat it
-          as a file path, taking precedence over ``output_video_name``.
-        - Otherwise, treat ``output_path`` as a directory and use
-          ``output_video_name`` when provided, falling back to the prompt.
-          A matching extension in the requested name is not appended twice.
-        - Invalid filename characters are removed; if the name changes, a
-          warning is logged.
-        - If the target path already exists, a numeric suffix is appended.
-        """
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
         is_directory = os.path.isdir(output_path)
@@ -820,14 +806,25 @@ class VideoGenerator:
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
-        new_output_path = os.path.join(output_dir, out_name)
-        counter = 1
-        while os.path.exists(new_output_path):
-            name_part, ext_part = os.path.splitext(out_name)
-            new_name = f"{name_part}_{counter}{ext_part}"
-            new_output_path = os.path.join(output_dir, new_name)
+        try:
+            name_max = os.pathconf(output_dir or ".", "PC_NAME_MAX")
+        except (AttributeError, OSError, ValueError):
+            name_max = 255
+        if name_max <= 0:
+            name_max = 255
+
+        name_part, ext_part = os.path.splitext(out_name)
+        candidate_name = out_name
+        counter = 0
+        while True:
+            if len(os.fsencode(candidate_name)) > name_max:
+                raise ValueError(f"Output filename exceeds the {name_max}-byte filesystem limit "
+                                 "(including extension and collision suffix). Use a shorter output name.")
+            new_output_path = os.path.join(output_dir, candidate_name)
+            if not os.path.exists(new_output_path):
+                return new_output_path
             counter += 1
-        return new_output_path
+            candidate_name = f"{name_part}_{counter}{ext_part}"
 
     def _generate_single_video(
         self,

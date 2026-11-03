@@ -399,6 +399,117 @@ def test_generate_optional_prompt_respects_output_video_name(monkeypatch, tmp_pa
     assert result["output_path"] == str(tmp_path / expected)
 
 
+@pytest.mark.parametrize("name", ["a" * 256, "a" * 252, "\u754c" * 84])
+@pytest.mark.parametrize("explicit_path", [False, True])
+def test_prepare_output_path_rejects_overlong_filename(monkeypatch, tmp_path, name, explicit_path):
+    generator = _new_video_generator()
+    monkeypatch.setattr(video_generator_module.os, "pathconf", lambda *args: 255, raising=False)
+    output_path = str(tmp_path / (name + ".mp4")) if explicit_path else str(tmp_path)
+
+    with pytest.raises(ValueError, match="Output filename exceeds the 255-byte filesystem limit"):
+        generator._prepare_output_path(output_path, "prompt", output_video_name=name)
+
+
+@pytest.mark.parametrize("name", ["a" * 251, "\u754c" * 83 + "ab", "?" * 300 + "clip"])
+def test_prepare_output_path_checks_sanitized_filename_bytes(monkeypatch, tmp_path, name):
+    generator = _new_video_generator()
+    monkeypatch.setattr(video_generator_module.os, "pathconf", lambda *args: 255, raising=False)
+
+    result = generator._prepare_output_path(str(tmp_path), "prompt", output_video_name=name)
+
+    assert os.path.basename(result) == name.replace("?", "") + ".mp4"
+    assert len(os.fsencode(os.path.basename(result))) <= 255
+    with open(result, "wb") as output:
+        output.write(b"generated output")
+
+
+@pytest.mark.parametrize("existing_count,stem_length,rejected", [(1, 249, False), (1, 251, True), (10, 249, True)])
+def test_prepare_output_path_checks_collision_suffix_bytes(monkeypatch, tmp_path, existing_count, stem_length, rejected):
+    generator = _new_video_generator()
+    monkeypatch.setattr(video_generator_module.os, "pathconf", lambda *args: 255, raising=False)
+    name = "a" * stem_length
+    existing_files = [tmp_path / (name + ".mp4")]
+    existing_files.extend(tmp_path / f"{name}_{index}.mp4" for index in range(1, existing_count))
+    for path in existing_files:
+        path.write_bytes(b"existing output")
+
+    if rejected:
+        with pytest.raises(ValueError, match="Output filename exceeds the 255-byte filesystem limit"):
+            generator._prepare_output_path(str(tmp_path), "prompt", output_video_name=name)
+    else:
+        result = generator._prepare_output_path(str(tmp_path), "prompt", output_video_name=name)
+        assert result == str(tmp_path / f"{name}_{existing_count}.mp4")
+        assert len(os.fsencode(os.path.basename(result))) == 255
+        with open(result, "wb") as output:
+            output.write(b"generated output")
+    assert all(path.read_bytes() == b"existing output" for path in existing_files)
+
+
+def test_prepare_output_path_respects_filesystem_name_limit(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    directory = tmp_path / "new_output_directory"
+
+    def pathconf(path, key):
+        assert path == str(directory)
+        assert directory.is_dir()
+        assert key == "PC_NAME_MAX"
+        return 20
+
+    monkeypatch.setattr(video_generator_module.os, "pathconf", pathconf, raising=False)
+    with pytest.raises(ValueError, match="Output filename exceeds the 20-byte filesystem limit"):
+        generator._prepare_output_path(str(directory), "prompt", output_video_name="a" * 17)
+    assert generator._prepare_output_path(str(directory), "prompt", output_video_name="a" * 16) == str(
+        directory / ("a" * 16 + ".mp4"))
+
+
+@pytest.mark.parametrize("unavailable", [AttributeError, OSError, ValueError, -1, 0])
+def test_prepare_output_path_filename_limit_fallback(monkeypatch, tmp_path, unavailable):
+    generator = _new_video_generator()
+
+    def pathconf(*args):
+        if isinstance(unavailable, type):
+            raise unavailable("name limit unavailable")
+        return unavailable
+
+    monkeypatch.setattr(video_generator_module.os, "pathconf", pathconf, raising=False)
+    with pytest.raises(ValueError, match="Output filename exceeds the 255-byte filesystem limit"):
+        generator._prepare_output_path(str(tmp_path), "prompt", output_video_name="a" * 252)
+    assert generator._prepare_output_path(str(tmp_path), "prompt", output_video_name="clip") == str(tmp_path / "clip.mp4")
+
+
+@pytest.mark.parametrize("entry", ["generate", "generate_video", "prompt_file"])
+@pytest.mark.parametrize("collision", [False, True])
+def test_generate_rejects_overlong_filename_before_model_execution(monkeypatch, tmp_path, entry, collision):
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    monkeypatch.setattr(video_generator_module.os, "pathconf", lambda *args: 255, raising=False)
+    executed = []
+
+    def fake_generate_single_video(**kwargs):
+        executed.append(kwargs)
+        return {"prompts": kwargs["prompt"], "video_path": kwargs["output_path"]}
+
+    monkeypatch.setattr(generator, "_generate_single_video", fake_generate_single_video)
+    name = "a" * (251 if collision else 256)
+    if collision:
+        (tmp_path / (name + ".mp4")).write_bytes(b"existing output")
+    output = {"output_path": str(tmp_path), "output_video_name": name}
+
+    if entry == "prompt_file":
+        prompt_file = tmp_path / "prompts.txt"
+        prompt_file.write_text("first prompt\nsecond prompt\n", encoding="utf-8")
+        assert generator.generate({"inputs": {"prompt_path": str(prompt_file)}, "output": output}) == []
+    elif entry == "generate":
+        with pytest.raises(ValueError, match="Output filename exceeds"):
+            generator.generate({"prompt": "prompt", "output": output})
+    else:
+        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="Output filename exceeds"):
+            generator.generate_video(prompt="prompt", **output)
+    assert not executed
+    if collision:
+        assert (tmp_path / (name + ".mp4")).read_bytes() == b"existing output"
+
+
 def test_generate_single_video_metadata_only_skips_output_materialization(monkeypatch, tmp_path):
     output_batch = _single_video_output_batch(
         _NoCpuMaterializationOutput(),
