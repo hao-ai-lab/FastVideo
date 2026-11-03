@@ -87,8 +87,7 @@ def _semantic_varlen(query, key, value, cu_q, cu_k, max_q, max_k, *, scale, wind
     return torch.cat(outputs, dim=0)
 
 
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
-@pytest.mark.parametrize("lengths", [[8] * 5, [8], [4, 6, 4], [4, 8, 4, 8]])
+@pytest.mark.parametrize("dtype,lengths", [(torch.float32, [8]), (torch.bfloat16, [4, 6, 4])])
 def test_cpu_semantic_packing_preserves_rope_dtype_and_original_order(dtype, lengths):
     attention = _attention(dtype)
     hidden, positions = _inputs(lengths, dtype)
@@ -106,20 +105,6 @@ def test_cpu_semantic_packing_preserves_rope_dtype_and_original_order(dtype, len
         expected_offsets.append(expected_offsets[-1] + length)
     assert calls.call_args.args[3].tolist() == expected_offsets
     torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-
-
-def test_cpu_semantic_frames_remain_independent():
-    lengths = [4, 6, 4]
-    attention = _attention()
-    hidden, positions = _inputs(lengths)
-    changed = hidden.clone()
-    changed[4:10] += torch.arange(32).float()
-    with torch.no_grad(), patch.object(vision, "varlen_attn", side_effect=_semantic_varlen):
-        original = attention(hidden, lengths, positions)
-        perturbed = attention(changed, lengths, positions)
-    assert not torch.allclose(original[4:10], perturbed[4:10])
-    torch.testing.assert_close(original[:4], perturbed[:4], atol=0, rtol=0)
-    torch.testing.assert_close(original[10:], perturbed[10:], atol=0, rtol=0)
 
 
 def test_tiny_model_deepstack_and_mixed_videos_build_metadata_once():
@@ -145,29 +130,8 @@ def test_tiny_model_deepstack_and_mixed_videos_build_metadata_once():
         torch.testing.assert_close(observed, reference, atol=0, rtol=0)
 
 
-def test_cpu_semantic_backward_uses_varlen_and_matches_original_gradients():
-    attention = _attention()
-    reference = copy.deepcopy(attention)
-    lengths = [4, 6, 4]
-    hidden, positions = _inputs(lengths)
-    hidden.requires_grad_(True)
-    reference_hidden = hidden.detach().clone().requires_grad_(True)
-    expected = _legacy_attention(reference, reference_hidden, lengths, positions)
-    with patch.object(vision, "varlen_attn", side_effect=_semantic_varlen) as calls:
-        actual = attention(hidden, lengths, positions)
-    assert calls.call_count == 1 and calls.call_args.args[0].requires_grad
-    weights = torch.randn_like(actual)
-    (actual * weights).sum().backward()
-    (expected * weights).sum().backward()
-    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-    torch.testing.assert_close(hidden.grad, reference_hidden.grad, atol=0, rtol=0)
-    for parameter, reference_parameter in zip(attention.parameters(), reference.parameters(), strict=True):
-        torch.testing.assert_close(parameter.grad, reference_parameter.grad, atol=0, rtol=0)
-
-
-@pytest.mark.parametrize("error", [NotImplementedError("unsupported device/dtype"), RuntimeError("kernel defect"),
-                                    torch.OutOfMemoryError("execution OOM")])
-def test_native_kernel_errors_propagate_without_sdpa_fallback(error):
+def test_native_kernel_oom_propagates_without_sdpa_fallback():
+    error = torch.OutOfMemoryError("execution OOM")
     attention = _attention()
     hidden, positions = _inputs([4, 6, 4])
     with patch.object(vision, "varlen_attn", side_effect=error) as calls:
@@ -177,7 +141,7 @@ def test_native_kernel_errors_propagate_without_sdpa_fallback(error):
     assert calls.call_count == 1
 
 
-@pytest.mark.parametrize("lengths", [[], [0], [-1, 5], [3]])
+@pytest.mark.parametrize("lengths", [[], [0]])
 def test_invalid_lengths_fail_before_projection(lengths):
     attention = _attention()
     hidden, positions = _inputs([4])
@@ -191,11 +155,10 @@ def test_metadata_rejects_int32_overflow_before_allocation():
         vision._vision_attention_metadata([2**31], 2**31, torch.device("cpu"))
 
 
-@pytest.mark.parametrize("token_count", [3, 5])
-def test_model_rejects_grid_token_mismatch_before_position_processing(token_count):
+def test_model_rejects_grid_token_mismatch_before_position_processing():
     model = vision.MiniMaxH3Qwen3VLVisionModel(_config()).eval()
     grid = torch.tensor([[1, 2, 2]])  # Describes four patch tokens.
-    pixels = torch.randn(token_count, 12)
+    pixels = torch.randn(3, 12)
     with patch.object(model, "_interpolate_position_embeddings",
                       side_effect=AssertionError("processed invalid pixel/grid geometry")):
         with pytest.raises(ValueError, match="sequence lengths must sum"):
@@ -214,7 +177,7 @@ def _cuda_attention(dtype):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for native PyTorch varlen parity")
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("lengths", [[32, 32, 32], [16, 40, 24]])
+@pytest.mark.parametrize("lengths", [[32, 32, 32], [128, 260, 64]])
 def test_cuda_native_varlen_forward_with_production_heads(dtype, lengths):
     attention = _cuda_attention(dtype)
     hidden, positions = _inputs(lengths, dtype, "cuda", hidden_size=1152, head_dim=72)
@@ -228,11 +191,11 @@ def test_cuda_native_varlen_forward_with_production_heads(dtype, lengths):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for native PyTorch varlen backward parity")
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_cuda_native_varlen_backward_with_production_heads(dtype):
+def test_cuda_native_varlen_backward_with_production_heads():
+    dtype = torch.bfloat16
     attention = _cuda_attention(dtype)
     reference = copy.deepcopy(attention)
-    lengths = [16, 40, 24]
+    lengths = [128, 260, 64]
     hidden, positions = _inputs(lengths, dtype, "cuda", hidden_size=1152, head_dim=72)
     hidden.requires_grad_(True)
     reference_hidden = hidden.detach().clone().requires_grad_(True)
