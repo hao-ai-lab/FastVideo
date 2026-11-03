@@ -49,14 +49,11 @@ def test_cudnn_route_presents_bhsd_strided_views():
 def test_cudnn_route_is_bit_identical_to_cudnn_dispatched_sdpa():
     query, key, value = _qkv(2048)
     scale = 1.0 / math.sqrt(query.shape[-1])
-    previous = torch.backends.cuda.cudnn_sdp_enabled()
-    torch.backends.cuda.enable_cudnn_sdp(True)
-    try:
-        with torch.no_grad():
-            reference = torch.nn.functional.scaled_dot_product_attention(
-                query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2), scale=scale).transpose(1, 2)
-    finally:
-        torch.backends.cuda.enable_cudnn_sdp(previous)
+    # Pin the reference to cuDNN: enabling it only makes it eligible, and the dispatcher
+    # prefers another backend on some GPUs (GB10), which is not bit-identical.
+    with torch.no_grad(), torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+        reference = torch.nn.functional.scaled_dot_product_attention(
+            query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2), scale=scale).transpose(1, 2)
 
     with torch.no_grad():
         output = cudnn_sdpa_bshd(query, key, value, scale=scale)
