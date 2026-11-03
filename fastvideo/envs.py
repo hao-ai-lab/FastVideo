@@ -404,15 +404,6 @@ FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
 
 # ================== Performance ==================
 
-FASTVIDEO_H3_VISION_ATTN_BACKEND = EnvChoice(
-    "sdpa",
-    choices=("sdpa", "flash_attn_2"),
-    category="performance",
-    doc="Experimental MiniMax-H3 vision attention backend, selected at model construction. sdpa keeps per-frame calls; "
-    "flash_attn_2 packs all frames with variable lengths on compatible CUDA FP16/BF16 inference. "
-    "Other devices, dtypes and grad-enabled calls retain SDPA. Requires a compatible flash-attn installation; "
-    "import and kernel failures propagate. Independent of the DiT attention backend.")
-
 # Non-fullgraph-traceable attention backends such as VSA degrade to eager with
 # one warning; see _regional_compile_unsupported_reason in
 # fastvideo/models/loader/fsdp_load.py.
@@ -990,7 +981,8 @@ FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
 DEPRECATED_VARIABLES = {
-    "FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE": "use FASTVIDEO_H3_VISION_ATTN_BACKEND for optional packed attention",
+    "FASTVIDEO_H3_VISION_ATTN_BATCH_SIZE": "H3 vision attention now follows the component attention backend",
+    "FASTVIDEO_H3_VISION_ATTN_BACKEND": "H3 vision attention now follows the component attention backend",
     "FASTVIDEO_TARGET_DEVICE": "no code reads it",
     "FASTVIDEO_USE_PRECOMPILED": "no code reads it",
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL": "no code reads it",
