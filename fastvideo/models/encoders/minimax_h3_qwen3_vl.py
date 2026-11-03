@@ -446,8 +446,6 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         attention_metadata: _VisionAttentionMetadata | None = None,
     ) -> torch.Tensor:
         sequence_length = hidden_states.shape[0]
-        # The model validates and builds metadata once. Standalone attention
-        # calls prepare their own metadata before projecting any tokens.
         if attention_metadata is None:
             attention_metadata = _vision_attention_metadata(sequence_lengths, sequence_length, hidden_states.device)
         query, key, value = self.qkv(hidden_states).view(sequence_length, 3, self.num_heads, self.head_dim).unbind(1)
@@ -458,9 +456,6 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         query = (query.float() * cos + _rotate_half(query.float()) * sin).to(query_dtype)
         key = (key.float() * cos + _rotate_half(key.float()) * sin).to(key_dtype)
 
-        # Packed offsets keep every frame independent, including unequal sizes.
-        # The native PyTorch kernel determines supported devices/dtypes and
-        # backward behavior; do not silently cast or switch implementations.
         hidden_states = varlen_attn(
             query, key, value,
             attention_metadata.cu_seqlens, attention_metadata.cu_seqlens,
