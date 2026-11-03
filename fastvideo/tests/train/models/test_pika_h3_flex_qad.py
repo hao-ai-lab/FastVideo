@@ -148,8 +148,8 @@ def test_contract_must_match_the_profile_trunk(tmp_path):
 
 
 def _reference_module():
-    from fastvideo.attention.backends.fp4_vsa_qat import _load
-    return _load("attn_qat_vsa_reference")
+    from fastvideo.attention.backends.fp4_vsa_qat import _load_checkout
+    return _load_checkout("attn_qat_vsa_reference")
 
 
 class _ExactKernel:
