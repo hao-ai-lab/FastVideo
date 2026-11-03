@@ -479,7 +479,7 @@ test("PAN 2 has a family card with the IFM logo and an editable serving deployme
   await expect(pan2.locator("img")).toHaveAttribute("src", /\/ifm\.webp$/);
   await expect(pan2.locator(".recipe-card-kicker")).toHaveText("IFM");
   await pan2.click();
-  await expect(page).toHaveURL(/cookbook\/pan2\/pan2$/);
+  await expect(page).toHaveURL(/cookbook\/pan\/pan2$/);
   await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("PAN 2");
   await settings(page, "Serving");

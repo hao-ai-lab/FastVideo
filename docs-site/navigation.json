@@ -260,11 +260,11 @@
         "items": [
           {
             "label": "PAN 2",
-            "href": "/cookbook/pan2/pan2"
+            "href": "/cookbook/pan/pan2"
           },
           {
             "label": "Family guide",
-            "href": "/cookbook/pan2"
+            "href": "/cookbook/pan"
           },
           {
             "label": "Model reference",
