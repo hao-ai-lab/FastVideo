@@ -51,8 +51,9 @@ def env_overrides():
 def tf32_disabled():
     """Disable TF32 for CUDA matmuls and cuDNN during the test, then restore the previous flags.
 
-    On torch 2.12 ``torch.backends.cuda.matmul.allow_tf32`` is computed by ``cuBLASModule`` rather
-    than stored on it, so ``monkeypatch.setattr`` cannot undo it. Restore through the same legacy
+    ``torch.backends.cuda.matmul`` serves ``allow_tf32`` through ``__getattr__``. pytest 9's
+    ``monkeypatch.setattr`` reads the old value from the instance ``__dict__``, finds nothing, and
+    its teardown ``delattr`` raises instead of restoring the flag. Restore through the same legacy
     flags: mixing them with the per-backend ``fp32_precision`` API makes later ``allow_tf32`` reads raise.
     """
     matmul, cudnn = torch.backends.cuda.matmul, torch.backends.cudnn
