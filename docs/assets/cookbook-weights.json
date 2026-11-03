@@ -1,0 +1,92 @@
+{
+  "generated": "2026-10-28",
+  "note": "Measured from Hugging Face safetensors files. Sizes are GiB at the checkpoint's own precision.",
+  "models": {
+    "fasth3-8step": {
+      "parts": {
+        "transformer": 65.29,
+        "text_encoder": 62.13,
+        "vae": 9.7,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "transformer_nvfp4": 36.91,
+        "transformer_fp8": 47.35,
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33,
+        "text_encoder_quantized": 15.33
+      },
+      "sources": [
+        "https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2/tree/main"
+      ]
+    },
+    "fasth3-4step": {
+      "parts": {
+        "transformer": 65.29,
+        "text_encoder": 62.13,
+        "vae": 9.7,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "transformer_nvfp4": 36.91,
+        "transformer_fp8": 47.35,
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33,
+        "text_encoder_quantized": 15.33
+      },
+      "sources": [
+        "https://huggingface.co/FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree/tree/main"
+      ]
+    },
+    "fasth3-trim": {
+      "parts": {
+        "transformer": 34.94,
+        "text_encoder": 15.33,
+        "vae": 5.93,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "transformer_nvfp4": 11.1,
+        "transformer_fp8": 19.88,
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33
+      },
+      "sources": [
+        "https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step/tree/main"
+      ]
+    },
+    "fasth3-omniref": {
+      "parts": {
+        "transformer": 65.33,
+        "text_encoder": 15.33,
+        "vae": 9.7,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "transformer_nvfp4": 36.95,
+        "transformer_fp8": 47.39,
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33
+      },
+      "sources": [
+        "https://huggingface.co/FastVideo/FastVideo-FastH3-Omni-8-Step-V1/tree/main",
+        "https://huggingface.co/FastVideo/FastH3-Omni-NVFP4-QAD/tree/main"
+      ]
+    },
+    "pika-h3-flex-t2va": {
+      "parts": {
+        "transformer": 61.73,
+        "adapter": 2.58,
+        "text_encoder": 62.13,
+        "vae": 9.7,
+        "audio_vae": 0.56
+      },
+      "alternates": {
+        "vae_nvfp4_quality": 5.82,
+        "vae_nvfp4_fast": 1.33,
+        "text_encoder_quantized": 15.33
+      },
+      "sources": ["https://huggingface.co/Pika-Labs/Pika-H3-Flex/tree/main"]
+    }
+  }
+}

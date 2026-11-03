@@ -12,10 +12,52 @@ permissions:
   issues: write
 
 jobs:
-  publish-node:
-    name: Publish Custom Node to registry
+  # Any pyproject.toml edit triggers this workflow, but the registry rejects a
+  # version it already has ("The node version already exists"). Publish only
+  # when [project].version changed, as the PyPI workflow does.
+  check-version-change:
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'hao-ai-lab' }}
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Compare [project].version with the version before this push
+        id: check
+        shell: python
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          import os
+          import subprocess
+          import tomllib
+
+          def version(text: str) -> str | None:
+              return tomllib.loads(text).get("project", {}).get("version")
+
+          def git(*args: str) -> subprocess.CompletedProcess:
+              return subprocess.run(["git", *args], capture_output=True, text=True)
+
+          # A push can carry several commits; compare with the tip before the push, not HEAD~1.
+          base = os.environ.get("BEFORE_SHA", "").strip()
+          if not base or set(base) == {"0"} or git("fetch", "--no-tags", "--depth=1", "origin", base).returncode:
+              base = "HEAD~1"
+          new = version(open("pyproject.toml", encoding="utf-8").read())
+          previous = git("show", f"{base}:pyproject.toml")
+          old = version(previous.stdout) if previous.returncode == 0 else None
+          changed = new is not None and new != old
+          print(f"base: {base}, previous version: {old}, current version: {new}, changed: {changed}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"changed={str(changed).lower()}\n")
+
+  publish-node:
+    name: Publish Custom Node to registry
+    needs: check-version-change
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'hao-ai-lab' && (needs.check-version-change.outputs.changed == 'true' || github.event_name == 'workflow_dispatch') }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4

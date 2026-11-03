@@ -40,13 +40,23 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def step0_fingerprint_inputs(method_config: Any, data_config: Any, qad_config: Any, amax_sha256: str,
-                             num_eval_rows: int, *, student_init_from: str, teacher_init_from: str) -> dict[str, Any]:
-    """Everything step 0 depends on. The init paths stand for their weights and ``fastvideo_inference.json``."""
+def step0_fingerprint_inputs(method_config: Any,
+                             data_config: Any,
+                             qad_config: Any,
+                             amax_sha256: str,
+                             num_eval_rows: int,
+                             *,
+                             student_init_from: str,
+                             teacher_init_from: str,
+                             compression: Any = None) -> dict[str, Any]:
+    """Everything step 0 depends on. The init paths stand for their weights and ``fastvideo_inference.json``.
+
+    ``compression`` (V2 token compression) enters only when set, so fingerprints without it are unchanged.
+    """
     method, data, qad = _plain(method_config), _plain(data_config), _plain(qad_config)
     linears = qad.get("linears") or {}
     provisional = int(linears.get("provisional_calibration_rows") or 0) > 0 and not linears.get("amax_json")
-    return {
+    inputs = {
         "format": STEP0_FORMAT,
         "models": {
             "student_init_from": str(student_init_from),
@@ -76,6 +86,9 @@ def step0_fingerprint_inputs(method_config: Any, data_config: Any, qad_config: A
         "amax_sha256": amax_sha256,
         "num_eval_rows": int(num_eval_rows),
     }
+    if compression:
+        inputs["compression"] = _plain(compression)
+    return inputs
 
 
 def fingerprint(inputs: dict[str, Any]) -> str:

@@ -1,0 +1,18 @@
+title: Open-H3-Regenerate-2K
+summary: Regenerate a 768P MiniMax-H3 draft at 2560x1440 with three refine steps.
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    guide: docs/inference/open_h3_regenerate_2k.md
+    workload: v2v
+    defaults: examples/serving/openai_open_h3_regenerate_2k.yaml
+    requirements:
+      - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
+      - "One GPU with about 150 GB free (B200 or GB200). Send the draft as video_reference; local paths must sit under server.media_roots."
+      - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+    options:
+      - server.*
+      - generator.engine.offload.text_encoder
+      - generator.pipeline.experimental.h3_vae_nvfp4_decoder
+      - default_request.sampling.seed
