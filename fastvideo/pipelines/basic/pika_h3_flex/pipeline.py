@@ -14,7 +14,8 @@ from fastvideo.configs.pipelines.pika_h3_flex import (
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3BasePipeline
-from fastvideo.pipelines.basic.pika_h3_flex.adapter import adapter_hf_patterns, load_adapter, task_for_pipeline
+from fastvideo.pipelines.basic.pika_h3_flex.adapter import (PIKA_MERGED_MARKER, adapter_hf_patterns, load_adapter,
+                                                            merged_adapter, task_for_pipeline)
 from fastvideo.pipelines.basic.pika_h3_flex.stages.denoising import PikaH3FlexDenoisingStage
 from fastvideo.pipelines.basic.pika_h3_flex.stages.input_preparation import PikaH3FlexInputPreparationStage
 
@@ -36,7 +37,7 @@ class PikaH3FlexBasePipeline(MiniMaxH3BasePipeline):
         # The concrete class picks the adapter, so a T2VA download does not
         # fetch the 2.7 GB Ref2VA adapter (and vice versa).
         task = "ref2va" if issubclass(cls, PikaH3FlexRefPipeline) else "fl2va"
-        return [*patterns, *adapter_hf_patterns(task)]
+        return [*patterns, *adapter_hf_patterns(task), PIKA_MERGED_MARKER]
 
     def _resolve_pika_adapter(self) -> None:
         """Point ``lora_path`` at the released adapter before LoRA layers attach.
@@ -47,6 +48,13 @@ class PikaH3FlexBasePipeline(MiniMaxH3BasePipeline):
         """
         task = task_for_pipeline(self._ref2va)
         explicit = self.fastvideo_args.lora_path
+        merged = merged_adapter(self.model_path, task) if explicit is None else None
+        if merged is not None:
+            # The trunk already carries the adapter (an exported, e.g. NVFP4 QAD, checkpoint): attach nothing.
+            logger.info("Pika H3 Flex: the %s trunk of %s already contains adapter %s; not applying it again", task,
+                        self.model_path, merged.get("release_id"))
+            self._pika_adapter = None
+            return
         source = explicit if explicit is not None else self.model_path
         revision = None if explicit is not None else self.fastvideo_args.revision
         adapter = load_adapter(source, task=task, revision=revision)

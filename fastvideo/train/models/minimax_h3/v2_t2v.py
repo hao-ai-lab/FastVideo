@@ -189,7 +189,7 @@ class MiniMaxH3V2T2VModel(MiniMaxH3OmniRefPDDModel):
     def num_rungs(self) -> int:
         return len(self.contract.dmd_steps)
 
-    def schedulers(self) -> tuple[Any, Any]:
+    def schedulers(self, prepared: PreparedRow | None = None) -> tuple[Any, Any]:
         """Fresh video/audio schedulers on the DMD sigma grid, as ``MiniMaxH3DenoisingStage._set_dmd_schedule``."""
         from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
         base = torch.tensor([step / 1000.0 for step in self.contract.dmd_steps] + [0.0], dtype=torch.float32)

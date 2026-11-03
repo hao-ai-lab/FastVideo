@@ -14,7 +14,14 @@ does not expose a step-count flag.  ``--lossless-accel`` turns on the existing
 training-free FastVideo switches (bit-identical kernels, reference memo,
 parallel VAE tiles) before the generator starts.  ``--nvfp4-decoder`` and
 ``--nvfp4-text-encoder`` opt into the existing Blackwell FP4 weight paths;
-they change weights, not the six-forward sampler.  Kernel/VSA work is separate.
+``--nvfp4-dit h3_dit`` loads a packed NVFP4 DiT export (e.g.
+FastVideo/Pika-H3-Flex-NVFP4-QAD).  They change weights, not the six-forward sampler.  Kernel/VSA work is separate.
+
+``--nvfp4-attention`` turns on FlashAttention-4 NVFP4 attention (Q/K in NVFP4, P/V in BF16; Blackwell and FA4 only)
+with the named exact Q/K preconditioning, which must match the ``qk_transform`` the checkpoint was QAD-trained with
+(``smooth_k+hadamard`` for Pika-H3-Flex-NVFP4-QAD).  ``--nvfp4-attention-bf16-blocks 45,49`` keeps those
+``transformer_blocks`` on BF16 attention, as in training.  ``none`` quantizes Q/K without preconditioning.
+Without ``--nvfp4-attention`` attention stays BF16.
 
 ``--resolution`` (480p/768p), ``--aspect`` (one of Pika's eleven buckets), and
 ``--duration`` (5-15 s) pick the bucket and the ``17n + 5`` frame count;
@@ -47,7 +54,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastvideo import VideoGenerator
+from fastvideo import VideoGenerator, envs
 from fastvideo.api import (
     CompileConfig,
     ComponentConfig,
@@ -59,8 +66,10 @@ from fastvideo.api import (
     OutputConfig,
     ParallelismConfig,
     PipelineSelection,
+    QuantizationConfig,
     SamplingConfig,
 )
+from fastvideo.attention.utils.nvfp4_qk_precondition import QK_TRANSFORMS, parse_block_indices
 from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 from fastvideo.pipelines.basic.pika_h3_flex.buckets import (
@@ -130,8 +139,23 @@ def parse_args() -> argparse.Namespace:
                         help="Blackwell-only NVFP4 H3 decoder (quality-36L or fast-8L decoder-nvfp4.safetensors)")
     parser.add_argument("--nvfp4-text-encoder",
                         help="Blackwell-only serialized NVFP4 Qwen3-VL text_encoder directory")
+    parser.add_argument("--nvfp4-dit",
+                        choices=("h3_dit", "h3_dit_ffn"),
+                        help="load a packed NVFP4 DiT export with this layer profile (h3_dit: attention + FFN linears)")
+    parser.add_argument("--nvfp4-attention",
+                        choices=tuple(QK_TRANSFORMS),
+                        help="FA4 NVFP4 Q/K attention with this exact Q/K preconditioning (default: BF16 attention)")
+    parser.add_argument("--nvfp4-attention-bf16-blocks",
+                        default="",
+                        help="comma-separated transformer_blocks indices that keep BF16 attention, e.g. 45,49")
     parser.add_argument("--output", default="outputs/pika_h3_flex")
     args = parser.parse_args()
+    if args.nvfp4_attention_bf16_blocks and not args.nvfp4_attention:
+        parser.error("--nvfp4-attention-bf16-blocks needs --nvfp4-attention")
+    try:
+        parse_block_indices(args.nvfp4_attention_bf16_blocks)
+    except ValueError as error:
+        parser.error(f"--nvfp4-attention-bf16-blocks: {error}")
 
     if args.task in ("i2va", "fl2va") and not args.image:
         parser.error(f"--task {args.task} needs --image")
@@ -202,8 +226,19 @@ def _pipeline(args: argparse.Namespace) -> PipelineSelection:
     )
 
 
+def _apply_nvfp4_attention(args: argparse.Namespace) -> None:
+    """Workers inherit the environment, so set it before VideoGenerator starts."""
+    if not args.nvfp4_attention:
+        return
+    envs.FASTVIDEO_NVFP4_FA4.set(True)
+    envs.FASTVIDEO_NVFP4_FA4_QK_TRANSFORM.set(args.nvfp4_attention)
+    envs.FASTVIDEO_NVFP4_FA4_BF16_BLOCKS.set(args.nvfp4_attention_bf16_blocks)
+    envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
+
+
 def main() -> None:
     args = parse_args()
+    _apply_nvfp4_attention(args)
     if args.lossless_accel:
         for key, value in LOSSLESS_ACCEL_ENV.items():
             os.environ.setdefault(key, value)
@@ -223,6 +258,8 @@ def main() -> None:
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=offload,
                 compile=CompileConfig(enabled=args.compile),
+                quantization=(QuantizationConfig(transformer_quant="NVFP4", layer_profile=args.nvfp4_dit)
+                              if args.nvfp4_dit else None),
             ),
             pipeline=_pipeline(args),
         ))

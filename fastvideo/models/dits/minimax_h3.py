@@ -19,6 +19,7 @@ from fastvideo.attention.backends.abstract import AttentionMetadata, layer_idx_f
 from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
+from fastvideo.attention.utils.nvfp4_qk_precondition import parse_block_indices
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -226,6 +227,7 @@ class MiniMaxH3Attention(nn.Module):
         exact_rope: bool = False,
         mk_qkv: bool = False,
         vsa_fp4: dict[str, Any] | None = None,
+        bf16_attention: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -274,6 +276,8 @@ class MiniMaxH3Attention(nn.Module):
                                             supported_attention_backends=supported_attention_backends)
         use_vsa = resolved_backend.get_name() == "VIDEO_SPARSE_ATTN_H3"
         attention_cls = DistributedAttention_VSA if use_vsa else DistributedAttention
+        # Blocks listed in FASTVIDEO_NVFP4_FA4_BF16_BLOCKS opt out of the process-wide NVFP4 FA4 Q/K quantization.
+        precision_args: dict[str, Any] = {"nvfp4_fa4": False} if bf16_attention else {}
         self.distributed_attention = attention_cls(
             num_heads=num_attention_heads,
             head_size=attention_head_dim,
@@ -282,6 +286,7 @@ class MiniMaxH3Attention(nn.Module):
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
             cudnn_sdpa=cudnn_sdpa,
+            **precision_args,
         )
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
@@ -698,6 +703,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         exact_kernels: frozenset[str] = frozenset(),
         vsa_fp4: dict[str, Any] | None = None,
         mk_tier: bool = False,
+        bf16_attention: bool = False,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -715,6 +721,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             exact_rope="rope" in exact_kernels,
             vsa_fp4=vsa_fp4,
             mk_qkv=mk_tier,
+            bf16_attention=bf16_attention,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -977,6 +984,11 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             config.quant_config,
             prefix=f"{config.prefix}.token_refiner",
         )
+        bf16_blocks = parse_block_indices(envs.FASTVIDEO_NVFP4_FA4_BF16_BLOCKS.get())
+        unknown_blocks = sorted(index for index in bf16_blocks if index >= arch.num_layers)
+        if unknown_blocks:
+            raise ValueError(f"FASTVIDEO_NVFP4_FA4_BF16_BLOCKS {unknown_blocks} exceed the {arch.num_layers} "
+                             "transformer_blocks")
         self.transformer_blocks = nn.ModuleList([
             MiniMaxH3TransformerBlock(
                 arch.hidden_size,
@@ -998,6 +1010,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 exact_kernels=self.enabled_exact_kernels,
                 vsa_fp4=config.vsa_fp4,
                 mk_tier=self.use_mk_kernels,
+                bf16_attention=index in bf16_blocks,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
