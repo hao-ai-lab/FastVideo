@@ -796,19 +796,30 @@ class CheckpointManager:
         tagged_dir = Path(self.output_dir) / tag
         if tagged_dir.resolve().parent != Path(self.output_dir).resolve():
             raise ValueError(f"checkpoint tag {tag!r} does not name a directory directly inside {self.output_dir}")
-        dcp_dir = tagged_dir / "dcp"
+        # The previous tagged weights stay in place until every rank has finished writing the replacement.
+        staging = Path(self.output_dir) / f".{tag}.staging"
         if _rank() == 0:
-            if tagged_dir.exists():
-                shutil.rmtree(tagged_dir)
-            os.makedirs(dcp_dir, exist_ok=True)
-            self._write_metadata(tagged_dir, step, weights_only=True)
+            if staging.exists():
+                shutil.rmtree(staging)
+            os.makedirs(staging / "dcp")
+            self._write_metadata(staging, step, weights_only=True)
             logger.info("Saving %s weights (step %d) to %s", tag, step, tagged_dir)
         _barrier()
         states = {key: value for key, value in self.method.checkpoint_state().items() if key.startswith("roles.")}
         # Coordinate over a CPU group: DCP's metadata gather over NCCL needs device memory, and right after an
         # evaluation the GPUs can be nearly full (seen as "NCCL Error 1: unhandled cuda error" in gather).
         torch.cuda.empty_cache()
-        dcp.save(states, checkpoint_id=str(dcp_dir), process_group=_cpu_group())
+        dcp.save(states, checkpoint_id=str(staging / "dcp"), process_group=_cpu_group())
+        _barrier()
+        if _rank() == 0:
+            retired = Path(self.output_dir) / f".{tag}.retired"
+            if retired.exists():
+                shutil.rmtree(retired)
+            if tagged_dir.exists():
+                os.replace(tagged_dir, retired)
+            os.replace(staging, tagged_dir)
+            if retired.exists():
+                shutil.rmtree(retired)
         _barrier()
 
     def _write_metadata(

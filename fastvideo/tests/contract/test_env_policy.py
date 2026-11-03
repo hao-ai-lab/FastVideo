@@ -6,7 +6,8 @@ The test parses every Python file under fastvideo/ (except fastvideo/third_party
 and the registry fastvideo/envs.py) with ``ast`` and reports code that:
 
 - reads the environment directly for a name outside EXTERNAL_ALLOWLIST (test
-  code under fastvideo/tests/ may also read CI_ONLY_VARIABLES);
+  code under fastvideo/tests/ may also read CI_ONLY_VARIABLES), or calls
+  envs.external_with_prefixes with a prefix that EXTERNAL_ALLOWLIST does not cover;
 - writes the environment directly (os.environ, os.putenv, monkeypatch.setenv),
   or through the envs.*_external helpers for a name outside
   EXTERNAL_WRITE_ALLOWLIST;
@@ -55,6 +56,8 @@ EXTERNAL_ALLOWLIST = {
     "NCCL_*": "NCCL communication library.",
     "TORCH_*": "PyTorch runtime settings.",
     "OMP_*": "OpenMP threading.",
+    "FA4_*": "FlashAttention-4 (flash_attn.cute) tuning knobs; fa4_env_cache.py fingerprints them.",
+    "FA_*": "FlashAttention-4 (flash_attn.cute) tuning knobs; fa4_env_cache.py fingerprints them.",
     "HF_HUB_*": "huggingface_hub settings.",
     "RANK": "Set by torchrun and other launchers.",
     "LOCAL_RANK": "Set by torchrun and other launchers.",
@@ -368,6 +371,12 @@ class EnvAccessScanner:
         elif (isinstance(func, ast.Attribute) and func.attr in EXTERNAL_WRITE_HELPERS
               and self._is_envs_module(func.value) and not is_external_write_allowed(func.attr, name, self.in_tests)):
             self.violations.append(("write", name, node.lineno))
+        elif (isinstance(func, ast.Attribute) and func.attr == "external_with_prefixes"
+              and self._is_envs_module(func.value)):
+            # A prefix read is allowed when an EXTERNAL_ALLOWLIST pattern covers the whole prefix.
+            for arg in node.args:
+                prefix = self._literal(arg)
+                self.violations.append(("read", prefix if prefix == "<dynamic>" else f"{prefix}*", node.lineno))
 
     def _check_registry_use(self, node: ast.Attribute, parent: ast.AST | None, in_function: bool) -> None:
         # Only a call counts: ``getter = envs.X.get`` neither reads the variable

@@ -704,8 +704,6 @@ class LoRAPipeline(ComposedPipelineBase):
                     _convert_quantized_weights_after_lora_change(repack_scope,
                                                                  skip=_all_side_branch(layers.values(), repack_scope))
         if untouched and rank == 0:
-            # One summary, not one line per wrapped layer: an adapter that trains a subset of the
-            # wrapped linears (e.g. no AdaLN projections) would otherwise log hundreds of warnings.
             logger.warning(
                 "LoRA adapter %s has no weights for %d wrapped layers; LoRA is disabled on them (e.g. %s).",
                 lora_path,

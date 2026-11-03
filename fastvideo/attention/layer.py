@@ -136,15 +136,43 @@ class DistributedAttention(nn.Module):
         """
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
-        batch_size, _, num_heads, _ = q.shape
+        # Stack QKV
+        qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
+        return self.forward_stacked(
+            qkv,
+            original_seq_len=original_seq_len,
+            replicated_q=replicated_q,
+            replicated_k=replicated_k,
+            replicated_v=replicated_v,
+            freqs_cis=freqs_cis,
+            attn_metadata=attn_metadata,
+        )
+
+    def forward_stacked(
+        self,
+        qkv: torch.Tensor,
+        original_seq_len: int | None = None,
+        replicated_q: torch.Tensor | None = None,
+        replicated_k: torch.Tensor | None = None,
+        replicated_v: torch.Tensor | None = None,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Attention over a pre-stacked ``[3*batch, seq_len, num_heads, head_dim]`` QKV buffer.
+
+        Identical to :meth:`forward` after its ``torch.cat``, so a fused QKV
+        prologue that already wrote the stack (e.g. MiniMax H3's MotionKernel
+        prologue) can skip that copy. Sequence-parallel redistribution,
+        ``freqs_cis``, replicated tokens and backend pre/post-processing are
+        handled exactly as in :meth:`forward`.
+        """
+        stacked, _, num_heads, _ = qkv.shape
+        batch_size = stacked // 3
         local_rank = get_sp_parallel_rank()
         world_size = get_sp_world_size()
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = attn_metadata if attn_metadata is not None else forward_context.attn_metadata
-
-        # Stack QKV
-        qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
         qkv = sequence_model_parallel_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
