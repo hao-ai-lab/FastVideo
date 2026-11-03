@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Compare H3 vision SDPA and packed FA2 using synthetic inputs and random weights.
+"""Compare original and automatically batched H3 vision SDPA with random weights.
 
 Run from the repository root with PYTHONPATH=. in a prepared FastVideo environment::
 
@@ -9,18 +9,16 @@ Run from the repository root with PYTHONPATH=. in a prepared FastVideo environme
 Use --sequence-lengths 512 1024 768 to test unequal independent frames.
 This measures one native vision-attention module, including QKV, RoPE and output
 projection. It does not measure checkpoint quality or end-to-end H3 latency.
-Metadata is built outside timing, matching its reuse across the vision blocks.
-Each backend uses identical weights and inputs; timings exclude warmup.
-An untimed setup call on each backend also excludes lazy import/kernel setup.
-The packed setup call wraps the resolved external kernel to verify execution;
-ineligible inputs or an unavailable optional package are reported as skipped.
+Consecutive equal-length groups are built outside timing, matching vision-block reuse.
+Each mode uses identical weights and inputs; timings exclude setup and warmup.
+An untimed call records actual SDPA batch sizes without retaining input tensors.
+CPU, math-backend and unsupported cases report per-segment execution explicitly.
 """
 
 from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext
-import importlib.metadata
 import json
 import statistics
 import time
@@ -35,9 +33,7 @@ from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
 )
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import (
     MiniMaxH3Qwen3VLVisionAttention,
-    _can_use_vision_flash_attn_2,
-    _get_vision_flash_attn_varlen,
-    _vision_attention_metadata,
+    _vision_attention_groups,
 )
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
@@ -51,8 +47,8 @@ def main() -> None:
     parser.add_argument("--sequence-lengths", type=int, nargs="+", help="Overrides --segments and --sequence-length")
     parser.add_argument("--hidden-size", type=int, default=1152)
     parser.add_argument("--heads", type=int, default=16)
-    parser.add_argument("--backends", choices=("sdpa", "flash_attn_2"), nargs="+", default=["sdpa", "flash_attn_2"])
-    parser.add_argument("--sdpa-backend", choices=("auto", "math", "flash", "efficient"), default="auto")
+    parser.add_argument("--modes", choices=("loop", "auto_batch"), nargs="+", default=["loop", "auto_batch"])
+    parser.add_argument("--sdpa-backend", choices=("auto", "math", "flash", "efficient", "cudnn"), default="auto")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--runs", type=int, default=10)
     args = parser.parse_args()
@@ -74,7 +70,7 @@ def main() -> None:
         vision_hidden_size=args.hidden_size,
         vision_num_heads=args.heads,
     ))
-    template = MiniMaxH3Qwen3VLVisionAttention(config, attn_implementation="sdpa")
+    template = MiniMaxH3Qwen3VLVisionAttention(config)
     weights = {name: tensor.detach().clone() for name, tensor in template.state_dict().items()}
     del template
     rows = sum(lengths)
@@ -82,9 +78,9 @@ def main() -> None:
     angles = torch.randn(rows, args.hidden_size // args.heads // 2, device=device)
     angles = torch.cat((angles, angles), dim=-1)
     positions = (angles.cos(), angles.sin())
-    backends = list(dict.fromkeys(["sdpa", *args.backends]))
+    modes = list(dict.fromkeys(["loop", *args.modes]))
     sdpa_backends = {"math": SDPBackend.MATH, "flash": SDPBackend.FLASH_ATTENTION,
-                     "efficient": SDPBackend.EFFICIENT_ATTENTION}
+                     "efficient": SDPBackend.EFFICIENT_ATTENTION, "cudnn": SDPBackend.CUDNN_ATTENTION}
 
     def synchronize() -> None:
         if device.type == "cuda":
@@ -93,46 +89,43 @@ def main() -> None:
     results = []
     reference = None
     with torch.inference_mode():
-        for backend in backends:
-            kernel = None
-            if backend == "flash_attn_2":
-                if not _can_use_vision_flash_attn_2(hidden, args.hidden_size // args.heads):
-                    results.append({"backend": backend, "status": "skipped",
-                                    "reason": "Inputs are ineligible for FA2; refusing to label an SDPA fallback as FA2"})
-                    continue
-                kernel = _get_vision_flash_attn_varlen()
-                if kernel is None:
-                    results.append({"backend": backend, "status": "skipped",
-                                    "reason": "Optional flash-attn package/extension is unavailable; production uses SDPA"})
-                    continue
-            model = MiniMaxH3Qwen3VLVisionAttention(
-                config, attn_implementation="sdpa" if backend == "sdpa" else "auto")
+        for mode in modes:
+            model = MiniMaxH3Qwen3VLVisionAttention(config)
             model.load_state_dict(weights)
             model = model.to(device=device, dtype=dtype).eval()
-            metadata = _vision_attention_metadata(lengths, device) if backend == "flash_attn_2" else None
+            groups = (tuple((length, 1) for length in lengths) if mode == "loop"
+                      else _vision_attention_groups(lengths))
 
             def run() -> torch.Tensor:
                 context = (sdpa_kernel(sdpa_backends[args.sdpa_backend])
-                           if backend == "sdpa" and args.sdpa_backend != "auto" else nullcontext())
+                           if args.sdpa_backend != "auto" else nullcontext())
                 with context:
-                    return model(hidden, lengths, positions, metadata)
+                    return model(hidden, lengths, positions, groups)
 
-            packed_setup_calls = 0
-            if kernel is not None:
-                # Count execution without retaining setup Q/K/V in mock call
-                # records, which would inflate the later CUDA memory peak.
-                def counted_kernel(*kernel_args, **kernel_kwargs):
-                    nonlocal packed_setup_calls
-                    packed_setup_calls += 1
-                    return kernel(*kernel_args, **kernel_kwargs)
+            # Record only scalar metadata. Mock argument records would retain
+            # setup Q/K/V and inflate the later CUDA memory peak.
+            sdpa_batch_sizes = []
+            selected_backends = []
+            original_sdpa = vision.F.scaled_dot_product_attention
 
-                with patch.object(vision, "_get_vision_flash_attn_varlen", new=lambda: counted_kernel):
-                    setup_output = run()
-                if packed_setup_calls != 1:
-                    raise RuntimeError("Packed benchmark did not execute exactly one external FA2 call")
-                del counted_kernel
-            else:
+            def recorded_sdpa(query, key, value, **kwargs):
+                sdpa_batch_sizes.append(query.shape[0])
+                selector = getattr(torch, "_fused_sdp_choice", None)
+                if callable(selector):
+                    try:
+                        selected = SDPBackend(selector(query, key, value, **kwargs)).name
+                    except torch.OutOfMemoryError:
+                        raise
+                    except (RuntimeError, TypeError, ValueError):
+                        selected = "unknown"
+                else:
+                    selected = "unknown"
+                selected_backends.append(selected)
+                return original_sdpa(query, key, value, **kwargs)
+
+            with patch.object(vision.F, "scaled_dot_product_attention", new=recorded_sdpa):
                 setup_output = run()
+            del recorded_sdpa
             if reference is None:
                 reference = setup_output
             del setup_output
@@ -140,6 +133,8 @@ def main() -> None:
                 warm_output = run()
                 del warm_output
             synchronize()
+            start_allocated = torch.cuda.memory_allocated(device) if device.type == "cuda" else None
+            start_reserved = torch.cuda.memory_reserved(device) if device.type == "cuda" else None
             if device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(device)
             timings = []
@@ -151,6 +146,7 @@ def main() -> None:
                 timings.append((time.perf_counter() - start) * 1000)
                 del output
             peak = torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None
+            peak_reserved = torch.cuda.max_memory_reserved(device) if device.type == "cuda" else None
             # Compare outside the timing and memory-measurement interval.
             output = run()
             error = (output.float() - reference.float()).abs()
@@ -158,36 +154,37 @@ def main() -> None:
                          torch.float32: (1e-4, 1e-5)}[dtype]
             torch.testing.assert_close(output, reference, rtol=tolerance[0], atol=tolerance[1])
             results.append({
-                "backend": backend,
-                "status": "measured",
-                "attention_calls_per_forward": len(lengths) if backend == "sdpa" else 1,
-                "verified_packed_kernel_setup_calls": packed_setup_calls,
-                "sdpa_backend": args.sdpa_backend if backend == "sdpa" else None,
+                "mode": mode,
+                "execution": "batched" if any(size > 1 for size in sdpa_batch_sizes) else "per_segment",
+                "attention_calls_per_forward": len(sdpa_batch_sizes),
+                "observed_sdpa_batch_sizes": sdpa_batch_sizes,
+                "setup_predicted_backends": selected_backends,
+                "sdpa_backend_setting": args.sdpa_backend,
                 "median_wall_ms": statistics.median(timings),
                 "wall_ms": timings,
+                "starting_allocated_bytes": start_allocated,
                 "peak_allocated_bytes": peak,
+                "extra_peak_allocated_bytes": peak - start_allocated if peak is not None else None,
+                "starting_reserved_bytes": start_reserved,
+                "peak_reserved_bytes": peak_reserved,
                 "max_abs_error": error.max().item(),
                 "bitwise_equal": torch.equal(output, reference),
             })
-            del output, error, model, metadata
-
-    try:
-        flash_attn_version = importlib.metadata.version("flash-attn")
-    except importlib.metadata.PackageNotFoundError:
-        flash_attn_version = None
+            del output, error, model, groups
 
     print(json.dumps({
         "scope": "synthetic single-module benchmark; no checkpoint or end-to-end evidence",
         "torch_version": torch.__version__,
-        "flash_attn_version": flash_attn_version,
         "cuda_version": torch.version.cuda,
         "device": torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu",
         "dtype": args.dtype,
         "shape": {"sequence_lengths": lengths,
                   "hidden_size": args.hidden_size, "heads": args.heads},
-        "warmup_per_backend": args.warmup,
-        "untimed_setup_calls_per_backend": 1,
-        "memory_scope": "total CUDA allocated peak including model, inputs and retained baseline output",
+        "warmup_per_mode": args.warmup,
+        "untimed_setup_calls_per_mode": 1,
+        "memory_scope": "allocated peaks include one model, inputs and retained baseline output; "
+                        "reserved peaks also include allocator cache from earlier modes",
+        "receipt_scope": "observed SDPA calls and private-selector predictions; not a GPU profiler trace",
         "results": results,
     }, indent=2))
 
