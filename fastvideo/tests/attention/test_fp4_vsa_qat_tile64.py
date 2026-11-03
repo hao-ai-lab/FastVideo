@@ -44,7 +44,8 @@ def test_tile64_emulator_matches_the_reference_on_padded_rows(quantize) -> None:
                                                      quantize=quantize)
     expected = expected[:, :, :q.shape[1]].transpose(1, 2).float()
     error = (out.float() - expected).norm() / expected.norm()
-    assert error < 2e-3
+    # BF16 P and output rounding: the same bounds as fastvideo-kernel/tests/test_attn_qat_vsa_train.py.
+    assert error < (2e-3 if quantize else 5e-3)
 
 
 def test_tile64_rejects_prefix_options_counted_in_128_token_tiles() -> None:
