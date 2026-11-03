@@ -127,6 +127,14 @@ def test_fused_matches_reference_under_fp32(transform, tf32_matmul) -> None:
 
 
 @requires_blackwell
+@pytest.mark.parametrize("tf32_matmul", [False], indirect=True)
+def test_hadamard_without_tf32_takes_the_reference_path(tf32_matmul) -> None:
+    q, k, _ = _inputs(1, 256, 4, 128, seed=4)
+    assert not fused.fused_qk_quant_supported(q, k, hadamard=True)
+    assert fused.fused_qk_quant_supported(q, k, hadamard=False)
+
+
+@requires_blackwell
 def test_forward_nvfp4_uses_fused_path_and_compiles_fullgraph() -> None:
     impl = flash_attn_module.FlashAttentionImpl(num_heads=4, head_size=128, causal=False, softmax_scale=128**-0.5,
                                                 num_kv_heads=4, nvfp4_fa4=True,

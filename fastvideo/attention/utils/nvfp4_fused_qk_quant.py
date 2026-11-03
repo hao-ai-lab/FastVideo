@@ -61,8 +61,14 @@ def fused_qk_quant_available() -> bool:
     return _TRITON_AVAILABLE and not non_default_recipe
 
 
-def fused_qk_quant_supported(query: torch.Tensor, key: torch.Tensor) -> bool:
-    """Tensor-level gate: BF16 CUDA ``[B, L, H, D]`` Q/K with a supported, channel-contiguous head dim."""
+def fused_qk_quant_supported(query: torch.Tensor, key: torch.Tensor, *, hadamard: bool = False) -> bool:
+    """Tensor-level gate: BF16 CUDA ``[B, L, H, D]`` Q/K with a supported, channel-contiguous head dim.
+
+    The Hadamard rotation is bit-exact only against cuBLAS's TF32 GEMM, so with TF32 matmuls off it takes the
+    reference path.
+    """
+    if hadamard and not torch.backends.cuda.matmul.allow_tf32:
+        return False
     return (query.is_cuda and key.is_cuda and query.dtype == torch.bfloat16 and key.dtype == torch.bfloat16
             and query.dim() == 4 and key.dim() == 4 and query.shape[0] == key.shape[0]
             and query.shape[-1] == key.shape[-1] and query.shape[-1] in SUPPORTED_HEAD_DIMS and query.stride(-1) == 1

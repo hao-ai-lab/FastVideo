@@ -540,7 +540,7 @@ class FlashAttentionImpl(AttentionImpl):
         orig_seqlen_k = key.shape[1]
 
         # Quantize Q/K to FP4 (internally pads to multiple of 128 for SF layout)
-        if self.nvfp4_fused_qk_quant and fused_qk_quant_supported(query, key):
+        if self.nvfp4_fused_qk_quant and fused_qk_quant_supported(query, key, hadamard=self.nvfp4_hadamard):
             q_fp4, q_sf, k_fp4, k_sf = nvfp4_fused_qk_quantize_fa4(query,
                                                                    key,
                                                                    smooth_k=self.nvfp4_smooth_k,
