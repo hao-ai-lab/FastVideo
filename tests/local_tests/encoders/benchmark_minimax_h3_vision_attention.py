@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Compare original and automatically batched H3 vision SDPA with random weights.
+"""Compare original per-frame SDPA and packed PyTorch varlen attention.
 
 Run from the repository root with PYTHONPATH=. in a prepared FastVideo environment::
 
@@ -9,10 +9,11 @@ Run from the repository root with PYTHONPATH=. in a prepared FastVideo environme
 Use --sequence-lengths 512 1024 768 to test unequal independent frames.
 This measures one native vision-attention module, including QKV, RoPE and output
 projection. It does not measure checkpoint quality or end-to-end H3 latency.
-Consecutive equal-length groups are built outside timing, matching vision-block reuse.
+Packed metadata is built outside timing, matching its reuse across vision blocks.
 Each mode uses identical weights and inputs; timings exclude setup and warmup.
-An untimed call records actual SDPA batch sizes without retaining input tensors.
-CPU, math-backend and unsupported cases report per-segment execution explicitly.
+An untimed call records attention calls without retaining input tensors.
+Native varlen requires a compatible CUDA FP16/BF16 runtime. CPU/FP32 smoke checks
+run only the original baseline and explicitly skip the varlen comparison.
 """
 
 from __future__ import annotations
@@ -33,9 +34,35 @@ from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
 )
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import (
     MiniMaxH3Qwen3VLVisionAttention,
-    _vision_attention_groups,
+    _vision_attention_metadata,
 )
 from torch.nn.attention import SDPBackend, sdpa_kernel
+
+
+def _looped_attention(model, hidden, lengths, positions):
+    """Original attention computation, kept here only as the benchmark baseline."""
+    rows = hidden.shape[0]
+    query, key, value = model.qkv(hidden).view(rows, 3, model.num_heads, model.head_dim).unbind(1)
+    cos, sin = (part.unsqueeze(-2).float() for part in positions)
+
+    def rotate(tensor):
+        left, right = tensor.float().chunk(2, dim=-1)
+        return (tensor.float() * cos + torch.cat((-right, left), dim=-1) * sin).to(tensor.dtype)
+
+    query, key = rotate(query), rotate(key)
+    outputs = []
+    offset = 0
+    for length in lengths:
+        end = offset + length
+        output = vision.F.scaled_dot_product_attention(
+            query[offset:end].transpose(0, 1).unsqueeze(0),
+            key[offset:end].transpose(0, 1).unsqueeze(0),
+            value[offset:end].transpose(0, 1).unsqueeze(0),
+            dropout_p=0.0, is_causal=False, scale=model.scaling,
+        )
+        outputs.append(output.transpose(1, 2))
+        offset = end
+    return model.proj(torch.cat(outputs, dim=1).reshape(rows, -1))
 
 
 def main() -> None:
@@ -47,8 +74,9 @@ def main() -> None:
     parser.add_argument("--sequence-lengths", type=int, nargs="+", help="Overrides --segments and --sequence-length")
     parser.add_argument("--hidden-size", type=int, default=1152)
     parser.add_argument("--heads", type=int, default=16)
-    parser.add_argument("--modes", choices=("loop", "auto_batch"), nargs="+", default=["loop", "auto_batch"])
-    parser.add_argument("--sdpa-backend", choices=("auto", "math", "flash", "efficient", "cudnn"), default="auto")
+    parser.add_argument("--modes", choices=("loop", "varlen"), nargs="+", default=["loop", "varlen"])
+    parser.add_argument("--sdpa-backend", choices=("auto", "math", "flash", "efficient", "cudnn"),
+                        default="auto", help="Controls only the original SDPA baseline")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--runs", type=int, default=10)
     args = parser.parse_args()
@@ -90,17 +118,22 @@ def main() -> None:
     reference = None
     with torch.inference_mode():
         for mode in modes:
+            if mode == "varlen" and (device.type != "cuda" or dtype not in (torch.float16, torch.bfloat16)):
+                results.append({"mode": mode, "status": "skipped",
+                                "reason": "Native varlen comparison requires compatible CUDA FP16/BF16"})
+                continue
             model = MiniMaxH3Qwen3VLVisionAttention(config)
             model.load_state_dict(weights)
             model = model.to(device=device, dtype=dtype).eval()
-            groups = (tuple((length, 1) for length in lengths) if mode == "loop"
-                      else _vision_attention_groups(lengths))
+            metadata = _vision_attention_metadata(lengths, rows, device) if mode == "varlen" else None
 
             def run() -> torch.Tensor:
+                if mode == "varlen":
+                    return model(hidden, lengths, positions, metadata)
                 context = (sdpa_kernel(sdpa_backends[args.sdpa_backend])
                            if args.sdpa_backend != "auto" else nullcontext())
                 with context:
-                    return model(hidden, lengths, positions, groups)
+                    return _looped_attention(model, hidden, lengths, positions)
 
             # Record only scalar metadata. Mock argument records would retain
             # setup Q/K/V and inflate the later CUDA memory peak.
@@ -123,9 +156,20 @@ def main() -> None:
                 selected_backends.append(selected)
                 return original_sdpa(query, key, value, **kwargs)
 
+            varlen_calls = 0
+            original_varlen = vision.varlen_attn
+
+            def recorded_varlen(*varlen_args, **varlen_kwargs):
+                nonlocal varlen_calls
+                varlen_calls += 1
+                return original_varlen(*varlen_args, **varlen_kwargs)
+
             with patch.object(vision.F, "scaled_dot_product_attention", new=recorded_sdpa):
-                setup_output = run()
-            del recorded_sdpa
+                with patch.object(vision, "varlen_attn", new=recorded_varlen):
+                    setup_output = run()
+            if mode == "varlen" and (varlen_calls != 1 or sdpa_batch_sizes):
+                raise RuntimeError("Varlen comparison must execute exactly one native varlen call and no SDPA loop")
+            del recorded_sdpa, recorded_varlen
             if reference is None:
                 reference = setup_output
             del setup_output
@@ -155,11 +199,13 @@ def main() -> None:
             torch.testing.assert_close(output, reference, rtol=tolerance[0], atol=tolerance[1])
             results.append({
                 "mode": mode,
-                "execution": "batched" if any(size > 1 for size in sdpa_batch_sizes) else "per_segment",
-                "attention_calls_per_forward": len(sdpa_batch_sizes),
+                "status": "measured",
+                "execution": "packed_varlen" if mode == "varlen" else "per_segment",
+                "attention_calls_per_forward": varlen_calls + len(sdpa_batch_sizes),
+                "observed_varlen_calls": varlen_calls,
                 "observed_sdpa_batch_sizes": sdpa_batch_sizes,
                 "setup_predicted_backends": selected_backends,
-                "sdpa_backend_setting": args.sdpa_backend,
+                "sdpa_backend_setting": args.sdpa_backend if mode == "loop" else None,
                 "median_wall_ms": statistics.median(timings),
                 "wall_ms": timings,
                 "starting_allocated_bytes": start_allocated,
@@ -170,7 +216,7 @@ def main() -> None:
                 "max_abs_error": error.max().item(),
                 "bitwise_equal": torch.equal(output, reference),
             })
-            del output, error, model, groups
+            del output, error, model, metadata
 
     print(json.dumps({
         "scope": "synthetic single-module benchmark; no checkpoint or end-to-end evidence",
@@ -184,7 +230,7 @@ def main() -> None:
         "untimed_setup_calls_per_mode": 1,
         "memory_scope": "allocated peaks include one model, inputs and retained baseline output; "
                         "reserved peaks also include allocator cache from earlier modes",
-        "receipt_scope": "observed SDPA calls and private-selector predictions; not a GPU profiler trace",
+        "receipt_scope": "observed varlen/SDPA calls; backend predictions apply to SDPA baseline only",
         "results": results,
     }, indent=2))
 
