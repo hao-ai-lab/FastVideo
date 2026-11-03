@@ -15,8 +15,10 @@ IN, OUT, RANK = 32, 24, 16
 
 @pytest.fixture(autouse=True)
 def _cpu_merge(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(torch._dynamo.config, "disable", True)
+    # config.patch restores the flag; a monkeypatch.setattr teardown would delete it (pytest 9).
     monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: torch.device("cpu"))
+    with torch._dynamo.config.patch(disable=True):
+        yield
 
 
 def _merged(adapter_dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
