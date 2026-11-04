@@ -210,11 +210,9 @@ if [ "${GPU_BACKEND}" = "CUDA" ] && ! (( PYTHON_ONLY )); then
     fi
 
     if ! has_cmake_arg "FASTVIDEO_KERNEL_BUILD_TK"; then
-        if [ "${cc_major}" = "9" ] && [ "${cc_minor}" = "0" ]; then
-            CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON"
-        else
-            CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=OFF"
-        fi
+        # Let CMake detect both the target GPU arch and host support. Explicit ON
+        # remains a request to fail if TK cannot be built on the host.
+        CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=AUTO"
     fi
 fi
 
