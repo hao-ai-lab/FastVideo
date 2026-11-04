@@ -14,7 +14,9 @@ def _write_executable(path: Path, contents: str) -> None:
     path.chmod(0o755)
 
 
-def _run_build(tmp_path: Path, capability: str, cuda_release: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+def _run_build(
+    tmp_path: Path, capability: str, cuda_release: str, cmake_args: str | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     kernel_dir = tmp_path / "fastvideo-kernel"
     kernel_dir.mkdir()
     shutil.copy2(BUILD_SCRIPT, kernel_dir / "build.sh")
@@ -46,6 +48,8 @@ def _run_build(tmp_path: Path, capability: str, cuda_release: str) -> tuple[subp
         "FV_TEST_RESULT": str(result_dir),
         "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
     })
+    if cmake_args is not None:
+        env["CMAKE_ARGS"] = cmake_args
     result = subprocess.run(
         ["bash", "build.sh"],
         cwd=kernel_dir,
@@ -82,3 +86,20 @@ def test_build_script_rejects_sm121_before_cmake_on_cuda_12(tmp_path: Path) -> N
 
     assert result.returncode != 0
     assert "sm_121a requires CUDA Toolkit 13.0+" in result.stderr
+
+
+@pytest.mark.parametrize("capability", ["9.0", "10.3"])
+def test_build_script_defers_tk_detection_to_cmake(tmp_path: Path, capability: str) -> None:
+    result, result_dir = _run_build(tmp_path, capability, "13.0")
+
+    assert result.returncode == 0, result.stderr
+    assert "-DFASTVIDEO_KERNEL_BUILD_TK=AUTO" in (result_dir / "cmake_args").read_text()
+
+
+@pytest.mark.parametrize("option", ["ON", "OFF"])
+def test_build_script_preserves_explicit_tk_option(tmp_path: Path, option: str) -> None:
+    result, result_dir = _run_build(tmp_path, "9.0", "13.0", f"-DFASTVIDEO_KERNEL_BUILD_TK={option}")
+
+    assert result.returncode == 0, result.stderr
+    assert (result_dir / "cmake_args").read_text().count("-DFASTVIDEO_KERNEL_BUILD_TK=") == 1
+    assert f"-DFASTVIDEO_KERNEL_BUILD_TK={option}" in (result_dir / "cmake_args").read_text()
