@@ -22,6 +22,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_FRAMES_PER_CHUNK,
     MINIMAX_H3_LATENTS_PER_CHUNK,
     MINIMAX_H3_MAX_DURATION,
+    MINIMAX_H3_MAX_PIXELS,
+    MINIMAX_H3_SHORT_EDGE,
     resolve_canvas_size,
 )
 
@@ -192,20 +194,26 @@ def resolve_reference_image_size(
     height: int,
     mode: str = "diffusers",
     canvas: tuple[int, int] | None = None,
+    *,
+    short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
 ) -> tuple[int, int]:
     """Resolve a reference image's ``(height, width)`` under a resize ``mode``.
 
     The aspect ratio is kept and each side rounds to a multiple of 32.
     ``canvas`` is the target ``(height, width)``, which ``match`` needs.
+    ``short_edge`` is the family tier's released reference-image short edge,
+    which ``diffusers`` scales to and ``max`` caps at.
     """
     if width <= 0 or height <= 0:
         raise ValueError(f"A reference image must have a positive size, got {width}x{height}.")
     if width > 4 * height or height > 4 * width:
         raise ValueError(f"A reference image must be within 1:4 and 4:1, got {width}x{height}.")
+    if short_edge <= 0:
+        raise ValueError(f"A reference-image short edge must be positive, got {short_edge}.")
     if mode == "diffusers":
-        scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+        scale = short_edge / min(width, height)
     elif mode == "max":
-        scale = min(1.0, MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height))
+        scale = min(1.0, short_edge / min(width, height))
     elif mode == "match":
         if canvas is None:
             raise ValueError("reference_resize_mode='match' needs the target canvas.")
@@ -256,12 +264,23 @@ def resample_reference_frames(frames: np.ndarray, fps: float) -> np.ndarray:
     return np.repeat(frames, repeats, axis=0)
 
 
-def prepare_reference_frames(frames: np.ndarray, num_frames: int) -> np.ndarray:
+def prepare_reference_frames(
+    frames: np.ndarray,
+    num_frames: int,
+    *,
+    short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    max_pixels: int = MINIMAX_H3_MAX_PIXELS,
+) -> np.ndarray:
     """Trim a reference video to the request and resize every RGB frame."""
     if frames.ndim != 4 or frames.shape[-1] != 3 or frames.shape[0] == 0:
         raise ValueError(f"A reference video must be non-empty RGB frames, got {tuple(frames.shape)}.")
     frames = frames[:num_frames]
-    height, width = resolve_canvas_size(frames.shape[2], frames.shape[1])
+    height, width = resolve_canvas_size(
+        frames.shape[2],
+        frames.shape[1],
+        short_edge=short_edge,
+        max_pixels=max_pixels,
+    )
     if frames.shape[1:3] == (height, width):
         return frames
     return np.stack(
@@ -346,11 +365,18 @@ def prepare_reference(
     target_sample_rate: int,
     resize_mode: str = "diffusers",
     canvas: tuple[int, int] | None = None,
+    *,
+    reference_short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
+    reference_canvas_short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    reference_canvas_max_pixels: int = MINIMAX_H3_MAX_PIXELS,
 ) -> MiniMaxH3PreparedReference:
     """Decode and normalize one deferred Ref2VA medium.
 
     An image is sized by ``resolve_reference_image_size`` under ``resize_mode``
-    and the target ``canvas``; videos and audio ignore both.
+    and the target ``canvas``; videos and audio ignore both.  The keyword
+    arguments let a family use its own tier's reference-image short edge and
+    reference-video canvas rule.  MiniMax-H3's released values are the
+    defaults; Pika H3 Flex passes its 480p/768p tier values.
     """
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
@@ -363,7 +389,11 @@ def prepare_reference(
             image = Image.fromarray(pixels)
         image = ImageOps.exif_transpose(image).convert("RGB")
         source_width, source_height = image.size
-        height, width = resolve_reference_image_size(source_width, source_height, resize_mode, canvas)
+        height, width = resolve_reference_image_size(source_width,
+                                                     source_height,
+                                                     resize_mode,
+                                                     canvas,
+                                                     short_edge=reference_short_edge)
         prepared.image = prepare_reference_image(image, height, width)
         return prepared
 
@@ -378,7 +408,12 @@ def prepare_reference(
             frames = reference_media_to_uint8(reference.source)
             decoded_fps = float(MINIMAX_H3_FPS)
         fps = float(reference.fps if reference.fps is not None else decoded_fps)
-        prepared.frames = prepare_reference_frames(resample_reference_frames(frames, fps), num_frames)
+        prepared.frames = prepare_reference_frames(
+            resample_reference_frames(frames, fps),
+            num_frames,
+            short_edge=reference_canvas_short_edge,
+            max_pixels=reference_canvas_max_pixels,
+        )
 
         if reference.soundtrack is not None:
             waveform, source_rate = _resolve_audio_source(reference.soundtrack)
