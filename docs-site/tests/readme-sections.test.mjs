@@ -59,6 +59,15 @@ test("stops at the next heading and ignores other sections", () => {
   assert.doesNotMatch(news[1].text, /Awesome work/);
 });
 
+test("accepts the Recent news heading used by the README", () => {
+  const { news } = readReadmeSections(legacy.replace("## NEWS", "## Recent news"));
+  assert.equal(news.length, 2);
+  assert.deepEqual(
+    news.map((item) => item.date),
+    ["2026/10/06", "2026/09/15"],
+  );
+});
+
 test("returns null when a section is missing", () => {
   assert.deepEqual(readReadmeSections("# FastVideo\n\n## Overview\n"), { news: null, projects: null });
 });

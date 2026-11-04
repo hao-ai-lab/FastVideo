@@ -9,6 +9,10 @@
     "icon": "boxes"
   },
   {
+    "label": "News",
+    "href": "/news"
+  },
+  {
     "label": "Get started",
     "icon": "rocket",
     "items": [
