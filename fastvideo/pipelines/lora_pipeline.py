@@ -572,9 +572,14 @@ class LoRAPipeline(ComposedPipelineBase):
             self.cur_adapter_path = ""
 
         def _lora_after_load(module: nn.Module, *, _name: str = transformer_name) -> nn.Module:
-            self._convert_one_transformer(_name, module)
-            self._apply_constructor_adapter()
-            self._reapply_runtime_adapter()
+            try:
+                self._convert_one_transformer(_name, module)
+                self._apply_constructor_adapter()
+                self._reapply_runtime_adapter()
+            except Exception:
+                # A failed materialize runs no release callback, and these layers would keep the transformer alive.
+                _drop_lora_refs()
+                raise
             return module
 
         transformer_module.add_release_callback(_drop_lora_refs)

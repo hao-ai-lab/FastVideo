@@ -146,3 +146,19 @@ def test_coverage_deferred_by_sequential_load_is_checked_when_the_transformer_ar
 
     assert "foreign" not in pipeline.lora_adapters and pipeline._runtime_adapter is None
     assert transformer.layer.lora_A is None
+
+
+def test_a_lazy_transformer_whose_deferred_coverage_fails_is_not_kept_alive(make_pipeline, tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign.safetensors"
+    save_file({"unet.0.lora_A.weight": torch.randn(RANK, DIM), "unet.0.lora_B.weight": torch.randn(DIM, RANK)},
+              str(foreign))
+    transformer = LazyModule("transformer", _Transformer)
+    pipeline = make_pipeline({"transformer": transformer})
+    pipeline.lora_strict_coverage = True
+    pipeline.set_lora_adapter("foreign", str(foreign), strength=0.8)
+
+    with pytest.raises(ValueError, match="reaches 0 of 1"):
+        transformer.materialize()
+
+    assert not transformer.is_materialized
+    assert "transformer" not in pipeline.lora_layers
