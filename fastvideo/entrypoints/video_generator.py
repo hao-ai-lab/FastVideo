@@ -637,6 +637,7 @@ class VideoGenerator:
         prompt_embeds = kwargs.pop("prompt_embeds", None)
         sampling_param.update(kwargs)
         kwargs["_extra_overrides"] = extra_overrides
+        save_to_disk = sampling_param.save_video and fastvideo_args.output_type != "latent"
 
         prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
         if self.executor.uses_spmd_execution:
@@ -670,7 +671,8 @@ class VideoGenerator:
                         partial(self._prepare_output_path,
                                 sampling_param.output_path,
                                 batch_prompt,
-                                output_video_name=sampling_param.output_video_name),
+                                output_video_name=sampling_param.output_video_name,
+                                save_to_disk=save_to_disk),
                         description="output-path setup",
                     )
                     kwargs["output_path"] = output_path
@@ -717,7 +719,8 @@ class VideoGenerator:
         output_path = self._run_on_output_rank(
             lambda: self._prepare_output_path(sampling_param.output_path,
                                               output_name_hint if output_name_hint else prompt,
-                                              output_video_name=sampling_param.output_video_name),
+                                              output_video_name=sampling_param.output_video_name,
+                                              save_to_disk=save_to_disk),
             description="output-path setup",
         )
         kwargs["output_path"] = output_path
@@ -749,7 +752,12 @@ class VideoGenerator:
         output_path: str,
         prompt: str,
         output_video_name: str | None = None,
+        *,
+        save_to_disk: bool = True,
     ) -> str:
+        if not save_to_disk:
+            return output_path
+
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
         is_directory = os.path.isdir(output_path)

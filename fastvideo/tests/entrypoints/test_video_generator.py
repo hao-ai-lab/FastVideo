@@ -41,6 +41,7 @@ def _new_runtime_video_generator() -> VideoGenerator:
     generator.fastvideo_args = SimpleNamespace(
         model_path="test-model",
         prompt_txt=None,
+        output_type="pil",
         workload_type=SimpleNamespace(value="t2v"),
         pipeline_config=SimpleNamespace(apply_request_constraints=lambda request, sampling_param: sampling_param),
     )
@@ -508,6 +509,106 @@ def test_generate_rejects_overlong_filename_before_model_execution(monkeypatch, 
     assert not executed
     if collision:
         assert (tmp_path / (name + ".mp4")).read_bytes() == b"existing output"
+
+
+@pytest.mark.parametrize("entry", ["generate", "generate_video", "prompt_file", "prompt_list"])
+@pytest.mark.parametrize("naming", ["prompt", "custom", "explicit"])
+@pytest.mark.parametrize("output_type,save_video,return_frames,return_samples", [
+    ("pil", False, True, False),
+    ("pil", False, False, True),
+    ("latent", True, False, True),
+], ids=["frames", "samples", "latent"])
+def test_generate_in_memory_preserves_results_with_long_names(
+    monkeypatch, tmp_path, entry, naming, output_type, save_video, return_frames, return_samples
+):
+    prompt = "\u754c" * 100
+    output = torch.ones((1, 16, 1, 2, 2) if output_type == "latent" else (1, 3, 2, 16, 16)) * 0.5
+    fastvideo_args = _single_video_args(output_type=output_type)
+    fastvideo_args.model_path = "test-model"
+    fastvideo_args.prompt_txt = None
+    generator = _single_video_generator(_single_video_output_batch(output), fastvideo_args)
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    directory = tmp_path / "unused_outputs"
+    output_path = directory / ("a" * 256 + ".mp4") if naming == "explicit" else directory
+    output_options = {
+        "output_path": str(output_path),
+        "output_video_name": "a" * 256 if naming == "custom" else None,
+        "save_video": save_video,
+        "return_frames": return_frames,
+        "return_samples": return_samples,
+    }
+    sampling_options = {"height": 16, "width": 16, "num_frames": 2, "num_inference_steps": 1}
+    request = {"prompt": prompt, "sampling": sampling_options, "output": output_options}
+    if entry == "prompt_file":
+        prompt_file = tmp_path / "prompts.txt"
+        prompt_file.write_text(f"{prompt}\n{prompt}\n", encoding="utf-8")
+        request["prompt"] = None
+        request["inputs"] = {"prompt_path": str(prompt_file)}
+    elif entry == "prompt_list":
+        request["prompt"] = [prompt, prompt]
+
+    def fail_path_operation(*args, **kwargs):
+        pytest.fail("In-memory generation must not prepare an output file")
+
+    with monkeypatch.context() as patches:
+        patches.setattr(video_generator_module.os, "pathconf", fail_path_operation, raising=False)
+        patches.setattr(video_generator_module.os, "makedirs", fail_path_operation)
+        if entry == "generate_video":
+            with pytest.warns(DeprecationWarning):
+                results = [generator.generate_video(prompt=prompt, **sampling_options, **output_options)]
+        else:
+            generated = generator.generate(request)
+            results = generated if isinstance(generated, list) else [generated]
+            results = [result.to_legacy_dict() for result in results]
+
+    assert len(results) == (2 if entry in {"prompt_file", "prompt_list"} else 1)
+    for result in results:
+        assert result["prompts"] == prompt
+        torch.testing.assert_close(result["samples"], output)
+        assert result["video_path"] is None
+        if return_frames:
+            assert len(result["frames"]) == 2
+            assert result["frames"][0].shape == (16, 16, 3)
+        else:
+            assert result["frames"] is None
+    assert not directory.exists()
+
+
+@pytest.mark.parametrize("output_type", ["pil", "latent"])
+@pytest.mark.parametrize("save_video", [False, True])
+def test_generate_output_path_uses_effective_request_options(monkeypatch, tmp_path, output_type, save_video):
+    output = torch.ones((1, 16, 1, 2, 2) if output_type == "latent" else (1, 3, 2, 16, 16)) * 0.5
+    default_args = _single_video_args(output_type="latent" if output_type == "pil" else "pil")
+    generator = _single_video_generator(_single_video_output_batch(output), default_args)
+    request_args = _single_video_args(output_type=output_type)
+    request_args.model_path = "test-model"
+    request_args.prompt_txt = None
+    sampling_param = _small_sampling_param(save_video=not save_video)
+    sampling_param.output_path = str(tmp_path / "outputs")
+    monkeypatch.setattr(video_generator_module.os, "pathconf", lambda *args: 255, raising=False)
+
+    def generate():
+        return generator._generate_video_impl(
+            prompt="\u754c" * 100,
+            sampling_param=sampling_param,
+            fastvideo_args=request_args,
+            save_video=save_video,
+            return_samples=True,
+        )
+
+    if save_video and output_type != "latent":
+
+        def fail_execute(*args):
+            pytest.fail("Invalid output filenames must be rejected before model execution")
+
+        monkeypatch.setattr(generator.executor, "execute_forward", fail_execute)
+        with pytest.raises(ValueError, match="Output filename exceeds the 255-byte filesystem limit"):
+            generate()
+    else:
+        result = generate()
+        assert result["video_path"] is None
+        torch.testing.assert_close(result["samples"], output)
+        assert not (tmp_path / "outputs").exists()
 
 
 def test_generate_single_video_metadata_only_skips_output_materialization(monkeypatch, tmp_path):
