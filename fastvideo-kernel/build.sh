@@ -80,7 +80,7 @@ extension_mode_from_cmake_args() {
         && printf '%s' "${BASH_REMATCH[2]^^}"
 }
 if (( PYTHON_ONLY )); then
-    _explicit_mode="$(extension_mode_from_cmake_args)"
+    _explicit_mode="$(extension_mode_from_cmake_args || true)"
     if [[ -n "${_explicit_mode}" && "${_explicit_mode}" != "OFF" ]]; then
         echo "ERROR: --python-only conflicts with CMAKE_ARGS -DFASTVIDEO_KERNEL_BUILD_EXTENSION=${_explicit_mode}" >&2
         exit 2
