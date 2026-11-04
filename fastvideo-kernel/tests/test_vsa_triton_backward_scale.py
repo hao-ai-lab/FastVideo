@@ -48,8 +48,9 @@ def _dense_reference(q, k, v, block_mask):
 
 
 @pytest.mark.cuda
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("scale", [1.0, 4.0, 16.0])
-def test_triton_backward_grad_parity_across_input_scales(scale: float) -> None:
+def test_triton_backward_grad_parity_across_input_scales(scale: float, dtype: torch.dtype) -> None:
     """Kernel dQ/dK/dV must stay within a few percent of the fp32 reference
     regardless of input magnitude.
 
@@ -63,7 +64,6 @@ def test_triton_backward_grad_parity_across_input_scales(scale: float) -> None:
         pytest.skip("CUDA is required")
 
     device = torch.device("cuda")
-    dtype = torch.bfloat16
     batch, heads, dim = 1, 4, 128
     num_blocks = 8
     seq = num_blocks * BLOCK
