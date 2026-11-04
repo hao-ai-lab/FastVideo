@@ -155,37 +155,43 @@ class BaseLayerWithLoRA(nn.Module):
         """The wrapped layer's bias, or ``None`` when it has none."""
         return getattr(self.base_layer, "bias", None)
 
-    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        lora_A = self.lora_A
-        lora_B = self.lora_B
-        if isinstance(self.lora_B, DTensor):
-            lora_B = self.lora_B.to_local()
-            lora_A = self.lora_A.to_local()
-
-        if self.side_branch and (self.lora_A is None or self._strength_is_zero):
-            # No adapter, or strength 0, is exactly the unadapted layer, down to the output dtype.
+        # The wrapper adds no compiled region around the base layer, so it runs exactly as it would unwrapped: eagerly,
+        # or inside a caller's compiled block. Compiling a packed NVFP4/FP8 linear on its own changes its numerics, and
+        # a wrapped layer with no adapter or strength 0 must equal the unwrapped layer exactly.
+        if self.lora_A is None or (self.side_branch and self._strength_is_zero):
+            # No adapter, or strength 0 on a side branch, is exactly the unadapted layer, down to the output dtype.
+            # A merge-mode wrapper reaches this branch while its first adapter is still loading or after a load
+            # failed: the pipeline wraps every linear before it reads the weights, so an unadapted request must
+            # not depend on an adapter that is not there.
             return self.base_layer(x)
 
-        if not self.merged and not self.disable_lora:
-            lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
-            lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
-            alpha_over_rank = 1.0
-            if self.lora_alpha != self.lora_rank:
-                alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
-            out, output_bias = self.base_layer(x)
-            if self.side_branch:
-                # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
-                _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
-                return out, output_bias
-            scale = float(self.lora_strength) * alpha_over_rank
-            delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
-            if scale != 1.0:
-                delta = delta * scale
-            return out + delta, output_bias
-        else:
-            out, output_bias = self.base_layer(x)
+        out, output_bias = self.base_layer(x)
+        if self.merged or self.disable_lora:
             return out.to(x), output_bias
+        return self._add_adapter(out, x), output_bias
+
+    @torch.compile()
+    def _add_adapter(self, out: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        lora_A = self.lora_A
+        lora_B = self.lora_B
+        if isinstance(lora_B, DTensor):
+            lora_B = lora_B.to_local()
+            lora_A = lora_A.to_local()
+        lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
+        lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
+        alpha_over_rank = 1.0
+        if self.lora_alpha != self.lora_rank:
+            alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
+        if self.side_branch:
+            # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
+            _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
+            return out
+        scale = float(self.lora_strength) * alpha_over_rank
+        delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
+        if scale != 1.0:
+            delta = delta * scale
+        return out + delta
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -248,13 +254,7 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device()).full_tensor()
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B).to(data) @ self.slice_lora_a_weights(self.lora_A).to(data))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
+            unsharded_base_layer.weight = nn.Parameter(self._merged_weight(data).to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(get_local_torch_device(),
@@ -271,15 +271,21 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            self.base_layer.weight.data = data.to(current_device, non_blocking=True)
+            self.base_layer.weight.data = self._merged_weight(data).to(current_device, non_blocking=True)
 
         self.merged = True
+
+    def _merged_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """``weight`` plus the scaled adapter delta, in ``weight``'s dtype.
+
+        An adapter stored wider than the base (an FP32 adapter on a BF16 DiT) is multiplied and added at its own
+        precision and rounded once, as a merge-then-cast reference does; with FSDP or without.
+        """
+        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
+        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
+        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return (weight.to(accumulate_dtype) + (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
 
     @torch.no_grad()
     # @torch.compile(dynamic=True)
