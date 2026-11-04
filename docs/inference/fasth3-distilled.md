@@ -49,6 +49,41 @@ pass `pipeline_config={"text_conditioning_cache_max_bytes": 16777216}` to
 Repeated token IDs and tags reuse the same text features across different
 seeds; keyframe and reference inputs always keep their existing paths.
 
+The shared FastH3 example also accepts a seed list and the cache budget:
+
+```bash
+python examples/inference/basic/basic_fasth3_8step.py \
+  --model-path /path/to/FastVideo-FastH3-8-Step-V2 \
+  --prompt 'A slow cinematic drone shot glides over a coastal town; gulls call over the harbor.' \
+  --num-gpus 1 --seeds 1000 1001 1002 --repeats 1 \
+  --text-conditioning-cache-max-bytes 16777216 \
+  --no-lazy-module-load --no-h3-sequential-load \
+  --profile strict --no-inference-torch-compile --no-compile-vae \
+  --no-fa4 --vsa-kernel triton --no-warmup \
+  --output outputs/fasth3-seeds-cached
+```
+
+Use a local snapshot of the full checkpoint. The GPU must fit the chosen
+single-rank recipe; the cache budget covers retained text tensors, not model
+weights. Keeping lazy and sequential loading off preserves the encoder
+instance between requests; rematerializing it invalidates the cache.
+
+`--seeds` runs the list in order on one generator, and `--repeats` repeats
+the whole list. Each measured output includes its run number and seed, so
+repeated seeds have separate files. `--seed` and `--seeds` are mutually
+exclusive. Omitting both preserves the existing single-seed behavior;
+omitting the cache budget keeps reuse disabled. A positive budget requires
+`--num-gpus 1` and is rejected before model loading otherwise. These options
+are shared by the four-step and eight-step examples.
+
+For a cache-off comparison, repeat the same command with the budget set to
+`0` and a different output directory. Keep the checkpoint, prompt, seed list,
+dimensions and other settings fixed. `--no-warmup` includes the first request;
+with the default warmup, that excluded request also conditions the prompt.
+Compare corresponding outputs and per-request timings, not just a median
+across seeds: first-request timings include other cold-start costs, and a
+faster request alone does not prove a text-cache hit or output parity.
+
 The cache retains at most eight entries and only CPU tensors, evicts least
 recently used results to stay within its tensor-byte budget, and does not
 retain a result larger than that budget. Returned features are independent

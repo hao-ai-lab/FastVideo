@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 
 
@@ -44,6 +45,8 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert args.vsa_tile_size == 64
     assert args.vsa_kernel == "ptx_blackwell"
     assert args.seed == 1000
+    assert args.seeds is None
+    assert args.text_conditioning_cache_max_bytes == 0
     assert args.warmup_seed == 999
     assert args.warmup is True
     assert args.repeats == 3
@@ -88,6 +91,25 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert request.sampling.batch_cfg is False
     assert request.output.output_path == str(tmp_path / "result.mp4")
     assert config.engine.offload.lazy_module_load is None
+
+
+def test_text_cache_budget_reaches_h3_pipeline_config():
+    args = _args("--num-gpus", "1", "--text-conditioning-cache-max-bytes", "16777216")
+    config = fasth3.build_generator_config(args)
+    pipeline = PipelineConfig.from_kwargs({"model_path": config.model_path, **config.pipeline.experimental})
+    assert pipeline.text_conditioning_cache_max_bytes == 16777216
+
+
+@pytest.mark.parametrize("overrides, message", [
+    (("--text-conditioning-cache-max-bytes", "-1"), "must be non-negative"),
+    (("--text-conditioning-cache-max-bytes", "1"), "requires --num-gpus 1"),
+    (("--seed", "1", "--seeds", "2", "3"), "not allowed with argument"),
+])
+def test_invalid_text_cache_or_seed_options_fail_before_loading(overrides, message, capsys):
+    with pytest.raises(SystemExit) as error:
+        _args(*overrides)
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err
 
 
 def test_lazy_module_load_is_tri_state():
@@ -306,6 +328,51 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
     assert "Median denoising time: 2.500s" in output
+
+
+def test_run_sweeps_seeds_on_one_generator(monkeypatch, tmp_path):
+    calls = []
+    configurations = []
+
+    class RecordingGenerator:
+        shutdown_called = False
+
+        def generate(self, request):
+            calls.append(request)
+            Path(request.output.output_path).touch()
+            return SimpleNamespace(video_path=request.output.output_path)
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+    generator = RecordingGenerator()
+
+    class RecordingVideoGenerator:
+
+        @classmethod
+        def from_config(cls, config):
+            configurations.append(config)
+            return generator
+
+    monkeypatch.setattr(fasth3, "VideoGenerator", RecordingVideoGenerator)
+    monkeypatch.setattr(fasth3, "configure_environment", lambda args: {})
+    monkeypatch.setattr(fasth3, "validate_profile_dependencies", lambda args: None)
+    args = _args("--output", str(tmp_path), "--num-gpus", "1", "--seeds", "7", "11", "7",
+                 "--repeats", "2", "--no-warmup", "--text-conditioning-cache-max-bytes", "16777216")
+
+    measured = fasth3.run(args)
+
+    assert len(configurations) == 1
+    assert configurations[0].pipeline.experimental["text_conditioning_cache_max_bytes"] == 16777216
+    assert [request.sampling.seed for request in calls] == [7, 11, 7, 7, 11, 7]
+    paths = [Path(request.output.output_path) for request in calls]
+    assert len(set(paths)) == len(calls) == len(measured) == 6
+    assert all(path.is_file() for path in paths)
+    assert [path.name for path in paths] == [
+        f"fasth3_all_run_{index:02d}_seed_{seed}.mp4"
+        for index, seed in enumerate([7, 11, 7, 7, 11, 7], 1)
+    ]
+    assert generator.shutdown_called
 
 
 @pytest.mark.parametrize("peak_memory_mb", (42.0, None))
