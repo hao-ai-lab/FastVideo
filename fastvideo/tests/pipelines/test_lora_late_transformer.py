@@ -61,7 +61,7 @@ def make_pipeline(monkeypatch: pytest.MonkeyPatch, env_overrides):
         attributes = dict(modules=modules, lora_adapters={}, lora_adapter_paths={}, lora_layers={},
                           cur_adapter_name="", cur_adapter_path="", cur_adapter_strength=1.0, lora_initialized=False,
                           lora_path=None, fastvideo_args=fastvideo_args, training_mode=False,
-                          device=torch.device("cpu"), _tracks_late_transformers=True,
+                          device=torch.device("cpu"), _tracks_late_transformers=True, _coverage_deferred=set(),
                           trainable_transformer_modules=dict(modules))
         for name, value in attributes.items():
             setattr(pipeline, name, value)
@@ -69,7 +69,8 @@ def make_pipeline(monkeypatch: pytest.MonkeyPatch, env_overrides):
         def convert_one(name: str, module: torch.nn.Module) -> None:
             module.layer = get_lora_layer(module.layer)
             pipeline.lora_layers[name] = SimpleNamespace(
-                lora_layers_by_block=lambda: iter([(None, {"layer": module.layer})]))
+                lora_layers_by_block=lambda: iter([(None, {"layer": module.layer})]),
+                all_lora_layers=lambda: iter([("layer", module.layer)]))
 
         pipeline._convert_one_transformer = convert_one  # type: ignore[method-assign]
         return pipeline
@@ -128,3 +129,20 @@ def test_a_change_that_fails_part_way_is_not_recorded(make_pipeline, adapter_fil
     pipeline.set_lora_adapter("realism", strength=0.3)
 
     assert transformer.layer.lora_strength == 0.3
+
+
+def test_coverage_deferred_by_sequential_load_is_checked_when_the_transformer_arrives(
+        make_pipeline, tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign.safetensors"
+    save_file({"unet.0.lora_A.weight": torch.randn(RANK, DIM), "unet.0.lora_B.weight": torch.randn(DIM, RANK)},
+              str(foreign))
+    pipeline = make_pipeline({})
+    pipeline.lora_strict_coverage = True
+    pipeline.set_lora_adapter("foreign", str(foreign), strength=0.8)
+
+    transformer = _Transformer()
+    with pytest.raises(ValueError, match="reaches 0 of 1"):
+        pipeline.add_module("transformer", transformer)
+
+    assert "foreign" not in pipeline.lora_adapters and pipeline._runtime_adapter is None
+    assert transformer.layer.lora_A is None

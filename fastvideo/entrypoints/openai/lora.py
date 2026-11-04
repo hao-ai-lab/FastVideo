@@ -59,7 +59,7 @@ def adapters_attach_as_side_branch(generator: GeneratorConfig) -> bool:
         return find_minimax_h3_nvfp4_dit_export([weights]) is not None
     export = f"{_transformer_partition(generator)}/{H3_NVFP4_DIT_EXPORT_FILENAME}"
     try:
-        model_dir = maybe_download_model(generator.model_path, allow_patterns=[export])
+        model_dir = maybe_download_model(generator.model_path, revision=generator.revision, allow_patterns=[export])
     except ValueError:
         logger.warning("Could not resolve %s to check for a packed NVFP4 export", generator.model_path, exc_info=True)
         return False
@@ -202,6 +202,15 @@ class LoraRuntime:
         if self.current_id == selection.id and self.current_strength == selection.strength:
             return
         self._set(generator, selection.id, selection.strength)
+
+    def invalidate(self) -> None:
+        """Mark the adapter state unknown after a generation failed with an adapter set.
+
+        Applying a held adapter to a transformer that just loaded happens inside generation, so a failed generation
+        may have dropped it; the next request clears before it selects anything.
+        """
+        if self.current_id is not None:
+            self.unknown_state = True
 
     def _set(self, generator: Any, adapter_id: str, strength: float) -> None:
         if adapter_id not in self.loaded:

@@ -429,6 +429,23 @@ def test_a_retried_selection_after_an_unknown_state_clears_before_it_changes_the
     assert generator.events == [orbit, ("clear",), ("clear",), ("clear",), orbit, ("generate", "styled")]
 
 
+def test_a_failed_generation_with_an_adapter_clears_before_the_next_request(make_client) -> None:
+    generator = _FakeGenerator()
+    client = make_client(generator)
+    generate = generator.generate
+
+    def fail_once(request: Any) -> SimpleNamespace:
+        generator.generate = generate  # type: ignore[method-assign]
+        raise RuntimeError("adapter reaches 0 of 1 modules")
+
+    generator.generate = fail_once  # type: ignore[method-assign]
+    assert _sync(client, "styled", name="realism").status_code == 500
+    assert _sync(client, "styled again", name="realism").status_code == 200
+
+    realism = ("set", "realism", REALISM_PATH, 0.8)
+    assert generator.events == [realism, ("clear",), realism, ("generate", "styled again")]
+
+
 def test_a_selection_after_a_failed_change_applies_normally(make_client) -> None:
     generator = _FakeGenerator(failing={("realism", 0.8)})
     client = make_client(generator)
@@ -562,18 +579,19 @@ def test_side_branch_check_resolves_a_hub_model_id(tmp_path: Path, monkeypatch: 
     (tmp_path / "transformer" / H3_NVFP4_DIT_EXPORT_FILENAME).touch()
     requested: list[tuple[str, list[str]]] = []
 
-    def resolve(model_path: str, allow_patterns: list[str]) -> str:
-        requested.append((model_path, allow_patterns))
+    def resolve(model_path: str, revision: str | None, allow_patterns: list[str]) -> str:
+        requested.append((model_path, revision, allow_patterns))
         return str(tmp_path)
 
     monkeypatch.setattr(lora_module, "maybe_download_model", resolve)
     monkeypatch.setattr(lora_module, "get_model_info", lambda *args, **kwargs: SimpleNamespace(pipeline_cls=object))
     config = GeneratorConfig(model_path="org/model",
+                             revision="v2",
                              engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4")))
 
     with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False):
         assert adapters_attach_as_side_branch(config) is True
-    assert requested == [("org/model", [f"transformer/{H3_NVFP4_DIT_EXPORT_FILENAME}"])]
+    assert requested == [("org/model", "v2", [f"transformer/{H3_NVFP4_DIT_EXPORT_FILENAME}"])]
 
 
 def test_a_dead_worker_during_an_adapter_change_marks_the_server_unhealthy(make_client) -> None:

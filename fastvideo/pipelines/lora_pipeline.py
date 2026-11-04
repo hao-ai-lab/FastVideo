@@ -232,6 +232,8 @@ class LoRAPipeline(ComposedPipelineBase):
     _constructor_adapter_pending: bool = False
     # Set once inference LoRA state exists, so ``add_module`` wraps a transformer that arrives later.
     _tracks_late_transformers: bool = False
+    # Adapters loaded while the transformer was not in memory; their coverage is checked when it loads.
+    _coverage_deferred: set[str]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -247,6 +249,7 @@ class LoRAPipeline(ComposedPipelineBase):
         self.cur_adapter_name = ""
         self.cur_adapter_path = ""
         self.cur_adapter_strength = 1.0
+        self._coverage_deferred = set()
         # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
             if (transformer_name in self.modules and self.modules[transformer_name] is not None):
@@ -369,22 +372,22 @@ class LoRAPipeline(ComposedPipelineBase):
         del lora_path
         return state_dict
 
-    def _check_adapter_coverage(self, lora_nickname: str, lora_path: str | None) -> None:
+    def _check_adapter_coverage(self, lora_nickname: str, lora_path: str | None) -> bool:
         """Fail before merging when an adapter reaches no layer, or too few of them.
 
         Without this the adapter loads, generation runs, and the result is an unadapted model with a
-        warning per layer buried in the log.
+        warning per layer buried in the log. Returns False when the check must wait for the transformer to load.
         """
         adapter = self.lora_adapters[lora_nickname]
         if not adapter and lora_path is not None and lora_path == self._constructor_dense_lora_path:
             # A dense-only adapter (.diff/.set_weight) has no low-rank layers; DenseLoRAPatch applied it at load.
-            return
+            return True
         released = sorted((set(self.trainable_transformer_modules) | set(self.trainable_transformer_names)) -
                           set(self.lora_layers))
         if released:
             # A released or not yet loaded transformer has no LoRA layers, so nothing can be matched yet.
-            logger.info("Skipping the LoRA coverage check for %r: %s not loaded", lora_path, ", ".join(released))
-            return
+            logger.info("Deferring the LoRA coverage check for %r: %s not loaded", lora_path, ", ".join(released))
+            return False
         lora_a = {key[:-len(".lora_A")] for key in adapter if key.endswith(".lora_A")}
         lora_b = {key[:-len(".lora_B")] for key in adapter if key.endswith(".lora_B")}
         # A module with only one factor is never applied, so it counts as unmatched, not as covered.
@@ -399,7 +402,7 @@ class LoRAPipeline(ComposedPipelineBase):
         matched = len(adapter_modules) - len(unmatched)
         fraction = matched / len(adapter_modules) if adapter_modules else 0.0
         if fraction >= self.lora_min_match_fraction and matched > 0:
-            return
+            return True
         shown = unmatched[:20]
         more = f" (+{len(unmatched) - len(shown)} more)" if len(unmatched) > len(shown) else ""
         raise ValueError(
@@ -478,6 +481,19 @@ class LoRAPipeline(ComposedPipelineBase):
         name, strength = self._runtime_adapter
         if name not in self.lora_adapters:
             return
+        if self.lora_strict_coverage and name in self._coverage_deferred:
+            path = self.lora_adapter_paths.get(name)
+            try:
+                checked = self._check_adapter_coverage(name, path)
+            except ValueError:
+                # Drop it so a later request reloads and checks it again instead of silently running without it.
+                self.lora_adapters.pop(name, None)
+                self.lora_adapter_paths.pop(name, None)
+                self._coverage_deferred.discard(name)
+                self._runtime_adapter = None
+                raise
+            if checked:
+                self._coverage_deferred.discard(name)
         self.cur_adapter_name = ""
         self.cur_adapter_path = ""
         self.set_lora_adapter(name, strength=strength)
@@ -681,8 +697,10 @@ class LoRAPipeline(ComposedPipelineBase):
                     if target_name in self.lora_adapters[lora_nickname]:
                         raise ValueError(f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]")
                     self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
-                if self.lora_strict_coverage:
-                    self._check_adapter_coverage(lora_nickname, lora_path)
+                if self.lora_strict_coverage and not self._check_adapter_coverage(lora_nickname, lora_path):
+                    self._coverage_deferred.add(lora_nickname)
+                else:
+                    self._coverage_deferred.discard(lora_nickname)
             except Exception:
                 if previous_adapter is None:
                     self.lora_adapters.pop(lora_nickname, None)

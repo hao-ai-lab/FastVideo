@@ -129,7 +129,13 @@ class OpenAIServingEngine:
 
         def call(*args: Any, **kwargs: Any) -> _T:
             runtime.apply(self._generator, selection)
-            return function(*args, **kwargs)
+            try:
+                return function(*args, **kwargs)
+            except (BrokenPipeError, EOFError):
+                raise
+            except Exception:
+                runtime.invalidate()
+                raise
 
         return call
 
