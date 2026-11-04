@@ -37,18 +37,26 @@ DRAFT_FRAME_COUNT = 124
 class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
     """Encode the draft with the H3 VAE, upscale its latent to the target grid and re-noise it to the first sigma."""
 
-    def __init__(self, vae: Any, audio_vae: Any, scheduler: Any, *, load_upscaler: Callable[[],
-                                                                                            MiniMaxH3LatentUpscaler],
-                 draft_size: str, start_sigma: float | None) -> None:
+    def __init__(self,
+                 vae: Any,
+                 audio_vae: Any,
+                 scheduler: Any,
+                 *,
+                 load_upscaler: Callable[[], MiniMaxH3LatentUpscaler],
+                 draft_size: str,
+                 start_sigma: float | None,
+                 draft_latent_path: str | None = None) -> None:
         super().__init__(vae, audio_vae, scheduler, ref2va=False)
         self.load_upscaler = load_upscaler
         self.draft_size = draft_size
         self.start_sigma = start_sigma
+        self.draft_latent_path = draft_latent_path
         self._silence: tuple[tuple[str, int], torch.Tensor] | None = None
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = super().verify_input(batch, fastvideo_args)
-        result.add_check("video_path", batch.video_path, lambda value: isinstance(value, str) and bool(value))
+        if self.draft_latent_path is None:
+            result.add_check("video_path", batch.video_path, lambda value: isinstance(value, str) and bool(value))
         return result
 
     def _encode_draft(self, video_path: str, device: torch.device, fastvideo_args: FastVideoArgs) -> torch.Tensor:
@@ -62,6 +70,24 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         finally:
             if fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
+
+    def _draft_latent_source(self, video_path: str | None) -> str | None:
+        """The saved draft latent for this request: the configured one, or a ``.pt`` passed as the draft video."""
+        if self.draft_latent_path is not None:
+            return self.draft_latent_path
+        return video_path if video_path is not None and video_path.lower().endswith(".pt") else None
+
+    def _load_draft_latent(self, path: str, device: torch.device) -> torch.Tensor:
+        """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video."""
+        tensor = torch.load(path, map_location="cpu", weights_only=True)
+        if isinstance(tensor, dict):
+            raise ValueError(f"{path} holds a mapping; save the draft latent tensor itself.")
+        tensor = torch.as_tensor(tensor)
+        if tensor.ndim == 5 and tensor.shape[0] == 1:
+            tensor = tensor[0]
+        if tensor.ndim != 4:
+            raise ValueError(f"A draft latent must be [C, T, h, w] or [1, C, T, h, w], got {tuple(tensor.shape)}.")
+        return tensor.to(device=device, dtype=torch.float32)
 
     def _silent_audio_rows(self, num_frames: int, device: torch.device, fastvideo_args: FastVideoArgs) -> torch.Tensor:
         """The encoded-silence audio stream, cached: it is the same for every request of this length."""
@@ -94,7 +120,9 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         patch_size = h3_dit_patch_size(fastvideo_args)
         _, channels, num_latent_frames, latent_height, latent_width = batch.raw_latent_shape
 
-        draft = self._encode_draft(batch.video_path, device, fastvideo_args)
+        latent_source = self._draft_latent_source(batch.video_path)
+        draft = (self._encode_draft(batch.video_path, device, fastvideo_args)
+                 if latent_source is None else self._load_draft_latent(latent_source, device))
         upscaler = self.load_upscaler()
         upscaled = upscale_latent(upscaler, draft, (batch.height, batch.width))
         if tuple(upscaled.shape) != (channels, num_latent_frames, latent_height, latent_width):

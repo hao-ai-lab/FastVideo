@@ -28,6 +28,12 @@ from fastvideo.attention.backends.abstract import (
     PackedSequenceMetadata,
 )
 from fastvideo.attention.backends.attn_qat_infer import _resolve_fa4_pv_mode
+from fastvideo.attention.utils.nvfp4_qk_precondition import parse_qk_transform, precondition_qk
+from fastvideo.attention.utils.nvfp4_fused_qk_quant import (
+    fused_qk_quant_available,
+    fused_qk_quant_supported,
+    nvfp4_fused_qk_quantize_fa4,
+)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -284,6 +290,14 @@ class FlashAttentionImpl(AttentionImpl):
         if nvfp4_fa4 is None:
             nvfp4_fa4 = envs.FASTVIDEO_NVFP4_FA4.get()
         self.nvfp4_fa4 = bool(nvfp4_fa4)
+        # Exact Q/K preconditioning ahead of NVFP4 quantization, shared with the QAD emulator
+        # (fastvideo.attention.utils.nvfp4_qk_precondition). Same arg-over-env precedence as nvfp4_fa4.
+        qk_transform = extra_impl_args.get("nvfp4_qk_transform")
+        if qk_transform is None:
+            qk_transform = envs.FASTVIDEO_NVFP4_FA4_QK_TRANSFORM.get()
+        self.nvfp4_smooth_k, self.nvfp4_hadamard = parse_qk_transform(qk_transform)
+        self.nvfp4_fused_qk_quant = ((self.nvfp4_smooth_k or self.nvfp4_hadamard)
+                                     and envs.FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT.get() and fused_qk_quant_available())
         # PV-mode knob for the FA4-FP4 path. Resolved + validated
         # unconditionally (shared helper) so a typo fails at construction, not
         # at the first forward on a Blackwell box, and so the ATTN_QAT_INFER
@@ -301,7 +315,10 @@ class FlashAttentionImpl(AttentionImpl):
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
             assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
                                         "Install via instructions in docs/inference/optimizations.md")
-            logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk, pv_mode=%s)", self.fa4_pv_mode)
+            logger.info(
+                "NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk, pv_mode=%s, smooth_k=%s, hadamard=%s, "
+                "fused_qk_quant=%s)", self.fa4_pv_mode, self.nvfp4_smooth_k, self.nvfp4_hadamard,
+                self.nvfp4_fused_qk_quant)
 
     def forward(
         self,
@@ -537,8 +554,15 @@ class FlashAttentionImpl(AttentionImpl):
         orig_seqlen_k = key.shape[1]
 
         # Quantize Q/K to FP4 (internally pads to multiple of 128 for SF layout)
-        q_fp4, q_sf = _nvfp4_quantize_for_fa4(query)
-        k_fp4, k_sf = _nvfp4_quantize_for_fa4(key)
+        if self.nvfp4_fused_qk_quant and fused_qk_quant_supported(query, key, hadamard=self.nvfp4_hadamard):
+            q_fp4, q_sf, k_fp4, k_sf = nvfp4_fused_qk_quantize_fa4(query,
+                                                                   key,
+                                                                   smooth_k=self.nvfp4_smooth_k,
+                                                                   hadamard=self.nvfp4_hadamard)
+        else:
+            query, key = precondition_qk(query, key, smooth_k=self.nvfp4_smooth_k, hadamard=self.nvfp4_hadamard)
+            q_fp4, q_sf = _nvfp4_quantize_for_fa4(query)
+            k_fp4, k_sf = _nvfp4_quantize_for_fa4(key)
 
         # fp8 PV: unscaled e4m3 cast (no mSFV/v_descale); output stays BF16.
         if self.fa4_pv_mode == "fp8":

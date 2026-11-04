@@ -93,6 +93,8 @@ EXTERNAL_ALLOWLIST = {
     "PYTORCH_MPS_*": "PyTorch MPS memory settings.",
     "USER": "Login name of the current user.",
     "PYTHONPATH": "Python module search path.",
+    "FLASHINFER_*": "flashinfer settings; the fused NVFP4 Q/K quantizer checks the quantization recipe switches.",
+    "TRTLLM_DISABLE_FP4_QUANT_FAST_MATH": "TensorRT-LLM FP4 quantization switch that flashinfer also reads.",
     "FASTVIDEO_VSA_CUTEDSL": "Read by fastvideo-kernel, which is outside this policy.",
     "FASTVIDEO_VSA_TRITON": "Read by fastvideo-kernel, which is outside this policy.",
     "FASTVIDEO_KERNEL_VSA_FORCE_TRITON": "Read by fastvideo-kernel, which is outside this policy.",
@@ -142,6 +144,7 @@ EXTERNAL_WRITE_ALLOWLIST = {
     "RAY_USAGE_STATS_ENABLED": "Turns off Ray usage statistics unless the user turned them on.",
     "CUTE_DSL_ENABLE_TVM_FFI": "CUTLASS DSL switch that the NVFP4 FlashAttention-4 path needs.",
     "CUBLAS_WORKSPACE_CONFIG": "cuBLAS workspace size; golden-gate tests set it before cuBLAS initializes.",
+    "FLASHINFER_DISABLE_FP4_QUANT_FAST_MATH": "Tests pin the flashinfer recipe gate of the fused NVFP4 Q/K quantizer.",
 }
 EXTERNAL_WRITE_HELPERS = {"set_external", "setdefault_external", "unset_external", "override_external"}
 

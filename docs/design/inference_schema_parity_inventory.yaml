@@ -159,6 +159,12 @@ surfaces:
       refine_start_sigma:
         sources:
           - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_transformer_dir:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      draft_latent_path:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig

@@ -487,17 +487,31 @@ def _write_deploy_checkpoint(path, student_layers: int, base_layers: int, heads:
     return decoder
 
 
-def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None):
+def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None, pipeline_config=None):
     from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
     from fastvideo.configs.pipelines import PipelineConfig
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import VAELoader
 
-    args = FastVideoArgs(model_path=str(vae_dir),
-                         pipeline_config=PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
-                         h3_vae_nvfp4_decoder=decoder)
+    args = FastVideoArgs(
+        model_path=str(vae_dir),
+        pipeline_config=pipeline_config or PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
+        h3_vae_nvfp4_decoder=decoder)
     args.vae_cpu_offload = cpu  # load on CPU
     return VAELoader().load(str(vae_dir), args)
+
+
+def test_open_h3_regenerate_2k_vae_load_applies_the_exported_decoder(tmp_path):
+    from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
+
+    _write_vae_dir(tmp_path / "vae", decoder_layers=5)
+    _write_deploy_checkpoint(tmp_path / "d3.pt", student_layers=3, base_layers=5)
+    config = OpenH3Regenerate2KPipelineConfig()
+    assert len(_load_h3_vae(tmp_path / "vae", pipeline_config=config).decoder.transformer_blocks) == 5
+    vae = _load_h3_vae(tmp_path / "vae", decoder=str(tmp_path / "d3.pt"), pipeline_config=config)
+    assert len(vae.decoder.transformer_blocks) == 3
+    assert vae.decode_autocast_dtype == torch.bfloat16
+    assert isinstance(vae.decoder.transformer_blocks[1].ff.net[2], NVFP4DecoderLinear)
 
 
 def test_loader_applies_exported_nvfp4_decoder(tmp_path):
