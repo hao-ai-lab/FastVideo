@@ -115,10 +115,10 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_ov
         model_id,
         ATTENTION_BACKEND,
     )
-    output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
     init_kwargs = {
+        "revision": "98583eb0fd66f481f73383428d65d2867c878e51",
         "num_gpus": params["num_gpus"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": True,
@@ -142,12 +142,12 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_ov
     try:
         generator = VideoGenerator.from_pretrained(
             model_path=params["model_path"], **init_kwargs)
-        generator.generate_video(prompt, **generation_kwargs)
+        result = generator.generate_video(prompt, **generation_kwargs)
     finally:
         if generator is not None:
             generator.shutdown()
 
-    generated_video_path = os.path.join(output_dir, output_video_name)
+    generated_video_path = result["video_path"]
     assert os.path.exists(generated_video_path), (
         f"Output video was not generated at {generated_video_path}")
 

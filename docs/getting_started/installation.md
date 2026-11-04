@@ -1,13 +1,17 @@
 
 # 🔧 Installation
 
-FastVideo supports the following hardware platforms:
+Start with [Hardware and runtimes](hardware.md) to distinguish NVIDIA RTX and
+data center GPUs, DGX Spark, Apple Silicon MLX, and AMD ROCm.
+
+The installation paths below cover:
 
 - [NVIDIA CUDA](installation/gpu.md)
 - **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
   [performance](installation/spark_performance.md),
   [pair two Sparks](installation/spark_pair.md)
 - [Apple silicon (MLX)](installation/mlx.md)
+- [AMD / ROCm support and current limits](installation/amd.md)
 
 ## Quick Installation
 

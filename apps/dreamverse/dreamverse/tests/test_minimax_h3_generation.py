@@ -73,7 +73,7 @@ def test_initialize_builds_vsa_datafree_fasth3_generator(monkeypatch):
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "test-attention")
     monkeypatch.setenv("FASTVIDEO_FA4", "0")
     monkeypatch.setenv("FASTVIDEO_MINIMAX_H3_FUSIONS", "0")
-    monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
+    monkeypatch.setenv("FASTVIDEO_VSA_PTX_BLACKWELL", "1")
     monkeypatch.setenv("FASTVIDEO_INFERENCE_TORCH_COMPILE", "1")
 
     backend = MiniMaxH3GenerationBackend(gpu_id=0)
@@ -108,7 +108,7 @@ def test_initialize_builds_vsa_datafree_fasth3_generator(monkeypatch):
     assert os.environ["FASTVIDEO_ATTENTION_BACKEND"] == "VIDEO_SPARSE_ATTN_H3"
     assert os.environ["FASTVIDEO_FA4"] == "1"
     assert os.environ["FASTVIDEO_MINIMAX_H3_FUSIONS"] == "all"
-    assert os.environ["FASTVIDEO_VSA_SM100A"] == "0"
+    assert os.environ["FASTVIDEO_VSA_PTX_BLACKWELL"] == "0"
     assert "FASTVIDEO_INFERENCE_TORCH_COMPILE" not in os.environ
 
 

@@ -13,8 +13,7 @@ receive gradients. The goal is to validate the training grad path
 Matrix-Game-2.0-Base is ~14B at bf16. A single-GPU backward (params +
 grads, no FSDP) needs well over the L40S CI runner's 48 GB, so this
 test skips on memory-constrained GPUs and only exercises the grad path
-on larger dev GPUs (H200 / GB200). LongCat (13.6B) is likewise covered
-by a loading-only smoke for the same reason.
+on larger dev GPUs (H200 / GB200).
 """
 
 from __future__ import annotations

@@ -1,4 +1,5 @@
 # OpenAI-compatible server for FastWan2.1 T2V 1.3B (DMD-distilled, VSA sparse attention).
+# Capacity components and optional run evidence: docs/cookbook/recipes/fastwan21.yaml
 # Requires: FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 #   FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN fastvideo serve --config examples/serving/openai_fastwan21_1_3b.yaml
 generator:

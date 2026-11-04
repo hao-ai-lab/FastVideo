@@ -94,4 +94,6 @@ def test_inference_vmoba(env_overrides):
 
 
 if __name__ == "__main__":
-    test_inference_vmoba()
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-vs"]))

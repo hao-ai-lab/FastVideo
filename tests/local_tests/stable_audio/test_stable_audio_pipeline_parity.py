@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """End-to-end pipeline parity test for Stable Audio Open 1.0.
 
-Per the add-model skill (steps 5 + 13(a)), the canonical parity
-reference is the **official upstream repo** (`Stability-AI/stable-audio-tools`).
+Per the porting guide (docs/contributing/coding_agents.md), the canonical
+parity reference is the **official upstream repo** (`Stability-AI/stable-audio-tools`).
 This test runs `stable_audio_tools.inference.generation.generate_diffusion_cond`
 on the published model + checkpoint and compares the resulting waveform
 against the FastVideo `StableAudioPipeline` output for the same prompt /

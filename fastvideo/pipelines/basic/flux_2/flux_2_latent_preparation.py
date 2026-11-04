@@ -120,8 +120,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
             latents = latents.to(device)
-            is_longcat_refine = (batch.refine_from is not None or batch.stage1_video is not None)
-            if (not is_longcat_refine) and hasattr(self.scheduler, "init_noise_sigma"):
+            if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 
         batch.latents = latents

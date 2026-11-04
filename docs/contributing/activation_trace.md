@@ -1,9 +1,10 @@
 # Activation Trace Mode
 
-!!! note
-    This page covers Extension 0 (module forward hooks), which is the implemented
-    tracing mechanism. Extensions 1-3 are design sketches for future work and are
-    **not yet implemented**.
+:::note
+This page covers Extension 0 (module forward hooks), which is the implemented
+tracing mechanism. Extensions 1-3 are design sketches for future work and are
+**not yet implemented**.
+:::
 
 ## Overview
 
@@ -247,9 +248,6 @@ upstream model, walks its `named_modules()`, and attaches hooks externally.
 This is the same pattern used in
 `tests/local_tests/transformers/_debug_magi_human_block_parity.py`.
 
-The `add-model-08-trace` skill at `.agents/skills/add-model-08-trace/`
-provides a script template for this purpose.
-
 ## Future extensions (design only, not yet implemented)
 
 ### Extension 1: FX/Dynamo backend graph rewrite
@@ -319,7 +317,6 @@ granularity isn't enough.
 - Env vars: `fastvideo/envs.py` (`FASTVIDEO_TRACE_ACTIVATIONS` and friends)
 - Pipeline integration: `fastvideo/pipelines/composed_pipeline_base.py`
 - Tests: `fastvideo/tests/hooks/test_activation_trace.py`
-- Companion skill (for ad-hoc port investigations): `.agents/skills/add-model-08-trace/`
 
 ## Changelog
 

@@ -1,8 +1,6 @@
 from fastvideo.configs.models.vaes.cosmosvae import CosmosVAEConfig
 from fastvideo.configs.models.vaes.cosmos2_5vae import Cosmos25VAEConfig
-from fastvideo.configs.models.vaes.gamecraftvae import GameCraftVAEConfig
 from fastvideo.configs.models.vaes.gen3cvae import Gen3CVAEConfig
-from fastvideo.configs.models.vaes.glm_image import GlmImageVAEConfig
 from fastvideo.configs.models.vaes.hunyuanvae import HunyuanVAEConfig
 from fastvideo.configs.models.vaes.hunyuan15vae import Hunyuan15VAEConfig
 from fastvideo.configs.models.vaes.kandinsky6_sr import Kandinsky6SRVAEArchConfig, Kandinsky6SRVAEConfig
@@ -14,10 +12,10 @@ from fastvideo.configs.models.vaes.minimax_h3_video import (
 )
 from fastvideo.configs.models.vaes.oobleck import OobleckVAEArchConfig, OobleckVAEConfig
 from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
+from fastvideo.configs.models.vaes.qwen_image21 import QwenImage21VAEArchConfig, QwenImage21VAEConfig
 from fastvideo.models.wan.vae_config import WanVAEConfig
 
 __all__ = [
-    "GameCraftVAEConfig",
     "HunyuanVAEConfig",
     "WanVAEConfig",
     "CosmosVAEConfig",
@@ -34,5 +32,6 @@ __all__ = [
     "OobleckVAEArchConfig",
     "OobleckVAEConfig",
     "Flux2VAEConfig",
-    "GlmImageVAEConfig",
+    "QwenImage21VAEArchConfig",
+    "QwenImage21VAEConfig",
 ]

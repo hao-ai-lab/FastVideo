@@ -25,7 +25,8 @@ skip or fail. Skipped in CI; run locally on a single GPU.
 ## Shared Environment Setup
 
 Run from the FastVideo repo root in the same env used for FastVideo. See the
-`add-model-prep` skill for canonical clone + install commands.
+[model porting guide](../../../docs/contributing/coding_agents.md) for clone and
+install steps.
 
 ```bash
 # Clone the official reference under the FastVideo repo root.

@@ -15,6 +15,7 @@ from fastvideo.configs.models.encoders.gemma import LTX2GemmaConfig
 from fastvideo.configs.models.encoders.mistral3 import Mistral3TextConfig
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (MiniMaxH3Qwen3VLArchConfig, MiniMaxH3Qwen3VLConfig)
 from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
+from fastvideo.configs.models.encoders.qwen_image21 import QwenImage21Qwen3VLArchConfig, QwenImage21Qwen3VLConfig
 from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLTextConfig
 from fastvideo.configs.models.encoders.stable_audio_conditioner import (
     StableAudioConditionerArchConfig,
@@ -49,6 +50,8 @@ __all__ = [
     "StableAudioConditionerConfig",
     "T5GemmaEncoderConfig",
     "Qwen3TextConfig",
+    "QwenImage21Qwen3VLArchConfig",
+    "QwenImage21Qwen3VLConfig",
     "Mistral3TextConfig",
     "LingBotWorld2UMT5ArchConfig",
     "LingBotWorld2UMT5Config",

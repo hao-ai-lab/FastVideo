@@ -84,6 +84,7 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
     and compares the output to reference videos using SSIM.
     """
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(False))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -126,7 +127,7 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
     }
 
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    result = generator.generate_video(prompt, **generation_kwargs)
 
     generator.executor.shutdown()
 
@@ -156,13 +157,11 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
         logger.error(f"Reference video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError("Reference video missing")
 
-    generated_video_name = _find_mp4(output_dir)
-    if not generated_video_name:
-        logger.error(f"Generated video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
-        raise FileNotFoundError(f"Generated video missing in {output_dir}")
+    assert isinstance(result, dict), f"Expected one MatrixGame3 generation result, got {type(result)}"
+    generated_video_path = result["video_path"]
+    assert generated_video_path and os.path.isfile(generated_video_path), "Generated MatrixGame3 video missing"
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
-    generated_video_path = os.path.join(output_dir, generated_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
     ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)

@@ -81,7 +81,7 @@ def test_small_canvas_bf16_mask_and_compete_stats(monkeypatch, exempt):
 
 
 def test_reference_dispatch_ignores_auto_preference(monkeypatch):
-    monkeypatch.setattr(vsa, "_AUTO_PREFERS_SIMD", True)
+    monkeypatch.setattr(vsa, "_AUTO_SIMD_TILES", (64, 128))
     monkeypatch.setattr(simd, "simd_kernel_available", lambda: pytest.fail("reference must not probe SIMD"))
     assert vsa.resolve_impl("reference", 128, 64) == "reference"
 

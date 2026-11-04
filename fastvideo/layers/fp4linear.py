@@ -17,11 +17,17 @@ def _require_flashinfer() -> Any:
     return flashinfer
 
 
-@torch.compile
 def _global_sf(t: torch.Tensor) -> torch.Tensor:
-    maxabs = t.float().abs().nan_to_num().max()
-    maxabs = maxabs.clamp(min=1e-12)
-    return (448.0 * 6.0) / maxabs
+    # Eager amax: the previous torch.compile'd reduction lowered to a single-block
+    # Triton kernel (~38 ms for a 21k x 2048 activation on GB200). Max is exact
+    # in any order, so finite input gives the same scale bit for bit; NaN and inf
+    # keep the elementwise reduction's behavior. No host sync.
+    maxabs = torch.nan_to_num(t.abs()).amax().float()
+    # The reduction above runs in the input dtype, so an infinite input becomes the
+    # fp16/bf16 maximum. The reference reduction replaces it in float32.
+    # new_full fills on the device; torch.tensor would copy from the host and sync.
+    maxabs = torch.where(torch.isinf(t).any(), maxabs.new_full((), torch.finfo(torch.float32).max), maxabs)
+    return (448.0 * 6.0) / maxabs.clamp(min=1e-12)
 
 
 class _LinearFWD4BWD16Fn(torch.autograd.Function):

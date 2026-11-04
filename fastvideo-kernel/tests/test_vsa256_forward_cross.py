@@ -9,6 +9,8 @@ import torch
 
 from fastvideo_kernel import video_sparse_attn
 
+from .utils import skip_cute_block_sparse_on_sm12x
+
 
 @pytest.fixture(autouse=True)
 def _require_cute_backend(monkeypatch):
@@ -18,6 +20,7 @@ def _require_cute_backend(monkeypatch):
     later forces Triton via ``FASTVIDEO_VSA_TRITON=1`` (which takes
     precedence in ``_resolve_backend``) for the Triton leg.
     """
+    skip_cute_block_sparse_on_sm12x()
     pytest.importorskip(
         "flash_attn.cute.block_sparsity",
         reason="optional FA4 CuTe build (flash_attn.cute) not installed",

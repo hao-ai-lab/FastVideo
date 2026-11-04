@@ -21,6 +21,7 @@ repos:
   rev: v0.43.0
   hooks:
   - id: yapf
+    require_serial: true
     args: [--in-place, --verbose]
     language_version: python3.12
     additional_dependencies: [toml] # TODO: Remove when yapf is upgraded

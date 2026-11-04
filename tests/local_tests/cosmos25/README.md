@@ -34,7 +34,7 @@ git clone https://github.com/NVIDIA/Cosmos-Predict2.5.git cosmos-predict2.5
 export COSMOS25_OFFICIAL_REF_DIR="$PWD/cosmos-predict2.5"
 ```
 
-The local DFD checkout is staged through the repository add-model workflow:
+Clone the DFD reference the same way:
 
 ```bash
 git clone https://github.com/csy2077/data-forcing-distillation.git DFDReference

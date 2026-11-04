@@ -1,0 +1,21 @@
+{
+  "avg_step_time": 3.832678238349035,
+  "grad_norm": 1.9089118242263794,
+  "step_time": 1.1276781709166244,
+  "train_loss": 0.3086116909980774,
+  "vsa_sparsity": 0.05,
+  "provenance": {
+    "source_commit": "d5253fd71055927f12aa6c4aa679b93a00238851",
+    "device": "NVIDIA GB200",
+    "num_gpus": 2,
+    "torch": "2.12.0+cu130",
+    "cuda": "13.0",
+    "flash_attn": "2.8.3",
+    "fastvideo_fa4": false,
+    "model_revision": "0fad780a534b6463e45facd96134c9f345acfa5b",
+    "dataset_revision": "e97e41d3db696c534d90424f7efea514a63bfde5",
+    "validation_runs": 2,
+    "second_run_grad_norm": 1.9349586963653564,
+    "second_run_train_loss": 0.30886438488960266
+  }
+}

@@ -1,30 +1,27 @@
 # Run H3 with a server and playground
 
-Start FastH3 on CUDA, one DGX Spark, or Apple Silicon MLX, then iterate on prompts in a browser,
-with cURL, or from your app. The server and clients can run on the same machine.
+Start FastH3 on CUDA, one DGX Spark, or Apple Silicon MLX, then send requests from a
+browser, cURL, or your app. Several clients can share one server process.
 
-The server supports the OpenAI-compatible video-job API. The Python and
-JavaScript client examples use that interface, but requests go to FastVideo.
-You do not need an OpenAI account or cloud key.
+CUDA requests reuse a loaded `VideoGenerator`. MLX keeps one pipeline object and
+a prompt-embedding cache, but loads and releases heavyweight components between
+phases to fit unified memory. MLX serving still pays that component-loading cost
+on subsequent requests.
 
-The [H3 recipe selector](minimax-h3.md) provides the same workflow with runtime
-selection. This guide covers FastH3 V1 (four forwards) and FastH3 V2
-(eight forwards). Start a server, then iterate in the playground or with the
-OpenAI Python client. Other H3 recipes keep their direct Python commands.
+The server implements the OpenAI-compatible video-job API. The Python and
+JavaScript clients use that API, but requests go to FastVideo. You do not need an
+OpenAI account or cloud key.
 
-CUDA requests reuse one loaded `VideoGenerator`. The Python SDK can do the same
-when you reuse the generator across `generate()` calls. MLX keeps one
-`MiniMaxH3MLXPipeline` and a prompt-embedding cache, but still loads and releases
-components between phases to fit unified memory. MLX serving does not keep all
-weights resident or remove phase-loading time. Use a server when you want
-separate clients to share the process without restarting scripts.
+This guide covers FastH3 V1 (four forwards) and FastH3 V2 (eight forwards). For
+direct Python generation, see the [H3 cookbook](minimax-h3.md).
 
 ## Install and start the server
 
+All runtimes need a FastVideo clone and an activated Python environment.
+
 ### CUDA
 
-Use a FastVideo clone and an activated Python environment. Complete the
-[CUDA installation requirements](../getting_started/installation/gpu.md)
+Complete the [CUDA installation requirements](../getting_started/installation/gpu.md)
 before running these commands:
 
 ```bash
@@ -33,9 +30,9 @@ fastvideo serve --config examples/serving/openai_fasth3.yaml --server.host 127.0
 ```
 
 The configuration loads `FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2` and
-advertises it as `fasth3`. It configures four CUDA GPUs but does not record
-a GPU model or VRAM requirement. This is a source-backed server profile, not
-the measured GB200 Python performance profile. Compilation is disabled.
+advertises it as `fasth3`. It configures four CUDA GPUs and does not record a GPU
+model or VRAM requirement, so treat it as a starting point, not a measured
+profile. Compilation is disabled.
 
 For FastH3 V2, use the same install and the 8-step config (nine sigma
 points, eight DiT forwards, VSA sparsity 0.8):
@@ -56,11 +53,11 @@ After model loading completes, the response is `{"status":"ok"}`.
 ### NVIDIA DGX Spark
 
 Complete the [DGX Spark installation](../getting_started/installation/spark.md)
-before running these commands. GB10 has no FA4 / sm_100a VSA kernel:
+before running these commands. GB10 has no FA4 / ptx_blackwell VSA kernel:
 
 ```bash
 UV_TORCH_BACKEND=cu130 uv pip install -e .
-FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
   fastvideo serve --config examples/serving/openai_fasth3_spark.yaml --server.host 127.0.0.1
 ```
 
@@ -181,9 +178,7 @@ python -m pip install openai==3.6.0
 python examples/serving/clients/video.py
 ```
 
-```python
---8<-- "examples/serving/clients/video.py"
-```
+<include>/_snippets/clients/video.py.md</include>
 
 ### OpenAI JavaScript
 
@@ -195,9 +190,7 @@ npm ci --prefix examples/serving/clients
 node examples/serving/clients/video.mjs
 ```
 
-```javascript
---8<-- "examples/serving/clients/video.mjs"
-```
+<include>/_snippets/clients/video.mjs.md</include>
 
 ### cURL
 
@@ -207,9 +200,7 @@ Install `curl` and `jq`, then run:
 bash examples/serving/clients/video.sh
 ```
 
-```bash
---8<-- "examples/serving/clients/video.sh"
-```
+<include>/_snippets/clients/video.sh.md</include>
 
 ## Connect your app
 

@@ -24,9 +24,9 @@ def check_assets(directory: Path) -> None:
             raise RuntimeError(f"Missing cookbook catalog: {url}. {PREPARE}")
 
 
-def on_pre_build(config, **kwargs):
-    check_assets(Path(config["docs_dir"]) / "assets/cookbook-config")
+if __name__ == "__main__":
+    import sys
 
-
-def on_post_build(config, **kwargs):
-    check_assets(Path(config["site_dir"]) / "assets/cookbook-config")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent
+    check_assets(root / "assets/cookbook-config")
+    print(f"Cookbook assets verified in {root}.")

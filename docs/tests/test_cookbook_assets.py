@@ -1,4 +1,4 @@
-"""Lightweight docs-hook checks; no MkDocs or model imports are needed."""
+"""Lightweight source and published cookbook asset checks."""
 
 import importlib.util
 import json
@@ -31,12 +31,11 @@ class CookbookAssetTests(unittest.TestCase):
 
     def test_unprepared_build_reports_preparation_command(self):
         with self.assertRaisesRegex(RuntimeError, "npm run build:catalog --prefix docs"):
-            assets.on_pre_build({"docs_dir": self.root})
+            assets.check_assets(self.root / "assets/cookbook-config")
 
-    def test_prepared_source_and_published_assets_pass(self):
+    def test_prepared_assets_pass(self):
         self.prepare()
-        assets.on_pre_build({"docs_dir": self.root})
-        assets.on_post_build({"site_dir": self.root})
+        assets.check_assets(self.root / "assets/cookbook-config")
 
     def test_missing_catalog_and_notices_fail(self):
         self.prepare()

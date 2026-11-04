@@ -1,0 +1,55 @@
+# FastH3 Trim NVFP4. Generator and sampling defaults follow the released
+# one-Spark recipe: examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml.
+# Install with the DGX Spark guide. This serving adaptation is not GPU-validated.
+generator:
+  model_path: FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      image_encoder: false
+      vae: false
+      pin_cpu_memory: false
+      lazy_module_load: false
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    workload_type: t2v
+    vae_tiling: true
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.8
+      VSA_tile_size: 64
+      h3_sequential_load: false
+      inference_torch_compile: false
+      vae_parallel_decode: false
+      video_decode_backend: h3-vae
+server:
+  host: 127.0.0.1
+  port: 8000
+  output_dir: outputs/fasth3_trim_server
+  served_model_name: fasth3-trim
+default_request:
+  prompt: A quiet pottery studio with a potter finishing a bowl at the wheel.
+  negative_prompt: ''
+  sampling:
+    seed: 1234
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 9
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    return_frames: false

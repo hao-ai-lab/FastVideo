@@ -87,6 +87,8 @@ def test_flux2_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
+    if model_id == "black-forest-labs/FLUX.2-klein-9B":
+        pytest.skip("FLUX.2-klein-9B SSIM is paused while gated-model access is not provisioned for CI.")
     _ = run_text_to_latent_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),

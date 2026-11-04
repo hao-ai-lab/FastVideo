@@ -82,6 +82,7 @@ SD35_MODEL_TO_PARAMS = {
 }
 
 
+@pytest.mark.skip(reason="SD3.5 SSIM is paused while gated-model access is not provisioned for CI.")
 @pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="SD3.5 SSIM test requires CUDA",

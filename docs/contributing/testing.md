@@ -53,6 +53,11 @@ or environment mismatch is not a pass. Do not replace a reference with the
 candidate output just to clear a failure. For a relocation, the unchanged
 parent is the baseline; two imports of the same class are not numerical proof.
 
+FA4 fingerprints record the effective boolean switch. Legacy block references
+with `fastvideo_fa4: <unset>` mean disabled and match an explicit `0`; enabling
+FA4 still fails the environment check. Other runtime pins and zero-tolerance
+tensor comparisons remain strict.
+
 The VAE and transformer CI lanes run their Wan component goldens first.
 Selected integration lanes wait for the golden lane in merge/full builds.
 See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics.
@@ -95,6 +100,14 @@ pytest fastvideo/tests/vaes/test_wan_vae.py -q
 GPU-heavy suites need the right hardware, credentials, local caches, and
 sometimes custom kernels. Document those assumptions in new tests.
 
+The legacy VSA training regression selects a device-specific summary. Its
+GB200 reference was generated from unchanged upstream commit
+`d5253fd71055927f12aa6c4aa679b93a00238851` using two GB200 GPUs, Torch
+2.12.0+cu130, CUDA 13.0 and FA2. Two independent upstream runs produced
+gradient norms 1.909 and 1.935 and losses 0.30861 and 0.30886. The reference
+JSON retains provenance; the H100 reference and all comparison tolerances
+remain unchanged. Candidate outputs must not be used to refresh this reference.
+
 ## SSIM Tests
 
 SSIM tests generate videos using specific models and parameters, then compare
@@ -102,9 +115,10 @@ the output against reference videos with Structural Similarity Index Measure.
 Use them for pipeline-level visual regression coverage when output quality or
 generation behavior must be preserved.
 
-!!! note
-    Add enough prompts, seeds, backends, and parameter combinations to cover the
-    behavior you want to protect, but keep runtime reasonable for CI.
+:::note
+Add enough prompts, seeds, backends, and parameter combinations to cover the
+behavior you want to protect, but keep runtime reasonable for CI.
+:::
 
 ### Directory Structure
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 from fastvideo.layers.pdd import validate_pdd_steps
@@ -93,3 +94,4 @@ class MiniMaxH3Config(DiTConfig):
     # FastVideo's Fully Sharded Data Parallel (FSDP) loading path requires one
     # parameter dtype, while H3 inference keeps boundary projections in FP32.
     uniform_parameter_dtype: bool = False
+    vsa_fp4: dict[str, Any] = field(default_factory=dict)

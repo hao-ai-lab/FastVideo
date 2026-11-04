@@ -10,7 +10,7 @@ import torch
 
 from fastvideo_kernel import video_sparse_attn
 
-from .utils import create_full_mask_from_block_mask
+from .utils import create_full_mask_from_block_mask, skip_cute_block_sparse_on_sm12x
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +21,7 @@ def _require_cute_backend(monkeypatch):
     these tests target the CuTe path, so they explicitly opt in and skip
     cleanly when the optional ``flash_attn.cute`` build is not installed.
     """
+    skip_cute_block_sparse_on_sm12x()
     pytest.importorskip(
         "flash_attn.cute.block_sparsity",
         reason="optional FA4 CuTe build (flash_attn.cute) not installed",

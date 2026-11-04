@@ -4,8 +4,8 @@
 from the published Stable Audio Open 1.0 checkpoint.
 
 (Was previously a diffusers comparison; switched to compare against the
-upstream reference per the add-model skill, which calls for parity
-against the official repo. The companion test
+upstream reference, since the porting guide calls for parity against the
+official repo. The companion test
 `test_oobleck_vae_official_parity.py` covers structural parity with
 randomly-initialized weights; this file exercises the *real* trained
 weights end-to-end through the official factory + checkpoint loader.)

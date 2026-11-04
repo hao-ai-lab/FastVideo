@@ -117,19 +117,14 @@ def test_legacy_vae_cache_context_is_shared_and_restored_after_errors():
 
 @pytest.mark.parametrize("module_name", [
     "fastvideo.models.dits.causal_wanvideo",
-    "fastvideo.models.dits.dreamx_world",
     "fastvideo.models.dits.matrixgame2.model",
     "fastvideo.models.dits.matrixgame2.causal_model",
     "fastvideo.models.dits.matrixgame3.model",
     "fastvideo.models.dits.lingbotworld.model",
-    "fastvideo.configs.models.dits.dreamx_world",
     "fastvideo.configs.models.dits.matrixgame2",
     "fastvideo.configs.models.dits.matrixgame3",
     "fastvideo.configs.pipelines.wan",
-    "fastvideo.configs.pipelines.dreamx_world",
-    "fastvideo.configs.pipelines.longcat",
     "fastvideo.configs.pipelines.lingbot_video",
-    "fastvideo.configs.pipelines.turbodiffusion",
     "fastvideo.configs.pipelines.lingbotworld2",
 ])
 def test_downstream_wan_consumers_import(module_name):

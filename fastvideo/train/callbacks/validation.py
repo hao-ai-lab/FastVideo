@@ -13,7 +13,7 @@ import gc
 import json
 import os
 import time
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
@@ -302,6 +302,9 @@ class ValidationCallback(Callback):
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
             self.tracker = tracker
+
+    def will_run_validation(self, iteration: int = 0) -> bool:
+        return (self.every_steps > 0 and (iteration != 0 or self.run_at_start) and iteration % self.every_steps == 0)
 
     def on_validation_begin(
         self,
@@ -1466,6 +1469,61 @@ class ValidationCallback(Callback):
     # Validation loop
     # ----------------------------------------------------------
 
+    def _student_sampling_pipeline_config(
+        self,
+        pipeline_config: Any,
+        *,
+        transformer: torch.nn.Module,
+        num_inference_steps: int,
+        pipeline: Any,
+    ) -> Any:
+        """Apply the sampling settings training uses that no checkpoint file supplies here.
+
+        Validation samples from the run's initialization path, which carries no
+        export ``fastvideo_inference.json``. A sparse Ref2VA student's reference
+        keep rate and a PDD student's fused-block partition therefore come from
+        training, or validation samples dense references and unfused heads.
+        Returns a copy when anything changes; the training config stays as is.
+        """
+        tc = self.training_config
+        updates: dict[str, Any] = {}
+        sparsity = float(getattr(tc, "vsa_sparsity", 0.0) or 0.0)
+        data_type = getattr(getattr(tc, "data", None), "preprocessed_data_type", None)
+        if (data_type == "ref2va" and sparsity > 0.0 and hasattr(pipeline_config, "vsa_ref_keep_rate")
+                and pipeline_config.vsa_ref_keep_rate is None):
+            configured = getattr(tc, "vsa_ref_keep_rate", None)
+            updates["vsa_ref_keep_rate"] = 1.0 - sparsity if configured is None else float(configured)
+        pdd_steps = getattr(transformer, "pdd_steps", None)
+        if pdd_steps is not None and hasattr(pipeline_config, "pdd_step_indices"):
+            self._check_pdd_sampling_clock(pipeline)
+            indices = pipeline_config.pdd_step_indices
+            if indices is None or len(indices) != int(num_inference_steps) + 1:
+                # The balanced partition PDDMethodMixin checks against the
+                # trained block sizes, one fused block per forward.
+                from fastvideo.layers.pdd import pdd_student_step_indices
+                balanced = pdd_student_step_indices(int(pdd_steps), int(num_inference_steps))
+                updates["pdd_step_indices"] = tuple(int(index) for index in balanced.tolist())
+        if not updates:
+            return pipeline_config
+        pipeline_config = copy(pipeline_config)
+        for name, value in updates.items():
+            setattr(pipeline_config, name, value)
+        return pipeline_config
+
+    def _check_pdd_sampling_clock(self, pipeline: Any) -> None:
+        """A PDD student's heads are tied to its training clocks; validation must sample on the same ones."""
+        student = getattr(self.method, "student", None)
+        get_module = getattr(pipeline, "get_module", None)
+        if student is None or not callable(get_module):
+            return
+        for attribute, module_name in (("video_scheduler_shift", "scheduler"), ("audio_scheduler_shift",
+                                                                                "audio_scheduler")):
+            trained = getattr(student, attribute, None)
+            sampled = getattr(get_module(module_name), "shift", None)
+            if trained is not None and sampled is not None and float(trained) != float(sampled):
+                raise ValueError(f"PDD validation samples with {module_name} shift {sampled}, but the student "
+                                 f"trains with {attribute}={trained}. Train with the checkpoint's shift.")
+
     def _run_validation_for_steps(
         self,
         num_inference_steps: int,
@@ -1507,6 +1565,12 @@ class ValidationCallback(Callback):
         # causal/DMD denoising stages can read them.
         if (self.sampling_timesteps is not None and inference_args.pipeline_config.dmd_denoising_steps is None):
             inference_args.pipeline_config.dmd_denoising_steps = ([int(s) for s in self.sampling_timesteps])
+        inference_args.pipeline_config = self._student_sampling_pipeline_config(
+            inference_args.pipeline_config,
+            transformer=transformer,
+            num_inference_steps=num_inference_steps,
+            pipeline=pipeline,
+        )
 
         videos: list[list[np.ndarray]] = []
         audio_waveforms: list[torch.Tensor | np.ndarray | None] = []

@@ -12,10 +12,16 @@ import pytest
 import torch
 
 from fastvideo.layers.layernorm import ScaleResidualLayerNormScaleShift
+import fastvideo.envs as envs
 
 cuda_only = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 
 B, S, H = 1, 9360, 1536  # the Wan2.1-T2V-1.3B sp2 shapes
+
+
+@pytest.fixture(autouse=True)
+def opt_into_fused_norm(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ENABLE_FUSED_NORM.override(True))
 
 
 def _make_modules(elementwise_affine: bool, seed: int = 0):
@@ -173,6 +179,20 @@ def test_env_kill_switch(env_overrides):
     with torch.no_grad():
         out, _ = fused(residual, x, gate, None, None)
     assert out.dtype == torch.float32  # eager promotion, not the fused bf16
+
+
+@cuda_only
+def test_fused_norm_requires_explicit_opt_in(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ENABLE_FUSED_NORM.override(False))
+    eager, fused = _make_modules(elementwise_affine=True)
+    residual, x = _inputs(torch.bfloat16, seed=6)
+    gate = torch.randn(1, 1, H, device="cuda", dtype=torch.float32)
+    with torch.no_grad():
+        expected, expected_residual = eager(residual, x, gate, None, None)
+        actual, actual_residual = fused(residual, x, gate, None, None)
+    assert actual.dtype == torch.float32
+    assert torch.equal(actual, expected)
+    assert torch.equal(actual_residual, expected_residual)
 
 
 @cuda_only

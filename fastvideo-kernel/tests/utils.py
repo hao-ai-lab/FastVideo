@@ -58,3 +58,10 @@ def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes, 
                     full_mask[head, q_start:q_end, kv_start:kv_end] = True
 
     return full_mask
+
+
+def skip_cute_block_sparse_on_sm12x() -> None:
+    """The FA4 CuTe block-sparse VSA kernels target sm100/sm103, not sm_12x (GB10, RTX Blackwell)."""
+    import pytest
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12:
+        pytest.skip("FA4 CuTe block-sparse VSA kernels do not support sm_12x")

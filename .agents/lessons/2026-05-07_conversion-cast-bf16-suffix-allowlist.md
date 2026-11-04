@@ -52,8 +52,8 @@ in one commit.
    script that supports a global dtype downcast flag MUST own an explicit
    allowlist of fp32-keep tensors, documented at the top of the file.
 
-2. **The `add-model-conversion` skill** should enforce two checks for any
-   converter that ships a `--cast-bf16`-style flag:
+2. **Check two things** for any converter that ships a `--cast-bf16`-style
+   flag:
    - Run the parity test for **every** variant of the model (base, distill,
      SR, etc.), not just the headline variant. Different variants exercise
      different code paths.

@@ -6,7 +6,7 @@
 - Tests:
   - `fastvideo/tests/` for package-level tests (dataset, encoders, inference, training, SSIM, workflow).
   - `tests/local_tests/` for additional local/component checks.
-- Docs and guides: `docs/` (MkDocs source), with contributor docs in `docs/contributing/`.
+- Docs and guides: canonical Markdown in `docs/`, the Blume app in `docs-site/`, and contributor docs in `docs/contributing/`.
 - Runnable examples and scripts: `examples/` and `scripts/`.
 - Static assets: `assets/` (including `assets/images/`, `assets/videos/`, and `assets/prompts/`) and `comfyui/assets/`.
 

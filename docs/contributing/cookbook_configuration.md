@@ -5,6 +5,11 @@ settings and download a serving YAML. A **deployment** is one named combination
 of a model, runtime and starting configuration, such as FastWan with CUDA REST.
 Ordinary additions use YAML; they require no custom UI or JavaScript changes.
 
+For shared hardware/component inventories and optional recorded GPU runs, see
+[Capacity estimation](capacity_estimation.md). Add optional `capacity` fields to the existing model manifest; component
+definitions remain shared, while examples and identity come from deployments.
+This metadata does not certify that an edited configuration fits.
+
 ## Before you start
 
 Choose a runnable serving configuration under `examples/serving/` and an existing
@@ -142,8 +147,13 @@ CI publication, see the [docs README](https://github.com/hao-ai-lab/FastVideo/bl
 
 | Level | Required | Optional |
 | --- | --- | --- |
-| Model | `title`, nonempty `deployments` | `summary`, `guide` |
+| Model | `title`, nonempty `deployments` | `summary`, `guide`, `capacity` |
 | Deployment | `runtime`, `workload`, `defaults`, `options` | `label`, `summary`, `guide`, `env`, `requirements`, `overrides` |
+
+The optional model-level `capacity` section contains shared component references,
+`memory_rules`, optional sources, and optional recorded runs. Its structure is
+validated alongside the manifest; shared references and hardware IDs are
+resolved by the capacity build. See the [capacity guide](capacity_estimation.md).
 
 Unknown keys fail validation. Paths are repository-relative: `defaults` must
 reference a YAML file under `examples/serving/`; a non-null `guide` must reference
@@ -318,3 +328,160 @@ For reusable UI methods and configuration guarantees, see the
 [design and API contract](../cookbook/design.md). Streaming client instructions
 follow the [WebSocket contract](../design/server_contracts/streaming.md); a health
 response alone does not establish generation readiness.
+
+## Memory estimates
+
+`estimateMemory()` in `docs/js/cookbook-memory.mjs` estimates one request's peak
+memory on one device from a resolved configuration. It is analytical: a result
+is not a measurement and never marks a recipe as verified.
+
+```javascript
+const hardware = await api.loadCapacityHardware(index);
+const { config } = api.resolveConfig(catalog, edits);
+const result = api.estimateMemory({
+  config,
+  workload: catalog.workload,
+  model,
+  hardware: hardware.devices.find((device) => device.id === "rtx-5090-32gb"),
+  memoryBudgetGiB: 28, // optional override; unified memory otherwise uses a labeled 75% default
+});
+```
+
+Each phase (`startup`, `encoding`, `denoising`, `decoding`) adds the weights
+resident on the device to that phase's working memory. The largest phase plus
+headroom (10% and 1 GiB by default) is compared with the device budget. `status`
+is `fits`, `exceeds`, `unsupported` when the device lacks a weight type, or
+`unknown` with a `reason`. The result reports each phase's weights and working
+memory in GiB, plus `capacityGiB`, `memory`, `host`, and `hardware`.
+
+| Model field | Meaning |
+| --- | --- |
+| `memory_rules` | Working-memory rule; `wan` is the only rule |
+| Shared transformer geometry | For `wan`: `hidden_size`, `ffn_size`, and `patch_size` |
+| Shared VAE geometry | `temporal_compression`, `spatial_compression`, and `vae_decoder_channels` |
+| `components[].role` | `text_encoder`, `transformer`, `image_encoder`, or `vae` |
+| `components[].parameter_count` | Parameters of the loaded subset |
+| `components[].block_count`, `block_parameter_count` | Repeated blocks and their total parameters, for streaming offload |
+
+Shared component records contain no selected dtype or offload setting; those
+come from the resolved serving configuration. A model manifest references
+shared entries instead of copying counts:
+
+```yaml
+capacity:
+  memory_rules: wan
+  components:
+    transformer: { ref: wan2.1-t2v-1.3b-dit }
+    text_encoder: { ref: umt5-xxl-encoder }
+    vae: { ref: wan2.1-vae-decoder }
+```
+
+The hardware lookup is versioned and source-backed; see the
+[capacity guide](capacity_estimation.md#hardware-catalog). Dedicated memory uses
+nominal or selected-partition capacity. Unified memory is shared with the CPU and
+OS, so the estimator uses `memoryBudgetGiB`, a catalogued `memory.usable` policy,
+or a labeled 75% default, and never treats nominal system memory as VRAM.
+`host_memory` and `hostMemoryGb` describe separate host RAM for CPU offload; the
+result reports a
+host requirement and status independently from device fit. Custom devices use
+the same fields and should set `custom: true`; they are not catalog-verified.
+
+Offload follows the native runtime:
+
+- Unset offload switches are on (`OffloadConfig` in `fastvideo/api/schema.py`).
+  Layerwise DiT offload replaces whole-model DiT offload.
+- An offloaded component leaves the device outside its own phase and is complete
+  during it. Layerwise DiT offload and FSDP text-encoder offload instead keep
+  the weights outside the blocks plus two blocks.
+- Without FSDP, whole-model DiT offload leaves the transformer on the device in
+  every request phase, not only denoising.
+- `FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS` keeps that many transformer blocks on
+  the device; the estimate counts them in addition to two streamed blocks during
+  denoising and as resident outside it.
+- Unified-memory CUDA devices disable every CPU-offload flag at runtime; the
+  estimate applies that policy instead of subtracting offloaded weights.
+- Packed NVFP4 weights are buffers, so layerwise offload keeps them resident.
+- `lazy_module_load` defers only the components a pipeline lists in
+  `_lazy_module_names`. Wan lists none, so the switch changes nothing.
+
+Multiple GPUs, FSDP, VSA, compilation, quantization, lazy loading, image-to-video,
+more than one video per prompt, missing parameter counts, and unsupported
+attention backends return `unknown`. A disabled VAE feature cache also returns
+`unknown` because the full-clip decode path has no rule. Unified memory without
+an application budget uses the labeled 75% default. With VAE tiling enabled, a
+note says the decode estimate assumes untiled decoding.
+
+`WAN_RULE` holds the uncalibrated tensor counts. To calibrate them, run with
+`FASTVIDEO_STAGE_LOGGING=1`: each stage then records `peak_allocated_mb` and
+`peak_reserved_mb` and resets the peak counter. The request-level
+`peak_memory_mb` is read after those resets, so it does not cover earlier
+stages. Allocator figures exclude the CUDA context, which the headroom covers.
+Successful-run evidence and analytical fit stay separate; see
+`assessCapacity()`, `matchEvidence()`, and `recommendCapacity()` in the
+[capacity guide](capacity_estimation.md#optional-successful-run-evidence).
+
+To add a model family, write a function that returns working-memory bytes per
+phase, register it in `WORKING_MEMORY` with its required geometry fields, and
+add cases to `docs/tests/cookbook-memory.test.mjs`. Run the tests with
+`npm run test:cookbook --prefix docs`.
+
+## Model pages in the cookbook
+
+The Blume cookbook starts at `/cookbook` with model cards filtered by Video,
+Image, Audio, or World. FastH3 appears first. Each model has its own page in a
+sidebar family group.
+
+`docs-site/lib/cookbook-pages.ts` derives the inventory from
+`docs/assets/cookbook-recipes.json`. Recipes sharing a checkpoint become variants
+on one model page. `transfer-docs.mjs` generates source-recipe pages and sidebar
+entries. Preparation publishes checked-in YAML under `assets/cookbook-sources/`
+and Python examples with source locations for editable literals under
+`assets/cookbook-examples/`. Python examples are parsed with AST, never imported.
+Explicit values in the maintained launch command take priority over argparse
+defaults. The editor rewrites those literals and preserves required launch flags
+and preparation commands. Controls inherited from a helper may use an explicitly
+declared cookbook knob. Settings without a source binding stay hidden.
+
+For a model with an editable serving catalog, add its display metadata to
+`recipePages`, map the checkpoint in `backendModels`, and add an MDX overlay with
+`<Cookbook modelId="your-model-key" />`. Use `mode: frame` so the island owns the
+logo, heading, and YAML actions. Add the route to its sidebar family.
+Presentation metadata must not define editable options or compatibility claims.
+
+Editable pages organize catalog fields into a compact option matrix. The shared
+API owns validation and YAML/command generation. Each model owns one page. Hardware backend buttons select declared
+deployments, so unsupported NVIDIA, AMD, or MLX choices do not appear. Precision
+and encoder controls appear only when the deployment declares them.
+
+GPU targets are URL preferences for setup guidance. GPU count and parallelism
+use backend fields. Automatic parallelism sets the supported degrees to `-1`;
+it does not estimate memory. All configurations carry an unverified-recipe
+label until hardware-fit and runtime validation are connected.
+
+Old `/cookbook?deployment=<id>` links open the corresponding model page.
+
+Provider labels follow the displayed logo. FastVideo-owned releases and converted
+checkpoints using its mark display `FastVideo` as provider. FastH3 Trim replaces
+the obsolete CompactH3 catalog entry. Its editable NVFP4 deployment uses the
+released checkpoint and the maintained one-Spark inference configuration, with
+a serving adaptation under `examples/serving/`. Do not restore the old local
+assembly recipes or their four-forward sampling settings.
+
+Every model uses the same header, run modes, command toolbar, hardware matrix,
+settings, and reset controls. The top choices are Python SDK, CLI, and Serving,
+limited to supported routes. Hardware backends display CUDA or MLX. Serving
+appears only where a native server baseline exists.
+
+The toolbar's Copy action writes the edited YAML or Python example with a quoted
+heredoc, then runs the matching command. CUDA catalog pages use the same generator
+settings for SDK, CLI, and serving. Inference uses `request`; serving uses `server`
+and `default_request`. These commands assume the platform's installation guide
+has already been followed. cURL and environment tools appear where the recipe
+provides them. Do not invent CLI flags, serving support, or container commands.
+
+Custom hardware names can be added through the matrix and persist in the page
+URL. This is a device preference, not a memory lookup or compatibility result.
+The component explorer is a design preview for weights, encoders, and decoders.
+It does not alter serving YAML. Choosing an alternate component on an editable
+recipe suppresses generated output until the baseline components are restored.
+Connect those choices only after a matching backend recipe is defined.

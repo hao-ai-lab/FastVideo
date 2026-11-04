@@ -21,10 +21,9 @@ dependencies = [
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    # GLM-Image's AR encoder (GlmImageForConditionalGeneration) first ships in
-    # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
-    # vision interpolation helper (get_vision_interpolation_indices_and_weights)
-    # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
+    # Floor raised from >=5.0.0 to >=5.15.0 for the public vision interpolation
+    # helper (get_vision_interpolation_indices_and_weights) that the MiniMax-H3
+    # Qwen3-VL encoder cross-checks against.
     # LTX-2.5's packed Gemma 4 unified encoder also requires transformers 5.15.0+
     # for correct mapping and loading of the Gemma 4 architecture.
     "transformers>=5.15.0",
@@ -120,10 +119,11 @@ members = ["apps/dreamverse", "apps/infinite_livestream"]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
 # GB10 (sm_121), so on ARM build from the in-tree source instead. The FastH3
 # extra also selects the in-tree source on x86_64 so a PR checkout can build
-# its matching sm_100a route before that version reaches PyPI. Other x86_64
-# installs keep the published wheel. This table is uv-only: plain pip ignores
-# it. Pass --no-sources to bypass it (e.g. when the kernel is already
-# installed, as in the Spark install guide).
+# its matching ptx_blackwell route and key-length-sized sparse FP4 entry point
+# before that version reaches PyPI. Other x86_64 installs keep the published
+# wheel. This table is uv-only: plain pip ignores it. Pass --no-sources to
+# bypass it (e.g. when the kernel is already installed, as in the Spark
+# install guide).
 fastvideo-kernel = [
   { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
   { path = "fastvideo-kernel", marker = "platform_machine == 'x86_64'", extra = "fasth3" },
@@ -299,13 +299,14 @@ follow_imports = "silent"
 # ``*/_vendored/*`` matches upstream-provenance files vendored under any
 # ``_vendored/`` subdir (project-wide convention; mirrors the
 # ``_``-prefixed auto-discovery skip).
-skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_dashboard/frontend/package-lock.json,docs/package-lock.json,*/_vendored/*"
+skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_dashboard/frontend/package-lock.json,docs/package-lock.json,docs-site/package-lock.json,*/_vendored/*"
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
 # "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
 # published checkpoint config; it must be spelled exactly to match.
-ignore-words-list = "tread,passt,dout,padd"
+# "nax" is the name of MLX's M5 TensorOps helper and the corresponding H3 backend.
+ignore-words-list = "tread,passt,dout,padd,nax"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

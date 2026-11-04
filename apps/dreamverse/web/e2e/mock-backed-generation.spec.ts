@@ -3,6 +3,37 @@ import { stat } from 'node:fs/promises';
 import { test, expect, type WebSocket as PWWebSocket } from '@playwright/test';
 
 test.describe('mock-backed generation smoke', () => {
+  test('leave dialog blocks navigation and keeps cancel and confirm usable', async ({ page, request }) => {
+    const health = await request.get('/healthz');
+    const body = health.ok() ? await health.json() : {};
+    test.skip(body.service !== 'ltx2-streaming-mock-server', 'Requires the local mock runtime.');
+    await page.goto('/');
+    await page.getByLabel('Continuation prompt').fill('A paper fox walks through a sunlit forest.');
+    await page.getByRole('button', { name: 'Generate', exact: true }).click();
+    const leave = page.getByRole('button', { name: 'Leave', exact: true });
+    await expect(leave).toBeEnabled();
+    await leave.click();
+    const dialog = page.getByRole('dialog', { name: 'Leave session?' });
+    await expect(dialog).toBeVisible();
+    expect(await dialog.evaluate((element) => element.closest('.isolate') === null)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Toggle sidebar' }).click({ trial: true, timeout: 1000 })).rejects.toThrow();
+    for (let index = 0; index < 4; index++) {
+      await page.keyboard.press('Tab');
+      await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    }
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(leave).toBeFocused();
+    await leave.click();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(leave).toBeFocused();
+    await leave.click();
+    await dialog.getByRole('button', { name: 'Leave session', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Generate', exact: true })).toBeVisible();
+  });
+
   test('accepts a custom prompt and enters the streaming state', async ({ page, request }) => {
     const health = await request.get('/healthz');
     const body = health.ok() ? await health.json() : {};

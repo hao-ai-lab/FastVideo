@@ -6,14 +6,7 @@ FastVideo's V1 API provides a streamlined interface for video generation tasks w
 
 This class will be the primary Python API for generating videos and images.
 
-::: fastvideo.entrypoints.video_generator.VideoGenerator
-    options:
-      show_root_heading: true
-      show_source: false
-      members:
-        - from_pretrained
-      heading_level: 3
-
+<api-reference path="fastvideo.entrypoints.video_generator.VideoGenerator" heading="3" members="from_pretrained" />
 `VideoGenerator.from_pretrained()` should be the primary way of creating a new video generator.
 
 ## Configuring FastVideo
@@ -22,25 +15,10 @@ The following two classes `PipelineConfig` and `SamplingParam` are used to confi
 
 ### PipelineConfig
 
-::: fastvideo.configs.pipelines.base.PipelineConfig
-    options:
-      show_root_heading: true
-      show_source: false
-      members:
-        - from_pretrained
-        - dump_to_json
-      heading_level: 4
-
+<api-reference path="fastvideo.configs.pipelines.base.PipelineConfig" heading="4" members="from_pretrained,dump_to_json" />
 ### SamplingParam
 
-::: fastvideo.api.sampling_param.SamplingParam
-    options:
-      show_root_heading: true
-      show_source: false
-      members:
-        - from_pretrained
-      heading_level: 4
-
+<api-reference path="fastvideo.api.sampling_param.SamplingParam" heading="4" members="from_pretrained" />
 ### Returning samples without previews
 
 Set `OutputConfig(return_samples=True, return_frames=False, save_video=False)`

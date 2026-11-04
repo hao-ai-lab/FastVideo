@@ -91,6 +91,7 @@ def test_kandinsky6_ti2va_inference_similarity(
         # examples/inference/basic/basic_kandinsky6_ti2va.py): no FSDP inference, text encoder offloaded
         # to CPU between encodes.
         init_kwargs_override={
+            "revision": "7be18aed6fbd64653c0c4872fddfe4a3e3e109f5",
             "use_fsdp_inference": False,
             "text_encoder_cpu_offload": True,
             "pin_cpu_memory": True,

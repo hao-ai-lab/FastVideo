@@ -24,7 +24,8 @@ the official `GEN3C` repo and converted weights, and is skipped in CI.
 ## Shared Environment Setup
 
 Run from the FastVideo repo root in the same env used for FastVideo. See the
-`add-model-prep` skill for canonical clone + install commands.
+[model porting guide](../../../docs/contributing/coding_agents.md) for clone and
+install steps.
 
 ```bash
 # Clone the official reference under the FastVideo repo root.

@@ -2,24 +2,25 @@
 
 We introduce a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computation, enabling much faster video generation.
 
-!!! tip "Attn-QAT DMD2 workflow"
-    The modular trainer also provides a Wan2.1 MixKit recipe that first
-    fine-tunes with fake-quantized attention, then distills the student to
-    timesteps `[1000, 757, 522]` while teacher and critic remain on Flash
-    Attention. See [Attn-QAT Training](../training/attn_qat.md).
+:::tip[Attn-QAT DMD2 workflow]
+The modular trainer also provides a Wan2.1 MixKit recipe that first
+fine-tunes with fake-quantized attention, then distills the student to
+timesteps `[1000, 757, 522]` while teacher and critic remain on Flash
+Attention. See [Attn-QAT Training](../training/attn_qat.md).
+:::
 
 ## 📊 Model Overview
 
-We provide two distilled models:
+We provide three distilled models:
 
 - **[FastWan2.1-T2V-1.3B-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)**: 3-step inference, up to **16 FPS** on H100 GPU
 - **[FastWan2.1-T2V-14B-480P-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-480P-Diffusers)**: 3-step inference, up to **60x speed up** at 480P, **90x speed up** at 720P for denoising loop
 - **[FastWan2.2-TI2V-5B-FullAttn-Diffusers](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers)**: 3-step inference, up to **50x speed up** at 720P for denoising loop
 
-Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
+All three models are trained on 61 frames at 448×832 but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
 ## ⚙️ Inference
-First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
+First install [VSA](../attention/vsa/index.md), then run the 1.3B config. The config pins the checkpoint; edit `model_path` there to use a local copy.
 
 ```bash
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN \
@@ -44,7 +45,7 @@ python scripts/huggingface/download_hf.py \
 
 ### Wan2.1 1.3B Model Sparse-Distill
 
-For the 1.3B model, we use **4 nodes with 32 H200 GPUs** (8 GPUs per node):
+For the 1.3B model, we use **8 nodes with 64 H200 GPUs** (8 GPUs per node):
 
 ```bash
 # Multi-node training (8 nodes, 64 GPUs total)

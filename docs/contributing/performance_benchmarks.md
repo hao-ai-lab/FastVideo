@@ -44,8 +44,9 @@ python fastvideo/tests/performance/dashboard.py
 
 The pytest run never uploads anything. `compare_baseline.py` uploads only when
 `PERF_UPLOAD_POLICY` is set. Local uploads are explicit opt-in and require HF
-credentials. PR/direct performance runs upload passing records for dashboard
-visibility, while scheduled-main runs upload both pass and fail records. The
+credentials. PR performance runs read baselines strictly and retain comparison
+reports as Buildkite artifacts without uploading records. Scheduled-main runs
+upload both pass and fail records using an operator-provisioned CI credential. The
 report directory default is container-oriented; set `PERF_REPORTS_DIR` to a
 writable local path when generating dashboards or when you want local
 Markdown/normalized-result artifacts from the comparator.
@@ -244,8 +245,8 @@ metrics are skipped.
 
 This is the **drift detector** — it catches sub-threshold regressions that
 slowly add up. Only scheduled-main successful records are baseline eligible.
-Local and pull-request runs can upload dashboard-visible records, but they do
-not update future gating baselines.
+Local uploads are explicit opt-in and do not update future gating baselines.
+PR runs retain their normalized records and reports as Buildkite artifacts.
 
 Comparator summaries and normalized artifacts include an explicit
 `comparison_status`:
@@ -620,9 +621,9 @@ When the rolling-baseline phase runs, it emits:
      "regression_thresholds": {
        "latency": { "threshold_percent": 0.10, "threshold_absolute": 1.0, "gated": true }
      }
-  }
+   }
 
-  ```
+   ```
 
    Legacy v1 configs without `config_schema_version` still load, but should not
    gain v2 identity or metadata fields until they are migrated to

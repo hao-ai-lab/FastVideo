@@ -38,6 +38,7 @@ import torch
 from torch.testing import assert_close
 
 import fastvideo.envs as envs
+from fastvideo.tests.golden_gate._harness import assert_env_fingerprint_matches
 
 MODEL_REPO_ID = "MiniMaxAI/MiniMax-H3"
 SEED = 20260805
@@ -98,7 +99,7 @@ def _env_fingerprint() -> dict[str, str]:
         "flash_attn": fa_version,
         "device_name": torch.cuda.get_device_name(0),
         "attention_backend": envs.FASTVIDEO_ATTENTION_BACKEND.get() or "<unset>",
-        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())) if envs.FASTVIDEO_FA4.is_set() else "<unset>",
+        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())),
         "tf32_matmul": str(torch.backends.cuda.matmul.allow_tf32),
         "tf32_cudnn": str(torch.backends.cudnn.allow_tf32),
     }
@@ -286,12 +287,7 @@ def test_minimax_h3_t2v_golden_gate(env_overrides) -> None:
         )
 
     golden = torch.load(golden_path, weights_only=True)
-    mismatches = {
-        key: (value, meta["env"].get(key))
-        for key, value in golden["metadata"]["env"].items() if meta["env"].get(key) != value
-    }
-    assert not mismatches, (f"environment changed since golden was minted — re-mint deliberately rather "
-                            f"than chasing bit drift. golden -> current: {mismatches}")
+    assert_env_fingerprint_matches(golden["metadata"]["env"], meta["env"])
 
     drift = (out - golden["output"]).abs()
     print(f"golden-gate drift: max_abs={drift.max().item():.10f} "

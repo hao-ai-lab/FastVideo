@@ -106,5 +106,8 @@ def test_stable_audio_inference_similarity(
         # FSDP + @torch.inference_mode in StableAudioDenoisingStage hits
         # "Inference tensors do not track version counter" on single-GPU
         # unshard. SA-1.0 fits on one B200 anyway.
-        init_kwargs_override={"use_fsdp_inference": False},
+        init_kwargs_override={
+            "use_fsdp_inference": False,
+            "revision": "26609645c363fc81829282fcfe6356340346c1d4",
+        },
     )

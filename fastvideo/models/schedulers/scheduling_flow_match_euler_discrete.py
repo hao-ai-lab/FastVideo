@@ -96,7 +96,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
         sigma_data (`float`, *optional*):
             The sigma data value for scaling.
         use_reference_discrete_timesteps (`bool`, defaults to False):
-            Some reference schedulers (e.g. Z-Image) construct the timestep
+            Some reference schedulers (e.g. MMAudio) construct the timestep
             schedule by linspacing `num_inference_steps + 1` points from
             `t_max` to `t_min` and dropping the terminal point. Default
             (`False`) preserves the original `np.linspace(t_max, t_min,
@@ -340,7 +340,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
                 if self.config.use_reference_discrete_timesteps:
-                    # Some reference schedulers (for example Z-Image) build a
+                    # Some reference schedulers (for example MMAudio) build a
                     # float64 num_steps+1 linspace and drop the terminal point.
                     timesteps_array = np.linspace(
                         t_max,

@@ -7,9 +7,11 @@ on:
       - 'docs/**'
       - 'examples/**'
       - 'scripts/inference/**'
-      - 'mkdocs.yml'
-      - 'requirements-mkdocs.in'
-      - 'requirements-mkdocs.txt'
+      - 'docs-site/**'
+      - 'fastvideo/**'
+      - 'README.md'
+      - 'requirements-docs.in'
+      - 'requirements-docs.txt'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
   pull_request:
@@ -18,9 +20,11 @@ on:
       - 'docs/**'
       - 'examples/**'
       - 'scripts/inference/**'
-      - 'mkdocs.yml'
-      - 'requirements-mkdocs.in'
-      - 'requirements-mkdocs.txt'
+      - 'docs-site/**'
+      - 'fastvideo/**'
+      - 'README.md'
+      - 'requirements-docs.in'
+      - 'requirements-docs.txt'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
 
@@ -35,6 +39,7 @@ concurrency:
 
 jobs:
   build:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -51,7 +56,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies
-        run: uv pip install --system -r requirements-mkdocs.txt
+        run: uv pip install --system -r requirements-docs.txt
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -59,10 +64,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            docs/package-lock.json
+            docs-site/package-lock.json
 
       - name: Install cookbook dependencies
-        run: npm ci --prefix docs
+        run: |
+          npm ci --prefix docs
+          npm ci --prefix docs-site
 
       - name: Validate and generate cookbook catalogs
         run: |
@@ -71,8 +82,25 @@ jobs:
           python docs/tests/test_cookbook_assets.py
           npm run build:catalog --prefix docs
 
-      - name: Build documentation
-        run: mkdocs build
+      - name: Check site types and formatting
+        run: |
+          npm run check --prefix docs-site
+          npm run format:check --prefix docs-site
+
+      - name: Build and validate documentation
+        run: |
+          npm run build --prefix docs-site
+          npm run validate --prefix docs-site
+          npm run test:content --prefix docs-site
+          python -m unittest discover -s docs-site/tests -p 'test_*.py'
+          python docs/check_cookbook_assets.py docs-site/dist
+
+      - name: Install test browser
+        working-directory: docs-site
+        run: npx playwright install --with-deps chromium
+
+      - name: Test documentation and cookbook interactions
+        run: npm test --prefix docs-site
 
       - name: Check docs links
         run: python scripts/check_docs_links.py
@@ -80,7 +108,15 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./site
+          path: ./docs-site/dist
+
+      - name: Upload browser failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-browser-results
+          path: docs-site/test-results
+          if-no-files-found: ignore
 
   deploy:
     environment:

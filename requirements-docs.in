@@ -1,0 +1,4 @@
+# Source-only Python API extraction and example generation. No model runtime.
+griffelib==2.1.0
+Markdown==3.10.2
+PyYAML==6.0.3

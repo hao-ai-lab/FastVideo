@@ -1618,10 +1618,13 @@ def test_v2_identity_lookup_ignores_model_id_and_gpu_display_string(tmp_path):
     assert records == [baseline]
 
 
-def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
+@pytest.mark.parametrize("baseline_latency, expected_rc", [(10.0, 0), (1.0, 1)])
+def test_pr_compares_baseline_without_upload_credentials(
     monkeypatch,
     env_overrides,
     tmp_path,
+    baseline_latency,
+    expected_rc,
 ):
     tracking_root = tmp_path / "tracking"
     results_dir = tmp_path / "results"
@@ -1637,7 +1640,7 @@ def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
             "timestamp": "2026-06-15T00:00:00+00:00",
             "success": True,
             "baseline_eligible": True,
-            "latency": 10.0,
+            "latency": baseline_latency,
             "workload_id": "wan-t2v",
             "variant_id": "1.3b-sp2",
             "benchmark_version": 2,
@@ -1654,17 +1657,29 @@ def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
-    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    sync_calls = []
+
+    def sync(local_dir, strict=False):
+        sync_calls.append(strict)
+        return local_dir
+
+    def upload(*args, **kwargs):
+        pytest.fail("PR comparisons must not require upload credentials")
+
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", sync)
+    monkeypatch.setattr(compare_baseline, "upload_record", upload)
     env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
-    assert compare_baseline.main() == 0
+    assert compare_baseline.main() == expected_rc
+    assert sync_calls == [True]
 
     artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
     assert len(artifacts) == 1
     with open(artifacts[0], encoding="utf-8") as f:
         normalized = json.load(f)
 
-    assert normalized["comparison_status"] == compare_baseline.STATUS_PASS
+    expected_status = compare_baseline.STATUS_PASS if expected_rc == 0 else compare_baseline.STATUS_REGRESSION
+    assert normalized["comparison_status"] == expected_status
     assert normalized["baseline_status"] == "compared"
 
 

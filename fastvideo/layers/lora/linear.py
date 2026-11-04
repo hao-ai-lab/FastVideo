@@ -8,6 +8,7 @@ from torch import nn
 from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy, fully_shard)
 from torch.distributed.tensor import DTensor
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (get_local_torch_device, get_tp_rank, split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
 from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase, MergedColumnParallelLinear, QKVParallelLinear,
@@ -17,8 +18,56 @@ from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
 
+# A full-sequence LoRA delta is the same size as the packed layer output. On a 32 GB card the base output
+# already occupies that space, so materializing the delta and then ``out + delta`` asks for the buffer a third time.
+_SIDE_BRANCH_CHUNK_BYTES = 256 * 1024 * 1024
+
+
+@torch.library.custom_op("fastvideo::lora_add_low_rank_inplace", mutates_args=("out", ))
+def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
+                          strength: torch.Tensor, alpha_over_rank: float) -> None:
+    """Add ``strength * alpha_over_rank * B(Ax)`` into ``out`` without a second full-size activation."""
+    scale = float(strength) * alpha_over_rank
+    if scale == 0.0:
+        return
+    out_rows = out.reshape(-1, out.shape[-1])
+    x_rows = x.reshape(-1, x.shape[-1])
+    bytes_per_row = max(out_rows.shape[-1] * out_rows.element_size(), 1)
+    row_count = max(1, _SIDE_BRANCH_CHUNK_BYTES // bytes_per_row)
+    for start in range(0, x_rows.shape[0], row_count):
+        stop = start + row_count
+        update = x_rows[start:stop] @ lora_a.transpose(0, 1) @ lora_b.transpose(0, 1)
+        if scale != 1.0:
+            update = update * scale
+        if update.dtype != out_rows.dtype:
+            update = update.to(dtype=out_rows.dtype)
+        out_rows[start:stop].add_(update)
+
+
+@_add_low_rank_inplace.register_fake
+def _add_low_rank_inplace_fake(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
+                               strength: torch.Tensor, alpha_over_rank: float) -> None:
+    return None
+
+
+def requires_side_branch(layer: nn.Module) -> bool:
+    """Return whether an adapter must run beside ``layer`` instead of being merged into it.
+
+    A packed linear without its original dense weight cannot merge an adapter while preserving the export's
+    calibration. Its adapter runs as ``y = base(x) + strength * (alpha / rank) * B(A x)`` in the activation dtype.
+    When the original dense weight is retained, merge into it as before and let the pipeline repack the
+    quantized buffers after the adapter changes.
+    ``FASTVIDEO_LORA_SIDE_BRANCH=1`` forces the side branch for every layer, which makes the adapter strength
+    changeable at runtime without touching the base weights.
+    """
+    if envs.FASTVIDEO_LORA_SIDE_BRANCH.get():
+        return True
+    return getattr(layer, "weight", None) is None
+
 
 class BaseLayerWithLoRA(nn.Module):
+    # Wrappers whose forward does not add the unmerged delta must keep merging.
+    supports_side_branch: bool = True
 
     def __init__(
         self,
@@ -31,18 +80,24 @@ class BaseLayerWithLoRA(nn.Module):
         self.base_layer: nn.Module = base_layer
 
         self.merged: bool = False
+        self.side_branch: bool = (self.supports_side_branch and not training_mode and requires_side_branch(base_layer))
         # A frozen CPU snapshot is needed only to undo inference-time merging.
         # Training never merges adapters; retaining every H3 projection here
         # otherwise adds several GiB of host memory per HSDP rank.
-        self.cpu_weight = None if training_mode else base_layer.weight.detach().to("cpu").clone()
+        self.cpu_weight = (None if training_mode or self.side_branch else base_layer.weight.detach().to("cpu").clone())
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
         self.lora_rank = lora_rank
-        self.lora_alpha = lora_alpha
+        self.lora_alpha: float | None = lora_alpha
         self.training_mode = training_mode
         self.lora_path: str | None = None
-        self.lora_strength: float = 1.0
+        # The side branch reads the strength from this CPU scalar, so compiled regions take it as an input. A Python
+        # float would be guarded by value, and each new strength would recompile until fullgraph hits the limit.
+        with torch.inference_mode(False):
+            self._side_branch_strength = torch.ones((), dtype=torch.float64)
+        self._strength_is_zero = False
+        self.lora_strength = 1.0
 
         if training_mode:
             assert self.lora_rank is not None, "LoRA rank  must be set for training mode"
@@ -68,6 +123,16 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_B = None
 
     @property
+    def lora_strength(self) -> float:
+        return self._lora_strength
+
+    @lora_strength.setter
+    def lora_strength(self, strength: float) -> None:
+        self._lora_strength = float(strength)
+        self._side_branch_strength.fill_(self._lora_strength)
+        self._strength_is_zero = self._lora_strength == 0.0
+
+    @property
     def weight(self) -> torch.Tensor:
         """The wrapped layer's weight.
 
@@ -90,28 +155,43 @@ class BaseLayerWithLoRA(nn.Module):
         """The wrapped layer's bias, or ``None`` when it has none."""
         return getattr(self.base_layer, "bias", None)
 
-    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # The wrapper adds no compiled region around the base layer, so it runs exactly as it would unwrapped: eagerly,
+        # or inside a caller's compiled block. Compiling a packed NVFP4/FP8 linear on its own changes its numerics, and
+        # a wrapped layer with no adapter or strength 0 must equal the unwrapped layer exactly.
+        if self.lora_A is None or (self.side_branch and self._strength_is_zero):
+            # No adapter, or strength 0 on a side branch, is exactly the unadapted layer, down to the output dtype.
+            # A merge-mode wrapper reaches this branch while its first adapter is still loading or after a load
+            # failed: the pipeline wraps every linear before it reads the weights, so an unadapted request must
+            # not depend on an adapter that is not there.
+            return self.base_layer(x)
+
+        out, output_bias = self.base_layer(x)
+        if self.merged or self.disable_lora:
+            return out.to(x), output_bias
+        return self._add_adapter(out, x), output_bias
+
+    @torch.compile()
+    def _add_adapter(self, out: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         lora_A = self.lora_A
         lora_B = self.lora_B
-        if isinstance(self.lora_B, DTensor):
-            lora_B = self.lora_B.to_local()
-            lora_A = self.lora_A.to_local()
-
-        if not self.merged and not self.disable_lora:
-            lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
-            lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
-            delta = x @ lora_A_sliced.T @ lora_B_sliced.T
-            if self.lora_alpha != self.lora_rank:
-                delta = delta * (
-                    self.lora_alpha / self.lora_rank  # type: ignore
-                )  # type: ignore
-            delta = delta * self.lora_strength
-            out, output_bias = self.base_layer(x)
-            return out + delta, output_bias
-        else:
-            out, output_bias = self.base_layer(x)
-            return out.to(x), output_bias
+        if isinstance(lora_B, DTensor):
+            lora_B = lora_B.to_local()
+            lora_A = lora_A.to_local()
+        lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
+        lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
+        alpha_over_rank = 1.0
+        if self.lora_alpha != self.lora_rank:
+            alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
+        if self.side_branch:
+            # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
+            _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
+            return out
+        scale = float(self.lora_strength) * alpha_over_rank
+        delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
+        if scale != 1.0:
+            delta = delta * scale
+        return out + delta
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -127,6 +207,12 @@ class BaseLayerWithLoRA(nn.Module):
                          lora_path: str | None = None,
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
+        if self.side_branch:
+            if accumulate and self.lora_A is not None:
+                raise ValueError("Accumulating adapters is unsupported on a side-branch LoRA layer (packed or "
+                                 "forced side branch); load one adapter at a time.")
+            # Kept in bf16 so the branch matches the activation dtype of a packed base layer.
+            A, B = A.to(torch.bfloat16), B.to(torch.bfloat16)
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -134,16 +220,20 @@ class BaseLayerWithLoRA(nn.Module):
         # Store rank and alpha directly
         rank = A.shape[0]  # rank is the first dimension of A
         self.lora_rank = rank
-        self.lora_alpha = int(lora_alpha) if lora_alpha is not None else rank
+        self.lora_alpha = lora_alpha if lora_alpha is not None else rank
         self.lora_strength = float(strength)
 
+        if self.side_branch:
+            self.merged = False
+            self.lora_path = lora_path
+            return
         if not training_mode:
             self.merge_lora_weights(accumulate=accumulate)
         self.lora_path = lora_path
 
     @torch.no_grad()
     def merge_lora_weights(self, accumulate: bool = False) -> None:
-        if self.disable_lora:
+        if self.disable_lora or self.side_branch:
             return
 
         if self.merged and not accumulate:
@@ -164,13 +254,7 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device()).full_tensor()
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B).to(data) @ self.slice_lora_a_weights(self.lora_A).to(data))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
+            unsharded_base_layer.weight = nn.Parameter(self._merged_weight(data).to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(get_local_torch_device(),
@@ -187,20 +271,26 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
-            # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            lora_delta *= scale * self.lora_strength
-            data += lora_delta
-            self.base_layer.weight.data = data.to(current_device, non_blocking=True)
+            self.base_layer.weight.data = self._merged_weight(data).to(current_device, non_blocking=True)
 
         self.merged = True
+
+    def _merged_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """``weight`` plus the scaled adapter delta, in ``weight``'s dtype.
+
+        An adapter stored wider than the base (an FP32 adapter on a BF16 DiT) is multiplied and added at its own
+        precision and rounded once, as a merge-then-cast reference does; with FSDP or without.
+        """
+        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
+        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
+        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return (weight.to(accumulate_dtype) + (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
 
     @torch.no_grad()
     # @torch.compile(dynamic=True)
     def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
-        if self.disable_lora:
+        if self.disable_lora or self.side_branch:
             return
 
         if not self.merged:
@@ -228,6 +318,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     This class behaves exactly the same as the base VocabParallelEmbedding.
     Future versions will integrate LoRA functionality to support efficient parameter fine-tuning.
     """
+    supports_side_branch = False
 
     def __init__(
         self,
@@ -240,6 +331,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
 
 
 class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
+    supports_side_branch = False
 
     def __init__(
         self,
@@ -326,6 +418,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
 
 class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
+    supports_side_branch = False
 
     def __init__(
         self,

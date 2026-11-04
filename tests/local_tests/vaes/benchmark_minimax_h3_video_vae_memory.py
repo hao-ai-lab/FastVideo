@@ -62,12 +62,14 @@ def _make_layout(rows, latent_shape):
 
     from fastvideo.pipelines.basic.minimax_h3.packing import MiniMaxH3PackedLayout
 
+    # A structurally valid video-only layout: every row is a real video token.
+    num_rows = rows.shape[0]
     empty = torch.empty(0, dtype=torch.long, device=rows.device)
     return MiniMaxH3PackedLayout(
-        sequence_length=rows.shape[0],
-        position_ids=empty,
-        token_tags=empty,
-        video_indices=empty,
+        sequence_length=num_rows,
+        position_ids=torch.zeros(num_rows, 3, dtype=torch.long, device=rows.device),
+        token_tags=torch.zeros(num_rows, dtype=torch.long, device=rows.device),
+        video_indices=torch.arange(num_rows, device=rows.device),
         audio_indices=empty,
         text_indices=empty,
         num_condition_video_rows=0,

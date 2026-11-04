@@ -392,7 +392,7 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     lanes_dir = Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes"
     for script, payload in {
             "kernel_tests.sh": "pytest fastvideo-kernel/tests/ -vs",
-            "inference_vmoba.sh": "python fastvideo/tests/inference/vmoba/test_vmoba_inference.py",
+            "inference_vmoba.sh": "exec pytest ./fastvideo/tests/inference/vmoba/test_vmoba_inference.py -vs",
             "golden_gate.sh": 'exec pytest "$golden_root" -xvs',
             "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
             "vae.sh": "pytest ./fastvideo/tests/vaes -vs",

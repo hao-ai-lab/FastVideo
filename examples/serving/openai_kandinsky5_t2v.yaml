@@ -1,0 +1,39 @@
+# OpenAI-compatible server for Kandinsky-5.0 T2V Lite (5 seconds, 50 steps).
+# Use the distilled checkpoint or lower num_inference_steps for faster runs.
+#   fastvideo serve --config examples/serving/openai_kandinsky5_t2v.yaml
+generator:
+  model_path: kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_kandinsky5_t2v
+  served_model_name: kandinsky5-t2v
+
+default_request:
+  negative_prompt: >-
+    Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality,
+    low quality, ugly, deformed, walking backwards
+  sampling:
+    seed: 1024
+    num_frames: 121
+    height: 512
+    width: 768
+    fps: 24
+    num_inference_steps: 50
+    guidance_scale: 5.0
+  output:
+    return_frames: false

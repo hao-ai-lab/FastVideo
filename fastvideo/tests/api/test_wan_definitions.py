@@ -80,6 +80,40 @@ def test_legacy_aliases_and_sampling_defaults(model_path, config_name, preset_na
             assert getattr(sampling, name) == value
 
 
+@pytest.mark.parametrize("hf_id", [
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+])
+@pytest.mark.parametrize("path_form", ["renamed_parent", "trailing_slash", "snapshot", "snapshot_slash"])
+def test_local_path_forms_resolve_like_hub_id(tmp_path, hf_id, path_form):
+    expected = registry._get_config_info(hf_id)
+    org, name = hf_id.split("/", 1)
+    if path_form.startswith("snapshot"):
+        checkpoint = tmp_path / "hub" / f"models--{org}--{name}" / "snapshots" / ("0" * 40)
+    else:
+        checkpoint = tmp_path / "renamed-parent" / name
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "model_index.json").write_text(json.dumps({
+        "_class_name": "WanPipeline", "_diffusers_version": "0.33.0",
+    }))
+    path = str(checkpoint) + ("/" if path_form.endswith("slash") else "")
+    info = registry._get_config_info(path)
+    assert info.pipeline_config_cls is expected.pipeline_config_cls
+    assert info.default_preset == expected.default_preset
+
+
+@pytest.mark.parametrize("suffix", ["", "/"])
+def test_unknown_snapshot_falls_back_to_real_manifest(tmp_path, suffix):
+    checkpoint = tmp_path / "models--x--y" / "snapshots" / ("0" * 40)
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "model_index.json").write_text(json.dumps({
+        "_class_name": "WanImageToVideoPipeline", "_diffusers_version": "0.33.0",
+    }))
+    info = registry._get_config_info(str(checkpoint) + suffix)
+    assert info.pipeline_config_cls is pipeline_config.WanI2V480PConfig
+    assert info.default_preset == "wan_i2v_14b_480p"
+
+
 @pytest.mark.parametrize("directory,manifest_class,expected_family,expected_preset", [
     ("custom", "WanPipeline", "wan", "wan_t2v_1_3b"),
     ("custom", "WanImageToVideoPipeline", "wan", "wan_i2v_14b_480p"),
@@ -92,8 +126,6 @@ def test_legacy_aliases_and_sampling_defaults(model_path, config_name, preset_na
     # during a relocation, including when path and class detectors disagree.
     ("lucy-edit-custom", "WanPipeline", "wan", "wan_t2v_1_3b"),
     ("sfwan2.2-i2v-custom", "WanCausalDMDPipeline", "wan", "sf_wan_t2v_1_3b"),
-    ("dreamx-world-5b-lucy-edit-custom", "UnknownPipeline", "dreamx_world", "dreamx_world_5b_ar"),
-    ("dreamx-world-5b-custom", "WanPipeline", "wan", "wan_t2v_1_3b"),
 ])
 def test_local_manifest_detectors_keep_first_match(tmp_path, directory, manifest_class, expected_family, expected_preset):
     checkpoint = tmp_path / directory

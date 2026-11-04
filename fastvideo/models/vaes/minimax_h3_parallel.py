@@ -252,7 +252,7 @@ def _tile_split_applies(vae: AutoencoderKLMiniMaxH3, x: torch.Tensor) -> bool:
     # The batched tile decode (FASTVIDEO_H3_VAE_TILE_BATCH) is a different
     # serial path; the tile split replays only the per-tile one.
     return (envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get() and vae.use_tiling and not vae._tile_helpers_compiled
-            and x.shape[0] == 1 and _tile_batch_size() == 1 and not torch.is_grad_enabled())
+            and x.shape[0] == 1 and _tile_batch_size(vae.decoder) == 1 and not torch.is_grad_enabled())
 
 
 def _tile_grid(vae: AutoencoderKLMiniMaxH3, height: int, width: int):

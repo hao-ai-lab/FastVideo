@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Golden-gate: Wan2.1-T2V-1.3B transformer block 0 (also the SFWan/TurboWan arch).
+"""Golden-gate: Wan2.1-T2V-1.3B transformer block 0 (also the SFWan arch).
 
 Spec notes: arch-config defaults are the 14B model, so the 1.3B geometry is
 pinned explicitly from the checkpoint's transformer/config.json. RoPE is built

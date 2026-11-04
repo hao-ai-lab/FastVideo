@@ -99,8 +99,15 @@ def encode_ref_visual_anchor(
     model_index: dict[str, Any],
     fastvideo_args: FastVideoArgs,
     patch_size: tuple[int, int, int],
+    *,
+    augment: bool = True,
 ) -> torch.Tensor:
-    """Encode and cache official 0.999-noised ordered visual condition rows."""
+    """Encode ordered visual rows, optionally caching the inference noise augmentation.
+
+    Packed DMD/PDD training stores clean rows and applies the same augmentation
+    when preparing its reference layout. Existing Ref2VA SFT callers keep the
+    precomputed 0.999-noised anchor by default.
+    """
     visual_references = [reference for reference in references if reference.media_type != "audio"]
     if not visual_references:
         return torch.empty((0, MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH), dtype=torch.float32)
@@ -138,6 +145,13 @@ def encode_ref_visual_anchor(
             reference.latent_width = int(latents.shape[4])
             clean_rows.append(patchify_video_latents(latents, patch_size).float().contiguous())
             del posterior, latents, pixels
+
+        if not augment:
+            anchor = torch.cat(clean_rows).float().cpu().contiguous()
+            del clean_rows, vae
+            gc.collect()
+            torch.cuda.empty_cache()
+            return anchor
 
         clean_anchor = torch.cat(clean_rows).to(device=device, dtype=torch.float32)
         shapes = tuple((reference.num_latent_frames, reference.latent_height, reference.latent_width)

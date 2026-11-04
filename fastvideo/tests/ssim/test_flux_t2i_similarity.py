@@ -84,6 +84,7 @@ FLUX_FULL_QUALITY_MODEL_TO_PARAMS = {
 }
 
 
+@pytest.mark.skip(reason="FLUX.1-dev SSIM is paused while gated-model access is not provisioned for CI.")
 @pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="FLUX T2I SSIM test requires CUDA",

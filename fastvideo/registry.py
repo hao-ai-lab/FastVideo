@@ -20,9 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
-from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
-from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
 from fastvideo.configs.pipelines.helios import HeliosPipelineConfig
 from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
@@ -36,7 +34,6 @@ from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
-from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.configs.pipelines.flux_2 import (
     Flux2KleinPipelineConfig,
@@ -45,6 +42,8 @@ from fastvideo.configs.pipelines.flux_2 import (
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
+from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -53,22 +52,17 @@ from fastvideo.configs.pipelines.mmaudio import (
     MMAudioSmall44kV2AConfig,
     MMAudioV2AConfig,
 )
-from fastvideo.configs.pipelines.turbodiffusion import (
-    TurboDiffusionI2V_A14B_Config,
-    TurboDiffusionT2V_14B_Config,
-    TurboDiffusionT2V_1_3B_Config,
-)
 from fastvideo.models.wan import pipeline_config as wan_pipeline_config
-from fastvideo.models.wan.definition import WAN_MODEL_DEFINITION_GROUPS, WanModelDefinition
-from fastvideo.configs.pipelines.glm_image import GlmImageConfig
+from fastvideo.models.wan.definition import WAN_MODEL_DEFINITIONS, WanModelDefinition
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
-from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
+from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
 from fastvideo.api.flux import FluxSamplingParam
+from fastvideo.api.pika_h3_flex import PikaH3FlexSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -225,20 +219,35 @@ def _resolve_class_name(config: dict[str, Any]) -> str | None:
     return class_name
 
 
+OPEN_H3_REGENERATE_2K_HF_PATH = "Efficient-Large-Model/Open-H3-Regenerate-2K"
+
+
+def _is_open_h3_regenerate_2k_release(model_path: str) -> bool:
+    return os.path.isfile(os.path.join(model_path, "lora", "open_h3_regenerate_2k_lora.safetensors"))
+
+
 def _get_config_info(
     model_path: str,
     *,
     raise_on_missing: bool = True,
     revision: str | None = None,
+    allow_remote: bool = True,
 ) -> ConfigInfo | None:
+    # Normalize only the lookup key; keep the real path for manifest IO and detectors.
+    lookup_path = model_path.rstrip("/") or model_path
+    parts = lookup_path.split("/")
+    # Standard Hugging Face cache layout: models--{org}--{name}/snapshots/{revision}.
+    if len(parts) >= 3 and parts[-2] == "snapshots" and parts[-3].startswith("models--"):
+        lookup_path = parts[-3][len("models--"):].replace("--", "/", 1)
+
     # 1. Exact match
-    if model_path in _MODEL_HF_PATH_TO_NAME:
-        model_id = _MODEL_HF_PATH_TO_NAME[model_path]
+    if lookup_path in _MODEL_HF_PATH_TO_NAME:
+        model_id = _MODEL_HF_PATH_TO_NAME[lookup_path]
         logger.debug("Resolved model path '%s' from exact path match.", model_path)
         return _CONFIG_REGISTRY.get(model_id)
 
     # 2. Partial match: use short model name.
-    model_name = get_model_short_name(model_path.lower())
+    model_name = get_model_short_name(lookup_path.lower())
     all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(), key=len, reverse=True)
     for registered_model_hf_id in all_model_hf_paths:
         registered_model_name = get_model_short_name(registered_model_hf_id.lower())
@@ -248,10 +257,15 @@ def _get_config_info(
             return _CONFIG_REGISTRY.get(model_id)
 
     # 3. Use detectors (path or model_index pipeline name).
+    if os.path.exists(model_path) and _is_open_h3_regenerate_2k_release(model_path):
+        # The release keeps its Diffusers manifest under base_model/, so a renamed local copy has no root manifest.
+        return _CONFIG_REGISTRY.get(_MODEL_HF_PATH_TO_NAME[OPEN_H3_REGENERATE_2K_HF_PATH])
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
-    else:
+    elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
+    else:
+        return None
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")
@@ -631,7 +645,7 @@ def _register_configs() -> None:
         default_preset="hunyuan15_sr_1080p",
     )
 
-    # Hunyuan (excludes gamecraft, hyworld, and versioned models)
+    # Hunyuan (excludes hyworld, versioned models, and removed GameCraft checkpoints)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=HunyuanConfig,
@@ -670,18 +684,6 @@ def _register_configs() -> None:
         default_preset="hyworld_t2v",
     )
 
-    # HunyuanGameCraft
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=HunyuanGameCraftPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/HunyuanGameCraft-Diffusers",
-        ],
-        model_detectors=[lambda path: "gamecraft" in path.lower()],
-        model_family="gamecraft",
-        default_preset="gamecraft_i2v",
-    )
     # LingBotWorld2 causal-fast
     register_configs(
         sampling_param_cls=None,
@@ -1021,43 +1023,6 @@ def _register_configs() -> None:
         pipeline_cls_name="Kandinsky6TI2VAPipeline",
     )
 
-    # LongCat (T2V, I2V, VC use same config; workload varies by path)
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=["FastVideo/LongCat-Video-T2V-Diffusers"],
-        model_detectors=[
-            lambda path: "longcat" in path.lower() and "i2v" not in path.lower() and "imagetovideo" not in path.lower()
-            and "vc" not in path.lower() and "videocontinuation" not in path.lower(),
-        ],
-        model_family="longcat",
-        default_preset="longcat_t2v",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=["FastVideo/LongCat-Video-I2V-Diffusers"],
-        model_detectors=[
-            lambda path: "longcatimagetovideo" in path.lower() or ("longcat" in path.lower() and "i2v" in path.lower()),
-        ],
-        model_family="longcat",
-        default_preset="longcat_i2v",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(),
-        hf_model_paths=["FastVideo/LongCat-Video-VC-Diffusers"],
-        model_detectors=[
-            lambda path: "longcatvideocontinuation" in path.lower() or
-            ("longcat" in path.lower() and "vc" in path.lower()),
-        ],
-        model_family="longcat",
-        default_preset="longcat_vc",
-    )
-
     # MatrixGame 2.0 (I2V)
     register_configs(
         sampling_param_cls=MatrixGame2SamplingParam,
@@ -1198,76 +1163,43 @@ def _register_configs() -> None:
         default_preset="cosmos_predict2_2b",
     )
 
-    # TurboDiffusion
+    _register_wan_configs(WAN_MODEL_DEFINITIONS)
+
+    # Pika H3 Flex. It reuses MiniMax-H3's components, but its six-forward
+    # re-noise sampler and bucket geometry are a separate family contract.
     register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionT2V_1_3B_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
+        sampling_param_cls=PikaH3FlexSamplingParam,
+        pipeline_config_cls=PikaH3FlexPipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["Pika-Labs/Pika-H3-Flex"],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "pika-h3-flex",
+                "pika_h3_flex",
+                "pikah3flexmodularpipeline",
+                "pikah3flexref2vamodularpipeline",
+            )),
         ],
-        model_detectors=[lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.lower()],
-        model_family="turbodiffusion",
-        default_preset="turbo_t2v_1_3b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionT2V_14B_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-        ],
-        model_family="turbodiffusion",
-        default_preset="turbo_t2v_14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionI2V_A14B_Config,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
-        ],
-        model_family="turbodiffusion",
-        default_preset="turbo_i2v_a14b",
+        model_family="pika_h3_flex",
+        default_preset="pika_h3_flex_t2va",
+        pipeline_cls_name="PikaH3FlexModularPipeline",
     )
 
-    # Preserve first-match ordering around the DreamX registrations below.
-    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[0])
-
+    # Open-H3-Regenerate-2K (video -> video). Registered before MiniMax H3 so the first matching detector wins. There is
+    # no V2V WorkloadType, so, like the Kandinsky6 SR entries, it declares no workload.
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/DreamX-World-5B-Cam-Diffusers",
-        ],
+        pipeline_config_cls=OpenH3Regenerate2KPipelineConfig,
+        workload_types=(),
+        hf_model_paths=[OPEN_H3_REGENERATE_2K_HF_PATH],
         model_detectors=[
-            # Mutually exclusive with the AR detector below: Cam requires an
-            # explicit "cam" marker so hyphenated AR local paths (e.g.
-            # /ckpts/dreamx-world-5b-converted) don't first-match here —
-            # detector resolution is first-match in registration order.
-            lambda path:
-            ("dreamx-world" in path.lower() and "cam" in path.lower()) or "dreamxworldpipeline" in path.lower()
+            lambda path: any(token in path.lower()
+                             for token in ("open-h3-regenerate", "open_h3_regenerate", "openh3regenerate2kpipeline")),
         ],
-        model_family="dreamx_world",
-        default_preset="dreamx_world_5b_cam",
+        model_family="open_h3_regenerate_2k",
+        default_preset="open_h3_regenerate_2k",
+        pipeline_cls_name="OpenH3Regenerate2KPipeline",
     )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=DreamXWorld5BARPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/DreamX-World-5B-Diffusers",
-        ],
-        model_detectors=[
-            lambda path:
-            ("dreamx-world-5b" in path.lower() and "cam" not in path.lower()) or "dreamxworldarpipeline" in path.lower(
-            )
-        ],
-        model_family="dreamx_world",
-        default_preset="dreamx_world_5b_ar",
-    )
-    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[1])
 
     # MiniMax H3
     register_configs(
@@ -1314,18 +1246,6 @@ def _register_configs() -> None:
         default_preset="sd35_medium",
     )
 
-    # GLM-Image
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=GlmImageConfig,
-        hf_model_paths=[
-            "zai-org/GLM-Image",
-        ],
-        model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
-        workload_types=(WorkloadType.T2I, ),
-        model_family="glm_image",
-    )
-
     # FLUX.1-dev (Diffusers)
     register_configs(
         sampling_param_cls=FluxSamplingParam,
@@ -1341,17 +1261,17 @@ def _register_configs() -> None:
         ],
     )
 
-    # Z-Image-Turbo
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=ZImagePipelineConfig,
-        workload_types=(WorkloadType.T2I, ),
-        hf_model_paths=["Tongyi-MAI/Z-Image-Turbo"],
+        pipeline_config_cls=QwenImage21PipelineConfig,
+        workload_types=(WorkloadType.T2I, WorkloadType.I2I),
+        hf_model_paths=["Qwen/Qwen-Image-2.1"],
         model_detectors=[
-            lambda path: "zimagepipeline" in path or "z-image" in path or "z_image" in path,
+            lambda path: "qwenimage21pipeline" in path or "qwen-image-2.1" in path or "qwen_image21" in path,
         ],
-        model_family="zimage",
-        default_preset="zimage_turbo",
+        model_family="qwen_image21",
+        default_preset="qwen_image21",
+        pipeline_cls_name="QwenImage21Pipeline",
     )
 
 
@@ -1392,19 +1312,18 @@ def get_model_info(
         # is triggered just to log the replaced name).
         pipeline_name: str | None = override_pipeline_cls_name
         logger.info("Using override pipeline class name %s", pipeline_name)
+    elif config_info.pipeline_cls_name is not None:
+        # The resolved (path/detector-based) config pins the pipeline class, e.g. an I2V checkpoint whose
+        # `_class_name` would otherwise resolve to the T2V pipeline. The manifest is not read: a release such as
+        # Open-H3-Regenerate-2K keeps it in a subfolder.
+        pipeline_name = config_info.pipeline_cls_name
+        logger.info("Pinned pipeline class name %s", pipeline_name)
     else:
         if os.path.exists(model_path):
             config = verify_model_config_and_directory(model_path, required_component_dirs=[])
         else:
             config = maybe_download_model_index(model_path, revision=revision)
-
         pipeline_name = _resolve_class_name(config)
-        if config_info.pipeline_cls_name is not None:
-            # The resolved (path/detector-based) config pins the pipeline class,
-            # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve
-            # to the T2V pipeline.
-            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
-            pipeline_name = config_info.pipeline_cls_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -1430,8 +1349,8 @@ def get_pipeline_config_cls_from_name(pipeline_name_or_path: str) -> type[Pipeli
     return config_info.pipeline_config_cls
 
 
-def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
-    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str, *, allow_remote: bool = True) -> Any | None:
+    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         logger.warning("No match found for pipeline %s, using default sampling param.", pipeline_name_or_path)
         return None
@@ -1445,10 +1364,6 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
-    from fastvideo.pipelines.basic.dreamx_world.presets import (
-        ALL_PRESETS as DREAMX_WORLD_PRESETS, )
-    from fastvideo.pipelines.basic.gamecraft.presets import (
-        ALL_PRESETS as GAMECRAFT_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
         ALL_PRESETS as GEN3C_PRESETS, )
     from fastvideo.pipelines.basic.hunyuan.presets import (
@@ -1473,8 +1388,6 @@ def _register_presets() -> None:
         ALL_PRESETS as LINGBOTWORLD_FAST_PRESETS, )
     from fastvideo.pipelines.basic.lingbot_video.presets import (
         ALL_PRESETS as LINGBOT_VIDEO_PRESETS, )
-    from fastvideo.pipelines.basic.longcat.presets import (
-        ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
     from fastvideo.pipelines.basic.magi_human.presets import (
@@ -1485,26 +1398,26 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
     from fastvideo.pipelines.basic.minimax_h3.presets import (
         ALL_PRESETS as MINIMAX_H3_PRESETS, )
+    from fastvideo.pipelines.basic.pika_h3_flex.presets import (
+        ALL_PRESETS as PIKA_H3_FLEX_PRESETS, )
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.presets import (
+        ALL_PRESETS as OPEN_H3_REGENERATE_2K_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
         ALL_PRESETS as STABLE_AUDIO_PRESETS, )
-    from fastvideo.pipelines.basic.turbodiffusion.presets import (
-        ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
-    from fastvideo.pipelines.basic.zimage.presets import (
-        ALL_PRESETS as ZIMAGE_PRESETS, )
+    from fastvideo.pipelines.basic.qwen_image21.presets import (
+        ALL_PRESETS as QWEN_IMAGE21_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
-        DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
-        GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
         HUNYUAN15_PRESETS,
@@ -1517,18 +1430,18 @@ def _register_presets() -> None:
         LINGBOTWORLD_PRESETS,
         LINGBOTWORLD2_PRESETS,
         LINGBOTWORLD_FAST_PRESETS,
-        LONGCAT_PRESETS,
         LTX2_PRESETS,
         MAGI_HUMAN_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
+        PIKA_H3_FLEX_PRESETS,
+        OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
-        TURBODIFFUSION_PRESETS,
         WAN_PRESETS,
-        ZIMAGE_PRESETS,
+        QWEN_IMAGE21_PRESETS,
     )
     for group in all_preset_groups:
         for preset in group:
