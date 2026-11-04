@@ -156,7 +156,7 @@ def _attn_fwd_sparse(
         acc = acc * alpha[:, None]
 
         v = tl.load(V_ptr)
-        acc = tl.dot(p.to(tl.bfloat16), v, acc)
+        acc = tl.dot(p.to(v.dtype), v, acc)
         m_i = m_ij
 
     # ----- epilogue -----
@@ -257,14 +257,14 @@ def _attn_bwd_dkdv(
         do = tl.load(do_ptrs + block_sparse_offset * stride_tok)
         # Compute dV.
         ppT = pT
-        ppT = ppT.to(tl.bfloat16)
+        ppT = ppT.to(do.dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(tl.bfloat16)
+        dsT = dsT.to(qT.dtype)
         dk += tl.dot(dsT, tl.trans(qT))
         # Increment pointers.
     return dk, dv
@@ -336,7 +336,7 @@ def _attn_bwd_dq(
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.bfloat16)
+        ds = ds.to(kT.dtype)
         # Compute dQ (kT is raw; the caller applies sm_scale once at the end).
         dq += tl.dot(ds, tl.trans(kT))
         # Increment pointers.
