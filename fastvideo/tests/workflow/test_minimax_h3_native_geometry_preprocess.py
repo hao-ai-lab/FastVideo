@@ -77,7 +77,6 @@ def test_build_record_uses_the_clip_geometry(monkeypatch: pytest.MonkeyPatch) ->
     """A portrait 158-frame clip yields a record the training collator accepts."""
     num_frames = 158
     height, width = resolve_canvas_size(9, 16)
-    # np.zeros is not touched below, so the full-size canvas costs no memory.
     target = np.zeros((num_frames, height, width, 3), dtype=np.uint8)
     waveform = torch.zeros(2, audio_latent_num_frames(num_frames) * _SAMPLES_PER_AUDIO_LATENT)
     monkeypatch.setattr(ref2va, "load_training_media", lambda _path, num_frames: (target, waveform))

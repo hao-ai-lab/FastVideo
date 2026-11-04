@@ -391,7 +391,6 @@ def _build_record(
     fastvideo_args: FastVideoArgs,
     patch_size: tuple[int, int, int],
 ) -> dict[str, Any]:
-    # Each clip keeps its own canvas and longest native frame count.
     target_frames, target_waveform = load_training_media(sample.target_video_path, num_frames=None)
     num_frames, height, width = (int(value) for value in target_frames.shape[:3])
     references = _prepare_references(sample.references, num_frames)
