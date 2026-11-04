@@ -31,7 +31,7 @@ test("converted guides render admonitions, preserve content, and publish local i
   const home = await readFile(new URL("dist/index.html", site), "utf8");
   assert.ok(home.includes("Welcome to FastVideo"));
   assert.ok(home.includes("/FastVideo/assets/logos/logo.svg"));
-  assert.ok(home.includes("FastVideo is an inference and post-training framework for diffusion models."));
+  assert.ok(home.includes("FastVideo is an inference and post-training framework for video diffusion models."));
   assert.ok(!home.includes("About FastVideo and performance overview"));
   await readFile(new URL("dist/assets/logos/logo.svg", site));
 });

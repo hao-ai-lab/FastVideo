@@ -30,16 +30,11 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self,
-                 scheduler,
-                 transformer,
-                 use_btchw_layout: bool = False,
-                 latent_dtype: torch.dtype | None = None) -> None:
+    def __init__(self, scheduler, transformer, use_btchw_layout: bool = False) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.transformer = transformer
         self.use_btchw_layout = use_btchw_layout
-        self.latent_dtype = latent_dtype
 
     def forward(
         self,
@@ -93,7 +88,7 @@ class LatentPreparationStage(PipelineStage):
             batch.prompt_embeds = [dummy_prompt]
             batch.negative_prompt_embeds = []
             batch.do_classifier_free_guidance = False
-        dtype = self.latent_dtype or batch.prompt_embeds[0].dtype
+        dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents

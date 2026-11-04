@@ -6,6 +6,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
+import { readReadmeSections, README_HEADINGS } from "../lib/readme.mjs";
 
 const site = fileURLToPath(new URL("../", import.meta.url));
 const repo = resolve(site, "..");
@@ -176,12 +177,11 @@ export async function transferDocs() {
       return (await stat(path)).isDirectory() || /\.mdx?$/.test(path);
     },
   });
-  // Native callout directives and islands compile as MDX, while source links keep .md filenames.
   for (const file of await files(content)) {
     if (!file.endsWith(".md")) continue;
     const text = await readFile(file, "utf8");
     if (/^:::(?:note|tip|warning|danger|info|success)\b/m.test(text) || text.includes("<RecipeFamily ")) {
-      await writeFile(file.replace(/\.md$/, ".mdx"), text);
+      await writeFile(file.replace(/\.md$/, ".mdx"), text.replace(/\{#([^}]+)\}/g, "[#$1]"));
       await rm(file);
     }
   }
@@ -251,10 +251,15 @@ export async function transferDocs() {
 
   // The README owns announcements and the community list; the welcome page renders a short news digest.
   const readme = await readFile(join(repo, "README.md"), "utf8");
-  const news = readme.match(/^## NEWS\n([\s\S]*?)(?=^##|^###)/m)?.[1];
-  const projects = readme.match(/^## Awesome work using FastVideo or our research projects\n([\s\S]*?)(?=^## )/m)?.[1];
-  if (!news || !projects) throw new Error("The README news or project section boundary needs updating.");
-  const recent = [...news.matchAll(/^- `([\d/]+)`: (.+)$/gm)].slice(0, 2).map(([, date, text]) => {
+  const { news, projects } = readReadmeSections(readme);
+  if (!news || !projects) {
+    const accepted = (names) => names.map((name) => `"## ${name.replace(/\b\w/g, (c) => c.toUpperCase())}"`).join(", ");
+    throw new Error(
+      `README section not found. Accepted news headings: ${accepted(README_HEADINGS.news)}. ` +
+        `Accepted project headings: ${accepted(README_HEADINGS.projects)}.`,
+    );
+  }
+  const recent = news.slice(0, 2).map(({ date, text }) => {
     const links = [...text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)];
     const headline = text
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")

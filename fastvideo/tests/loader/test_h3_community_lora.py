@@ -370,3 +370,46 @@ def test_h3_pipeline_converts_and_rejects_foreign_adapters() -> None:
     with pytest.raises(ValueError, match="no MiniMax-H3 LoRA layers"):
         MiniMaxH3BasePipeline.convert_adapter_state_dict(pipeline, {"unet.down.0.lora_A.weight": torch.zeros(1)},
                                                          "adapter")
+
+
+class _RecordingLoRALayer(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.disable_lora = False
+        self.applied = False
+
+    def set_lora_weights(self, *args, **kwargs) -> None:
+        self.applied = True
+
+
+def test_layers_without_adapter_weights_log_one_summary_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An adapter that trains a subset of the wrapped linears warns once, not once per layer."""
+    import fastvideo.pipelines.lora_pipeline as lp
+
+    names = ["blocks.0.attn.to_q"] + [f"blocks.{i}.adaln_proj.linear" for i in range(40)]
+    layers = {name: _RecordingLoRALayer() for name in names}
+    adapter = {"blocks.0.attn.to_q.lora_A": torch.zeros(2, 4), "blocks.0.attn.to_q.lora_B": torch.zeros(4, 2)}
+    warnings: list[str] = []
+    monkeypatch.setattr(lp.dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(lp.logger, "warning", lambda message, *args: warnings.append(message % args))
+    pipeline = SimpleNamespace(
+        lora_adapters={"default": adapter},
+        lora_adapter_paths={"default": "pika.safetensors"},
+        lora_layers={"transformer": SimpleNamespace(lora_layers_by_block=lambda: iter([(None, layers)]))},
+        trainable_transformer_modules={},
+        cur_adapter_name="",
+        cur_adapter_path="",
+        cur_adapter_strength=1.0,
+        lora_initialized=True,
+        _setting_constructor_adapter=True,
+        _constructor_dense_lora_path=None,
+        fastvideo_args=SimpleNamespace(training_mode=False),
+    )
+
+    LoRAPipeline.set_lora_adapter(pipeline, "default", "pika.safetensors")
+
+    assert layers["blocks.0.attn.to_q"].applied and not layers["blocks.0.attn.to_q"].disable_lora
+    assert all(layers[name].disable_lora for name in names[1:])
+    assert len(warnings) == 1
+    assert "no weights for 40 wrapped layers" in warnings[0] and "blocks.0.adaln_proj.linear" in warnings[0]
