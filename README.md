@@ -48,59 +48,23 @@ FastVideo has the following features:
 
 ## Getting Started
 
-We recommend using [uv](https://docs.astral.sh/uv/) to create a clean environment. If you previously used Conda, switching to uv generally gives faster and more stable installs.
+Install FastVideo with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-# Create and activate a new uv environment
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-# Install FastVideo on NVIDIA CUDA 12
+# NVIDIA CUDA 12; use cu130 on CUDA 13
 UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
-Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
-[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
+Platform guides: [NVIDIA GPUs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/gpu/), [DGX Spark / GB10](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/), [Apple Silicon MLX](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/), [AMD / ROCm](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/amd/) — or the [full installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/).
 
-> **On an Apple Silicon Mac?** Install with `uv pip install -e '.[mlx]'` from
-> a clone, then pick a recipe in the
-> [cookbook](https://haoailab.com/FastVideo/cookbook/). See the
-> [MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
-
-Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
-
-> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the FastVideo CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=cu130 uv pip install -e .`, which compiles that kernel for you) rather than `UV_TORCH_BACKEND=cu130 uv pip install fastvideo`. A compatible prebuilt ARM64 FlashAttention wheel is available separately. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
-
-### Install with an AI coding agent
-
-FastVideo is a monorepo with rich agent guidance (see [`AGENTS.md`](AGENTS.md)). If you use Claude Code, Cursor, or another coding agent, paste the prompt below — it detects your platform and follows the matching guide:
-
-```text
-Install FastVideo (https://github.com/hao-ai-lab/FastVideo) into a fresh uv virtual environment.
-
-1. Detect the platform: run `uname -m`, `nvidia-smi`, and `nvcc --version`.
-2. Read and follow the matching install guide exactly (in this repo, or at
-   https://hao-ai-lab.github.io/FastVideo/getting_started/installation/):
-     - NVIDIA GPU, x86_64                         -> docs/getting_started/installation/gpu.md
-     - NVIDIA DGX Spark / GB10, aarch64, CUDA 13  -> docs/getting_started/installation/spark.md
-     - Apple Silicon, macOS                       -> docs/getting_started/installation/mlx.md
-3. Use uv for every step. If a command fails, debug it and tell me what you changed.
-4. Verify the result:
-     python -c "import fastvideo, torch; print('cuda', torch.cuda.is_available())"
-     fastvideo --help
-5. Report which platform you detected and any deviations you had to make.
-```
+To have a coding agent do the install, give it the [agent install prompt](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/#install-with-an-ai-coding-agent).
 
 ## Sparse Distillation
 
-For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
-
-See below for recipes and datasets:
-
-| Model                                                                                 | Sparse Distillation                                                                                             | Dataset                                                                                                  |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers) | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)       | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)     |
-| [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)   | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free) | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k) |
+Sparse distillation reaches >50× denoising speedup. See the [distillation guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/) and the [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/); the training recipes live under [`examples/distill/`](examples/distill/) with the [FastVideo Synthetic datasets](https://huggingface.co/FastVideo).
 
 ## Dreamverse — Realtime Video Generation & Editing
 
