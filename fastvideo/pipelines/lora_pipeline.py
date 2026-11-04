@@ -674,6 +674,7 @@ class LoRAPipeline(ComposedPipelineBase):
         # Merge the new adapter
         adapted_count = 0
         consumed: set[str] = set()
+        untouched: list[str] = []
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -714,12 +715,7 @@ class LoRAPipeline(ComposedPipelineBase):
                             adapted_count += 1
                             consumed.update((lora_A_name, lora_B_name, lora_alpha_name))
                         else:
-                            if rank == 0:
-                                logger.warning(
-                                    "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
-                                    lora_path,
-                                    name,
-                                )
+                            untouched.append(name)
                             if not accumulate:
                                 # An earlier adapter may be merged here; disabling alone would keep its delta.
                                 layer.unmerge_lora_weights()
@@ -728,6 +724,13 @@ class LoRAPipeline(ComposedPipelineBase):
                     repack_scope = [module] if module is not None else list(layers.values())
                     _convert_quantized_weights_after_lora_change(repack_scope,
                                                                  skip=_all_side_branch(layers.values(), repack_scope))
+        if untouched and rank == 0:
+            logger.warning(
+                "LoRA adapter %s has no weights for %d wrapped layers; LoRA is disabled on them (e.g. %s).",
+                lora_path,
+                len(untouched),
+                ", ".join(untouched[:5]),
+            )
         logger.info(
             "Rank %d: LoRA adapter %s applied to %d layers",
             rank,

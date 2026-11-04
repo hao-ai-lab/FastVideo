@@ -23,9 +23,21 @@ IN, OUT, RANK = 16, 12, 4
 
 @pytest.fixture(autouse=True)
 def _eager_forward(monkeypatch: pytest.MonkeyPatch):
-    """``BaseLayerWithLoRA.forward`` is ``torch.compile``d; run it eagerly, and merge on CPU even on MPS hosts."""
-    monkeypatch.setattr(torch._dynamo.config, "disable", True)
+    """``BaseLayerWithLoRA.forward`` is ``torch.compile``d; run it eagerly, and merge on CPU even on MPS hosts.
+
+    Dynamo flags go through ``config.patch``: its module serves them via ``__getattr__``, so a
+    ``monkeypatch.setattr`` teardown deletes the flag instead of restoring it (pytest 9).
+    """
     monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: torch.device("cpu"))
+    with torch._dynamo.config.patch(disable=True):
+        yield
+
+
+@pytest.fixture
+def dynamo_enabled():
+    """Re-enable dynamo inside the autouse eager scope for tests that compile on purpose."""
+    with torch._dynamo.config.patch(disable=False):
+        yield
 
 
 class _PackedMethod:
@@ -84,14 +96,12 @@ def test_wrapped_layer_at_strength_zero_is_bitwise_the_base_layer(packed: bool) 
 
 @pytest.mark.parametrize("backend", ["eager", "inductor"])
 @pytest.mark.parametrize("adapter", [False, True])
-def test_wrapping_does_not_change_a_compiled_block(monkeypatch: pytest.MonkeyPatch, backend: str,
-                                                   adapter: bool) -> None:
+def test_wrapping_does_not_change_a_compiled_block(dynamo_enabled, backend: str, adapter: bool) -> None:
     """Under a caller's compile the base layer is traced with the block, as it is unwrapped; the wrapper adds no
     region of its own, so the compiled block is unchanged with no adapter or at strength 0."""
     if backend == "inductor" and not torch.cuda.is_available():
         pytest.skip("Inductor execution requires a CUDA GPU for this regression")
     device = torch.device("cuda" if backend == "inductor" else "cpu")
-    monkeypatch.setattr(torch._dynamo.config, "disable", False)
     torch._dynamo.reset()
 
     class Block(torch.nn.Module):
@@ -117,9 +127,9 @@ def test_wrapping_does_not_change_a_compiled_block(monkeypatch: pytest.MonkeyPat
         torch._dynamo.reset()
 
 
-def test_wrapper_adds_no_compiled_region_around_the_base_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wrapper_adds_no_compiled_region_around_the_base_layer(monkeypatch: pytest.MonkeyPatch,
+                                                               dynamo_enabled) -> None:
     """Compiling a packed base layer on its own changes its numerics, so an uncompiled caller runs it eagerly."""
-    monkeypatch.setattr(torch._dynamo.config, "disable", False)
     torch._dynamo.reset()
     base = _packed_linear()
     layer = get_lora_layer(base)
@@ -179,11 +189,11 @@ def test_side_branch_chunked_update_matches_the_full_product(monkeypatch: pytest
 
 
 @pytest.mark.parametrize("backend", ["eager", "inductor"])
-def test_side_branch_chunked_update_compiles_fullgraph(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+def test_side_branch_chunked_update_compiles_fullgraph(monkeypatch: pytest.MonkeyPatch, dynamo_enabled,
+                                                       backend: str) -> None:
     if backend == "inductor" and not torch.cuda.is_available():
         pytest.skip("Inductor execution requires a CUDA GPU for this regression")
     device = torch.device("cuda" if backend == "inductor" else "cpu")
-    monkeypatch.setattr(torch._dynamo.config, "disable", False)
     monkeypatch.setattr(lora_linear, "_SIDE_BRANCH_CHUNK_BYTES", 64)
     torch._dynamo.reset()
     base = _packed_linear().to(device)
@@ -221,9 +231,8 @@ def test_side_branch_chunked_update_compiles_fullgraph(monkeypatch: pytest.Monke
         torch._dynamo.reset()
 
 
-def test_side_branch_strength_changes_do_not_recompile(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_side_branch_strength_changes_do_not_recompile(dynamo_enabled) -> None:
     """A float strength is guarded by value, so fullgraph would fail after ``recompile_limit`` distinct strengths."""
-    monkeypatch.setattr(torch._dynamo.config, "disable", False)
     torch._dynamo.reset()
     base = _packed_linear()
     layer = get_lora_layer(base)

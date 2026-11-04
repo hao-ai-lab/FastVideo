@@ -7,7 +7,16 @@ import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
-from quack.mx_utils import to_blocked, to_mx
+
+# Quack moved these helpers to quack.blockscaled.quantize, and some images ship neither.
+try:
+    from quack.mx_utils import to_blocked, to_mx
+except ImportError:
+    try:
+        from quack.blockscaled.quantize import to_blocked, to_mx
+    except ImportError:
+        to_blocked = None
+        to_mx = None
 
 MXFP8_BLOCK_SIZE = 32
 _BLOCKS_PER_PROGRAM = 16
@@ -31,6 +40,11 @@ def _quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor
 
 def quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Prequantize a weight with Quack and return hardware-blocked scales."""
+    if to_mx is None or to_blocked is None:
+        raise ImportError("MXFP8 weight quantization requires Quack's to_mx/to_blocked helpers "
+                          "(quack.mx_utils in older releases, quack.blockscaled.quantize in newer "
+                          "ones). Install a compatible quack to use the MXFP8 weight path; the "
+                          "Triton activation and SwiGLU quantizers do not need it.")
     _validate_mxfp8_matrix(matrix)
     return _quantize_mxfp8_weight_blockwise(matrix)
 
@@ -210,6 +224,13 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
     return quantized, blocked_scales
 
 
+def _as_e8m0_scales(scales: torch.Tensor) -> torch.Tensor:
+    # F.scaled_mm rejects flashinfer's uint8 E8M0 scale buffers; they hold the same bytes as float8_e8m0fnu.
+    if scales.dtype == torch.uint8:
+        return scales.view(torch.float8_e8m0fnu)
+    return scales
+
+
 def mxfp8_scaled_mm(
     activation_values: torch.Tensor,
     activation_scales: torch.Tensor,
@@ -221,9 +242,9 @@ def mxfp8_scaled_mm(
     return F.scaled_mm(
         mat_a=activation_values,
         mat_b=weight_values.mT,
-        scale_a=activation_scales,
+        scale_a=_as_e8m0_scales(activation_scales),
         scale_recipe_a=F.ScalingType.BlockWise1x32,
-        scale_b=weight_scales,
+        scale_b=_as_e8m0_scales(weight_scales),
         scale_recipe_b=F.ScalingType.BlockWise1x32,
         swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
         swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
