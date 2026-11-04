@@ -14,9 +14,11 @@ from starlette.testclient import TestClient
 from fastvideo import envs
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import (
+    ComponentConfig,
     EngineConfig,
     GeneratorConfig,
     LoRAAdapterConfig,
+    PipelineSelection,
     QuantizationConfig,
     ServeConfig,
     ServeLoRAConfig,
@@ -191,8 +193,10 @@ def test_startup_adapter_without_allow_list_still_parses() -> None:
     [("NVFP4", True, False, True), ("NVFP4", False, False, False), (None, True, False, False),
      ("FP8", True, False, False), (None, False, True, True)],
 )
-def test_runtime_switching_matches_side_branch_attachment(tmp_path: Path, quant: str | None, packed: bool,
-                                                          side_branch_env: bool, expected: bool) -> None:
+def test_runtime_switching_matches_side_branch_attachment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                          quant: str | None, packed: bool, side_branch_env: bool,
+                                                          expected: bool) -> None:
+    monkeypatch.setattr(lora_module, "get_model_info", lambda *args, **kwargs: SimpleNamespace(pipeline_cls=object))
     transformer = tmp_path / "transformer"
     transformer.mkdir()
     if packed:
@@ -409,6 +413,22 @@ def test_a_failed_change_whose_clear_also_fails_refuses_until_a_clear_succeeds(m
     assert generator.events[-2:] == [("clear",), ("generate", "plain again")]
 
 
+def test_a_retried_selection_after_an_unknown_state_clears_before_it_changes_the_layers(make_client) -> None:
+    generator = _FakeGenerator(failing={("orbit", None)}, clear_fails=True)
+    client = make_client(generator)
+    assert _sync(client, name="orbit").status_code == 500
+
+    refused = _sync(client, name="orbit", scale=1.0)
+    generator.failing.clear()
+    generator.clear_fails = False
+    retried = _sync(client, "styled", name="orbit", scale=1.0)
+
+    orbit = ("set", "orbit", "pablodawson/Orbit", 1.0)
+    assert refused.status_code == 500
+    assert retried.status_code == 200
+    assert generator.events == [orbit, ("clear",), ("clear",), ("clear",), orbit, ("generate", "styled")]
+
+
 def test_a_selection_after_a_failed_change_applies_normally(make_client) -> None:
     generator = _FakeGenerator(failing={("realism", 0.8)})
     client = make_client(generator)
@@ -508,6 +528,35 @@ def test_check_adapter_file_refuses_what_the_pipeline_would(tmp_path: Path, monk
         lora_module.check_adapter_file(LoRAAdapterConfig(id="x", path="org/x"))
 
 
+@pytest.mark.parametrize(("packed_dir", "expected"), [("transformer_ref", True), ("transformer", False)])
+def test_side_branch_check_looks_in_the_pipelines_transformer_partition(tmp_path: Path,
+                                                                        monkeypatch: pytest.MonkeyPatch,
+                                                                        packed_dir: str, expected: bool) -> None:
+    (tmp_path / packed_dir).mkdir()
+    (tmp_path / packed_dir / H3_NVFP4_DIT_EXPORT_FILENAME).touch()
+    ref2va = type("Ref2VAPipeline", (), {"_extra_config_module_map": {"transformer": "transformer_ref"}})
+    monkeypatch.setattr(lora_module, "get_model_info", lambda *args, **kwargs: SimpleNamespace(pipeline_cls=ref2va))
+    config = GeneratorConfig(model_path=str(tmp_path),
+                             engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4")))
+
+    with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False):
+        assert adapters_attach_as_side_branch(config) is expected
+
+
+@pytest.mark.parametrize(("file_name", "expected"), [(H3_NVFP4_DIT_EXPORT_FILENAME, True),
+                                                     ("diffusion_pytorch_model.safetensors", False)])
+def test_side_branch_check_follows_transformer_weights(tmp_path: Path, file_name: str, expected: bool) -> None:
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    (weights / file_name).touch()
+    config = GeneratorConfig(model_path=str(tmp_path / "model"),
+                             engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4")),
+                             pipeline=PipelineSelection(components=ComponentConfig(transformer_weights=str(weights))))
+
+    with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False):
+        assert adapters_attach_as_side_branch(config) is expected
+
+
 def test_side_branch_check_resolves_a_hub_model_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "transformer").mkdir()
     (tmp_path / "transformer" / H3_NVFP4_DIT_EXPORT_FILENAME).touch()
@@ -518,6 +567,7 @@ def test_side_branch_check_resolves_a_hub_model_id(tmp_path: Path, monkeypatch: 
         return str(tmp_path)
 
     monkeypatch.setattr(lora_module, "maybe_download_model", resolve)
+    monkeypatch.setattr(lora_module, "get_model_info", lambda *args, **kwargs: SimpleNamespace(pipeline_cls=object))
     config = GeneratorConfig(model_path="org/model",
                              engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4")))
 

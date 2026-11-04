@@ -16,9 +16,11 @@ from typing import Any
 
 from fastvideo import envs
 from fastvideo.api.schema import GeneratorConfig, LoRAAdapterConfig, ServeConfig, ServeLoRAConfig
-from fastvideo.layers.quantization.nvfp4_config import H3_NVFP4_DIT_EXPORT_FILENAME
+from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.layers.quantization.nvfp4_config import (H3_NVFP4_DIT_EXPORT_FILENAME, find_minimax_h3_nvfp4_dit_export)
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch
+from fastvideo.registry import get_model_info
 from fastvideo.utils import maybe_download_lora, maybe_download_model
 
 logger = init_logger(__name__)
@@ -43,21 +45,43 @@ def adapters_attach_as_side_branch(generator: GeneratorConfig) -> bool:
     """Whether adapters attach beside the base weights, so a request can change them on the running server.
 
     That holds with ``FASTVIDEO_LORA_SIDE_BRANCH=1`` and for a packed NVFP4 export, whose linears have no dense
-    weight to merge into. A Hugging Face model id is resolved to its snapshot first, fetching only the packed
-    transformer file.
+    weight to merge into. The export is looked for where the transformer loads from: ``transformer_weights`` when
+    set, otherwise the pipeline's transformer partition (``transformer_ref`` for Ref2VA). A Hugging Face model id
+    is resolved to its snapshot first, fetching only the packed transformer file.
     """
     if envs.FASTVIDEO_LORA_SIDE_BRANCH.get():
         return True
     quantization = generator.engine.quantization
     if quantization is None or quantization.transformer_quant != "NVFP4":
         return False
-    export = f"transformer/{H3_NVFP4_DIT_EXPORT_FILENAME}"
+    weights = generator.pipeline.components.transformer_weights
+    if weights is not None:
+        return find_minimax_h3_nvfp4_dit_export([weights]) is not None
+    export = f"{_transformer_partition(generator)}/{H3_NVFP4_DIT_EXPORT_FILENAME}"
     try:
         model_dir = maybe_download_model(generator.model_path, allow_patterns=[export])
     except ValueError:
         logger.warning("Could not resolve %s to check for a packed NVFP4 export", generator.model_path, exc_info=True)
         return False
     return (Path(model_dir) / export).is_file()
+
+
+def _transformer_partition(generator: GeneratorConfig) -> str:
+    """The model directory the selected pipeline loads its transformer from."""
+    workload = generator.pipeline.workload_type
+    try:
+        pipeline_cls = get_model_info(
+            generator.model_path,
+            workload_type=None if workload is None else WorkloadType.from_string(workload),
+            override_pipeline_cls_name=generator.pipeline.components.override_pipeline_cls_name,
+            revision=generator.revision,
+        ).pipeline_cls
+    except ValueError:
+        logger.warning("Could not resolve the pipeline for %s; looking for the packed export in transformer/",
+                       generator.model_path,
+                       exc_info=True)
+        return "transformer"
+    return getattr(pipeline_cls, "_extra_config_module_map", {}).get("transformer", "transformer")
 
 
 def check_adapter_file(adapter: LoRAAdapterConfig) -> None:
@@ -117,7 +141,7 @@ class LoraRuntime:
     check_adapter: Callable[[LoRAAdapterConfig], None] = check_adapter_file
     current_id: str | None = None
     current_strength: float | None = None
-    # Set only when clearing after a failed change failed too; the next successful change or clear resets it.
+    # Set only when clearing after a failed change failed too; only a successful clear resets it.
     unknown_state: bool = False
     adapters: dict[str, LoRAAdapterConfig] = field(init=False)
     loaded: set[str] = field(init=False, default_factory=set)
@@ -163,18 +187,19 @@ class LoraRuntime:
         Raises when the generator cannot be cleared back to the base model after a failed change, so the server
         never renders with an adapter nobody asked for.
         """
-        if selection is None:
+        if self.unknown_state:
+            # The layers may hold part of an adapter, and a retried selection the pipeline already recorded would
+            # skip repairing them, so only a successful clear makes any request servable again.
+            self._clear(generator)
             if self.unknown_state:
-                self._clear(generator)
-                if self.unknown_state:
-                    raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and "
-                                       "clearing the adapter to restore the base model failed too.")
-                return
+                raise RuntimeError("A failed LoRA adapter change left this server's adapter state unknown, and "
+                                   "clearing the adapter to restore the base model failed too.")
+        if selection is None:
             if self.current_id is None or self.current_strength == 0.0:
                 return
             self._set(generator, self.current_id, 0.0)
             return
-        if not self.unknown_state and self.current_id == selection.id and self.current_strength == selection.strength:
+        if self.current_id == selection.id and self.current_strength == selection.strength:
             return
         self._set(generator, selection.id, selection.strength)
 
