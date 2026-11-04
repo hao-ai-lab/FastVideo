@@ -15,7 +15,11 @@ def _write_executable(path: Path, contents: str) -> None:
 
 
 def _run_build(
-    tmp_path: Path, capability: str, cuda_release: str, cmake_args: str | None = None
+    tmp_path: Path,
+    capability: str,
+    cuda_release: str,
+    cmake_args: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     kernel_dir = tmp_path / "fastvideo-kernel"
     kernel_dir.mkdir()
@@ -51,7 +55,7 @@ def _run_build(
     if cmake_args is not None:
         env["CMAKE_ARGS"] = cmake_args
     result = subprocess.run(
-        ["bash", "build.sh"],
+        ["bash", "build.sh", *(extra_args or [])],
         cwd=kernel_dir,
         env=env,
         capture_output=True,
@@ -103,3 +107,25 @@ def test_build_script_preserves_explicit_tk_option(tmp_path: Path, option: str) 
     assert result.returncode == 0, result.stderr
     assert (result_dir / "cmake_args").read_text().count("-DFASTVIDEO_KERNEL_BUILD_TK=") == 1
     assert f"-DFASTVIDEO_KERNEL_BUILD_TK={option}" in (result_dir / "cmake_args").read_text()
+
+
+@pytest.mark.parametrize("cmake_args", [None, "-DOTHER_OPTION=ON", "-DFASTVIDEO_KERNEL_BUILD_EXTENSION=OFF"])
+@pytest.mark.parametrize("build_args", [["--python-only"], ["--rocm", "--python-only"]])
+def test_python_only_build_defaults_extension_to_off(
+    tmp_path: Path, cmake_args: str | None, build_args: list[str]
+) -> None:
+    result, result_dir = _run_build(tmp_path, "9.0", "13.0", cmake_args, build_args)
+
+    assert result.returncode == 0, result.stderr
+    assert (result_dir / "cmake_args").read_text().count("-DFASTVIDEO_KERNEL_BUILD_EXTENSION=OFF") == 1
+    if cmake_args == "-DOTHER_OPTION=ON":
+        assert cmake_args in (result_dir / "cmake_args").read_text()
+    if "--rocm" in build_args:
+        assert "-DGPU_BACKEND=ROCM" in (result_dir / "cmake_args").read_text()
+
+
+def test_python_only_build_rejects_extension_on(tmp_path: Path) -> None:
+    result, _ = _run_build(tmp_path, "9.0", "13.0", "-DFASTVIDEO_KERNEL_BUILD_EXTENSION=ON", ["--python-only"])
+
+    assert result.returncode != 0
+    assert "--python-only conflicts" in result.stderr
