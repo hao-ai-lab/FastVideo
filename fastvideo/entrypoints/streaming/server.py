@@ -38,6 +38,7 @@ from fastvideo.entrypoints.streaming.protocol import (
     SeedPromptsUpdated,
     SegmentPromptSource,
     SessionInitV2,
+    SessionTimeout,
     SnapshotState,
     StepComplete,
     parse_client_message,
@@ -67,8 +68,11 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 # RFC 6455 WebSocket close codes used by the server.
+_WS_CLOSE_NORMAL = 1000
 _WS_CLOSE_UNSUPPORTED_DATA = 1003
+_WS_CLOSE_INTERNAL_ERROR = 1011
 _WS_CLOSE_TRY_AGAIN_LATER = 1013
+_SessionEnd = Literal["segment_cap", "idle_timeout", "disconnected"]
 _ErrorCode = Literal[
     "session_rejected",
     "invalid_message",
@@ -236,10 +240,25 @@ async def _handle_session(
     await _send_json(websocket, _build_stream_start(session, state))
 
     try:
-        await _run_segment_loop(websocket, session, state)
-    finally:
-        with contextlib.suppress(RuntimeError):
-            await _send_json(websocket, Ltx2StreamComplete(reason="stop_requested"))
+        end = await _run_segment_loop(websocket, session, state)
+    except WebSocketDisconnect:
+        raise
+    except Exception as exc:
+        await _send_final_frame(
+            websocket,
+            ErrorMessage(code="internal_error",
+                         message=f"unexpected server error ({type(exc).__name__})",
+                         retryable=False),
+            _WS_CLOSE_INTERNAL_ERROR,
+            "internal_error",
+        )
+        raise
+    if end == "segment_cap":
+        with contextlib.suppress(InvalidSessionTransition):
+            session.transition(SessionState.COMPLETE)
+        await _send_final_frame(websocket, Ltx2StreamComplete(reason="segment_cap"), _WS_CLOSE_NORMAL, "segment_cap")
+    elif end == "idle_timeout":
+        await _send_session_timeout(websocket, state)
 
 
 async def _read_init_message(
@@ -256,6 +275,7 @@ async def _read_init_message(
         logger.info("session %s: init timeout", session.id[:8])
         with contextlib.suppress(InvalidSessionTransition):
             session.transition(SessionState.TIMEOUT)
+        await _send_session_timeout(websocket, state)
         return None
     except WebSocketDisconnect:
         return None
@@ -313,12 +333,12 @@ async def _run_segment_loop(
     websocket: WebSocket,
     session: Session,
     state: ServerState,
-) -> None:
+) -> _SessionEnd:
     cap = state.sessions.segment_cap
     while True:
         if session.segment_cap_reached(cap):
             logger.info("session %s: segment cap (%d) reached", session.id[:8], cap)
-            return
+            return "segment_cap"
 
         try:
             raw = await asyncio.wait_for(
@@ -329,9 +349,9 @@ async def _run_segment_loop(
             logger.info("session %s: idle timeout", session.id[:8])
             with contextlib.suppress(InvalidSessionTransition):
                 session.transition(SessionState.TIMEOUT)
-            return
+            return "idle_timeout"
         except WebSocketDisconnect:
-            return
+            return "disconnected"
         session.touch()
 
         try:
@@ -560,6 +580,22 @@ async def _send_error(
     await _send_json(
         websocket,
         ErrorMessage(code=code, message=message, retryable=retryable),
+    )
+
+
+async def _send_final_frame(websocket: WebSocket, message: Any, close_code: int, close_reason: str) -> None:
+    """Send the session's last frame and close; the client may already be gone."""
+    with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+        await _send_json(websocket, message)
+        await websocket.close(code=close_code, reason=close_reason)
+
+
+async def _send_session_timeout(websocket: WebSocket, state: ServerState) -> None:
+    await _send_final_frame(
+        websocket,
+        SessionTimeout(timeout_seconds=state.sessions.session_timeout_seconds),
+        _WS_CLOSE_NORMAL,
+        "session_timeout",
     )
 
 
