@@ -222,6 +222,15 @@ def unset_external(name: str) -> None:
     os.environ.pop(name, None)
 
 
+def external_with_prefixes(*prefixes: str) -> dict[str, str]:
+    """Return the variables outside the registry whose names start with one of ``prefixes``.
+
+    For tools that read an open-ended family of variables, such as FA4's ``FA4_*`` tuning knobs. The contract test
+    checks each prefix against its read allowlist.
+    """
+    return {name: value for name, value in os.environ.items() if name.startswith(prefixes)}
+
+
 @contextmanager
 def override_external(name: str, value: str | None) -> Iterator[None]:
     """Set, or unset when ``value`` is None, a variable outside the registry, and restore it on exit.
@@ -267,6 +276,12 @@ FASTVIDEO_HOST_IP = EnvStr(
     category="distributed",
     doc="IP address of this node when the node has several network interfaces. Set it on each node for multi-node "
     "inference.")
+FASTVIDEO_PG_TIMEOUT_MIN = EnvInt(
+    0,
+    category="distributed",
+    doc="Timeout in minutes for the training process groups' collectives (0 keeps PyTorch's 10-minute default). "
+    "Raise it for large models whose rank-0 load and scatter, checkpoint saves or long evaluations outlast the "
+    "default.")
 FASTVIDEO_LOOPBACK_IP = EnvStr("",
                                category="distributed",
                                doc="Loopback IP address to use instead of the detected one.")
@@ -346,11 +361,20 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
     category="attention",
     doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
     "floating-point reduction order, so it is an inference-only opt-in.")
-FASTVIDEO_VSA_SM100A = EnvBool(
+FASTVIDEO_MINIMAX_H3_DENSE_ATTN = EnvChoice(
+    "flash",
+    choices=("flash", "cudnn"),
+    category="attention",
+    doc="Kernel for MiniMax-H3 dense DiT self-attention: flash keeps the selected FlashAttention backend; with "
+    "FLASH_ATTN, cudnn sends the no-mask, no-grad dense call through cuDNN's fused SDPA. cuDNN has a different "
+    "reduction order, so this is an inference-only opt-in.")
+FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
-    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
-    "fastvideo-kernel reads the same variable with the same rule.")
+    doc="VIDEO_SPARSE_ATTN_H3 sends tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel; "
+    "grad-tracking forwards need its autograd operator, else Triton. "
+    "fastvideo-kernel reads the same variable with the same rule.",
+    deprecated_names=("FASTVIDEO_VSA_SM100A", ))
 FASTVIDEO_VSA_TRITON = EnvBool(
     False,
     category="attention",
@@ -360,6 +384,25 @@ FASTVIDEO_NVFP4_FA4 = EnvBool(
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_NVFP4_FA4_QK_TRANSFORM = EnvChoice(
+    "none",
+    choices=("none", "smooth_k", "hadamard", "smooth_k+hadamard"),
+    category="attention",
+    doc="Exact Q/K preconditioning applied right before NVFP4 quantization on the FlashAttention-4 NVFP4 path: "
+    "smooth_k subtracts each head's token-mean of K, hadamard rotates Q and K by the head-dim Hadamard matrix. "
+    "Must match the qk_transform the model was QAD-trained with. An explicit nvfp4_qk_transform attention "
+    "implementation argument takes precedence.")
+FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT = EnvBool(
+    True,
+    category="attention",
+    doc="With FASTVIDEO_NVFP4_FA4_QK_TRANSFORM other than none, apply the transform and the NVFP4 quantization in one "
+    "fused Triton kernel per tensor (same FP4 codes and scale factors as the unfused path). Set it to 0 to use the "
+    "unfused PyTorch transform and flashinfer quantization.")
+FASTVIDEO_NVFP4_FA4_BF16_BLOCKS = EnvStr(
+    "",
+    category="attention",
+    doc="Comma-separated MiniMax-H3 transformer_blocks indices whose attention stays in BF16 while "
+    "FASTVIDEO_NVFP4_FA4 quantizes the rest, for example 45,49.")
 FASTVIDEO_FA4_PV_MODE = EnvChoice(
     "bf16",
     choices=("bf16", "fp8"),
@@ -425,7 +468,8 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
-    "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+    "modulate,qknorm_rope,swiglu. The whole-tier value mk selects the MotionKernel kernels instead of "
+    "the Sol-Engine ones. Empty, 0, or none keeps the eager implementation.")
 FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
     "",
     category="performance",
@@ -446,6 +490,11 @@ FASTVIDEO_MLX_DQ_GEMM = EnvStr(
     category="performance",
     doc="MLX dequantized GEMM for affine-quantized weights: 0 turns it off, 1 uses the measured minimum row count, "
     "and an integer sets the minimum row count.")
+FASTVIDEO_MLX_QUANT_GEMM = EnvStr(
+    "auto",
+    category="performance",
+    doc="MLX H3 affine-quantized GEMM path: auto keeps FASTVIDEO_MLX_DQ_GEMM behaviour, dequant always uses "
+    "dequantize + dense GEMM for wide inputs, qmm always uses mx.quantized_matmul.")
 FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D = EnvBool(True,
                                               category="performance",
                                               doc="LTX-2 VAE uses the channels_last_3d memory format.")
@@ -586,7 +635,48 @@ FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
 FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
-                               "(sm_120, no-grad, single sequence-parallel rank).")
+                               "(sm_120 or GB10 sm_121, no-grad, eager inference).")
+FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
+    "",
+    choices=("", "fp8", "bf16"),
+    category="attention",
+    doc="Prefix split for the FP4 sparse attention kernel: keep the dense prefix query tiles (text, "
+    "reference and audio rows) off the FP4 kernel and run those rows densely with fp8 or bf16 Q/K and "
+    "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
+    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Use "
+    "64/128-token tiles. Empty keeps each row on the FP4 kernel.")
+FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
+    -1,
+    category="attention",
+    doc="Number of leading denoising steps that use the FP4 prefix split (see "
+    "FASTVIDEO_H3_VSA_FP4_PREFIX). -1 applies it to every step; 0 disables it. Early steps set the "
+    "global structure, so a small value keeps most of the split's quality benefit for a fraction of "
+    "its cost.")
+FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P = EnvBool(
+    False,
+    category="attention",
+    doc="Quantize the FP4 attention probabilities with the two-level scheme the QAD student trained "
+    "with (rowmax-derived s_P1, then per-block s_P2) instead of the kernel's single-level default.")
+FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
+    False,
+    category="attention",
+    doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
+    "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
+    0,
+    category="performance",
+    doc="Rows per chunk when the VSA FP4 gate branch expands the pooled compression output back "
+    "to token rows. 0 keeps the single full-size index_select; a positive value caps the transient "
+    "at chunk_rows*heads*head_dim and is bit-identical.")
+FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
+    "",
+    choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
+    category="attention",
+    doc="Replace tile-128 fine attention, preserving VSA selection and compression, with the Triton "
+    "emulator of the sparse FP4 kernel: emulator-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; "
+    "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
+    "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
+    "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -617,9 +707,22 @@ FASTVIDEO_H3_FP8_GRANULARITY = EnvChoice("tensor",
                                          choices=("tensor", "channel"),
                                          category="performance",
                                          doc="FP8 scaling granularity for FASTVIDEO_H3_FP8_ATTENTION.")
+FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
+                                     category="performance",
+                                     doc="Apply inference LoRA adapters as a bf16 side branch next to every "
+                                     "target linear instead of merging them, so the adapter strength can change "
+                                     "at runtime. Packed NVFP4 or FP8 linears without their original dense "
+                                     "weight always use the side branch.")
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
-                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears: auto (cudnn for MiniMax-H3 DiT "
+                                    "profiles on sm_100), cutlass or cudnn.")
+FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
+    "off",
+    choices=("off", "table", "auto"),
+    category="performance",
+    doc="Run large cuDNN NVFP4 GEMMs over row chunks where its plan heuristic is slow: off, table (fixed "
+    "per-shape chunk counts) or auto (time 1/2/4 chunks once per shape; not deterministic across runs).")
 FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
                                    category="performance",
                                    doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "
@@ -654,10 +757,20 @@ FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
                                              category="performance",
                                              doc="Expand the serialized NVFP4 MiniMax-H3 text encoder with one "
                                              "fused Triton pass on GPUs without FP4 GEMM.")
-FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(8,
                                      category="performance",
-                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
-                                     "tile.")
+                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call. The ViT decoder "
+                                     "treats batch entries independently, so batching tiles matches per-tile "
+                                     "decoding, except for NVFP4 decoders with dynamic activation scales, which "
+                                     "always decode per tile. On GB200 at 768x1344, 8 tiles per call decodes 107 "
+                                     "frames in 3.7 s instead of 5.4 s and 362 frames in 12.8 s instead of 18.3 s "
+                                     "(+0.7 GiB peak). 1 decodes per tile.")
+FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE = EnvBool(False,
+                                              category="performance",
+                                              doc="Fuse the MiniMax-H3 video VAE decoder per-head QK RMSNorm and "
+                                              "partial RoPE into one Triton pass per attention layer (same "
+                                              "fp32/inference-dtype arithmetic; the RMSNorm reduction order differs, "
+                                              "like the DiT FASTVIDEO_MINIMAX_H3_FUSIONS qknorm_rope).")
 FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
                                           category="performance",
                                           doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
@@ -667,7 +780,25 @@ FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
                                          category="performance",
                                          doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
                                          "the sequence-parallel ranks in the parallel decode and keyframe encode; "
-                                         "bitwise equal to the serial path.")
+                                         "bitwise equal to the serial path. Requires "
+                                         "FASTVIDEO_H3_VAE_TILE_BATCH=1 (the split replays the per-tile path).")
+FASTVIDEO_H3_VAE_NVFP4_FUSED = EnvBool(True,
+                                       category="performance",
+                                       doc="Run NVFP4 MiniMax-H3 VAE decoder blocks through the bit-exact fused "
+                                       "Triton kernels at inference.")
+FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH = EnvBool(True,
+                                            category="performance",
+                                            doc="Replay small fused NVFP4 MiniMax-H3 VAE decoder calls (at most "
+                                            "four 1797-token tiles) as per-shape CUDA graphs.")
+FASTVIDEO_H3_VAE_NVFP4_DECODER = EnvPath(None,
+                                         category="performance",
+                                         doc="Exported NVFP4 MiniMax-H3 video decoder (.pt, or .safetensors with "
+                                         "bf16 masters or pre-packed NVFP4 weights) that replaces the VAE decoder "
+                                         "at load; skips the INT8 ConvRot overlay.")
+FASTVIDEO_H3_VAE_INT8_OVERLAY = EnvBool(True,
+                                        category="performance",
+                                        doc="Apply the INT8 ConvRot decoder overlay when the MiniMax-H3 VAE folder "
+                                        "ships one; 0 decodes with the dense weights.")
 FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
                                            category="performance",
                                            doc="Share the INT8 activation rotation and quantization across the "
@@ -676,6 +807,21 @@ FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
                                                category="performance",
                                                doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
                                                "projections.")
+FASTVIDEO_H3_VAE_COMPILE_BLOCKS = EnvBool(False,
+                                          category="performance",
+                                          doc="Run the MiniMax-H3 video VAE decoder transformer blocks through one "
+                                          "regional torch.compile graph: Inductor fuses the fp32 residual scale/add "
+                                          "pairs, the RMSNorm+cast and the SwiGLU silu*mul.")
+FASTVIDEO_H3_VAE_UINT8_PIXELS = EnvBool(True,
+                                        category="performance",
+                                        doc="Quantize single-GPU MiniMax-H3 video VAE output to uint8 on the GPU per "
+                                        "chunk and stream uint8 into the host buffer; frames are bitwise identical "
+                                        "to the fp32 path. 0 streams fp32.")
+FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH = EnvInt(1,
+                                            category="performance",
+                                            doc="Spatial tiles per MiniMax-H3 video VAE encoder call (reference and "
+                                            "keyframe encodes); 1 encodes per tile. Batched tiles differ from "
+                                            "per-tile encoding only in reduction order.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "

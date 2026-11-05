@@ -24,6 +24,7 @@ exec pytest \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
+  ./fastvideo/tests/distributed/test_sp_warmup_device.py \
   ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/training/test_ltx2_rope_fps.py \
@@ -31,6 +32,7 @@ exec pytest \
   ./fastvideo/tests/inference/test_inference_regional_compile.py \
   ./fastvideo/tests/attention/ \
   ./fastvideo/tests/layers/test_pdd_linear.py \
+  ./fastvideo/tests/layers/test_lora_side_branch.py \
   ./fastvideo/tests/layers/test_triton_fused_norm.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \

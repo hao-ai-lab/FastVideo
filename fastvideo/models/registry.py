@@ -71,7 +71,12 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
+_TEXT_TO_IMAGE_DIT_MODELS = {
+    "QwenImage21Transformer2DModel": ("dits", "qwen_image21", "QwenImage21Transformer2DModel"),
+}
+
 _TEXT_ENCODER_MODELS = {
+    "QwenImage21Qwen3VLConditioner": ("encoders", "qwen_image21", "QwenImage21Qwen3VLConditioner"),
     "MMAudioDFNCLIPTextEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPTextEncoder"),
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "CLIPTextModelWithProjection": ("encoders", "clip", "CLIPTextModelWithProjection"),
@@ -108,6 +113,7 @@ _VAE_MODELS = {
     "AutoencoderKLWan": ("wan", "vae", "AutoencoderKLWan"),
     "LingBotWorld2WanVAE": ("vaes", "lingbotworld2_wanvae", "LingBotWorld2WanVAE"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
+    "AutoencoderKLQwenImage21": ("vaes", "qwen_image21", "AutoencoderKLQwenImage21"),
     "AutoencoderKLGen3CTokenizer": ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
     "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
@@ -154,6 +160,7 @@ _UPSAMPLERS = {
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
+    **_TEXT_TO_IMAGE_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,

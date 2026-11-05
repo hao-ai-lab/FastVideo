@@ -99,8 +99,15 @@ def encode_ref_visual_anchor(
     model_index: dict[str, Any],
     fastvideo_args: FastVideoArgs,
     patch_size: tuple[int, int, int],
+    *,
+    augment: bool = True,
 ) -> torch.Tensor:
-    """Encode and cache official 0.999-noised ordered visual condition rows."""
+    """Encode ordered visual rows, optionally caching the inference noise augmentation.
+
+    Packed DMD/PDD training stores clean rows and applies the same augmentation
+    when preparing its reference layout. Existing Ref2VA SFT callers keep the
+    precomputed 0.999-noised anchor by default.
+    """
     visual_references = [reference for reference in references if reference.media_type != "audio"]
     if not visual_references:
         return torch.empty((0, MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH), dtype=torch.float32)
@@ -138,6 +145,13 @@ def encode_ref_visual_anchor(
             reference.latent_width = int(latents.shape[4])
             clean_rows.append(patchify_video_latents(latents, patch_size).float().contiguous())
             del posterior, latents, pixels
+
+        if not augment:
+            anchor = torch.cat(clean_rows).float().cpu().contiguous()
+            del clean_rows, vae
+            gc.collect()
+            torch.cuda.empty_cache()
+            return anchor
 
         clean_anchor = torch.cat(clean_rows).to(device=device, dtype=torch.float32)
         shapes = tuple((reference.num_latent_frames, reference.latent_height, reference.latent_width)
@@ -291,6 +305,9 @@ def build_ref2va_parquet_record(
     ref_visual_anchor: torch.Tensor,
     ref_audio_anchor: torch.Tensor,
     references: list[MiniMaxH3PreparedReference],
+    num_frames: int = NUM_FRAMES,
+    height: int = VIDEO_HEIGHT,
+    width: int = VIDEO_WIDTH,
 ) -> dict[str, Any]:
     record = build_parquet_record(
         file_name=file_name,
@@ -298,6 +315,9 @@ def build_ref2va_parquet_record(
         video_latents=video_latents,
         audio_latents=audio_latents,
         text_embedding=text_embedding,
+        num_frames=num_frames,
+        height=height,
+        width=width,
     )
     record["schema_version"] = MINIMAX_H3_REF2VA_SCHEMA_VERSION
     record["text_token_tags"] = text_token_tags.to(dtype=torch.long, device="cpu").tolist()
@@ -312,8 +332,13 @@ def validate_record_contract(record: dict[str, Any]) -> None:
     if missing:
         raise ValueError(f"Ref2VA record is missing schema fields: {missing}")
     expected_target_shapes = {
-        "vae_latent_shape": [24, video_latent_num_frames(NUM_FRAMES), VIDEO_HEIGHT // 16, VIDEO_WIDTH // 16],
-        "audio_latent_shape": [2, 32, audio_latent_num_frames(NUM_FRAMES)],
+        "vae_latent_shape": [
+            24,
+            video_latent_num_frames(record["num_frames"]),
+            record["height"] // 16,
+            record["width"] // 16,
+        ],
+        "audio_latent_shape": [2, 32, audio_latent_num_frames(record["num_frames"])],
     }
     for name, expected in expected_target_shapes.items():
         if record[name] != expected:
@@ -323,9 +348,12 @@ def validate_record_contract(record: dict[str, Any]) -> None:
     collate_minimax_h3_ref2va_rows([record])
 
 
-def _prepare_references(references: tuple[MiniMaxH3RawReference, ...], ) -> list[MiniMaxH3PreparedReference]:
+def _prepare_references(
+    references: tuple[MiniMaxH3RawReference, ...],
+    num_frames: int = NUM_FRAMES,
+) -> list[MiniMaxH3PreparedReference]:
     raw_references = build_minimax_h3_references(references)
-    prepared = [prepare_reference(reference, NUM_FRAMES, AUDIO_SAMPLE_RATE) for reference in raw_references]
+    prepared = [prepare_reference(reference, num_frames, AUDIO_SAMPLE_RATE) for reference in raw_references]
     for index, (raw, resolved) in enumerate(zip(references, prepared, strict=True)):
         expected_audio = raw.media_type in {"audio", "video_audio"}
         if resolved.has_audio != expected_audio:
@@ -363,8 +391,9 @@ def _build_record(
     fastvideo_args: FastVideoArgs,
     patch_size: tuple[int, int, int],
 ) -> dict[str, Any]:
-    target_frames, target_waveform = load_training_media(sample.target_video_path)
-    references = _prepare_references(sample.references)
+    target_frames, target_waveform = load_training_media(sample.target_video_path, num_frames=None)
+    num_frames, height, width = (int(value) for value in target_frames.shape[:3])
+    references = _prepare_references(sample.references, num_frames)
 
     # The established single-sample helpers deliberately release each large
     # component before the next one is loaded, keeping this multi-sample path
@@ -396,6 +425,9 @@ def _build_record(
         ref_visual_anchor=ref_visual_anchor,
         ref_audio_anchor=ref_audio_anchor,
         references=references,
+        num_frames=num_frames,
+        height=height,
+        width=width,
     )
     record["id"] = sample.sample_id
     validate_record_contract(record)

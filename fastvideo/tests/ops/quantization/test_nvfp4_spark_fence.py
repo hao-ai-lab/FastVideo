@@ -48,7 +48,10 @@ def _spy_sync(monkeypatch):
     return syncs
 
 
+@pytest.mark.skipif(torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 1),
+                    reason="needs a non-GB10 Blackwell GPU")
 def test_fenced_quantize_matches_flashinfer_without_a_fence_off_spark(monkeypatch) -> None:
+    monkeypatch.setattr(nv, "_is_dgx_spark", lambda _index: False)  # also true when run on a real Spark
     real, pdl = _spy_quantize(monkeypatch)
     syncs = _spy_sync(monkeypatch)
     x, global_sf = _activation()
@@ -82,6 +85,7 @@ def test_qat_linear_quantizes_through_the_fence_with_unchanged_numerics(monkeypa
     x = torch.randn(4, 64, 256, device="cuda", dtype=torch.bfloat16)
     weight = torch.randn(512, 256, device="cuda", dtype=torch.bfloat16) / 16
     bias = torch.randn(512, device="cuda", dtype=torch.bfloat16)
+    monkeypatch.setattr(nv, "_is_dgx_spark", lambda _index: False)
     off_spark = fp4linear._LinearFWD4BWD16Fn.apply(x, weight, bias, "cutlass", 16, True)
 
     _, pdl = _spy_quantize(monkeypatch)
@@ -94,3 +98,100 @@ def test_qat_linear_quantizes_through_the_fence_with_unchanged_numerics(monkeypa
     reference = torch.nn.functional.linear(x.float(), weight.float(), bias.float())
     relative = (on_spark.float() - reference).norm() / reference.norm()
     assert relative < 0.15
+
+
+@pytest.mark.parametrize("rows", [200, 256])
+def test_swizzled_quantize_skips_the_pad_copy_bit_exactly(monkeypatch, rows: int) -> None:
+    torch.manual_seed(2)
+    x = torch.randn(rows, 256, device="cuda", dtype=torch.bfloat16)
+    global_sf = (448.0 * 6.0) / x.float().abs().amax()
+    expected = flashinfer.nvfp4_quantize(_pad_rows(x), global_sf, sfLayout=LAYOUT_128X4, do_shuffle=False)
+    # nv.F is torch.nn.functional, so the spy sees every pad; install it after the reference.
+    pads = []
+    real_pad = torch.nn.functional.pad
+    monkeypatch.setattr(nv.F, "pad", lambda *args, **kwargs: pads.append(args) or real_pad(*args, **kwargs))
+    quantized, scales = nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
+    assert pads == []
+    assert quantized.shape[0] == rows
+    assert torch.equal(quantized, expected[0][:rows]) and torch.equal(scales, expected[1])
+
+
+@pytest.mark.parametrize("rows", [200, 256])
+@pytest.mark.parametrize("layout", ["layout_128x4", "layout_8x4", "layout_linear"])
+@pytest.mark.parametrize("do_shuffle", [False, True])
+def test_fake_quantize_reports_flashinfer_shapes(rows: int, layout: str, do_shuffle: bool) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    if do_shuffle and (layout != "layout_128x4" or rows % 128):
+        pytest.skip("FlashInfer only shuffles 128x4, and _nvfp4_quantize row-pads shuffled inputs")
+    sf_layout = getattr(flashinfer.SfLayout, layout).value
+    nv._register_ops_once()
+    torch.manual_seed(3)
+    x = torch.randn(rows, 256, device="cuda", dtype=torch.bfloat16)
+    global_sf = (448.0 * 6.0) / x.float().abs().amax()
+    real = torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
+    with FakeTensorMode() as mode:
+        fake = torch.ops.fastvideo_fp4.nvfp4_quantize(mode.from_tensor(x), mode.from_tensor(global_sf), sf_layout,
+                                                      do_shuffle)
+    assert [tuple(t.shape) for t in fake] == [tuple(t.shape) for t in real]
+
+
+def test_compiled_swizzled_quantize_quantizes_once_without_row_guards(monkeypatch) -> None:
+    from torch._dynamo.testing import CompileCounterWithBackend
+
+    calls = []
+    real_fenced = nv.nvfp4_quantize_fenced
+    monkeypatch.setattr(nv, "nvfp4_quantize_fenced", lambda x, *args: calls.append(x.shape[0]) or real_fenced(x, *args))
+    counter = CompileCounterWithBackend("inductor")
+    torch._dynamo.reset()
+    compiled = torch.compile(lambda x, sf: nv._nvfp4_quantize(x, sf, sfLayout=LAYOUT_128X4),
+                             backend=counter,
+                             dynamic=True,
+                             fullgraph=True)
+    for rows in (200, 256, 300):
+        torch.manual_seed(rows)
+        x = torch.randn(rows, 256, device="cuda", dtype=torch.bfloat16)
+        global_sf = (448.0 * 6.0) / x.float().abs().amax()
+        calls.clear()
+        quantized, scales = compiled(x, global_sf)
+        expected = flashinfer.nvfp4_quantize(_pad_rows(x), global_sf, sfLayout=LAYOUT_128X4, do_shuffle=False)
+        assert calls == [rows]
+        assert torch.equal(quantized, expected[0][:rows]) and torch.equal(scales, expected[1])
+    assert counter.frame_count == 1
+    torch._dynamo.reset()
+
+
+# (255, 2064): K/16 = 129 pads to 132 scale columns, so 255 unpadded rows already
+# hold more scales than 256 rows x 129 logical columns.
+@pytest.mark.parametrize("rows,k", [(200, 256), (255, 2064)])
+def test_unpadded_flashinfer_scales_fall_back_to_the_pad_copy_once(monkeypatch, rows: int, k: int) -> None:
+    monkeypatch.setattr(nv, "_FLASHINFER_PADS_128X4_SCALES", True)
+    real_fenced = nv.nvfp4_quantize_fenced
+    calls = []
+
+    def unpadded(x, global_sf, sf_layout, do_shuffle=False):
+        calls.append(x.shape[0])
+        quantized, scales = real_fenced(x, global_sf, sf_layout, do_shuffle)
+        return quantized, scales[:x.shape[0]]
+
+    monkeypatch.setattr(nv, "nvfp4_quantize_fenced", unpadded)
+    torch.manual_seed(0)
+    x = torch.randn(rows, k, device="cuda", dtype=torch.bfloat16)
+    global_sf = (448.0 * 6.0) / x.float().abs().amax()
+    nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
+    assert calls == [rows, 256] and nv._FLASHINFER_PADS_128X4_SCALES is False
+    calls.clear()
+    nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
+    assert calls == [256]
+
+
+def test_global_sf_does_not_sync() -> None:
+    x = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+    x[3, 5] = float("inf")
+    torch.cuda.synchronize()
+    torch.cuda.set_sync_debug_mode("error")
+    try:
+        scale = fp4linear._global_sf(x)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
+    assert scale.item() == pytest.approx((448.0 * 6.0) / torch.finfo(torch.float32).max)

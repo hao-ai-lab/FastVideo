@@ -6,7 +6,8 @@ The test parses every Python file under fastvideo/ (except fastvideo/third_party
 and the registry fastvideo/envs.py) with ``ast`` and reports code that:
 
 - reads the environment directly for a name outside EXTERNAL_ALLOWLIST (test
-  code under fastvideo/tests/ may also read CI_ONLY_VARIABLES);
+  code under fastvideo/tests/ may also read CI_ONLY_VARIABLES), or calls
+  envs.external_with_prefixes with a prefix that EXTERNAL_ALLOWLIST does not cover;
 - writes the environment directly (os.environ, os.putenv, monkeypatch.setenv),
   or through the envs.*_external helpers for a name outside
   EXTERNAL_WRITE_ALLOWLIST;
@@ -55,6 +56,8 @@ EXTERNAL_ALLOWLIST = {
     "NCCL_*": "NCCL communication library.",
     "TORCH_*": "PyTorch runtime settings.",
     "OMP_*": "OpenMP threading.",
+    "FA4_*": "FlashAttention-4 (flash_attn.cute) tuning knobs; fa4_env_cache.py fingerprints them.",
+    "FA_*": "FlashAttention-4 (flash_attn.cute) tuning knobs; fa4_env_cache.py fingerprints them.",
     "HF_HUB_*": "huggingface_hub settings.",
     "RANK": "Set by torchrun and other launchers.",
     "LOCAL_RANK": "Set by torchrun and other launchers.",
@@ -90,6 +93,8 @@ EXTERNAL_ALLOWLIST = {
     "PYTORCH_MPS_*": "PyTorch MPS memory settings.",
     "USER": "Login name of the current user.",
     "PYTHONPATH": "Python module search path.",
+    "FLASHINFER_*": "flashinfer settings; the fused NVFP4 Q/K quantizer checks the quantization recipe switches.",
+    "TRTLLM_DISABLE_FP4_QUANT_FAST_MATH": "TensorRT-LLM FP4 quantization switch that flashinfer also reads.",
     "FASTVIDEO_VSA_CUTEDSL": "Read by fastvideo-kernel, which is outside this policy.",
     "FASTVIDEO_VSA_TRITON": "Read by fastvideo-kernel, which is outside this policy.",
     "FASTVIDEO_KERNEL_VSA_FORCE_TRITON": "Read by fastvideo-kernel, which is outside this policy.",
@@ -98,7 +103,7 @@ EXTERNAL_ALLOWLIST = {
 # Variables that FastVideo's own CI and CI tooling define. They keep their names
 # and test code under fastvideo/tests/ reads them directly; the value names what sets them.
 CI_ONLY_VARIABLES = {
-    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-ssim.yml",
+    "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-full-suite.yml",
     "PERF_RUN_SOURCE": ".buildkite/scripts/lanes/performance.sh",
     "PERF_UPLOAD_POLICY": ".buildkite/scripts/lanes/performance.sh",
     "PERF_REPORTS_DIR": ".buildkite/scripts/lanes/performance.sh",
@@ -111,6 +116,7 @@ CI_ONLY_VARIABLES = {
     "GPU_BACKEND": "fastvideo-kernel/CMakeLists.txt (kernel build).",
     "FASTVIDEO_PERFORMANCE_PROFILE_VERSION": "fastvideo/tests/modal/launch_l40s_job.py; recorded in performance identity.",
     "FASTVIDEO_CONTAINER_IMAGE_REF": "Modal CI launchers; recorded in performance identity.",
+    "FASTVIDEO_CI_BACKEND": "DGX Spark CI runner sets spark4; see docs/contributing/ci_architecture.md.",
     "FASTVIDEO_SSIM_MODEL_ID": "fastvideo/tests/ssim/ci_runner.py (SSIM CI scheduler).",
     "FASTVIDEO_MODAL_IMAGE": "Modal launch tooling in fastvideo/tests/modal/.",
     "FASTVIDEO_MODAL_VOLUME": "Modal launch tooling in fastvideo/tests/modal/.",
@@ -138,6 +144,7 @@ EXTERNAL_WRITE_ALLOWLIST = {
     "RAY_USAGE_STATS_ENABLED": "Turns off Ray usage statistics unless the user turned them on.",
     "CUTE_DSL_ENABLE_TVM_FFI": "CUTLASS DSL switch that the NVFP4 FlashAttention-4 path needs.",
     "CUBLAS_WORKSPACE_CONFIG": "cuBLAS workspace size; golden-gate tests set it before cuBLAS initializes.",
+    "FLASHINFER_DISABLE_FP4_QUANT_FAST_MATH": "Tests pin the flashinfer recipe gate of the fused NVFP4 Q/K quantizer.",
 }
 EXTERNAL_WRITE_HELPERS = {"set_external", "setdefault_external", "unset_external", "override_external"}
 
@@ -189,7 +196,6 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/ssim/ci_runner.py: whole-environ': 1,
     'fastvideo/tests/ssim/reference_videos_cli.py: read <dynamic>': 1,
     'fastvideo/tests/train/methods/test_minimax_h3_finetune.py: whole-environ': 2,
-    'fastvideo/tests/train/models/test_load_kandinsky5.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/tests/training/distill/test_anyflow_smoke.py: whole-environ': 2,
     'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/utils.py: read <dynamic>': 5,
@@ -365,6 +371,12 @@ class EnvAccessScanner:
         elif (isinstance(func, ast.Attribute) and func.attr in EXTERNAL_WRITE_HELPERS
               and self._is_envs_module(func.value) and not is_external_write_allowed(func.attr, name, self.in_tests)):
             self.violations.append(("write", name, node.lineno))
+        elif (isinstance(func, ast.Attribute) and func.attr == "external_with_prefixes"
+              and self._is_envs_module(func.value)):
+            # A prefix read is allowed when an EXTERNAL_ALLOWLIST pattern covers the whole prefix.
+            for arg in node.args:
+                prefix = self._literal(arg)
+                self.violations.append(("read", prefix if prefix == "<dynamic>" else f"{prefix}*", node.lineno))
 
     def _check_registry_use(self, node: ast.Attribute, parent: ast.AST | None, in_function: bool) -> None:
         # Only a call counts: ``getter = envs.X.get`` neither reads the variable

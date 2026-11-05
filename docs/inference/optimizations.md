@@ -114,6 +114,24 @@ the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
 reduction order relative to fixed-length FA4, so treat it as a speed/quality
 evaluation option rather than an exact-parity mode.
 
+### cuDNN SDPA for H3 dense attention (opt-in)
+
+With the `FLASH_ATTN` backend, MiniMax-H3's dense, unmasked, inference-only DiT
+self-attention can use cuDNN's fused SDPA engine instead of FlashAttention:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn
+```
+
+It keeps the same precision contract (bf16 operands, fp32 softmax/accumulation,
+bf16 output) but uses a different reduction order, so treat it as a
+speed/quality option rather than an exact-parity mode. Training calls, compiled
+regions, head sizes above 128, non-contiguous inputs, and the sparse VSA blocks
+stay on their existing paths. Standalone kernel timings at 37.7k and 109k tokens
+are within measurement noise of FA4; an in-model A/B on one GB200 measured a
+2.2% faster DiT forward. Requires CUDA and a torch build with
+`aten::_scaled_dot_product_cudnn_attention` (cuDNN 9.x).
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**
@@ -399,8 +417,8 @@ loader wraps each `_compile_conditions` block in
 loads. The ordinary compile path keeps its historical compiler-disabled
 attention boundary by default; regional compile opts in only the compatible
 attention instances owned by this transformer. MiniMax-H3 VSA is supported
-only by the inference-only sm_100a tile-64 route
-(`FASTVIDEO_VSA_SM100A=1` and `VSA_tile_size=64`); the loader probes that
+only by the inference-only ptx_blackwell tile-64 route
+(`FASTVIDEO_VSA_PTX_BLACKWELL=1` and `VSA_tile_size=64`); the loader probes that
 route before capture and keeps the transformer eager when the kernel or
 device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
 `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
@@ -450,7 +468,7 @@ regional MiniMax-H3 compile as an opt-in performance experiment, not an
 eager-parity-safe mode.
 
 The same caveat applies to sparse MiniMax-H3 regional compile. Its mask
-compaction, sm_100a launch, trained compression gates, and inference-only H3
+compaction, ptx_blackwell launch, trained compression gates, and inference-only H3
 fusions are fullgraph-compatible, but compilation can still change model
 numerics. The FastH3 `all` profile enables regional compile by default because
 it is the fastest measured route at 124, 243, and 345 frames. Use
@@ -479,7 +497,7 @@ MS-SSIM gate on *your* config, especially when combining
   PyTorch rejects `mode` together with `options`. The generic compile path
   can accept `mode`, but CUDA-graph compatibility remains backend- and
   shape-dependent. FA2/FA3 inference and FA4 expose traceable custom-op
-  boundaries. MiniMax-H3's sm_100a tile-64 inference route is the only VSA
+  boundaries. MiniMax-H3's ptx_blackwell tile-64 inference route is the only VSA
   path in the regional support envelope; other VSA paths and the FA3
   grad-enabled path remain outside it. Use the default inductor mode shown
   above unless your exact configuration has its own gate.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 import triton
 import triton.language as tl
+from triton.language.extra.cuda import libdevice
 
 
 @triton.jit
@@ -16,10 +17,11 @@ def _dequant_bias(Acc, XScale, WScale, Bias, Out, M: tl.constexpr, N: tl.constex
     acc = tl.load(Acc + offsets, valid, 0).to(tl.float32)
     x_scale = tl.load(XScale + rows * XS, valid, 0).to(tl.float32)
     weight_scale = tl.load(WScale + cols * WS).to(tl.float32)
-    out = acc * x_scale
-    out = out * weight_scale
+    # Keep each FP32 rounding boundary explicit through vectorization and PTX lowering.
+    out = libdevice.mul_rn(acc, x_scale)
+    out = libdevice.mul_rn(out, weight_scale)
     if HAS_BIAS:
-        out = out + tl.load(Bias + cols).to(tl.float32)
+        out = libdevice.add_rn(out, tl.load(Bias + cols).to(tl.float32))
     tl.store(Out + offsets, out, valid)
 
 

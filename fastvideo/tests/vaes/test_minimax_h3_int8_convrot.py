@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 
 import torch
+import pytest
 import torch.nn as nn
 from safetensors.torch import save_file
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.minimax_h3_int8_convrot import (
+    INT8_CONVROT_FILENAME,
     Int8ConvRotLinear,
     _int8_linear_from_tensors,
     dense_vae_safetensors,
+    int8_convrot_overlay_to_apply,
     overlay_minimax_h3_int8_convrot_decoder,
     parse_comfy_quant_marker,
     regular_hadamard,
@@ -80,6 +84,20 @@ def test_dense_vae_safetensors_drops_convrot_overlay() -> None:
         "/tmp/vae/diffusion_pytorch_model-00001-of-00003.safetensors",
         "/tmp/vae/other.safetensors",
     ]
+
+
+@pytest.mark.parametrize(("enabled", "ships_overlay", "applied"), [
+    (True, True, True),
+    (False, True, False),
+    (True, False, False),
+])
+def test_int8_convrot_overlay_follows_the_overlay_switch(tmp_path, env_overrides, enabled: bool, ships_overlay: bool,
+                                                         applied: bool) -> None:
+    if ships_overlay:
+        (tmp_path / INT8_CONVROT_FILENAME).write_bytes(b"")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_INT8_OVERLAY.override(enabled))
+    expected = tmp_path / INT8_CONVROT_FILENAME if applied else None
+    assert int8_convrot_overlay_to_apply(tmp_path) == expected
 
 
 def test_parse_comfy_quant_marker_reads_padded_uint8() -> None:

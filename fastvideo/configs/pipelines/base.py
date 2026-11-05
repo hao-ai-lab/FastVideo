@@ -64,6 +64,7 @@ class PipelineConfig:
     vae_decode_precision: str | None = None
     vae_tiling: bool = True
     vae_sp: bool = True
+    output_channels: int = 3
 
     # Image encoder configuration
     image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)

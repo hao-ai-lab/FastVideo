@@ -28,7 +28,7 @@ image = (
                   f"git -C /cutlass checkout {CUTLASS_COMMIT}")
     .env({"FLASHINFER_CUDA_ARCH_LIST": "12.0a", "FLASHINFER_WORKSPACE_BASE": "/vol/cache/flashinfer",
           "TORCHINDUCTOR_CACHE_DIR": "/vol/cache/inductor", "TRITON_CACHE_DIR": "/vol/cache/triton",
-          "FASTVIDEO_VSA_SM100A": "0", "FASTVIDEO_FA4": "0", "FASTVIDEO_STAGE_LOGGING": "1",
+          "FASTVIDEO_VSA_PTX_BLACKWELL": "0", "FASTVIDEO_FA4": "0", "FASTVIDEO_STAGE_LOGGING": "1",
           "HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 app = modal.App("h3-pro6000-fastest", image=image)

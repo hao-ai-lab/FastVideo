@@ -1,0 +1,26 @@
+# OpenAI-compatible image server for FLUX.2-dev.
+#   fastvideo serve --config examples/serving/openai_flux2_dev.yaml
+generator:
+  model_path: black-forest-labs/FLUX.2-dev
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: true
+      text_encoder: true
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: t2i
+    components:
+      override_pipeline_cls_name: Flux2Pipeline
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_flux2_dev
+  served_model_name: flux2-dev

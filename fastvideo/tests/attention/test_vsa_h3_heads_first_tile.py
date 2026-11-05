@@ -37,13 +37,13 @@ def _metadata(seq: int, n_tiles: int, tile_elems: int) -> SimpleNamespace:
 
 def _impl() -> vsa.MiniMaxH3VSAImpl:
     impl = object.__new__(vsa.MiniMaxH3VSAImpl)
-    impl._regional_compile_sm100a_enabled = None
+    impl._regional_compile_ptx_blackwell_enabled = None
     return impl
 
 
 @pytest.fixture
-def sm100a():
-    with envs.FASTVIDEO_VSA_SM100A.override(True):
+def ptx_blackwell():
+    with envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True):
         yield
 
 
@@ -64,7 +64,7 @@ def test_scatter_rows_heads_first_matches_indexed_assignment() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(("tile_elems", "n_tiles"), [(128, 37), (128, 40), (64, 41)])
-def test_heads_first_tile_equals_the_default_tile(sm100a, tile_elems: int, n_tiles: int) -> None:
+def test_heads_first_tile_equals_the_default_tile(ptx_blackwell, tile_elems: int, n_tiles: int) -> None:
     _require_cuda_triton()
     torch.manual_seed(1)
     meta = _metadata(seq=n_tiles * tile_elems - 300, n_tiles=n_tiles, tile_elems=tile_elems)
@@ -79,7 +79,7 @@ def test_heads_first_tile_equals_the_default_tile(sm100a, tile_elems: int, n_til
         assert heads_first.transpose(1, 2).is_contiguous()
         assert _same_bits(default, heads_first)
         # The tile-score pooling reads the logical prefix of the view directly
-        # (forward() drops the sm100a pairing tile); its FP32 sums must not move.
+        # (forward() drops the ptx_blackwell pairing tile); its FP32 sums must not move.
         logical = n_tiles * tile_elems
         assert _same_bits(vsa._pool_tiles(default[:, :logical], meta.variable_block_sizes, tile_elems),
                           vsa._pool_tiles(heads_first[:, :logical], meta.variable_block_sizes, tile_elems))

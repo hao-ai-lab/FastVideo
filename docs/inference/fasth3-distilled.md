@@ -19,7 +19,7 @@ other flag works unchanged:
 ```bash
 python examples/inference/basic/basic_fasth3_8step.py \
   --prompt 'A slow cinematic drone shot glides over a coastal town; gulls call over the harbor.' \
-  --num-gpus 4 --vsa-kernel sm100a \
+  --num-gpus 4 --vsa-kernel ptx_blackwell \
   --profile strict --no-inference-torch-compile --no-compile-vae \
   --height 768 --width 1344 --num-frames 124 \
   --output outputs/fasth3-8step
@@ -35,8 +35,8 @@ H3 clean-time values (`1 - sigma`). A uniform nine-point grid is not a substitut
 for those rungs.
 
 Compilation and H3 fusions are disabled above to establish an eager reference;
-they can be evaluated separately. On hardware without the sm100a extension,
-use `--vsa-kernel triton`; compare outputs and performance before adopting that
+they can be evaluated separately. Where the `ptx_blackwell` kernel is unavailable
+(non-Blackwell GPUs, or a build without it), use `--vsa-kernel triton`; compare outputs and performance before adopting that
 backend. This recipe is T2AV-only, not a distilled `transformer_ref` model.
 
 ## Export metadata and validation

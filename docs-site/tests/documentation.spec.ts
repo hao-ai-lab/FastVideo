@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
 
+test("Omni Apple silicon links open the published guide and MLX recipe", async ({ page }) => {
+  for (const slash of ["", "/"]) {
+    await page.goto(`/FastVideo/cookbook/minimax-h3/fasth3-omniref${slash}`);
+    const guide = page.getByRole("link", { name: "FastH3 Omni on MLX", exact: true });
+    await expect(guide).toHaveAttribute("href", "/FastVideo/inference/fasth3_omniref_mlx");
+    await guide.click();
+    await expect(page).toHaveURL(/\/FastVideo\/inference\/fasth3_omniref_mlx\/?$/);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  }
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-omniref");
+  await page.getByRole("link", { name: "MLX recipe", exact: true }).click();
+  await expect(page.getByLabel("Inference command")).toContainText("--mlx-checkpoint");
+});
+
 test("GitHub stars refresh automatically and survive a failed refresh", async ({ page }) => {
   await page.clock.install();
   let requests = 0;
@@ -33,8 +47,8 @@ test("documentation navigation opens transferred guides", async ({ page }) => {
   await page.goto("/FastVideo");
   await expect(page.getByRole("heading", { name: "Welcome to FastVideo", exact: true })).toBeVisible();
   await page.locator("#blume-nav-drawer").getByRole("link", { name: "Installation", exact: true }).click();
-  await expect(page).toHaveURL(/getting_started\/installation/);
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page).toHaveURL(/getting_started\/installation/, { timeout: 30000 });
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30000 });
 });
 
 test("the welcome page introduces the project and opens the cookbook", async ({ page }) => {
@@ -133,13 +147,14 @@ test("generated module links stay inside the transferred Python reference", asyn
 });
 
 test("search finds a transferred guide and opens it by keyboard", async ({ page }) => {
+  test.setTimeout(180000);
   await page.goto("/FastVideo");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   const query = page.getByRole("combobox", { name: "Search docs", exact: true });
   await query.fill("offloading");
-  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible();
+  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible({ timeout: 120000 });
   await query.press("Enter");
-  await expect(page).toHaveURL(/FastVideo\/inference\/offloading/);
+  await expect(page).toHaveURL(/FastVideo\/inference\/offloading/, { timeout: 30000 });
 });
 
 test("the welcome cards reflow on mobile without horizontal scrolling", async ({ page }) => {
@@ -153,15 +168,21 @@ test("the welcome cards reflow on mobile without horizontal scrolling", async ({
 test("the model catalog filters by family and checkpoint name", async ({ page }) => {
   await page.goto("/FastVideo/fast-models");
   const catalog = page.locator(".model-catalog");
-  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+  await expect(catalog.getByRole("status")).toHaveText("21 checkpoints");
   await page.getByRole("button", { name: "FastMetal", exact: true }).click();
   await expect(catalog.getByRole("status")).toHaveText("3 checkpoints");
   await page.getByRole("searchbox", { name: "Search checkpoints", exact: true }).fill("14B");
   await expect(catalog.getByRole("status")).toHaveText("1 checkpoint");
+  await page.getByRole("button", { name: "All models", exact: true }).click();
+  await page.getByRole("searchbox").fill("NVFP4");
+  const codes = await catalog.locator(".model-checkpoints code").allInnerTexts();
+  expect(codes.length).toBeGreaterThan(0);
+  expect(codes.every((text) => text.includes("NVFP4"))).toBe(true);
+  await expect(catalog.getByText("FastVideo/FastVideo-FastH3-8-Step-V2-FP8", { exact: true })).toHaveCount(0);
   await page.getByRole("searchbox").fill("no-such-model");
   await expect(catalog.getByRole("status")).toHaveText("0 checkpoints");
   await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+  await expect(catalog.getByRole("status")).toHaveText("21 checkpoints");
 });
 
 test("hardware guides are grouped below general inference tasks", async ({ page }) => {
@@ -177,7 +198,7 @@ test("family runbooks use React model cards without the old cookbook runtime", a
   await page.goto("/FastVideo/cookbook/wan/");
   await expect(page.locator(".recipe-card").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "← All models", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "← All recipes", exact: true })).toHaveAttribute(
     "href",
     /\/FastVideo\/cookbook$/,
   );

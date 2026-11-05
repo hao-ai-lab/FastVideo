@@ -519,6 +519,16 @@ class ComposedPipelineBase(ABC):
         """
         return
 
+    def _component_load_target(self, module_name: str) -> tuple[str, str]:
+        """The loader dispatch name and directory of ``module_name``, following ``_extra_config_module_map``.
+
+        A relative mapping (``"transformer_ref"``, ``"base_model/vae"``) dispatches on its own name. An absolute one is a
+        directory outside the checkpoint whose name says nothing about the component, so it dispatches on the role.
+        """
+        mapped = self._extra_config_module_map.get(module_name, module_name)
+        dispatch_name = module_name if os.path.isabs(mapped) else mapped
+        return dispatch_name, os.path.join(self.model_path, mapped)
+
     def load_modules(self,
                      fastvideo_args: FastVideoArgs,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
@@ -611,13 +621,7 @@ class ComposedPipelineBase(ABC):
                 modules[module_name] = loaded_modules[module_name]
                 continue
 
-            # we load the module from the extra config module map if it exists
-            if module_name in self._extra_config_module_map:
-                load_module_name = self._extra_config_module_map[module_name]
-            else:
-                load_module_name = module_name
-
-            component_model_path = os.path.join(self.model_path, load_module_name)
+            load_module_name, component_model_path = self._component_load_target(module_name)
 
             def load_component(load_module_name: str = load_module_name,
                                component_model_path: str = component_model_path,

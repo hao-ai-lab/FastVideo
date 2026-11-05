@@ -281,6 +281,8 @@ def test_set_lora_adapter_rejects_nvfp4_without_bf16_weight() -> None:
         cur_adapter_path="/first-adapter",
         cur_adapter_strength=1.0,
         lora_adapter_paths={},
+        lora_initialized=True,
+        lora_layers={},
         trainable_transformer_modules={"transformer": transformer},
     )
 

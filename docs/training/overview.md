@@ -62,6 +62,7 @@ FastVideo supports several training approaches:
 | **Full finetune** | Adapt entire model to a new domain or style |
 | **LoRA finetune** | Lightweight adaptation with frozen base weights |
 | **VSA finetune** | Finetune with Variable Sparse Attention for efficiency |
+| **PDD / DMPDD** | [Reference-conditioned MiniMax-H3 distillation](omniref_dmpdd.md) |
 | **Attn-QAT** | Train with fake-quantized attention, optionally followed by DMD2 distillation |
 
 ## Next Steps

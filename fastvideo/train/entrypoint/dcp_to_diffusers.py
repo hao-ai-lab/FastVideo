@@ -40,6 +40,7 @@ import gc
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import fastvideo.envs as envs
@@ -218,13 +219,15 @@ def _save_role_pretrained(
     module_names: list[str] | None = None,
     overwrite: bool = False,
     model: Any,
+    inference_contract: dict[str, Any] | None = None,
 ) -> str:
     """Export a role's modules into a diffusers-style model dir.
 
     Produces a ``model_path`` loadable by
     ``PipelineComponentLoader`` (``model_index.json``,
     ``transformer/``, ``vae/``, etc. copied from
-    ``base_model_path``).
+    ``base_model_path``). ``inference_contract`` becomes the export's
+    ``fastvideo_inference.json``.
     """
     import shutil
     from pathlib import Path
@@ -343,6 +346,10 @@ def _save_role_pretrained(
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
                 reverse_key = reverse_lookup_aliases.get(key, key)
+                if reverse_key not in reverse_mapping and key in reverse_mapping:
+                    # Plugins that enable LoRA after loading (e.g. Wan) record the
+                    # mapping under the pre-LoRA name, not ``base_layer.weight``.
+                    reverse_key = key
                 if reverse_key in reverse_mapping:
                     hf_key, merge_index, _ = reverse_mapping[reverse_key]
                     if merge_index is not None:
@@ -382,6 +389,13 @@ def _save_role_pretrained(
                 written_weights = [legacy_name]
             logger.info("Saved %s weight artifacts: %s", module_name, written_weights)
 
+            config_overrides = getattr(modules[module_name], "inference_config_overrides", None)
+            if callable(config_overrides):
+                from fastvideo.train.utils.inference_checkpoint import _apply_config_overrides
+                overrides = config_overrides()
+                if overrides:
+                    _apply_config_overrides(module_dir / "config.json", overrides)
+
             metadata_path = dst / "fastvideo_training_export.json"
             metadata_path.write_text(
                 json.dumps(
@@ -398,6 +412,18 @@ def _save_role_pretrained(
             )
 
         _barrier()
+
+    if _rank() == 0:
+        from fastvideo.train.utils.inference_checkpoint import (INFERENCE_CONTRACT_FILE, replace_json_file)
+
+        contract_path = dst / INFERENCE_CONTRACT_FILE
+        if inference_contract is not None:
+            replace_json_file(contract_path, inference_contract)
+        elif contract_path.exists() or contract_path.is_symlink():
+            # A copied base contract describes the initialization checkpoint,
+            # not this export; drop only this export's link to it.
+            contract_path.unlink()
+    _barrier()
 
     return str(dst)
 
@@ -428,6 +454,15 @@ def _strict_reload_verify(
     logger.info("Strict reload verification passed.")
 
 
+def _resolve_export_checkpoint(checkpoint_dir: str) -> Path:
+    """A DCP image directory, including a tagged weights-only one, or a regular checkpoint path."""
+    raw_path = Path(os.path.expanduser(checkpoint_dir)).resolve()
+    if (raw_path / "dcp" / ".metadata").is_file():
+        return raw_path
+    from fastvideo.train.utils.checkpoint import _resolve_resume_checkpoint
+    return _resolve_resume_checkpoint(checkpoint_dir, output_dir=checkpoint_dir)
+
+
 def convert(
     *,
     checkpoint_dir: str,
@@ -436,6 +471,7 @@ def convert(
     role: str = "student",
     overwrite: bool = False,
     verify: bool = False,
+    base_model_revision: str | None = None,
 ) -> str:
     """Load a DCP checkpoint and export as a diffusers model.
 
@@ -446,10 +482,7 @@ def convert(
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.train.utils.builder import build_from_config
-    from fastvideo.train.utils.checkpoint import (
-        CheckpointManager,
-        _resolve_resume_checkpoint,
-    )
+    from fastvideo.train.utils.checkpoint import CheckpointManager
     from fastvideo.train.utils.config import (
         RunConfig,
         load_run_config,
@@ -458,20 +491,18 @@ def convert(
     import torch.distributed.checkpoint as dcp
 
     # -- Resolve checkpoint directory --
-    resolved = _resolve_resume_checkpoint(
-        checkpoint_dir,
-        output_dir=checkpoint_dir,
-    )
+    resolved = _resolve_export_checkpoint(checkpoint_dir)
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")
+    metadata = CheckpointManager.load_metadata(resolved) if (resolved / "metadata.json").is_file() else {}
+    weights_only = bool(metadata.get("weights_only", False))
 
     # -- Obtain config --
     cfg: RunConfig
     if config_path is not None:
         cfg = load_run_config(config_path)
     else:
-        metadata = CheckpointManager.load_metadata(resolved)
         raw_config = metadata.get("config")
         if raw_config is None:
             raise ValueError("Checkpoint metadata.json does not "
@@ -480,6 +511,10 @@ def convert(
         cfg = _run_config_from_raw(raw_config)
 
     tc = cfg.training
+    if base_model_revision is not None:
+        from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+        parse_base_model_revision(base_model_revision)
+        tc.checkpoint.inference_base_model_revision = base_model_revision
 
     # -- Init distributed for the one-rank export process. DCP can reshard the
     # checkpoint, but full-state gathering still requires substantial memory.
@@ -500,6 +535,8 @@ def convert(
 
     # -- Load DCP weights into the model --
     states = method.checkpoint_state()
+    if weights_only:
+        states = {key: value for key, value in states.items() if key.startswith("roles.")}
     logger.info(
         "Loading DCP checkpoint from %s",
         resolved,
@@ -521,12 +558,15 @@ def convert(
         base_model_path,
     )
     transformer_component = _transformer_component_name(model)
+    contract_hook = getattr(method, "inference_checkpoint_contract", None)
+    inference_contract = contract_hook(role) if callable(contract_hook) else None
     result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
         output_dir=output_dir,
         overwrite=overwrite,
         model=model,
+        inference_contract=inference_contract,
     )
     logger.info("Export complete: %s", result)
 
@@ -660,6 +700,14 @@ def main() -> None:
               "the exported directory to catch key-mapping bugs "
               "immediately."),
     )
+    parser.add_argument(
+        "--base-model-revision",
+        type=str,
+        default=None,
+        help=("hf://<repo id>@<revision> of the base MiniMax-H3 snapshot that a "
+              "FastH3 PDD student export's fastvideo_inference.json names; "
+              "overrides training.checkpoint.inference_base_model_revision."),
+    )
     args = parser.parse_args(sys.argv[1:])
 
     convert(
@@ -669,6 +717,7 @@ def main() -> None:
         role=args.role,
         overwrite=args.overwrite,
         verify=args.verify,
+        base_model_revision=args.base_model_revision,
     )
 
 

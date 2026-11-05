@@ -145,10 +145,10 @@ def _stub_fsdp_loading(monkeypatch):
     monkeypatch.setattr(fsdp_load, "_maybe_quantize_model", lambda _model, **_kwargs: None)
 
 
-def _load_tiny_model(model_cls, *, lora_path=None, lora_strength=1.0):
+def _load_tiny_model(model_cls, *, lora_path=None, lora_strength=1.0, init_params=None):
     return fsdp_load.maybe_load_fsdp_model(
         model_cls=model_cls,
-        init_params={},
+        init_params=init_params or {},
         weight_dir_list=[],
         device=torch.device("cpu"),
         hsdp_replicate_dim=1,
@@ -369,3 +369,49 @@ def test_a_fully_applied_payload_warns_about_nothing(tmp_path, caplog):
         patch.report_unapplied()
 
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def _stub_packed_nvfp4_export(monkeypatch, tmp_path):
+    from fastvideo.layers.quantization import nvfp4_config
+
+    packed_path = tmp_path / "packed.safetensors"
+    save_file({"placeholder": torch.zeros(1)}, str(packed_path))
+    loaded = []
+    monkeypatch.setattr(nvfp4_config, "find_minimax_h3_nvfp4_dit_export", lambda _paths: str(packed_path))
+    monkeypatch.setattr(nvfp4_config, "nvfp4_linear_weight_param_names", lambda _model: {"linear.weight"})
+    monkeypatch.setattr(nvfp4_config, "load_minimax_h3_nvfp4_dit_export",
+                        lambda _model, path, device: loaded.append(path))
+    _stub_fsdp_loading(monkeypatch)
+    return loaded
+
+
+class _PackedTinyModel(torch.nn.Module):
+    param_names_mapping = {r"^hf\.(.*)$": r"custom.\1"}
+
+    def __init__(self, config=None):
+        super().__init__()
+
+
+def _packed_init_params():
+    from types import SimpleNamespace
+    return {"config": SimpleNamespace(quant_config=SimpleNamespace(layer_profile="h3_dit"))}
+
+
+def test_packed_nvfp4_export_loads_with_a_low_rank_only_adapter(monkeypatch, tmp_path):
+    loaded = _stub_packed_nvfp4_export(monkeypatch, tmp_path)
+    monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(lambda *_args, **_kwargs: None))
+
+    _load_tiny_model(_PackedTinyModel, lora_path="adapter.safetensors", init_params=_packed_init_params())
+
+    assert loaded == [str(tmp_path / "packed.safetensors")]
+
+
+def test_packed_nvfp4_export_rejects_an_adapter_with_dense_payload(monkeypatch, tmp_path):
+    loaded = _stub_packed_nvfp4_export(monkeypatch, tmp_path)
+    patch = DenseLoRAPatch([], {"linear.weight": ("adapter.safetensors", "linear.diff")}, {}, 1.0)
+    monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(lambda *_args, **_kwargs: patch))
+
+    with pytest.raises(ValueError, match="dense"):
+        _load_tiny_model(_PackedTinyModel, lora_path="adapter.safetensors", init_params=_packed_init_params())
+
+    assert loaded == []

@@ -1,0 +1,24 @@
+# OpenAI-compatible image server for Stable Diffusion 3.5 Medium.
+#   fastvideo serve --config examples/serving/openai_sd35.yaml
+generator:
+  model_path: stabilityai/stable-diffusion-3.5-medium
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      text_encoder: false
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: t2i
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_sd35
+  served_model_name: sd35

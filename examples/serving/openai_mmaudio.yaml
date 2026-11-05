@@ -1,0 +1,37 @@
+# OpenAI-compatible media server for MMAudio large-44k-v2 video-to-audio.
+#   fastvideo serve --config examples/serving/openai_mmaudio.yaml
+# Send video_reference (local path or URL). Audio uses the /v1/videos job
+# endpoints and returns media_type audio/wav.
+generator:
+  model_path: FastVideo/MMAudio-large-44k-v2-Diffusers
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      text_encoder: false
+      pin_cpu_memory: false
+
+  pipeline:
+    workload_type: v2a
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_mmaudio
+  served_model_name: mmaudio-large-44k-v2
+
+default_request:
+  negative_prompt: music
+  sampling:
+    audio_start_in_s: 0.0
+    audio_end_in_s: 8.0
+    num_inference_steps: 25
+    guidance_scale: 4.5
+    seed: 42
+  output:
+    return_frames: false

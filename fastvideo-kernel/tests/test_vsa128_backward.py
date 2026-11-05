@@ -11,6 +11,7 @@ from fastvideo_kernel import video_sparse_attn, video_sparse_attn_bshd
 from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_128
 
 from .test_vsa256_triton import _metrics, _torch_vsa256_reference
+from .utils import skip_cute_block_sparse_on_sm12x
 
 _BLOCK = 128
 _BLOCK_SIZE_3D = (2, 8, 8)
@@ -20,6 +21,7 @@ def _select_backend(monkeypatch, backend: str) -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
     if backend == "cute":
+        skip_cute_block_sparse_on_sm12x()
         pytest.importorskip(
             "flash_attn.cute.block_sparsity",
             reason="optional FA4 CuTe build (flash_attn.cute) not installed",

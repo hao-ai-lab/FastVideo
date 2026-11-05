@@ -110,6 +110,7 @@ def test_retained_weight_lora_merge_reaches_nvfp4_buffers(monkeypatch) -> None:
     monkeypatch.setattr(nv, "_nvfp4_quantize", capturing_quantize)
 
     layer = ReplicatedLinear(16, 8, bias=False, params_dtype=torch.bfloat16)
+    nn.init.normal_(layer.weight)
     layer.quant_method = _method(_ALWAYS_FP4_PREFIX, retain=True)
     root = nn.Module()
     root.layer = layer

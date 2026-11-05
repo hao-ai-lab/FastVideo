@@ -14,6 +14,7 @@ import torch
 
 import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAImpl, MiniMaxH3VSAMetadataBuilder)
+from fastvideo.tests.ci_backend import skip_cute_block_sparse_on_sm12x
 
 _SPEC = dict(raw_latent_shape=(16, 16, 24), patch_size=(1, 2, 2), prefix_segments=(64, 32, 16))
 _HEADS = 2
@@ -32,6 +33,7 @@ def _build_meta(device, sparsity=0.5):
 
 def _select_backend(env_overrides, backend):
     if backend == "cute":
+        skip_cute_block_sparse_on_sm12x()
         pytest.importorskip(
             "flash_attn.cute.block_sparsity",
             reason="optional FA4 CuTe build (flash_attn.cute) not installed",

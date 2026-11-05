@@ -19,7 +19,7 @@
 # request.sampling below is the measured 4xH100 shape (960x544, 345 frames =
 # 14.375 s at 24 FPS). Legal H3 frame counts are 17n+5, max 345.
 #
-#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_VSA_TK=1 \
+#   FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 FASTVIDEO_VSA_TK=1 \
 #     FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 #     fastvideo generate --config examples/inference/basic/basic_fasth3_h100.yaml
 generator:
