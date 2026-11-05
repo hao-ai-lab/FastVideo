@@ -14,7 +14,7 @@ def _dataset(tmp_path, clips: int):
     videos.mkdir()
     annotations = []
     for i in range(clips):
-        (videos / f"clip{i}.mp4").write_bytes(b"")  # only existence is checked once decoding is stubbed
+        (videos / f"clip{i}.mp4").write_bytes(b"")
         annotations.append({"path": f"clip{i}.mp4", "cap": ["a caption"], "resolution": {"width": 32, "height": 32},
                             "fps": 8, "duration": 1.0, "num_frames": 8})
     (tmp_path / "annotation.json").write_text(json.dumps(annotations))
@@ -30,7 +30,6 @@ def test_iterating_does_not_retain_pixels_on_processed_batches(tmp_path, monkeyp
     dataset = _dataset(tmp_path, clips=3)
 
     def fake_decode(batch):
-        # Stands in for VideoTransformStage.process, which assigns the decoded clip to the batch.
         batch.pixel_values = torch.zeros(3, 8, 32, 32)
         return batch
 
