@@ -514,8 +514,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
 
     def _get_item(self, idx: int) -> dict:
         """Get a single processed data item."""
-        # The stages assign decoded pixels to the batch they are given; transform a
-        # copy so processed_batches doesn't keep every decoded video alive.
         batch = replace(self.processed_batches[idx])
 
         # Apply transformation stages
