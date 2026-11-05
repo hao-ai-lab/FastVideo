@@ -252,9 +252,11 @@ def test_unmerge_then_merge_lora_weights_mxfp8_requantizes_each_step(
 
 
 @pytest.mark.parametrize("retain_bf16_weight", [False, True])
-def test_unmerge_lora_weights_requires_dense_state_for_nvfp4(retain_bf16_weight: bool) -> None:
-    """An unwrapped packed layer has no CPU snapshot from which to recreate a purged parameter."""
-    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+@pytest.mark.parametrize("operation", ["merge_lora_weights", "unmerge_lora_weights"])
+def test_nvfp4_without_lora_layers_is_a_lifecycle_noop(retain_bf16_weight: bool, operation: str,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """Public merge/unmerge only act on wrapped LoRA layers, not an adapter-free packed model."""
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline, _has_nvfp4_weights_without_bf16
 
     transformer = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
     transformer.linear.register_parameter(
@@ -263,34 +265,17 @@ def test_unmerge_lora_weights_requires_dense_state_for_nvfp4(retain_bf16_weight:
     )
     transformer.linear.register_buffer("_nvfp4_weight", torch.empty(1))
     pipeline = SimpleNamespace(trainable_transformer_modules={"transformer": transformer}, lora_layers={})
+    previous_weight = transformer.linear.weight
+    previous_packed = transformer.linear._nvfp4_weight
 
-    if retain_bf16_weight:
-        LoRAPipeline.unmerge_lora_weights(pipeline)
-    else:
-        with pytest.raises(RuntimeError, match="LoRA unmerge is unsupported after NVFP4 weight quantization"):
-            LoRAPipeline.unmerge_lora_weights(pipeline)
+    def unexpected_pack(model):
+        pytest.fail("An adapter-free lifecycle operation must not repack the model")
 
-
-def test_set_lora_adapter_rejects_nvfp4_without_bf16_weight() -> None:
-    """Reject runtime adapter changes after NVFP4 removes the BF16 weight."""
-    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
-
-    transformer = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
-    transformer.linear.register_parameter("weight", None)
-    transformer.linear.register_buffer("_nvfp4_weight", torch.empty(1))
-    pipeline = SimpleNamespace(
-        _setting_constructor_adapter=False,
-        cur_adapter_name="first-adapter",
-        cur_adapter_path="/first-adapter",
-        cur_adapter_strength=1.0,
-        lora_adapter_paths={},
-        lora_initialized=True,
-        lora_layers={},
-        trainable_transformer_modules={"transformer": transformer},
-    )
-
-    with pytest.raises(RuntimeError, match="Runtime LoRA adapter changes are unsupported after NVFP4 quantization"):
-        LoRAPipeline.set_lora_adapter(pipeline, "second-adapter", "/second-adapter")
+    monkeypatch.setattr(nvfp4, "convert_model_to_nvfp4", unexpected_pack)
+    assert not _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules)
+    getattr(LoRAPipeline, operation)(pipeline)
+    assert transformer.linear.weight is previous_weight
+    assert transformer.linear._nvfp4_weight is previous_packed
 
 
 def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -321,29 +306,6 @@ def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pyt
     LoRAPipeline.set_lora_adapter(pipeline, "second-adapter")
 
     assert events == ["adapter merged", "weights requantized"]
-
-
-@pytest.mark.parametrize("retain_bf16_weight", [False, True])
-def test_merge_lora_weights_rejects_nvfp4_without_bf16(retain_bf16_weight: bool) -> None:
-    """Reject the NVFP4 LoRA merge only once the BF16 weight is gone."""
-    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
-
-    transformer = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
-    transformer.linear.register_parameter(
-        "weight",
-        nn.Parameter(torch.empty(1), requires_grad=False) if retain_bf16_weight else None,
-    )
-    transformer.linear.register_buffer("_nvfp4_weight", torch.empty(1))
-    pipeline = SimpleNamespace(
-        trainable_transformer_modules={"transformer": transformer},
-        lora_layers={},
-    )
-
-    if retain_bf16_weight:
-        LoRAPipeline.merge_lora_weights(pipeline)
-    else:
-        with pytest.raises(RuntimeError, match="LoRA merge is unsupported after NVFP4 weight quantization"):
-            LoRAPipeline.merge_lora_weights(pipeline)
 
 
 class _CpuPackedNVFP4Method(nvfp4.NVFP4QuantizeMethod):
@@ -494,6 +456,23 @@ def test_nvfp4_purged_accumulation_rejects_before_mutation(cpu_nvfp4_lifecycle, 
     assert wrapped.base_layer.weight is None and wrapped.merged
     for name, value in packed_before.items():
         torch.testing.assert_close(getattr(wrapped.base_layer, name), value, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("missing", ["snapshot", "packed_weight"])
+def test_nvfp4_invalid_restore_fails_at_layer_boundary_without_mutation(cpu_nvfp4_lifecycle, missing: str) -> None:
+    """Restoration checks its own required state rather than scanning unrelated pipeline modules."""
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    pipeline, wrapped, _, _, _ = _nvfp4_lifecycle_pipeline(False)
+    if missing == "snapshot":
+        wrapped.cpu_weight = None
+    else:
+        wrapped.base_layer._nvfp4_weight = None
+    previous_a, previous_b = wrapped.lora_A, wrapped.lora_B
+    with pytest.raises(RuntimeError, match="snapshot|packed weight"):
+        LoRAPipeline.unmerge_lora_weights(pipeline)
+    assert wrapped.base_layer.weight is None and wrapped.merged
+    assert wrapped.lora_A is previous_a and wrapped.lora_B is previous_b
 
 
 def test_nvfp4_cpu_snapshot_restore_and_repack_stay_in_offload_scope(cpu_nvfp4_lifecycle, monkeypatch) -> None:
