@@ -34,7 +34,6 @@ def _compile_args(args, compile_kwargs, **overrides):
     ({"mode": "max-autotune-no-cudagraphs"}, {}, []),
     (None, {}, []),
     ({"mode": "reduce-overhead", "disable": True}, {}, []),
-    # These configurations skip the pipeline-level DiT compile.
     ({"mode": "reduce-overhead"}, {"use_fsdp_inference": True}, []),
     ({"mode": "reduce-overhead"}, {"inference_torch_compile": True}, []),
     ({"mode": "reduce-overhead"}, {"training_mode": True}, []),
@@ -103,7 +102,7 @@ def _run_compiled_stage(monkeypatch, env_overrides, mode):
     stage = denoising.DenoisingStage(model, TinyScheduler())
     stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
     outputs = []
-    for _ in range(3):  # cudagraph trees warm up, record, then replay
+    for _ in range(3):
         batch = _batch(steps=6, cfg=True)
         batch.latents = batch.latents.to(device)
         batch.prompt_embeds = [torch.full((1, 4, 32), 0.5, device=device)]
@@ -141,7 +140,7 @@ def test_cudagraph_compile_warns_when_layerwise_offload_moves_weights(monkeypatc
 
     class _Pipeline(base.ComposedPipelineBase):
 
-        def __init__(self, fastvideo_args):  # deliberately does not call super()
+        def __init__(self, fastvideo_args):
             self.fastvideo_args = fastvideo_args
             self.modules = {"transformer": torch.nn.Linear(2, 2)}
 
@@ -158,7 +157,7 @@ def test_cudagraph_compile_warns_when_layerwise_offload_moves_weights(monkeypatc
                            torch_compile_kwargs_audio_vae={}, dit_layerwise_offload=offload)
 
     pipeline = _Pipeline(args)
-    pipeline._apply_inference_compile(("vae", ))  # no DiT selected: never warns
+    pipeline._apply_inference_compile(("vae", ))
     assert logger.warnings == []
     # MiniMax-H3 sequential loading calls this again for late modules; warn once.
     pipeline._apply_inference_compile()
