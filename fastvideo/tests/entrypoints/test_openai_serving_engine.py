@@ -312,7 +312,6 @@ def test_inline_continuation_video_is_decoded_like_a_video_reference(tmp_path: P
 @pytest.mark.parametrize("chunk_chars", [media_policy.DATA_URL_CHUNK_CHARS, 3, 4, 5, 7])
 def test_inline_reference_payload_may_be_wrapped_and_percent_escaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                     chunk_chars: int) -> None:
-    # Small chunks put chunk boundaries inside percent escapes and line breaks.
     monkeypatch.setattr(media_policy, "DATA_URL_CHUNK_CHARS", chunk_chars)
     track = bytes(range(256)) * 2
     encoded = base64.b64encode(track).decode()
