@@ -161,7 +161,7 @@ WS /v1/stream  ─────── connect ───────────�
                        "payload": {"schema_version": 1, ...}}
 
 (close) ──────────────────────────────────────────────────►
-                                                          (session → COMPLETE)
+                                                          (connection closed)
 ```
 
 ## Backward / forward compatibility
