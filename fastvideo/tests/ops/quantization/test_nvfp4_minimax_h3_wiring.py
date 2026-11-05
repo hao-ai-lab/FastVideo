@@ -405,6 +405,8 @@ def test_nvfp4_cpu_backed_unmerge_remerge_rebuilds_every_buffer(cpu_nvfp4_lifecy
         LoRAPipeline.unmerge_lora_weights(pipeline)
         _assert_cpu_packed_weight(wrapped, original, retain)
         assert not wrapped.merged
+        if retain:
+            assert not wrapped.base_layer.weight.requires_grad
         # Unmerge keeps the adapter active beside the freshly packed base.
         packed = _cpu_packed_state(original)
         expected = torch.nn.functional.linear(
@@ -414,6 +416,52 @@ def test_nvfp4_cpu_backed_unmerge_remerge_rebuilds_every_buffer(cpu_nvfp4_lifecy
         LoRAPipeline.merge_lora_weights(pipeline)
         _assert_cpu_packed_weight(wrapped, merged, retain)
         torch.testing.assert_close(wrapped.cpu_weight, original, rtol=0, atol=0)
+
+
+def test_nvfp4_restore_recreates_a_frozen_inference_parameter(cpu_nvfp4_lifecycle) -> None:
+    _, wrapped, original, _, _ = _nvfp4_lifecycle_pipeline(False)
+    wrapped.unmerge_lora_weights()
+
+    assert not wrapped.base_layer.weight.requires_grad
+    assert wrapped.base_layer.weight.data_ptr() != wrapped.cpu_weight.data_ptr()
+    torch.testing.assert_close(wrapped.base_layer.weight, original, rtol=0, atol=0)
+
+
+def test_lora_training_keeps_adapter_gradients_without_inference_restore(cpu_nvfp4_lifecycle,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared wrapper trains A/B while freezing the base and never restoring inference weights."""
+    from fastvideo.layers.linear import ReplicatedLinear
+    from fastvideo.layers.lora.linear import get_lora_layer
+
+    torch.manual_seed(11)
+    base = ReplicatedLinear(8, 6, bias=False, params_dtype=torch.float32)
+    # Start with a trainable parameter so wrapper initialization must explicitly freeze it.
+    base.weight.requires_grad_(True)
+    wrapped = get_lora_layer(base, lora_rank=2, lora_alpha=2, training_mode=True)
+    assert wrapped.cpu_weight is None
+
+    def unexpected_restore():
+        pytest.fail("LoRA training must not restore or merge inference weights")
+
+    monkeypatch.setattr(wrapped, "_restore_base_weight", unexpected_restore)
+    wrapped.set_lora_weights(torch.randn(2, 8), torch.randn(6, 2), training_mode=True)
+    assert not wrapped.merged and not wrapped.base_layer.weight.requires_grad
+    assert wrapped.lora_A.requires_grad and wrapped.lora_B.requires_grad
+    original = wrapped.base_layer.weight.detach().clone()
+    adapter_before = [wrapped.lora_A.detach().clone(), wrapped.lora_B.detach().clone()]
+    optimizer = torch.optim.SGD([wrapped.lora_A, wrapped.lora_B], lr=0.01)
+    inputs = torch.randn(3, 8, requires_grad=True)
+
+    wrapped(inputs)[0].square().mean().backward()
+
+    assert wrapped.base_layer.weight.grad is None
+    assert inputs.grad is not None and inputs.grad.abs().sum() > 0
+    for parameter in (wrapped.lora_A, wrapped.lora_B):
+        assert parameter.grad is not None and parameter.grad.abs().sum() > 0
+    optimizer.step()
+    torch.testing.assert_close(wrapped.base_layer.weight, original, rtol=0, atol=0)
+    for parameter, previous in zip((wrapped.lora_A, wrapped.lora_B), adapter_before, strict=True):
+        assert not torch.equal(parameter, previous)
 
 
 @pytest.mark.parametrize("retain", [False, True])

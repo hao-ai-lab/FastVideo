@@ -326,7 +326,8 @@ class BaseLayerWithLoRA(nn.Module):
             if packed_weight is None or isinstance(self.cpu_weight, DTensor):
                 raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot and "
                                    "an NVFP4 packed weight.")
-            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(packed_weight.device, copy=True),
+            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(packed_weight.device, non_blocking=True,
+                                                                     copy=True),
                                                   requires_grad=False)
         elif isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
