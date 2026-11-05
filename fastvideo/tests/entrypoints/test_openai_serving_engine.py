@@ -294,6 +294,21 @@ def test_inline_video_and_audio_references_are_decoded_in_order(tmp_path: Path) 
     assert not _uploads(tmp_path)
 
 
+def test_inline_continuation_video_is_decoded_like_a_video_reference(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="waves", continuation_video=_data_url("video/x-matroska", b"last-frames"))
+    created = asyncio.run(prepare_reference_media("request", request, str(tmp_path), policy=MediaPolicy()))
+    assert created == [request.continuation_video]
+    assert Path(request.continuation_video).read_bytes() == b"last-frames"
+    assert Path(request.continuation_video).suffix == ".mkv"
+    discard_materialized_media(created)
+    assert not _uploads(tmp_path)
+
+    mismatched = VideoGenerationRequest(prompt="waves", continuation_video=_data_url("audio/mpeg", b"track"))
+    with pytest.raises(RequestAdaptationError, match="need a data:video/"):
+        asyncio.run(prepare_reference_media("request", mismatched, str(tmp_path), policy=MediaPolicy()))
+    assert not _uploads(tmp_path)
+
+
 @pytest.mark.parametrize("chunk_chars", [media_policy.DATA_URL_CHUNK_CHARS, 3, 4, 5, 7])
 def test_inline_reference_payload_may_be_wrapped_and_percent_escaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                     chunk_chars: int) -> None:
@@ -595,6 +610,41 @@ def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
                 override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline",
             ),
             served_model_name="minimax-h3",
+            output_dir=str(tmp_path),
+        )
+
+
+def test_fasth3_ref2va_continuation_video_becomes_a_continuation_reference(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(
+        prompt="a fox",
+        task="ref2va",
+        aspect_ratio="16:9",
+        num_frames=141,
+        image_reference=[{"image_url": "/tmp/reference.png"}],
+        continuation_video="/tmp/clip.mkv",
+    )
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("MiniMaxAI/MiniMax-H3", override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
+        served_model_name="minimax-h3",
+        output_dir=str(tmp_path),
+    )
+    references = adapted.inputs.references
+    assert [(reference.media_type, reference.source) for reference in references] == [
+        ("image", "/tmp/reference.png"),
+        ("continuation", "/tmp/clip.mkv"),
+    ]
+
+
+def test_continuation_video_needs_a_ref2va_server(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", num_frames=141, continuation_video="/tmp/clip.mkv")
+    with pytest.raises(RequestAdaptationError, match="continuation_video requires"):
+        build_generation_request(
+            "video_gen_test",
+            request,
+            _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+            served_model_name="fasth3",
             output_dir=str(tmp_path),
         )
 

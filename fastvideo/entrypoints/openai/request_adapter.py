@@ -261,6 +261,8 @@ async def prepare_reference_media(
             request.video_path = await materialize_clip(request.video_path, "video_path", "video")
         if request.video_url:
             request.video_url = await materialize_clip(request.video_url, "video_url", "video")
+        if request.continuation_video:
+            request.continuation_video = await materialize_clip(request.continuation_video, "continuation", "video")
         for index, reference in enumerate(_as_list(request.audio_reference)):
             reference.audio_url = await materialize_clip(reference.audio_url, f"audio_{index}", "audio")
     except BaseException:
@@ -420,6 +422,8 @@ def _apply_reference_inputs(
         references = [MiniMaxH3Reference(source=source, media_type="image") for source in images]
         references.extend(MiniMaxH3Reference(source=source, media_type="video") for source in videos)
         references.extend(MiniMaxH3Reference(source=source, media_type="audio") for source in audios)
+        if request.continuation_video:
+            references.append(MiniMaxH3Reference(source=request.continuation_video, media_type="continuation"))
         if references:
             try:
                 kwargs["references"] = validate_references(references)
@@ -429,6 +433,9 @@ def _apply_reference_inputs(
 
     if request.task is not None and model_family != "minimax_h3":
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
+    if request.continuation_video:
+        raise RequestAdaptationError("continuation_video requires a MiniMax-H3 server configured with "
+                                     "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
 
     if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
         if len(videos) != 1 or images or audios:

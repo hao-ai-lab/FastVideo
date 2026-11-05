@@ -19,6 +19,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
     MINIMAX_H3_KEYFRAME_ENCODE_SEED,
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
+    MiniMaxH3ContinuationLayout,
     MiniMaxH3PackedLayout,
     audio_latent_num_frames,
     build_packed_sequence,
@@ -29,6 +30,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     patchify_video_latents,
 )
 from fastvideo.pipelines.basic.minimax_h3.reference import (
+    MINIMAX_H3_PREPARED_CONTINUATION_KEY,
+    MiniMaxH3PreparedContinuation,
     MiniMaxH3PreparedReference,
     trim_reference_num_frames,
 )
@@ -45,6 +48,7 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 logger = init_logger(__name__)
 
 MINIMAX_H3_LAYOUT_KEY = "minimax_h3_layout"
+_CONTINUATION_LAYOUT_KEY = "minimax_h3_continuation_layout"
 
 
 def _video_geometry(batch: ForwardBatch) -> tuple[int, int, int, int]:
@@ -169,6 +173,19 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             rows.append(patchify_video_latents(latents, patch_size))
         return rows
 
+    def _encode_continuation_video(self, continuation: MiniMaxH3PreparedContinuation) -> torch.Tensor:
+        """The clip's normalized video latents, sampled as a reference video's are."""
+        pixels = torch.from_numpy(np.ascontiguousarray(continuation.frames)).permute(3, 0, 1, 2)[None]
+        posterior = self.vae.encode_pixels(pixels).latent_dist
+        return self.vae.normalize_latents(_sample_visual_posterior(posterior).to(torch.float16).float()).cpu()
+
+    def _encode_continuation_audio(self, continuation: MiniMaxH3PreparedContinuation,
+                                   device: torch.device) -> torch.Tensor:
+        """The clip soundtrack's normalized latents as channel-major rows, encoded as a reference track is."""
+        posterior = self.audio_vae.encode(continuation.waveform.to(device)[:, None]).latent_dist
+        latents = self.audio_vae.normalize_latents(posterior.mode().float()).cpu().transpose(1, 2)
+        return latents.reshape(-1, self.audio_vae.latent_channels)
+
     def _encode_audio_rows(
         self,
         references: list[MiniMaxH3PreparedReference],
@@ -243,20 +260,27 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA latent preparation requires prepared references.")
 
+        continuation = batch.extra.pop(MINIMAX_H3_PREPARED_CONTINUATION_KEY, None)
+        continuation_video = continuation_audio = None
         vae_device = get_local_torch_device()
         pinned_offload.load(self.vae, vae_device, pin=fastvideo_args.pin_cpu_memory)
         try:
             video_rows = self._encode_visual_rows(references, vae_device, fastvideo_args)
+            if continuation is not None:
+                continuation_video = self._encode_continuation_video(continuation)
         finally:
             if fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
         audio_rows: list[torch.Tensor] = []
-        if any(reference.has_audio for reference in references):
+        has_continuation_audio = continuation is not None and continuation.waveform is not None
+        if any(reference.has_audio for reference in references) or has_continuation_audio:
             audio_device = get_local_torch_device()
             pinned_offload.load(self.audio_vae, audio_device, pin=fastvideo_args.pin_cpu_memory)
             try:
                 audio_rows = self._encode_audio_rows(references, audio_device)
+                if has_continuation_audio:
+                    continuation_audio = self._encode_continuation_audio(continuation, audio_device)
             finally:
                 if fastvideo_args.vae_cpu_offload:
                     pinned_offload.unload(self.audio_vae)
@@ -277,6 +301,31 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             MINIMAX_H3_KEYFRAME_NOISE_AUG,
             noise,
         )
+        batch.extra.pop(_CONTINUATION_LAYOUT_KEY, None)
+        if continuation_video is not None:
+            # The clip's rows follow the references' and carry the same noise augmentation, drawn from a generator of
+            # its own so the target noise does not depend on whether a clip is present.
+            patch_size = h3_dit_patch_size(fastvideo_args)
+            clip_noise = keyframe_condition_noise(
+                (tuple(int(size) for size in continuation_video.shape[2:]), ),
+                patch_size,
+                _video_latent_channels(fastvideo_args),
+                generator=torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED + 1),
+                device=device,
+            )
+            clip_rows = self.scheduler.scale_noise(
+                patchify_video_latents(continuation_video, patch_size).to(device),
+                MINIMAX_H3_KEYFRAME_NOISE_AUG,
+                clip_noise,
+            )
+            video_conditions = torch.cat((video_conditions, clip_rows))
+            if continuation_audio is not None:
+                audio_rows.append(continuation_audio)
+            clip_audio_latents = (0 if continuation_audio is None else continuation_audio.shape[0] //
+                                  MINIMAX_H3_AUDIO_CHANNELS)
+            batch.extra[_CONTINUATION_LAYOUT_KEY] = MiniMaxH3ContinuationLayout(num_latent_frames=int(
+                continuation_video.shape[2]),
+                                                                                num_audio_latents=clip_audio_latents)
         audio_conditions = torch.cat(audio_rows).to(device) if audio_rows else None
 
         for reference in references:
@@ -303,6 +352,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                 width,
                 num_audio_latents,
                 h3_dit_patch_size(fastvideo_args),
+                continuation=batch.extra.pop(_CONTINUATION_LAYOUT_KEY, None),
             )
         anchors = batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, ())
         if not isinstance(anchors, tuple):

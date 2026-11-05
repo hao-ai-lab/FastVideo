@@ -94,7 +94,7 @@ Reference objects carry one string each through `image_url`, `video_url`, and
 | Field | `http(s)` URL | `data:` URL | Local path |
 | --- | --- | --- | --- |
 | `image_reference[].image_url`, `input_reference`, `reference_url` | yes | `data:image/...;base64,` | under `server.media_roots` |
-| `video_reference[].video_url`, `video_path`, `video_url` | yes | `data:video/...;base64,` | under `server.media_roots` |
+| `video_reference[].video_url`, `video_path`, `video_url`, `continuation_video` | yes | `data:video/...;base64,` | under `server.media_roots` |
 | `audio_reference[].audio_url` | yes | `data:audio/...;base64,` | under `server.media_roots` |
 
 `input_reference` also accepts a multipart upload. `file_id` references are

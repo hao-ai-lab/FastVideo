@@ -26,3 +26,39 @@ to receive the decoded CPU tensor in `GenerationResult.samples` without building
 preview grids or writing media. Pixel samples retain the existing float `[0, 1]`
 contract. `return_frames=True` continues to return both samples and preview frames.
 The legacy sampling/keyword interface accepts the same `return_samples` option.
+
+### Choosing an output filename
+
+Set `request.output.output_video_name` to choose a filename when
+`request.output.output_path` is a directory:
+
+```python
+result = generator.generate({
+    "prompt": "A waterfall in the mountains",
+    "output": {"output_path": "outputs/", "output_video_name": "my_clip"},
+})
+# Saves outputs/my_clip.mp4 when that file does not already exist.
+```
+
+An explicit file path such as `outputs/custom.mp4` takes precedence over
+`output_video_name`. Without a name, the filename is derived from the prompt
+(or the input video for prompt-less super-resolution pipelines). Names are
+sanitized, and existing files are preserved by adding numeric suffixes such as
+`my_clip_1.mp4`, including when processing multiple prompts. A matching extension
+in the name is not duplicated. Image workloads accept PNG, JPEG, or WebP names
+and default to PNG; audio workloads use WAV.
+
+For requests that save media, the sanitized filename is checked against the
+destination filesystem's filename byte limit, including its extension and any
+collision suffix. If the limit cannot be determined, 255 bytes is used.
+Overlong names are rejected before model execution; use a shorter name rather
+than relying on automatic truncation. Multibyte characters may use more than
+one byte each. Prompt-file batches retain their existing per-prompt error
+handling.
+
+Requests with `save_video=False` or `output_type="latent"` do not prepare an
+output file: filename validation, directory creation, and collision checks are
+skipped. This also applies to latent output when `save_video=True`.
+
+The legacy `SamplingParam` and `generate_video` keyword interfaces accept the
+same `output_video_name` option.
