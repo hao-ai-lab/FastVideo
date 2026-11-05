@@ -1,12 +1,3 @@
-"""AMD-only autotune configs for the block-sparse Triton forward.
-
-On ROCm the forward's autotuner is offered four extra configs that set the
-AMD launch keys (``matrix_instr_nonkdim``, ``waves_per_eu``). On
-gfx950 (MI355X) they beat every generic config at FastH3-like sequence
-lengths, so the autotuner has to keep picking one of them there; the CUDA
-backend rejects these keys, so it must never be offered them.
-"""
-
 import pytest
 import torch
 
