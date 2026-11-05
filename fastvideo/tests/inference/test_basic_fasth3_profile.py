@@ -93,11 +93,32 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert config.engine.offload.lazy_module_load is None
 
 
-def test_text_cache_budget_reaches_h3_pipeline_config():
-    args = _args("--num-gpus", "1", "--text-conditioning-cache-max-bytes", "16777216")
+@pytest.mark.parametrize("budget", [0, 16777216])
+def test_text_cache_budget_reaches_conditioning_stage(budget, monkeypatch):
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+    from fastvideo.pipelines.basic.minimax_h3.stages import minimax_h3_conditioning as conditioning
+
+    args = _args("--num-gpus", "1", "--text-conditioning-cache-max-bytes", str(budget), "--no-h3-sequential-load")
     config = fasth3.build_generator_config(args)
-    pipeline = PipelineConfig.from_kwargs({"model_path": config.model_path, **config.pipeline.experimental})
-    assert pipeline.text_conditioning_cache_max_bytes == 16777216
+    pipeline_config = PipelineConfig.from_kwargs({"model_path": config.model_path, **config.pipeline.experimental})
+    assert pipeline_config.text_conditioning_cache_max_bytes == budget
+
+    # Exercise real stage assembly without loading model weights or starting a
+    # distributed runtime. Only the rank query and unloaded components are fixtures.
+    monkeypatch.setattr(conditioning, "get_world_size", lambda: 1)
+    pipeline = object.__new__(MiniMaxH3Pipeline)
+    pipeline.modules = {"text_encoder": object(), "tokenizer": object(), "processor": None}
+    pipeline._stages = []
+    pipeline._stage_name_mapping = {}
+    pipeline._lazy_release_hooks_installed = False
+    runtime_args = SimpleNamespace(pipeline_config=pipeline_config, inference_mode=True,
+                                   h3_sequential_load=args.h3_sequential_load)
+    pipeline._add_condition_stages(runtime_args, ref2va=False)
+
+    stage = pipeline._stage_name_mapping["conditioning_stage"]
+    assert isinstance(stage, conditioning.MiniMaxH3ConditioningStage)
+    assert stage.conditioner is pipeline.modules["text_encoder"]
+    assert stage._text_cache_max_bytes == budget
 
 
 @pytest.mark.parametrize("overrides, message", [
