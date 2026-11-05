@@ -189,7 +189,8 @@ CUDA block-sparse kernel (B200, B300, GB200, GB300) of a fastvideo-kernel
 build with the Blackwell VSA extension. Elsewhere, such as RTX PRO 6000 and
 RTX 5090 (sm_120), each 128-token tile runs as two 64-token tiles of the
 Triton block-sparse kernels under the same block map, which is slower; the
-backend raises only when neither kernel is installed. Tile 128 runs eagerly.
+backend raises only when the Triton tile-64 kernels are also unavailable.
+Tile 128 runs eagerly.
 Regional compile requires 64-token tiles. With `--num-gpus` above 1 the example shards the DiT
 across the GPUs (FSDP) and splits the sequence across them.
 

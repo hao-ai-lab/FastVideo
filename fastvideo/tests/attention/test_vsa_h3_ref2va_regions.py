@@ -624,7 +624,9 @@ def test_forward_tile128_real_triton64_split_matches_oracle(env_overrides, monke
     meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
     n_tiles = meta.variable_block_sizes.numel()
     logical = n_tiles * 128
-    assert int(meta.variable_block_sizes.min()) < 64, "the layout must exercise a partial second half"
+    second_half = (meta.variable_block_sizes - 64).clamp(min=0)
+    assert ((second_half > 0) & (second_half < 64)).any(), "the layout must exercise a partial second half"
+    assert (second_half == 0).any(), "the layout must exercise an empty second half"
     impl = _impl(_DIM)
     torch.manual_seed(19)
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
