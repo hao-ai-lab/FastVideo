@@ -72,7 +72,6 @@ _WS_CLOSE_NORMAL = 1000
 _WS_CLOSE_UNSUPPORTED_DATA = 1003
 _WS_CLOSE_INTERNAL_ERROR = 1011
 _WS_CLOSE_TRY_AGAIN_LATER = 1013
-# Why the segment loop stopped; decides the session's last frame.
 _SessionEnd = Literal["segment_cap", "idle_timeout", "disconnected"]
 _ErrorCode = Literal[
     "session_rejected",
@@ -244,8 +243,15 @@ async def _handle_session(
         end = await _run_segment_loop(websocket, session, state)
     except WebSocketDisconnect:
         raise
-    except Exception:
-        await _send_final_frame(websocket, Ltx2StreamComplete(reason="error"), _WS_CLOSE_INTERNAL_ERROR, "error")
+    except Exception as exc:
+        await _send_final_frame(
+            websocket,
+            ErrorMessage(code="internal_error",
+                         message=f"unexpected server error ({type(exc).__name__})",
+                         retryable=False),
+            _WS_CLOSE_INTERNAL_ERROR,
+            "internal_error",
+        )
         raise
     if end == "segment_cap":
         with contextlib.suppress(InvalidSessionTransition):

@@ -6,7 +6,9 @@ weights). Skips the fMP4 assertions when ``ffmpeg`` is missing.
 """
 from __future__ import annotations
 
+import contextlib
 import shutil
+import signal
 from dataclasses import dataclass
 from typing import Any
 
@@ -186,11 +188,11 @@ class TestSessionEnd:
         if not _FFMPEG_AVAILABLE:
             pytest.skip("ffmpeg not installed")
         client, _ = _build_client()
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
             for _ in range(3):
                 ws.receive_json()
-            for i in range(2):  # generation_segment_cap=2
+            for i in range(2):
                 ws.send_json({"type": "segment_prompt_source", "prompt": f"segment {i}", "num_inference_steps": 1})
                 _drain_until(ws, "ltx2_segment_complete")
             final = ws.receive_json()
@@ -199,7 +201,7 @@ class TestSessionEnd:
 
     def test_idle_session_is_told_it_timed_out(self):
         client, _ = _build_client(session_timeout_seconds=1)
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
             for _ in range(3):
                 ws.receive_json()
@@ -208,11 +210,11 @@ class TestSessionEnd:
 
     def test_missing_opening_frame_is_told_it_timed_out(self):
         client, _ = _build_client(session_timeout_seconds=1)
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             assert ws.receive_json() == {"type": "session_timeout", "timeout_seconds": 1}
             assert ws.receive() == {"type": "websocket.close", "code": 1000, "reason": "session_timeout"}
 
-    def test_unexpected_failure_ends_with_error_reason(self, monkeypatch):
+    def test_unexpected_failure_sends_a_fatal_error_frame(self, monkeypatch):
         import fastvideo.entrypoints.streaming.server as server
 
         async def _fail(*args, **kwargs):
@@ -220,13 +222,18 @@ class TestSessionEnd:
 
         monkeypatch.setattr(server, "_run_segment", _fail)
         client, _ = _build_client()
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
             for _ in range(3):
                 ws.receive_json()
             ws.send_json({"type": "segment_prompt_source", "prompt": "x", "num_inference_steps": 1})
-            assert ws.receive_json() == {"type": "ltx2_stream_complete", "reason": "error"}
-            assert ws.receive() == {"type": "websocket.close", "code": 1011, "reason": "error"}
+            assert ws.receive_json() == {
+                "type": "error",
+                "code": "internal_error",
+                "message": "unexpected server error (RuntimeError)",
+                "retryable": False,
+            }
+            assert ws.receive() == {"type": "websocket.close", "code": 1011, "reason": "internal_error"}
 
 
 class TestContinuationStatePersistence:
@@ -255,6 +262,29 @@ class TestContinuationStatePersistence:
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _deadline(seconds: float = 10.0):
+    """Fail instead of hanging when the server never sends the frame a test waits for.
+
+    ``TestClient`` websocket receives block with no timeout, and the server
+    sending nothing is exactly the regression these tests guard against.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _expired(signum, frame):
+        raise TimeoutError(f"no server frame within {seconds:g} s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _drain_until(ws, target_type: str) -> dict[str, Any]:

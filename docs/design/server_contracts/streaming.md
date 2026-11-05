@@ -41,7 +41,7 @@ through the states in `SessionState` (`fastvideo/entrypoints/streaming/session.p
                 ┌───────────┼───────────┐
                 ▼           ▼           ▼
             COMPLETE      ERROR      TIMEOUT
-        (clean leave)  (any failure)  (idle / segment_cap reached)
+        (segment_cap)  (any failure)     (idle)
 ```
 
 Terminal states (`COMPLETE`, `ERROR`, `TIMEOUT`, `REJECTED`) are sinks —
@@ -92,10 +92,10 @@ closed.
 | binary frame | fMP4 fragment bytes | Subsequent media chunks; the protocol enforces that `media_init` precedes any binary frames. |
 | `media_segment_complete` | `segment_idx`, chunk count, byte count | Last media chunk for the segment. |
 | `ltx2_segment_complete` | `segment_idx`, segment summary | Segment fully shipped; ready for the next `segment_prompt_source`. |
-| `ltx2_stream_complete` | `reason` | Session reached `generation_segment_cap` (`segment_cap`, then close 1000), failed unexpectedly (`error`, then close 1011), or client requested clean shutdown (`stop_requested`). |
-| `session_timeout` | reason | Session hit `session_timeout_seconds`; immediately followed by close. |
+| `ltx2_stream_complete` | `reason` | Session reached `generation_segment_cap` (`reason: "segment_cap"`); followed by close 1000 `segment_cap`. `stop_requested` and `error` are reserved: no client message requests a stop yet, and a server failure is reported with an `error` frame instead. |
+| `session_timeout` | `timeout_seconds` | Session hit `session_timeout_seconds`, idle or before its opening frame; followed by close 1000 `session_timeout`. |
 | `continuation_state_snapshot` | `kind`, `payload` | Reply to `snapshot_state`. The payload is the same shape produced by `LTX2ContinuationState.to_continuation_state(...)`. |
-| `error` | `code`, `message` | Any validation/runtime error. Non-fatal errors keep the connection open; fatal errors precede a `close`. |
+| `error` | `code`, `message`, `retryable` | Any validation/runtime error. Non-fatal errors keep the connection open; fatal errors precede a `close` (an unexpected server failure sends `code: "internal_error"`, then close 1011). |
 
 ## Continuation state
 
