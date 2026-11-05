@@ -95,7 +95,6 @@ def test_encoder_lane_collects_native_h3_text_cache_gpu_test(tmp_path):
     import shlex
     import subprocess
 
-    # Trace the actual lane's pytest arguments without importing GPU backends.
     pytest = tmp_path / "pytest"
     pytest.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*"\n')
     pytest.chmod(0o755)

@@ -103,8 +103,6 @@ def test_text_cache_budget_reaches_conditioning_stage(budget, monkeypatch):
     pipeline_config = PipelineConfig.from_kwargs({"model_path": config.model_path, **config.pipeline.experimental})
     assert pipeline_config.text_conditioning_cache_max_bytes == budget
 
-    # Exercise real stage assembly without loading model weights or starting a
-    # distributed runtime. Only the rank query and unloaded components are fixtures.
     monkeypatch.setattr(conditioning, "get_world_size", lambda: 1)
     pipeline = object.__new__(MiniMaxH3Pipeline)
     pipeline.modules = {"text_encoder": object(), "tokenizer": object(), "processor": None}
