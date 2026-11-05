@@ -346,6 +346,10 @@ def _save_role_pretrained(
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
                 reverse_key = reverse_lookup_aliases.get(key, key)
+                if reverse_key not in reverse_mapping and key in reverse_mapping:
+                    # Plugins that enable LoRA after loading (e.g. Wan) record the
+                    # mapping under the pre-LoRA name, not ``base_layer.weight``.
+                    reverse_key = key
                 if reverse_key in reverse_mapping:
                     hf_key, merge_index, _ = reverse_mapping[reverse_key]
                     if merge_index is not None:
