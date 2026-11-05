@@ -2,6 +2,7 @@
 """Open-H3-Regenerate-2K through the OpenAI-compatible video routes, with a fake generator (no GPU)."""
 
 import asyncio
+import base64
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -108,8 +109,18 @@ def test_two_refine_steps_can_be_requested(served):
     assert generator.requests[0].sampling.num_inference_steps == 2
 
 
+def test_an_inline_draft_is_decoded_and_removed(served):
+    client, generator, _ = served
+    draft = {"video_url": "data:video/mp4;base64," + base64.b64encode(b"draft").decode()}
+    response = client.post("/v1/videos/sync", json={"prompt": PROMPT, "video_reference": draft})
+    assert response.status_code == 200, response.text
+    video_path = Path(generator.requests[0].inputs.video_path)
+    assert video_path.parent.name == "uploads" and video_path.suffix == ".mp4"
+    assert not video_path.exists()
+
+
 @pytest.mark.parametrize("reference, message", [
-    ({"video_url": "data:video/mp4;base64,AAAA"}, "Data video references are not supported"),
+    ({"video_url": "data:audio/mpeg;base64,AAAA"}, "Video references need a data:video/"),
     ({"video_url": "/etc/passwd"}, "Local media paths are not accepted"),
     ({"file_id": "file_1"}, "file_id video references are not supported"),
 ])

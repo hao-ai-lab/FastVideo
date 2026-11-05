@@ -82,8 +82,8 @@ The response headers carry `X-Request-Id`, `X-Model`, `X-Inference-Time-S` and `
 
 - Exactly one `video_reference` (or the legacy `video_path` / `video_url`) and no image or audio references.
 - `http(s)` URLs must resolve to public addresses unless `server.allow_private_media_urls` is set. A local path is accepted
-  only inside a directory listed in `server.media_roots`. `data:` URLs are refused for video references; this policy is
-  unchanged.
+  only inside a directory listed in `server.media_roots`. A base64 `data:video/...` URL is decoded, up to
+  `server.media_reference_max_bytes`.
 - `size`, `width` and `height` may be omitted or `2560x1440`; `num_frames` may be omitted or 124 (the frame count of the
   VAE grid; the video has 121 frames); `fps` must be 24. `seconds` is not accepted.
 - `num_inference_steps` is 3 (default) or 2; `seed` sets the refine noise.

@@ -159,8 +159,9 @@ audio latents, the reference context of
 Drop the clip's frames, and the matching audio, from the new video, then append
 the rest to the earlier one.
 
-- Over HTTP, set `continuation_video` to the clip's URL or local path (under
-  `server.media_roots`) beside the usual references. In Python, append
+- Over HTTP, set `continuation_video` to the clip's URL, a base64
+  `data:video/...` URL or a local path (under `server.media_roots`) beside the
+  usual references. In Python, append
   `MiniMaxH3Reference(source=clip, media_type="continuation")` to `references`.
 - The clip is resampled to 24 fps and must then have 5, 22 or 39 frames on the
   target canvas. A request takes at most one clip and still needs at least one
