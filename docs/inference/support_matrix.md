@@ -16,8 +16,8 @@ actively maintained `main` inference path.
 
 ## Registered Model IDs
 
-Every Hugging Face model ID registered in `fastvideo/registry.py` on `main`
-(commit `8d89f30d`), grouped by family. Any ID below can
+Every Hugging Face model ID registered in `fastvideo/registry.py` on `main`,
+grouped by family. Any ID below can
 be passed to `VideoGenerator.from_pretrained(...)`; FastVideo resolves the
 matching pipeline and sampling defaults. The **Family** column is a
 documentation grouping: it follows each registration's declared `model_family`,
@@ -36,6 +36,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | flux2 | `black-forest-labs/FLUX.2-klein-4B`<br />`black-forest-labs/FLUX.2-klein-9B` | T2I | [basic_flux2_klein.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_flux2_klein.py) |
 | flux2 | `black-forest-labs/FLUX.2-dev` | T2I | [basic_flux2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_flux2.py) |
 | gen3c | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | T2V | [basic_gen3c.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_gen3c.py) |
+| helios | `BestWishYsh/Helios-Distilled` | T2V | [basic_helios_distilled_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_helios_distilled_t2v.py) |
 | hunyuan | `hunyuanvideo-community/HunyuanVideo` | T2V | — |
 | hunyuan | `FastVideo/FastHunyuan-diffusers` | T2V | — |
 | hunyuan15 | `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v` | T2V | [basic_hy15.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_hy15.py) |
@@ -60,14 +61,14 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | lingbotworld2 | `robbyant/lingbot-world-v2-14b-causal-fast` | I2V | [basic_lingbotworld2_causal_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld2_causal_fast.py) |
 | lingbotworld_fast | `FastVideo/LingBot-World-Fast-Diffusers` | I2V | [basic_lingbotworld_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_fast.py) |
 | ltx2 | `FastVideo/LTX2-Distilled-Diffusers`<br />`FastVideo/LTX2.3-Distilled-Diffusers`<br />`FastVideo/LTX-2.3-Distilled-Diffusers` | T2V | [basic_ltx2_distilled.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_distilled.py) |
-| ltx2 | `FastVideo/LTX-2.5-Distilled-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br />[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
-| ltx2 | `FastVideo/LTX-2.5-Dev-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br />[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
+| ltx2 | `FastVideo/LTX-2.5-Distilled-Diffusers`<br />`FastVideo/LTX2.5-Distilled-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br />[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
+| ltx2 | `FastVideo/LTX-2.5-Dev-Diffusers`<br />`FastVideo/LTX2.5-Dev-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br />[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
 | ltx2 | `Lightricks/LTX-2.3`<br />`FastVideo/LTX2.3-base`<br />`FastVideo/LTX2.3-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | ltx2 | `Lightricks/LTX-2`<br />`FastVideo/LTX2-base`<br />`FastVideo/LTX2-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
-| mmaudio | `FastVideo/MMAudio-large-44k-v2-Diffusers` | V2A, T2A | [basic_mmaudio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mmaudio.py) |
+| mmaudio | `FastVideo/MMAudio-small-16k-Diffusers`<br />`FastVideo/MMAudio-small-44k-Diffusers`<br />`FastVideo/MMAudio-medium-44k-Diffusers`<br />`FastVideo/MMAudio-large-44k-v2-Diffusers`<br />`FastVideo/MMAudio-large-44k-Diffusers` | V2A, T2A | [basic_mmaudio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mmaudio.py) |
 | matrixgame | `FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers`<br />`FastVideo/Matrix-Game-2.0-Base-Diffusers`<br />`FastVideo/Matrix-Game-2.0-GTA-Diffusers`<br />`FastVideo/Matrix-Game-2.0-TempleRun-Diffusers`<br />`mignonjia/mg_longtuning_distilled_zelda`<br />`mignonjia/mg_sf_distilled_zelda_1k_steps`<br />`mignonjia/mg_sf_distilled_zelda`<br />`mignonjia/mg_causal_zelda`<br />`mignonjia/mg_bidirectional_zelda` | I2V | [basic_matrixgame2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame2.py) |
 | matrixgame | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | I2V | [basic_matrixgame3.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_matrixgame3.py) |
-| minimax_h3 | `MiniMaxAI/MiniMax-H3` | T2V, I2V | [T2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_t2v.py)<br />[FL2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_fl2va.py)<br />[Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_ref2va.py) |
+| minimax_h3 | `MiniMaxAI/MiniMax-H3`<br />`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`<br />`FastVideo/FastVideo-FastH3-8-Step-V2` | T2V, I2V | [T2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_t2v.py)<br />[FL2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_fl2va.py)<br />[Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_ref2va.py) |
 | pika_h3_flex | `Pika-Labs/Pika-H3-Flex` | T2V, I2V | [T2VA/I2VA/L2VA/FL2VA/Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pika_h3_flex.py) |
 | open_h3_regenerate_2k | `Efficient-Large-Model/Open-H3-Regenerate-2K` | — | [basic_open_h3_regenerate_2k.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_open_h3_regenerate_2k.py) |
 | sd35 | `stabilityai/stable-diffusion-3.5-medium` | T2I | [basic_sd35_t2i.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_sd35_t2i.py) |
@@ -96,7 +97,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 (`StableAudioT2AConfig` / `StableAudioOpenSmallConfig`); they are registered
 under the generic T2V workload option in the registry.
 
-**Note (MMAudio)**: the registered Hugging Face model ID is reserved but not
+**Note (MMAudio)**: the registered Hugging Face model IDs are reserved but not
 yet public. Follow the [MMAudio inference guide](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/mmaudio/README.md)
 to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 
