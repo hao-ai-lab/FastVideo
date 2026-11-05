@@ -523,6 +523,49 @@ def test_nvfp4_invalid_restore_fails_at_layer_boundary_without_mutation(cpu_nvfp
     assert wrapped.lora_A is previous_a and wrapped.lora_B is previous_b
 
 
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_dtensor_lora_restore_preserves_parameter_gradient_flag(tmp_path, requires_grad: bool) -> None:
+    """Replacing a real CPU DTensor parameter preserves freezing or trainability despite the no-grad scope."""
+    import torch.distributed as dist
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
+    from fastvideo.layers.linear import ReplicatedLinear
+    from fastvideo.layers.lora.linear import get_lora_layer
+
+    if not dist.is_available() or not dist.is_gloo_available():
+        pytest.skip("CPU DTensor restoration requires the Gloo backend")
+    if dist.is_initialized():
+        pytest.skip("This singleton CPU DTensor test must own its process group")
+    dist.init_process_group("gloo", init_method=(tmp_path / "dtensor-store").as_uri(), rank=0, world_size=1)
+    try:
+        mesh = init_device_mesh("cpu", (1, ))
+        original = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+        base = ReplicatedLinear(4, 4, bias=False, params_dtype=torch.float32)
+        base.weight = nn.Parameter(distribute_tensor(original.clone(), mesh, [Replicate()]),
+                                   requires_grad=requires_grad)
+        wrapped = get_lora_layer(base)
+        with torch.no_grad():
+            wrapped.base_layer.weight.add_(5)
+        wrapped.merged = True
+
+        wrapped.unmerge_lora_weights()
+
+        restored = wrapped.base_layer.weight
+        assert isinstance(restored, DTensor)
+        assert restored.requires_grad is requires_grad
+        assert not wrapped.merged
+        torch.testing.assert_close(restored.to_local(), original, rtol=0, atol=0)
+        torch.testing.assert_close(wrapped.cpu_weight.to_local(), original, rtol=0, atol=0)
+        if requires_grad:
+            restored.to_local().sum().backward()
+            assert isinstance(restored.grad, DTensor)
+            torch.testing.assert_close(restored.grad.to_local(), torch.ones_like(original), rtol=0, atol=0)
+        else:
+            assert restored.grad is None
+    finally:
+        dist.destroy_process_group()
+
+
 def test_nvfp4_cpu_snapshot_restore_and_repack_stay_in_offload_scope(cpu_nvfp4_lifecycle, monkeypatch) -> None:
     from contextlib import contextmanager
     from fastvideo.pipelines import lora_pipeline
