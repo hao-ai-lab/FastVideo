@@ -31,7 +31,8 @@ from fastvideo.api.compat import normalize_generation_request
 from fastvideo.api.parser import parse_config
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.schema import GenerationRequest
-from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.minimax_h3 import (_PDD_FIXED_FIELDS, MiniMaxH3PipelineConfig,
+                                                    build_pdd_inference_file)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
@@ -334,6 +335,53 @@ def test_apply_request_constraints_non_pdd_checkpoint_keeps_request_steps():
     sampling_param = SamplingParam(num_inference_steps=50)
     assert MiniMaxH3PipelineConfig().apply_request_constraints(request, sampling_param) is sampling_param
     assert sampling_param.num_inference_steps == 50
+
+
+# ------------------------------------------------- build_pdd_inference_file: the training-side writer
+
+
+def _trained_fields() -> dict:
+    return {key: value for key, value in PDD_FILE.items() if key not in _PDD_FIXED_FIELDS}
+
+
+def test_build_pdd_inference_file_round_trips_through_resolve_checkpoint_settings(tmp_path):
+    inference_file = build_pdd_inference_file(**_trained_fields())
+    assert inference_file == PDD_FILE
+    args = _run_args(_checkpoint(tmp_path, inference_file))
+    assert args.pipeline_config.pdd_step_indices == tuple(GRID32_BLOCKS8)
+
+
+@pytest.mark.parametrize("change, match", [
+    ({"guidance_scale": 1.0}, r"fixed \['guidance_scale'\]"),
+    ({"unknown": 1}, r"unknown \['unknown'\]"),
+    ({"pdd_steps": None}, r"missing \['pdd_steps'\]"),
+])
+def test_build_pdd_inference_file_takes_exactly_the_trained_fields(change, match):
+    fields = {**_trained_fields(), **change}
+    fields = {key: value for key, value in fields.items() if value is not None}
+    with pytest.raises(ValueError, match=match):
+        build_pdd_inference_file(**fields)
+
+
+def test_build_pdd_inference_file_rejects_an_unparsable_base_model_revision():
+    with pytest.raises(ValueError, match="hf://<repo id>@<revision>"):
+        build_pdd_inference_file(**{**_trained_fields(), "base_model_revision": "/models/MiniMax-H3"})
+
+
+# ------------------------------------------------- training-side scheduler shifts
+
+
+@pytest.mark.parametrize("shift", [0.0, -3.0, float("nan"), True])
+def test_check_pipeline_config_rejects_an_invalid_training_shift(shift):
+    with pytest.raises(ValueError, match="video_scheduler_shift must be positive and finite"):
+        MiniMaxH3PipelineConfig(video_scheduler_shift=shift).check_pipeline_config()
+
+
+def test_initialize_pipeline_refuses_a_training_shift_the_checkpoint_contradicts(tmp_path):
+    model_path = _checkpoint(tmp_path, None, pdd_steps=None)
+    _pipeline(model_path).initialize_pipeline(_run_args(model_path, {"video_scheduler_shift": 12.0}))
+    with pytest.raises(ValueError, match="video_scheduler_shift=10.0 is a training setting"):
+        _pipeline(model_path).initialize_pipeline(_run_args(model_path, {"video_scheduler_shift": 10.0}))
 
 
 # ------------------------------------------------- worker pipeline: initialize_pipeline and the transformer check

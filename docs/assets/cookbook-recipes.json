@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 20,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -430,6 +430,44 @@
       "limitations": ["FLUX.1 is loadable by ID but registers no model_family in fastvideo/registry.py; it is grouped under FLUX for documentation only."]
     },
     {
+      "id": "qwen-image21-t2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Text to image",
+      "label": "Qwen-Image-2.1",
+      "summary": "Generate a 1024 × 1024 image in 40 steps on one CUDA GPU, with the CPU offload settings recorded in the maintained YAML.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/qwen_image21_t2i.yaml",
+      "command": "fastvideo generate --config examples/inference/basic/qwen_image21_t2i.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/teapot.png",
+      "limitations": ["The source uses DiT layerwise offload, text-encoder and VAE offload, and lazy loading. GPU memory requirements have not been established for this recipe."],
+      "related": ["qwen-image21-i2i"]
+    },
+    {
+      "id": "qwen-image21-i2i",
+      "family": "qwen_image21",
+      "stage": "inference",
+      "task": "Image to image",
+      "label": "Qwen-Image-2.1 references and editing",
+      "summary": "Generate or edit an image from a prompt and up to ten ordered reference images, using the maintained single-GPU Python example.",
+      "model": "Qwen/Qwen-Image-2.1",
+      "source": "examples/inference/basic/basic_qwen_image21.py",
+      "command": "python examples/inference/basic/basic_qwen_image21.py --reference source.png --prompt 'Change the shirt to blue; retain the subject and composition.' --output outputs/qwen_image21/edit.png",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "RGBA PNG image at outputs/qwen_image21/edit.png",
+      "limitations": [
+        "Replace source.png with an existing image. Repeat --reference for additional images and describe their order in the prompt.",
+        "Mask images use the same ordered-reference path; they do not impose hard pixel-preservation constraints.",
+        "The source enables CPU offload and lazy loading. This entry does not establish a minimum GPU memory requirement."
+      ],
+      "related": ["qwen-image21-t2i"]
+    },
+    {
       "id": "sd35-medium-t2i",
       "family": "sd35",
       "stage": "inference",
@@ -723,6 +761,370 @@
       "limitations": ["Pass --reference-audio for an additional audio reference. The checked-in source defaults to four GPUs."]
     },
     {
+      "id": "pika-h3-flex-t2va",
+      "family": "pika_h3_flex",
+      "stage": "inference",
+      "task": "Text to video (with audio)",
+      "label": "Pika H3 Flex",
+      "summary": "Pika's post-trained MiniMax-H3: synchronized video and stereo audio from text in six forwards, at 480p or 768p, 5-15 s, in BF16 or as FastVideo's NVFP4 QAD release on Blackwell, with optional FP4 attention.",
+      "model": "Pika-Labs/Pika-H3-Flex",
+      "source": "examples/inference/basic/basic_pika_h3_flex.py",
+      "command": "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 python examples/inference/basic/basic_pika_h3_flex.py --task t2va --offload resident --prompt 'A paper boat drifts down a rainy city street at night; rain patters on the water.'",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "accelerator": "NVIDIA GB200",
+        "peak_memory": "About 129 GiB resident (BF16, 768p, 5 s)",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2038"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_t2va.mp4",
+      "modes": ["T2VA"],
+      "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
+        {
+          "key": "resolution",
+          "label": "Resolution",
+          "hint": "Pika resolution tier",
+          "flag": "--resolution",
+          "options": [{"value": "768p", "label": "768p"}, {"value": "480p", "label": "480p"}],
+          "default": "768p"
+        },
+        {
+          "key": "aspect",
+          "label": "Aspect ratio",
+          "hint": "Bucket within the tier",
+          "flag": "--aspect",
+          "options": ["21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "9:21"],
+          "default": "16:9"
+        },
+        {
+          "key": "duration",
+          "label": "Duration",
+          "hint": "Rounded up to the 17n+5 frame grid",
+          "flag": "--duration",
+          "options": [
+            {"value": 5, "label": "5 s (124 frames)"},
+            {"value": 10, "label": "10 s (243 frames)"},
+            {"value": 15, "label": "15 s (362 frames)"}
+          ],
+          "default": 5
+        },
+        {
+          "key": "nvfp4_decoder",
+          "label": "VAE decoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-decoder",
+          "options": [
+            {"value": "", "label": "BF16 H3 VAE"},
+            {"value": "./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors", "label": "NVFP4 36L quality"},
+            {"value": "./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors", "label": "NVFP4 8L fast"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "nvfp4_text_encoder",
+          "label": "Text encoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-text-encoder",
+          "options": [
+            {"value": "", "label": "BF16 Qwen3-VL"},
+            {"value": "./fasth3-nvfp4-encoder/text_encoder", "label": "NVFP4 Qwen3-VL"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "offload",
+          "label": "Memory",
+          "hint": "Resident is how the GB200 timings were measured",
+          "flag": "--offload",
+          "options": [
+            {"value": "resident", "label": "All resident (fastest)"},
+            {"value": "lazy", "label": "Lazy load + offload"}
+          ],
+          "default": "resident"
+        },
+        {
+          "key": "num_gpus",
+          "label": "GPUs",
+          "hint": "Sequence-parallel degree",
+          "flag": "--num-gpus",
+          "options": [1, 2, 4, 8],
+          "default": 1
+        }
+      ],
+      "limitations": [
+        "NVFP4 QAD release (--weights), one GB200, 768p 16:9, 5 s, warm: 16.8 s with BF16 attention and 15.2 s with FP4 attention; at 768p, 15 s, FP4 attention is 16% faster than BF16 attention (85.3 s vs 101.8 s).",
+        "Measured on one GB200 at 768p 16:9, 5 s, warm: official pika-h3-pro CLI 59.7 s; FastVideo BF16 26.2 s; with the NVFP4 quality-36L decoder 18.0 s; with the fast-8L decoder 17.4 s. The 36L decoder measured 40.5 dB PSNR against the BF16 decoder.",
+        "Peak resident memory was about 129 GiB for the all-BF16 run and 104.6 GiB with the NVFP4 text encoder (25.49 s) at 768p / 5 s on GB200; the official CLI's sampling peak was 71.7 GiB, a different measurement. The NVFP4 text encoder's first request in a fresh process pays a one-time cost of about 183 s.",
+        "--offload resident keeps every component on the GPU (104.6-108.5 GiB peak with the NVFP4 text encoder, about 129 GiB all-BF16, on GB200). --offload lazy loads components on demand for smaller devices; on GB200 it took 48.06 s for the same T2VA request.",
+        "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 selects FlashAttention-4 on Hopper or Blackwell; FA4 is never enabled just because it is installed. Without FA4, attention uses FA3/FA2 if installed and otherwise falls back to SDPA, which is slow and can run out of memory at 768p.",
+        "The NVFP4 decoder and text encoder are Blackwell-only. Download them before selecting them: hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae; hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder. The 8L decoder is a distilled student; validate it on your prompts.",
+        "The six-forward re-noise ladder is part of the adapter contract; the example exposes no step-count flag."
+      ],
+      "related": ["pika-h3-flex-keyframes", "pika-h3-flex-ref2va"]
+    },
+    {
+      "id": "pika-h3-flex-keyframes",
+      "family": "pika_h3_flex",
+      "stage": "inference",
+      "task": "First/last frame to video (with audio)",
+      "label": "Pika H3 Flex keyframes",
+      "summary": "Animate from a first frame (I2VA), toward a last frame (L2VA), or between both (FL2VA). Pika center-crops each keyframe to the selected bucket.",
+      "model": "Pika-Labs/Pika-H3-Flex",
+      "source": "examples/inference/basic/basic_pika_h3_flex.py",
+      "command": "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 python examples/inference/basic/basic_pika_h3_flex.py --task fl2va --offload resident --image assets/images/natural.jpg --last-image assets/images/peninsula.jpg --prompt 'The camera drifts from the misty mountain ridge down to the coastal cliffs above the sea.'",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "accelerator": "NVIDIA GB200",
+        "peak_memory": "105.2 GiB FL2VA, 104.9 GiB I2VA (NVFP4 text encoder, 768p, 5 s)",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2038"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_<task>.mp4",
+      "modes": ["I2VA", "L2VA", "FL2VA"],
+      "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
+        {
+          "key": "task",
+          "label": "Task",
+          "hint": "Which keyframes condition the clip",
+          "flag": "--task",
+          "options": [
+            {"value": "i2va", "label": "First frame (I2VA)"},
+            {"value": "l2va", "label": "Last frame (L2VA)"},
+            {"value": "fl2va", "label": "First and last (FL2VA)"}
+          ],
+          "default": "fl2va"
+        },
+        {
+          "key": "resolution",
+          "label": "Resolution",
+          "hint": "Pika resolution tier",
+          "flag": "--resolution",
+          "options": [{"value": "768p", "label": "768p"}, {"value": "480p", "label": "480p"}],
+          "default": "768p"
+        },
+        {
+          "key": "aspect",
+          "label": "Aspect ratio",
+          "hint": "Bucket within the tier",
+          "flag": "--aspect",
+          "options": ["21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "9:21"],
+          "default": "16:9"
+        },
+        {
+          "key": "duration",
+          "label": "Duration",
+          "hint": "Rounded up to the 17n+5 frame grid",
+          "flag": "--duration",
+          "options": [
+            {"value": 5, "label": "5 s (124 frames)"},
+            {"value": 10, "label": "10 s (243 frames)"},
+            {"value": 15, "label": "15 s (362 frames)"}
+          ],
+          "default": 5
+        },
+        {
+          "key": "nvfp4_decoder",
+          "label": "VAE decoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-decoder",
+          "options": [
+            {"value": "", "label": "BF16 H3 VAE"},
+            {"value": "./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors", "label": "NVFP4 36L quality"},
+            {"value": "./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors", "label": "NVFP4 8L fast"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "nvfp4_text_encoder",
+          "label": "Text encoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-text-encoder",
+          "options": [
+            {"value": "", "label": "BF16 Qwen3-VL"},
+            {"value": "./fasth3-nvfp4-encoder/text_encoder", "label": "NVFP4 Qwen3-VL"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "offload",
+          "label": "Memory",
+          "hint": "Resident is how the GB200 timings were measured",
+          "flag": "--offload",
+          "options": [
+            {"value": "resident", "label": "All resident (fastest)"},
+            {"value": "lazy", "label": "Lazy load + offload"}
+          ],
+          "default": "resident"
+        },
+        {
+          "key": "num_gpus",
+          "label": "GPUs",
+          "hint": "Sequence-parallel degree",
+          "flag": "--num-gpus",
+          "options": [1, 2, 4, 8],
+          "default": 1
+        }
+      ],
+      "limitations": [
+        "Measured on one GB200 at 768p, 5 s, seed 42, NVFP4 text encoder, all resident: FL2VA 28.95 s (first frame 39.6 dB / SSIM 0.971 and last frame 29.1 dB / 0.819 against the inputs); I2VA 27.37 s (first frame 26.5 dB / 0.715). L2VA was not measured separately.",
+        "The command passes both keyframes; the example uses only the ones the selected task needs. Replace them with your own images.",
+        "--offload resident keeps every component on the GPU (104.6-108.5 GiB peak with the NVFP4 text encoder, about 129 GiB all-BF16, on GB200). --offload lazy loads components on demand for smaller devices; on GB200 it took 48.06 s for the same T2VA request.",
+        "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 selects FlashAttention-4 on Hopper or Blackwell; FA4 is never enabled just because it is installed. Without FA4, attention uses FA3/FA2 if installed and otherwise falls back to SDPA, which is slow and can run out of memory at 768p.",
+        "The NVFP4 decoder and text encoder are Blackwell-only. Download them before selecting them: hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae; hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder. The 8L decoder is a distilled student; validate it on your prompts."
+      ],
+      "related": ["pika-h3-flex-t2va", "pika-h3-flex-ref2va"]
+    },
+    {
+      "id": "pika-h3-flex-ref2va",
+      "family": "pika_h3_flex",
+      "stage": "inference",
+      "task": "Reference media to video (with audio)",
+      "label": "Pika H3 Flex references",
+      "summary": "Generate from ordered image, video, and audio references through Pika's ref2va adapter: up to 9 images, 3 videos, and 3 audio clips.",
+      "model": "Pika-Labs/Pika-H3-Flex",
+      "source": "examples/inference/basic/basic_pika_h3_flex.py",
+      "command": "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 python examples/inference/basic/basic_pika_h3_flex.py --task ref2va --offload resident --reference image:assets/images/natural.jpg --reference image:assets/images/bus_terminal.jpg --prompt 'Start on the misty mountain ridge from the first reference, then cut to the night bus terminal from the second.'",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "accelerator": "NVIDIA GB200",
+        "peak_memory": "108.5 GiB with two image references (NVFP4 text encoder, 768p, 5 s)",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2038"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_ref2va.mp4",
+      "modes": ["Ref2VA"],
+      "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
+        {
+          "key": "resolution",
+          "label": "Resolution",
+          "hint": "Pika resolution tier",
+          "flag": "--resolution",
+          "options": [{"value": "768p", "label": "768p"}, {"value": "480p", "label": "480p"}],
+          "default": "768p"
+        },
+        {
+          "key": "aspect",
+          "label": "Aspect ratio",
+          "hint": "Bucket within the tier",
+          "flag": "--aspect",
+          "options": ["21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "9:21"],
+          "default": "16:9"
+        },
+        {
+          "key": "duration",
+          "label": "Duration",
+          "hint": "Rounded up to the 17n+5 frame grid",
+          "flag": "--duration",
+          "options": [
+            {"value": 5, "label": "5 s (124 frames)"},
+            {"value": 10, "label": "10 s (243 frames)"},
+            {"value": 15, "label": "15 s (362 frames)"}
+          ],
+          "default": 5
+        },
+        {
+          "key": "nvfp4_decoder",
+          "label": "VAE decoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-decoder",
+          "options": [
+            {"value": "", "label": "BF16 H3 VAE"},
+            {"value": "./fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors", "label": "NVFP4 36L quality"},
+            {"value": "./fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors", "label": "NVFP4 8L fast"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "nvfp4_text_encoder",
+          "label": "Text encoder",
+          "hint": "NVFP4 needs Blackwell",
+          "flag": "--nvfp4-text-encoder",
+          "options": [
+            {"value": "", "label": "BF16 Qwen3-VL"},
+            {"value": "./fasth3-nvfp4-encoder/text_encoder", "label": "NVFP4 Qwen3-VL"}
+          ],
+          "default": ""
+        },
+        {
+          "key": "offload",
+          "label": "Memory",
+          "hint": "Resident is how the GB200 timings were measured",
+          "flag": "--offload",
+          "options": [
+            {"value": "resident", "label": "All resident (fastest)"},
+            {"value": "lazy", "label": "Lazy load + offload"}
+          ],
+          "default": "resident"
+        },
+        {
+          "key": "num_gpus",
+          "label": "GPUs",
+          "hint": "Sequence-parallel degree",
+          "flag": "--num-gpus",
+          "options": [1, 2, 4, 8],
+          "default": 1
+        }
+      ],
+      "limitations": [
+        "Measured on one GB200 at 768p, 5 s, seed 42, NVFP4 text encoder, all resident, two image references: 51.17 s (38.42 s denoise, 64,241 packed tokens); both references appear in the output.",
+        "Repeat --reference image:PATH, video:PATH, or audio:PATH in order. At least one image or video is required; a video reference needs at least 22 frames at 24 fps.",
+        "Ref2VA loads transformer_ref and the ref2va adapter, a separate 61.7 GiB trunk download. Reference images are encoded at up to a 1024 (480p) or 2048 (768p) short edge, so conditioning memory is higher than T2VA's.",
+        "--offload resident keeps every component on the GPU (104.6-108.5 GiB peak with the NVFP4 text encoder, about 129 GiB all-BF16, on GB200). --offload lazy loads components on demand for smaller devices; on GB200 it took 48.06 s for the same T2VA request.",
+        "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 selects FlashAttention-4 on Hopper or Blackwell; FA4 is never enabled just because it is installed. Without FA4, attention uses FA3/FA2 if installed and otherwise falls back to SDPA, which is slow and can run out of memory at 768p.",
+        "The NVFP4 decoder and text encoder are Blackwell-only. Download them before selecting them: hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae; hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer --include 'text_encoder/*' --local-dir fasth3-nvfp4-encoder. The 8L decoder is a distilled student; validate it on your prompts."
+      ],
+      "related": ["pika-h3-flex-t2va", "pika-h3-flex-keyframes"]
+    },
+    {
+      "id": "open-h3-regenerate-2k",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Video super-resolution (2K regeneration)",
+      "label": "Open-H3-Regenerate-2K",
+      "summary": "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with NVlabs' three-step refiner. The output is silent.",
+      "model": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+      "source": "examples/inference/basic/basic_open_h3_regenerate_2k.py",
+      "command": ": \"${INPUT_VIDEO:?Set INPUT_VIDEO to a 768P MiniMax-H3 draft}\"\npython examples/inference/basic/basic_open_h3_regenerate_2k.py --video \"$INPUT_VIDEO\" --prompt \"A red fox trots through fresh snow in a pine forest at golden hour.\"",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "2560x1440 MP4 at outputs/open_h3_regenerate_2k/regen2k_0.mp4",
+      "related": ["minimax-h3-t2v", "fasth3-8step-v2-cuda"]
+    },
+    {
       "id": "fasth3-lora-preview",
       "family": "minimax_h3",
       "stage": "inference",
@@ -858,6 +1260,103 @@
         "install": "Install FastVideo following the DGX Spark installation guide.",
         "audio": true
       }
+    },
+    {
+      "id": "fasth3-omniref-rtx5090",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX 5090",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-5090 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "minimum_memory": "32 GB VRAM",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-rtx-pro6000",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on RTX PRO 6000",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile rtx-pro-6000 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 OmniRef on DGX Spark",
+      "summary": "Eight-forward video and audio from a prompt plus ordered image, video, and audio references, with the NVFP4 stack.",
+      "model": "FastVideo/FastH3-OmniRef-NVFP4-QAD",
+      "source": "examples/inference/basic/basic_fasth3_omniref_pdd.py",
+      "command": "python examples/inference/basic/basic_fasth3_omniref_pdd.py --model-path FastVideo/FastH3-OmniRef-NVFP4-QAD --profile spark --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.'",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed"
+    },
+    {
+      "id": "fasth3-omniref-mlx",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Reference media to video with audio",
+      "label": "FastH3 Omni V1 on MLX",
+      "summary": "Run the FastH3 Omni BF16 release on Apple Silicon: compose it with the NVFP4 text-encoder stack, convert the DiT to INT6 with VSA, and decode with the LightVAE encoder and the FastH3 NVFP4 decoder.",
+      "model": "FastVideo/FastVideo-FastH3-Omni-8-Step-V1",
+      "source": "examples/inference/basic/mlx_fasth3_omniref.py",
+      "command": "hf download FastVideo/FastVideo-FastH3-Omni-8-Step-V1 --local-dir ./FastVideo-FastH3-Omni-8-Step-V1\nhf download FastVideo/FastH3-OmniRef-NVFP4-QAD --include 'text_encoder/*' 'tokenizer/*' 'processor/*' 'vae/config.json' 'audio_vae/*' --local-dir ./FastH3-OmniRef-NVFP4-QAD\nhf download lightx2v/LightVAE lightvae-lite-h3-encoder.safetensors --local-dir ./LightVAE\nhf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./FastH3-NVFP4-VAE-Decoder\npython examples/inference/basic/mlx_fasth3_omniref.py --compose-only --export ./FastVideo-FastH3-Omni-8-Step-V1 --base-model-path ./FastH3-OmniRef-NVFP4-QAD --composed-dir ./FastH3-OmniRef-composed\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-OmniRef-composed/transformer_ref --out ./FastH3-OmniRef-MLX --formats int6 --include-vsa --nvfp4-conditioner-root ./FastH3-OmniRef-NVFP4-QAD/text_encoder\nln -sfn \"$PWD/FastH3-OmniRef-MLX/nvfp4-encoder\" ./FastH3-OmniRef-composed/text_encoder\npython examples/inference/basic/mlx_fasth3_omniref.py --model-root ./FastH3-OmniRef-composed --mlx-checkpoint ./FastH3-OmniRef-MLX/int6 --image assets/images/couple.jpg --prompt 'A person on a sofa, lit by a warm lamp, speaking to camera.' --vae-encoder ./LightVAE/lightvae-lite-h3-encoder.safetensors --vae-decoder ./FastH3-NVFP4-VAE-Decoder/quality-36L/decoder-nvfp4.safetensors --vae-dtype bf16 --mlx-cache-limit-gib 8 --metal-wired-limit-gib 42 --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_omniref_mlx.mp4",
+      "gpu_types": [
+        "Apple Silicon"
+      ],
+      "hardware": {
+        "platform": "mlx",
+        "accelerator": "Apple M5 Max",
+        "system_memory": "64 GB unified memory",
+        "minimum_memory": "36 GB unified memory",
+        "peak_memory": "27-31 GB peak memory, INT6 DiT of about 17 GB",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/2000"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_omniref_mlx.mp4",
+      "modes": [
+        "Ref2VA",
+        "8-step FastH3 Omni",
+        "trained VSA"
+      ],
+      "limitations": [
+        "Convert with --include-vsa. At least one image or video reference is required; pass references in the order the model should read them.",
+        "Validated on an M4 Max with 36 GB and an M5 Max with 64 GB. Set --metal-wired-limit-gib to about two thirds of the Mac's memory.",
+        "Use fast-8L/decoder-nvfp4.safetensors for the smaller, faster decoder tier. FL2VA keyframes, two-pass refinement and TAEH3 decoding are not wired for references."
+      ]
     }
   ]
 }

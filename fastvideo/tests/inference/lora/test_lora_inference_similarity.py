@@ -127,7 +127,9 @@ def test_merge_lora_weights(model_id):
         hf_param = hf_state_dict[key]
         custom_param = custom_state_dict[key].to_local() if isinstance(custom_state_dict[key],
                                                                        DTensor) else custom_state_dict[key]
-        assert_close(hf_param, custom_param, atol=7e-4, rtol=7e-4)
+        # Unified-memory devices (GB10) disable dit_cpu_offload, so the custom params stay on the GPU
+        # while the HF pipeline's offloaded params are on the CPU; compare on one device.
+        assert_close(hf_param, custom_param.to(hf_param.device), atol=7e-4, rtol=7e-4)
 
 
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])

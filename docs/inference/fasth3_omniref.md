@@ -12,6 +12,18 @@ This page covers running the NVFP4 stack on one consumer Blackwell device
 (RTX 5090, RTX PRO 6000, DGX Spark) and the closest equivalent on an RTX 4090,
 which has no FP4 hardware.
 
+## At a glance
+
+| | |
+|---|---|
+| Checkpoint | [FastVideo/FastH3-OmniRef-NVFP4-QAD](https://huggingface.co/FastVideo/FastH3-OmniRef-NVFP4-QAD) |
+| Inputs | A prompt plus ordered references: up to 9 images, 3 videos and 3 audio clips, 12 in total |
+| Output | Video with synchronized stereo audio at 24 fps |
+| Clip length | 124, 243 or 362 frames (5, 10 or 15 seconds) |
+| Sampling | 8 fused transformer forwards, guidance 1.0 |
+| Local hardware | RTX 5090, RTX PRO 6000 and DGX Spark (NVFP4); RTX 4090 (FP8) |
+| Cookbook | [MiniMax H3 cookbook](../cookbook/minimax-h3.md) |
+
 ## Composing the model directory
 
 The NVFP4 checkpoint is
@@ -114,6 +126,60 @@ sits 4.3 dB farther from the bf16 attention reference on every frame (20.96 vs
 Use the 36L decoder for the best-quality clip and the 8L decoder on memory-bound
 devices; both run the FP8 split.
 
+## Serving
+
+`examples/serving/openai_fasth3_omniref_{rtx5090,rtx_pro6000,spark}.yaml` serve
+the same stacks through the OpenAI-compatible API; their `generator` blocks match
+the inference recipes above. Start one with the environment from its header:
+
+```bash
+fastvideo serve --config examples/serving/openai_fasth3_omniref_spark.yaml
+```
+
+Requests send ordered `image_reference`, `video_reference` and audio references.
+The server reads local paths only under `server.media_roots`. These serving
+configurations follow the maintained inference recipes and have not yet been
+validated as servers on each device.
+
+Select the NVFP4 decoder per configuration with
+`generator.pipeline.experimental.h3_vae_nvfp4_decoder`, pointing at a file from
+[FastVideo/FastH3-NVFP4-VAE-Decoder](https://huggingface.co/FastVideo/FastH3-NVFP4-VAE-Decoder);
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` remains the fallback. The composed directory
+holds base MiniMax-H3's full 36-block VAE, so both the 36-block quality tier and
+the 8-block fast tier apply.
+
+## Continuing a video
+
+A Ref2VA request can continue an earlier video. It takes the earlier video's last
+5, 22 or 39 frames (and their sound, if any) as a continuation clip, and the
+generated video starts by regenerating those frames at the same positions: the
+clip's latent rows take the coordinates of the target's first latent frames and
+audio latents, the reference context of
+[ComfyUI-H3-Continuum](https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum).
+Drop the clip's frames, and the matching audio, from the new video, then append
+the rest to the earlier one.
+
+- Over HTTP, set `continuation_video` to the clip's URL, a base64
+  `data:video/...` URL or a local path (under `server.media_roots`) beside the
+  usual references. In Python, append
+  `MiniMaxH3Reference(source=clip, media_type="continuation")` to `references`.
+- The clip is resampled to 24 fps and must then have 5, 22 or 39 frames on the
+  target canvas. A request takes at most one clip and still needs at least one
+  reference; the clip does not count toward the reference limits and is not
+  shown to the text encoder.
+- `num_frames` counts the clip: 22 frames plus five new seconds is 142,
+  aligned up to 158.
+- Write the prompt from the clip's actual end state. When the prompt's opening
+  contradicts the clip, the model tends to cut to a new shot right after it.
+- Each continuation drifts a little toward higher saturation and sharpness, so
+  fewer, longer segments (two 15-second ones rather than six 5-second ones) hold
+  up better.
+
+Measured on a FastH3 OmniRef PDD student at 1344×768, 22-frame clips re-encoded
+from the earlier output: the jump at a join was about half that of conditioning
+the next segment on the earlier last frame as an image reference, and the sound
+continued instead of restarting from near silence.
+
 ## Environment
 
 The profiles set these; set them yourself when driving the YAML recipes.
@@ -204,6 +270,6 @@ separate point-to-point subnets without routes between them.
 
 ## Apple Silicon
 
-`fastvideo/mlx_runtime` has an MLX MiniMax-H3 runtime, but its pipeline is
-T2V/FL2VA-class. Running OmniRef on a Mac needs an MLX Ref2VA path and an MLX
-build of the NVFP4 decoder; it is not implemented.
+Apple Silicon runs OmniRef natively through MLX, with a locally converted
+INT8/INT6/INT4 DiT instead of NVFP4. See
+[FastH3 OmniRef on Apple Silicon (MLX)](fasth3_omniref_mlx.md).

@@ -131,6 +131,9 @@ class VideoGenerationRequest(BaseModel):
     # SGLang's legacy direct-video spellings.
     video_path: str | None = None
     video_url: str | None = None
+    # MiniMax-H3 Ref2VA: the last 5, 22 or 39 frames of an earlier video (URL or local path) that this request
+    # continues; see MiniMaxH3Reference(media_type="continuation").
+    continuation_video: str | None = None
     video_params: VideoParams | None = None
     user: str | None = None
     task: str | None = None
@@ -145,6 +148,8 @@ class VideoGenerationRequest(BaseModel):
     # SGLang spelling retained as an alias-like input field.
     n: int | None = Field(default=None, ge=1, le=10)
     start_time_seconds: float | None = Field(default=None, ge=0.0)
+    audio_start_in_s: float | None = Field(default=None, ge=0.0)
+    audio_end_in_s: float | None = Field(default=None, gt=0.0)
     quality: Literal["auto", "default", "standard", "hd"] | None = None
     negative_prompt: str | None = None
     num_inference_steps: int | None = Field(default=None, ge=1, le=200)
@@ -226,7 +231,7 @@ class VideoResponse(BaseModel):
     expires_at: int | None = None
     file_path: str | None = None
     file_name: str | None = None
-    media_type: Literal["video/mp4"] = "video/mp4"
+    media_type: Literal["video/mp4", "audio/wav"] = "video/mp4"
     completed_at: int | None = None
     error: VideoError | None = None
     peak_memory_mb: float | None = None

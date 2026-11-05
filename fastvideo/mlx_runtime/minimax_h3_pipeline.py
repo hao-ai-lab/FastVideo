@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -38,6 +39,7 @@ from fastvideo.mlx_runtime.frame_upsample import (
     PIXEL_UPSAMPLE_MODES,
     upsample_frames,
 )
+from fastvideo.mlx_runtime.fastwan import set_quant_gemm_mode
 from fastvideo.mlx_runtime.minimax_h3 import (
     H3_MANIFEST_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
@@ -54,8 +56,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     align_num_frames,
     audio_latent_num_frames,
     build_packed_layout,
+    build_ref2va_packed_layout,
     build_row_timesteps,
     dense_only_vsa_error,
+    load_fasth3_inference_contract,
     load_mlx_h3_checkpoint,
     mlx_h3_checkpoint_vsa_capable,
     resolve_h3_denoise_schedule,
@@ -64,7 +68,22 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     unpack_audio_tokens,
     video_latent_num_frames,
 )
+from fastvideo.mlx_runtime.minimax_h3_reference import (
+    MiniMaxH3PreparedReference,
+    MiniMaxH3Reference,
+    prepare_reference,
+    validate_references,
+)
+from fastvideo.mlx_runtime.minimax_h3_prefix_kv import (
+    DEFAULT_PREFIX_KV_MAX_GIB,
+    MiniMaxH3PrefixKVCache,
+    check_prefix_kv_budget,
+    estimate_prefix_kv_bytes,
+    frozen_prefix_rows,
+    validate_prefix_kv_storage,
+)
 from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
+from fastvideo.mlx_runtime.minimax_h3_vsa_contract import resolve_vsa_settings
 from fastvideo.mlx_runtime.prompt_cache import fingerprint_digest, text_encoder_fingerprint
 
 logger = init_logger(__name__)
@@ -80,6 +99,7 @@ class GenerationResult:
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
     vsa: dict[str, Any] = field(default_factory=dict)
     video_decode_backend: str = "h3-vae"
+    prefix_kv: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -304,6 +324,20 @@ def _restore_metal_memory_limit(mx, previous_bytes: int | None) -> None:
         set_memory(previous_bytes)
 
 
+def _configure_mlx_cache_limit(mx, cache_limit_gib: float | None) -> int | None:
+    """Bound MLX's freed-buffer cache; returns the previous limit to restore.
+
+    MLX keeps freed buffers up to its memory limit by default. With a ~17 GB
+    DiT on a 36 GB Mac that cache competes with the weights and macOS pages
+    them out; too small a cache instead re-allocates every activation.
+    """
+    if cache_limit_gib is None:
+        return None
+    if not math.isfinite(cache_limit_gib) or cache_limit_gib < 0:
+        raise ValueError("mlx_cache_limit_gib must be finite and non-negative")
+    return int(mx.set_cache_limit(int(cache_limit_gib * 2**30)))
+
+
 MINIMAX_H3_PROMPT_CACHE_VERSION = "v2-attention-layout"
 
 
@@ -394,11 +428,19 @@ def _preflight_media_dependencies(*,
 
 
 class MiniMaxH3MLXPipeline:
-    """Text-to-video-with-audio generation through the native MLX runtime."""
+    """Text-to-video-with-audio generation through the native MLX runtime.
+
+    ``generate`` also takes an ordered ``references`` list for the
+    reference-conditioned (Ref2VA / OmniRef) student, which prepends the
+    encoded references to the packed sequence and pins them as conditioning.
+    """
 
     # Defaults for pipelines built without __init__ (unit tests use __new__).
     resident = False
     conditioner_mode = "auto"
+    vae_decoder_path: Path | None = None
+    vae_encoder_path: Path | None = None
+    vae_decoder_quantization: str | None = None
 
     def __init__(
         self,
@@ -406,10 +448,15 @@ class MiniMaxH3MLXPipeline:
         model_root: str | Path,
         mlx_dit_checkpoint: str | Path,
         vae_dtype: str = "fp32",
+        vae_decoder_path: str | Path | None = None,
+        vae_encoder_path: str | Path | None = None,
+        vae_decoder_quantization: str | None = None,
         prompt_cache_dir: str | Path | None = None,
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
+        mlx_cache_limit_gib: float | None = None,
+        quant_gemm: str | None = None,
         video_decode_backend: str = "h3-vae",
         taeh3_checkpoint: str | Path | None = None,
         taeh3_chunk_size: int = 5,
@@ -428,6 +475,9 @@ class MiniMaxH3MLXPipeline:
         self._resident_components: dict[str, Any] = {}
         self.dit_checkpoint = Path(mlx_dit_checkpoint)
         self.vae_dtype = vae_dtype
+        self.vae_decoder_path = Path(vae_decoder_path) if vae_decoder_path else None
+        self.vae_encoder_path = Path(vae_encoder_path) if vae_encoder_path else None
+        self.vae_decoder_quantization = vae_decoder_quantization
         if video_decode_backend not in ("h3-vae", "taeh3"):
             raise ValueError(f"Unknown H3 video decoder: {video_decode_backend}")
         if taeh3_chunk_size < 1:
@@ -450,9 +500,44 @@ class MiniMaxH3MLXPipeline:
         self._dit_in_channels = int(dit_config["in_channels"])
         self.last_dit_forward_s = 0.0
         self.last_vsa_stats: dict[str, Any] | None = None
+        self._apply_quant_gemm(quant_gemm)
         self._previous_memory_limit, self._previous_wired_limit = _configure_metal_memory_limits(mx,
                                                                                                  metal_wired_limit_gib,
                                                                                                  resident=resident)
+        self._previous_cache_limit = _configure_mlx_cache_limit(mx, mlx_cache_limit_gib)
+
+    def _apply_quant_gemm(self, quant_gemm: str | None) -> None:
+        """An explicit mode overrides FASTVIDEO_MLX_QUANT_GEMM for this pipeline; None leaves it in charge."""
+        self._quant_gemm_set = quant_gemm is not None
+        self._previous_quant_gemm = set_quant_gemm_mode(quant_gemm) if self._quant_gemm_set else None
+
+    def _restore_quant_gemm(self) -> None:
+        if getattr(self, "_quant_gemm_set", False):
+            set_quant_gemm_mode(self._previous_quant_gemm)
+            self._quant_gemm_set = False
+
+    def _load_video_vae(self, *, include_encoder: bool, include_decoder: bool = True):
+        """Load the H3 video VAE, swapping in standalone decoder / encoder files when configured."""
+        from fastvideo.mlx_runtime import minimax_h3_video_vae as video_vae
+
+        vae_dir = self.model_root / "vae"
+        standalone = (self.vae_decoder_path is not None or self.vae_encoder_path is not None
+                      or self.vae_decoder_quantization is not None)
+        if not standalone:
+            return video_vae.mlx_h3_video_vae_from_dir(vae_dir,
+                                                       include_encoder=include_encoder,
+                                                       include_decoder=include_decoder,
+                                                       storage_dtype=self.vae_dtype)
+        has_base = vae_dir.is_dir() and (any(vae_dir.glob("*.safetensors")) or (vae_dir / "config.json").exists())
+        return video_vae.mlx_h3_video_vae_from_files(
+            vae_dir=vae_dir if has_base else None,
+            decoder_path=self.vae_decoder_path,
+            encoder_path=self.vae_encoder_path,
+            include_encoder=include_encoder,
+            include_decoder=include_decoder,
+            storage_dtype=self.vae_dtype,
+            decoder_quantization=self.vae_decoder_quantization,
+        )
 
     # -- input validation (before anything heavy loads) -------------------
 
@@ -462,8 +547,14 @@ class MiniMaxH3MLXPipeline:
             missing.append(str(self.dit_checkpoint))
         vae_dir = self.model_root / "vae"
         audio_dir = self.model_root / "audio_vae"
-        if self.video_decode_backend == "h3-vae" and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
+        # Standalone decoder + encoder files (LightVAE, FastH3 decoder) replace the base VAE shards entirely.
+        standalone = self.vae_decoder_path is not None and self.vae_encoder_path is not None
+        if (self.video_decode_backend == "h3-vae" and not standalone
+                and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors")))):
             missing.append(str(vae_dir))
+        for path in (self.vae_decoder_path, self.vae_encoder_path):
+            if path is not None and not path.is_file():
+                missing.append(str(path))
         if not (audio_dir.exists() and any(audio_dir.glob("*.safetensors"))):
             missing.append(str(audio_dir))
         if missing:
@@ -506,8 +597,6 @@ class MiniMaxH3MLXPipeline:
             return
         from fastvideo.mlx_runtime.minimax_h3_conditioner import ResidentNVFP4MiniMaxH3TextConditioner
         from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
-        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
-
         import mlx.core as mx
 
         try:
@@ -517,9 +606,7 @@ class MiniMaxH3MLXPipeline:
                 raise ValueError("All-resident generation requires the packed NVFP4 text encoder.")
             self._resident_components["conditioner"] = conditioner
             self._resident_components["dit"] = _load_resident_dit(self.dit_checkpoint)
-            self._resident_components["video_vae"] = mlx_h3_video_vae_from_dir(self.model_root / "vae",
-                                                                               include_encoder=False,
-                                                                               storage_dtype=self.vae_dtype)
+            self._resident_components["video_vae"] = self._load_video_vae(include_encoder=False)
             self._resident_components["audio_vae"] = mlx_h3_audio_vae_from_dir(self.model_root / "audio_vae",
                                                                                include_encoder=False)
             mx.eval(list(self._resident_components["audio_vae"].weights.values()))
@@ -529,6 +616,7 @@ class MiniMaxH3MLXPipeline:
             raise
 
     def close(self) -> None:
+        self._restore_quant_gemm()
         conditioner = self._resident_components.get("conditioner")
         if conditioner is not None:
             conditioner.close()
@@ -546,6 +634,12 @@ class MiniMaxH3MLXPipeline:
 
             _restore_metal_memory_limit(mx, previous_memory)
             self._previous_memory_limit = None
+        previous_cache = getattr(self, "_previous_cache_limit", None)
+        if previous_cache is not None:
+            import mlx.core as mx
+
+            mx.set_cache_limit(previous_cache)
+            self._previous_cache_limit = None
 
     def encode_prompt(self, prompt: str) -> tuple[np.ndarray, np.ndarray]:
         """Returns (hidden states (S, hidden), token tags). Uses the cache or
@@ -593,6 +687,76 @@ class MiniMaxH3MLXPipeline:
         data = np.load(path)
         return data["hidden_states"], data["token_tags"]
 
+    def prepare_references(
+        self,
+        references: Sequence[MiniMaxH3Reference],
+        num_frames: int,
+        *,
+        max_pixels: int | None = None,
+    ) -> list[MiniMaxH3PreparedReference]:
+        """Validate and decode the ordered reference list.
+
+        Decoding happens once, before anything is loaded, so a bad reference
+        fails before the DiT and the encoders are resident.
+        """
+        validated = validate_references(list(references))
+        target_sample_rate = self.audio_sample_rate()
+        prepared = [
+            prepare_reference(reference, num_frames, target_sample_rate, max_pixels=max_pixels)
+            for reference in validated
+        ]
+        logger.info("Prepared %d reference(s): %s", len(prepared),
+                    ", ".join(reference.media_type for reference in prepared))
+        return prepared
+
+    def audio_sample_rate(self) -> int:
+        """The audio VAE's sample rate, which reference soundtracks are resampled to."""
+        config_path = self.model_root / "audio_vae" / "config.json"
+        if not config_path.is_file():
+            return 32000
+        return int(json.loads(config_path.read_text(encoding="utf-8")).get("sampling_rate", 32000))
+
+    def encode_reference_prompt(
+        self,
+        prompt: str,
+        references: list[MiniMaxH3PreparedReference],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Encode the prompt with its ordered references as Qwen3-VL condition rows."""
+        from fastvideo.mlx_runtime.minimax_h3_ref_conditioning import encode_reference_prompt, load_vision_limits
+        from fastvideo.mlx_runtime.minimax_h3_vision import Qwen3VLVisionConfig
+
+        if self.resident:
+            self.prepare_resident()
+            conditioner = self._resident_components["conditioner"]
+        else:
+            conditioner = self._load_conditioner()
+        try:
+            config = Qwen3VLVisionConfig.from_config_json(self.conditioner_dir / "config.json")
+            min_pixels, max_pixels = load_vision_limits(self.processor_dir())
+            video_min_pixels, video_max_pixels = load_vision_limits(self.processor_dir(), video=True)
+            hidden, tags = encode_reference_prompt(
+                conditioner,
+                prompt,
+                references,
+                vision_config=config,
+                min_pixels=min_pixels,
+                max_pixels=max_pixels,
+                video_min_pixels=video_min_pixels,
+                video_max_pixels=video_max_pixels,
+            )
+        finally:
+            if not self.resident:
+                conditioner.close()
+        _cleanup_mlx()
+        return hidden, tags
+
+    def processor_dir(self) -> Path:
+        """Where the Qwen3-VL processor config lives, defaulting to the tokenizer dir."""
+        for candidate in (self.model_root / "processor", self.tokenizer_dir):
+            if (candidate / "preprocessor_config.json").is_file():
+                return candidate
+        return self.tokenizer_dir
+
     def has_conditioner_weights(self) -> bool:
         marker = self.conditioner_dir / "model.safetensors.index.json"
         single = self.conditioner_dir / "model.safetensors"
@@ -635,9 +799,34 @@ class MiniMaxH3MLXPipeline:
         dit: Any | None = None,
         vsa_config: MiniMaxH3VSAConfig | None = None,
         inter_step_cooldown_s: float = 0.0,
+        references: list[MiniMaxH3PreparedReference] | None = None,
+        condition_video_rows: np.ndarray | None = None,
+        condition_audio_rows: np.ndarray | None = None,
+        reuse_prefix_kv: bool = False,
+        prefix_kv_refresh_every: int = 0,
+        prefix_kv_cache_max_gib: float = DEFAULT_PREFIX_KV_MAX_GIB,
+        prefix_kv_storage: str = "bf16",
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Denoise joint latents; returns (normalized video rows, audio rows)."""
+        """Denoise joint latents; returns (normalized target video rows, target audio rows).
+
+        With ``references`` the packed sequence is reference-prefixed and the
+        encoder rows ride along in every forward, but only the target rows are
+        stepped and returned: the references are conditioning, not output.
+
+        ``reuse_prefix_kv`` (Ref2VA only, lossy) records the text/reference
+        rows' per-block K/V on the first step and runs later steps on the
+        target rows alone; ``prefix_kv_refresh_every=R`` re-records every R
+        steps (0 never). The cache is refused above ``prefix_kv_cache_max_gib``.
+        """
         import mlx.core as mx
+
+        self.last_prefix_kv_stats: dict[str, object] = {"enabled": False}
+        self.last_denoise_step_times = []
+        if prefix_kv_refresh_every < 0:
+            raise ValueError(f"prefix_kv_refresh_every must be >= 0, got {prefix_kv_refresh_every}.")
+        if reuse_prefix_kv and references is None:
+            raise ValueError("Prefix K/V reuse needs Ref2VA references (a reference-prefixed packed layout).")
+        validate_prefix_kv_storage(prefix_kv_storage)
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=audio_num_frames is None)
         audio_frames = geometry["num_frames"] if audio_num_frames is None else align_num_frames(audio_num_frames)
@@ -659,8 +848,25 @@ class MiniMaxH3MLXPipeline:
         audio_scheduler = schedule.audio
         union = schedule.adaln_timesteps
         num_steps = schedule.num_steps
+        # A FastH3 PDD export runs one fused head block per trained block; its
+        # plan supplies the block partition, the per-modality node sigmas
+        # (already on the schedulers) and the integration weights.
+        pdd_plan = schedule.pdd_plan
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
-        # conditioning rows; those modes recompute the ladder before denoise.
+        # conditioning rows. A Ref2VA PDD ladder already carries it, so a
+        # converted DiT's baked cache matches; this append is then a no-op.
+        if references is not None:
+            if video_temporal_scale != 1.0:
+                # The reference-prefixed builder stretches only the target video
+                # rows, which the CUDA packing never does either; refusing beats
+                # silently ignoring the request.
+                raise ValueError("Reference-conditioned packing has no temporal-scale stretch; "
+                                 "run Ref2VA without fast mode.")
+            union = np.unique(np.concatenate([union, np.array([MINIMAX_H3_KEYFRAME_NOISE_AUG],
+                                                              dtype=np.float32)])).astype(np.float32)
+            if condition_video_rows is None or condition_audio_rows is None:
+                condition_video_rows, condition_audio_rows = self._encode_reference_conditions(
+                    references, dit.patch_size, video_scheduler, seed)
 
         cache = getattr(dit, "_adaln_cache", None)
         if cache is None or not np.array_equal(cache.timesteps.astype(np.float32), union):
@@ -687,16 +893,27 @@ class MiniMaxH3MLXPipeline:
         if hasattr(dit, "reset_vsa_stats"):
             dit.reset_vsa_stats()
 
-        layout = build_packed_layout(
-            len(token_tags),
-            geometry["latent_frame_count"],
-            geometry["latent_height"],
-            geometry["latent_width"],
-            audio_latent_num_frames(audio_frames),
-            patch_size=dit.patch_size,
-            text_token_tags=np.asarray(token_tags, dtype=np.int64),
-            video_temporal_scale=video_temporal_scale,
-        )
+        if references is not None:
+            layout = build_ref2va_packed_layout(
+                np.asarray(token_tags, dtype=np.int64),
+                references,
+                geometry["latent_frame_count"],
+                geometry["latent_height"],
+                geometry["latent_width"],
+                audio_latent_num_frames(audio_frames),
+                patch_size=dit.patch_size,
+            )
+        else:
+            layout = build_packed_layout(
+                len(token_tags),
+                geometry["latent_frame_count"],
+                geometry["latent_height"],
+                geometry["latent_width"],
+                audio_latent_num_frames(audio_frames),
+                patch_size=dit.patch_size,
+                text_token_tags=np.asarray(token_tags, dtype=np.int64),
+                video_temporal_scale=video_temporal_scale,
+            )
         if getattr(dit, "vsa_config", None) is not None and dit.vsa_config.enabled:
             dit.prepare_vsa_geometry(layout)
 
@@ -705,8 +922,52 @@ class MiniMaxH3MLXPipeline:
         target_audio_rows = int(layout.audio_indices.shape[0] - layout.num_condition_audio_rows)
         x_v = mx.random.normal((target_video_rows, dit.patch_dim), key=video_key)
         x_a = mx.random.normal((target_audio_rows, dit.audio_in_channels), key=audio_key)
+        if condition_video_rows is not None:
+            if condition_video_rows.shape != (layout.num_condition_video_rows, dit.patch_dim):
+                raise ValueError(f"Video condition rows {condition_video_rows.shape} do not match the layout's "
+                                 f"{layout.num_condition_video_rows} condition rows of width {dit.patch_dim}.")
+            x_v = mx.concatenate([mx.array(condition_video_rows), x_v], axis=0)
+        elif layout.num_condition_video_rows:
+            raise ValueError("A reference-prefixed layout needs its encoded video condition rows.")
+        if condition_audio_rows is not None:
+            if condition_audio_rows.shape != (layout.num_condition_audio_rows, dit.audio_in_channels):
+                raise ValueError(f"Audio condition rows {condition_audio_rows.shape} do not match the layout's "
+                                 f"{layout.num_condition_audio_rows} condition rows.")
+            x_a = mx.concatenate([mx.array(condition_audio_rows), x_a], axis=0)
+        elif layout.num_condition_audio_rows:
+            raise ValueError("A reference-prefixed layout needs its encoded audio condition rows.")
         text = mx.array(text_rows.astype(np.float32))
+        # The token refiner depends only on this request's conditioning, not
+        # the changing latents or timesteps. A local value also prevents a
+        # resident DiT from reusing embeddings from an earlier request.
+        text_embeds = None
         dit_forward_s = 0.0
+        prefix_kv = None
+        if reuse_prefix_kv:
+            frozen_rows = frozen_prefix_rows(layout)
+            estimated = estimate_prefix_kv_bytes(len(dit.blocks), frozen_rows, dit.num_heads, dit.head_dim,
+                                                 prefix_kv_storage)
+            check_prefix_kv_budget(estimated, prefix_kv_cache_max_gib, rows=frozen_rows)
+            prefix_kv = MiniMaxH3PrefixKVCache(len(dit.blocks), frozen_rows, dit.num_heads, dit.head_dim,
+                                               prefix_kv_storage)
+            logger.info("Prefix K/V reuse: %d frozen rows, ~%.2f GiB cache (%s), refresh_every=%d", frozen_rows,
+                        estimated / 2**30, prefix_kv_storage, prefix_kv_refresh_every)
+        recorded_steps: list[int] = []
+        reused_steps: list[int] = []
+
+        if pdd_plan is not None:
+            # PDD targets start at the first node's noise level (0.999 * eps),
+            # as the students were trained; conditioning rows stay untouched.
+            x_v = mx.concatenate([
+                x_v[:layout.num_condition_video_rows],
+                x_v[layout.num_condition_video_rows:] * float(pdd_plan.node_sigmas["video"][0]),
+            ],
+                                 axis=0)
+            x_a = mx.concatenate([
+                x_a[:layout.num_condition_audio_rows],
+                x_a[layout.num_condition_audio_rows:] * float(pdd_plan.node_sigmas["audio"][0]),
+            ],
+                                 axis=0)
 
         for step_index in range(num_steps):
             video_t = float(video_scheduler.timesteps[step_index])
@@ -719,23 +980,66 @@ class MiniMaxH3MLXPipeline:
                 condition_audio_timestep=1.0,
             )
             step_started = time.perf_counter()
-            video_velocity, audio_velocity = dit.forward_with_cache(
-                x_v,
-                x_a,
-                text,
-                layout=layout,
-                step_timesteps=unique,
-                row_timestep_inverse=inverse,
-                step_index=step_index,
-            )
-            # Only target rows are being denoised (no conditions in T2VA).
-            video_velocity = video_velocity[layout.num_condition_video_rows:]
-            audio_velocity = audio_velocity[layout.num_condition_audio_rows:]
-            x_v = video_scheduler.step(video_velocity, step_index, x_v)
-            x_a = audio_scheduler.step(audio_velocity, step_index, x_a)
+            pdd_forward_kwargs = ({} if pdd_plan is None else {
+                "pdd_block": pdd_plan.block(step_index),
+                "pdd_integration_weights": pdd_plan.integration_weights,
+            })
+            record_step = prefix_kv is not None and (step_index == 0 or (prefix_kv_refresh_every > 0
+                                                                         and step_index % prefix_kv_refresh_every == 0))
+            if prefix_kv is not None and not record_step:
+                video_velocity, audio_velocity = dit.forward_target_rows(
+                    x_v[layout.num_condition_video_rows:],
+                    x_a[layout.num_condition_audio_rows:],
+                    layout=layout,
+                    step_timesteps=unique,
+                    row_timestep_inverse=inverse,
+                    prefix_kv=prefix_kv,
+                    step_index=step_index,
+                    **pdd_forward_kwargs,
+                )
+                reused_steps.append(step_index)
+            else:
+                if record_step:
+                    pdd_forward_kwargs["record_prefix_kv"] = prefix_kv
+                    recorded_steps.append(step_index)
+                if text_embeds is None:
+                    text_embeds = dit.refine_text(text)
+                    mx.eval(text_embeds)
+                video_velocity, audio_velocity = dit.forward_with_cache(
+                    x_v,
+                    x_a,
+                    text,
+                    layout=layout,
+                    step_timesteps=unique,
+                    row_timestep_inverse=inverse,
+                    step_index=step_index,
+                    precomputed_text_embeds=text_embeds,
+                    **pdd_forward_kwargs,
+                )
+                video_velocity = video_velocity[layout.num_condition_video_rows:]
+                audio_velocity = audio_velocity[layout.num_condition_audio_rows:]
+            # Only the target rows are denoised: condition rows stay pinned at
+            # the timestep the contract trained them at.
+            if layout.num_condition_video_rows:
+                x_v = mx.concatenate([
+                    x_v[:layout.num_condition_video_rows],
+                    video_scheduler.step(video_velocity, step_index, x_v[layout.num_condition_video_rows:])
+                ],
+                                     axis=0)
+            else:
+                x_v = video_scheduler.step(video_velocity, step_index, x_v)
+            if layout.num_condition_audio_rows:
+                x_a = mx.concatenate([
+                    x_a[:layout.num_condition_audio_rows],
+                    audio_scheduler.step(audio_velocity, step_index, x_a[layout.num_condition_audio_rows:])
+                ],
+                                     axis=0)
+            else:
+                x_a = audio_scheduler.step(audio_velocity, step_index, x_a)
             mx.eval(x_v, x_a)
             step_s = time.perf_counter() - step_started
             dit_forward_s += step_s
+            self.last_denoise_step_times.append(step_s)
             logger.info("H3 denoise step %d/%d (sigma_video=%.4f, sigma_audio=%.4f) in %.2fs", step_index + 1,
                         num_steps, 1.0 - video_t, 1.0 - audio_t, step_s)
             del video_velocity, audio_velocity
@@ -745,6 +1049,17 @@ class MiniMaxH3MLXPipeline:
                 time.sleep(inter_step_cooldown_s)
 
         self.last_dit_forward_s = dit_forward_s
+        self.last_prefix_kv_stats = {
+            "enabled": prefix_kv is not None,
+            "refresh_every": prefix_kv_refresh_every,
+            "storage": prefix_kv_storage,
+            "frozen_rows": 0 if prefix_kv is None else prefix_kv.rows,
+            "cache_gib": 0.0 if prefix_kv is None else prefix_kv.nbytes / 2**30,
+            "max_gib": prefix_kv_cache_max_gib,
+            "recorded_steps": recorded_steps,
+            "reused_steps": reused_steps,
+        }
+        prefix_kv = None
         stats = getattr(dit, "last_vsa_stats", None)
         self.last_vsa_stats = None if stats is None else {
             "enabled": bool(getattr(dit.vsa_config, "enabled", False)),
@@ -765,8 +1080,8 @@ class MiniMaxH3MLXPipeline:
             "checkpoint_vsa_capable": bool(getattr(dit, "vsa_capable", False)),
         }
 
-        video_rows = np.asarray(x_v, dtype=np.float32)
-        audio_rows = np.asarray(x_a, dtype=np.float32)
+        video_rows = np.asarray(x_v, dtype=np.float32)[layout.num_condition_video_rows:]
+        audio_rows = np.asarray(x_a, dtype=np.float32)[layout.num_condition_audio_rows:]
         if owned_dit:
             del dit
             _cleanup_mlx()
@@ -786,8 +1101,6 @@ class MiniMaxH3MLXPipeline:
         """Normalized packed rows -> (T, H, W, 3) uint8 frames."""
         _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
         import mlx.core as mx
-
-        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=False)
         if self.video_decode_backend == "taeh3":
@@ -810,9 +1123,7 @@ class MiniMaxH3MLXPipeline:
             self.prepare_resident()
             vae = self._resident_components["video_vae"]
         else:
-            vae = mlx_h3_video_vae_from_dir(self.model_root / "vae",
-                                            include_encoder=False,
-                                            storage_dtype=self.vae_dtype)
+            vae = self._load_video_vae(include_encoder=False)
         expected_height = height // vae.spatial_compression_ratio
         expected_width = width // vae.spatial_compression_ratio
         if (geometry["latent_height"], geometry["latent_width"]) != (expected_height, expected_width):
@@ -942,6 +1253,43 @@ class MiniMaxH3MLXPipeline:
             tmp_video.unlink(missing_ok=True)
         return output_path
 
+    def _encode_reference_conditions(
+        self,
+        references: list[MiniMaxH3PreparedReference],
+        patch_size: tuple[int, int, int],
+        scheduler: MiniMaxH3SchedulerState,
+        seed: int,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """VAE-encode the prepared references into their condition rows.
+
+        The encoders are loaded for this call alone and released afterwards
+        rather than kept on the pipeline: only a reference-conditioned request
+        needs them, and they double the VAE's resident bytes.
+        """
+        from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
+        from fastvideo.mlx_runtime.minimax_h3_ref_conditioning import encode_reference_conditions
+
+        if self.video_decode_backend == "taeh3":
+            raise ValueError("A reference-conditioned request needs the video VAE encoder; "
+                             "use --video-decode-backend h3-vae.")
+
+        needs_audio = any(reference.has_audio for reference in references)
+        video_vae = self._load_video_vae(include_encoder=True, include_decoder=False)
+        audio_vae = (mlx_h3_audio_vae_from_dir(self.model_root /
+                                               "audio_vae", include_encoder=True) if needs_audio else None)
+        try:
+            return encode_reference_conditions(
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                references=references,
+                patch_size=patch_size,
+                scheduler=scheduler,
+                seed=seed,
+            )
+        finally:
+            del video_vae, audio_vae
+            _cleanup_mlx()
+
     # -- end-to-end ----------------------------------------------------------
 
     def generate(
@@ -949,6 +1297,7 @@ class MiniMaxH3MLXPipeline:
         prompt: str,
         *,
         output_path: str | Path,
+        references: Sequence[MiniMaxH3Reference] | None = None,
         height: int = 480,
         width: int = 832,
         num_frames: int = 124,
@@ -966,28 +1315,52 @@ class MiniMaxH3MLXPipeline:
         fast_spatial_scale: int = 2,
         fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
         fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
-        vsa: bool = False,
-        vsa_sparsity: float = 0.9,
-        vsa_tile_size: int = 64,
+        vsa: bool | None = None,
+        vsa_sparsity: float | None = None,
+        vsa_tile_size: int | None = None,
+        vsa_ref_policy: str | None = None,
+        vsa_ref_keep_rate: float | None = None,
         vsa_prefix_mode: str = "exempt",
         vsa_dense_first_n_steps: int = 0,
         vsa_dense_layers: tuple[int, ...] = (),
         vsa_impl: str = "auto",
         inter_step_cooldown_s: float = 0.0,
+        reference_max_pixels: int | None = None,
+        reuse_prefix_kv: bool = False,
+        prefix_kv_refresh_every: int = 0,
+        prefix_kv_cache_max_gib: float = DEFAULT_PREFIX_KV_MAX_GIB,
+        prefix_kv_storage: str = "bf16",
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
 
+        if vsa_impl in ("sdpa", "nax") and reuse_prefix_kv:
+            raise ValueError(
+                f"{vsa_impl.upper()} VSA does not support prefix K/V reuse; disable reuse or select another backend")
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         if inter_step_cooldown_s < 0:
             raise ValueError(f"inter_step_cooldown_s must be non-negative, got {inter_step_cooldown_s}.")
         _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
         _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
-        vsa_config = MiniMaxH3VSAConfig(
-            enabled=vsa,
+        # Unset VSA knobs come from the snapshot's FastH3 contract; ``vsa=None``
+        # turns VSA on for a VSA contract and ``vsa=False`` opts out.
+        vsa_settings = resolve_vsa_settings(
+            load_fasth3_inference_contract(self.model_root),
+            vsa=vsa,
             sparsity=vsa_sparsity,
             tile_size=vsa_tile_size,
+            ref_policy=vsa_ref_policy,
+            ref_keep_rate=vsa_ref_keep_rate,
+            checkpoint_capable=mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
+        )
+        vsa = vsa_settings.enabled
+        vsa_config = MiniMaxH3VSAConfig(
+            enabled=vsa,
+            sparsity=vsa_settings.sparsity,
+            tile_size=vsa_settings.tile_size,
+            ref_policy=vsa_settings.ref_policy,
+            ref_keep_rate=vsa_settings.ref_keep_rate,
             prefix_mode=vsa_prefix_mode,  # type: ignore[arg-type]
             dense_first_n_steps=vsa_dense_first_n_steps,
             dense_layers=vsa_dense_layers,
@@ -1043,9 +1416,18 @@ class MiniMaxH3MLXPipeline:
             timings["decoder_prepare_s"] = time.perf_counter() - started
             logger.warning("TAEH3 is an approximate preview decoder; reconstruction differs from the full H3 VAE.")
 
+        prepared_references: list[MiniMaxH3PreparedReference] | None = None
+        if references is not None:
+            prepared_references = self.prepare_references(references,
+                                                          video_geometry["num_frames"],
+                                                          max_pixels=reference_max_pixels)
+
         _reset_peak_memory()
         started = time.perf_counter()
-        text_rows, token_tags = self.encode_prompt(prompt)
+        if prepared_references is None:
+            text_rows, token_tags = self.encode_prompt(prompt)
+        else:
+            text_rows, token_tags = self.encode_reference_prompt(prompt, prepared_references)
         timings["condition_s"] = time.perf_counter() - started
         peaks["condition_gib"] = _peak_memory_gib()
         _cleanup_mlx()
@@ -1064,6 +1446,11 @@ class MiniMaxH3MLXPipeline:
             num_steps=num_steps,
             vsa_config=vsa_config,
             inter_step_cooldown_s=inter_step_cooldown_s,
+            references=prepared_references,
+            reuse_prefix_kv=reuse_prefix_kv,
+            prefix_kv_refresh_every=prefix_kv_refresh_every,
+            prefix_kv_cache_max_gib=prefix_kv_cache_max_gib,
+            prefix_kv_storage=prefix_kv_storage,
         )
         timings["denoise_s"] = time.perf_counter() - started
         timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
@@ -1154,6 +1541,11 @@ class MiniMaxH3MLXPipeline:
             timings=timings,
             peak_memory_gib=peaks,
             video_decode_backend=self.video_decode_backend,
+            prefix_kv={
+                **getattr(self, "last_prefix_kv_stats", {"enabled": False}),
+                "step_times_s":
+                list(getattr(self, "last_denoise_step_times", [])),
+            },
             vsa=getattr(self, "last_vsa_stats", None) or {
                 "enabled": vsa_config.enabled,
                 "checkpoint_vsa_capable": mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),

@@ -2,7 +2,7 @@
 # selected options, schema types/ranges, and baseline values for each deployment.
 # TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
 title: LTX2 Distilled
-summary: Incremental video delivery over the native streaming WebSocket interface.
+summary: LTX2 video generation with synchronized audio over REST or incremental WebSocket streaming.
 
 deployments:
   cuda-streaming:
@@ -33,3 +33,28 @@ deployments:
       default_request.sampling.width:
         minimum: 64
         multipleOf: 64
+
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    defaults: examples/serving/openai_ltx2_distilled.yaml
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.sp_size
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.fps
+      - default_request.sampling.seed
+    overrides:
+      default_request.sampling.height:
+        minimum: 64
+        multipleOf: 32
+        default: 1024
+      default_request.sampling.width:
+        minimum: 64
+        multipleOf: 32
+        default: 1536

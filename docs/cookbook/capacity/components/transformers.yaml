@@ -1,0 +1,17 @@
+transformers:
+  fastwan2.1-t2v-1.3b-vsa-dit:
+    name: FastWan2.1 T2V 1.3B VSA transformer
+    # Sum of tensor shapes in the FastWan checkpoint header at the pinned revision below.
+    # Includes 70_824_960 VSA to_gate_compress parameters across the 30 blocks.
+    # block_parameter_count includes only blocks.* tensors; the total also includes embeddings and output heads.
+    parameter_count: 1_489_821_760
+    block_count: 30
+    block_parameter_count: 1_464_046_080
+    geometry:
+      hidden_size: 1536
+      ffn_size: 8960
+      patch_size: [1, 2, 2]
+      gated_ffn: false
+    sources:
+      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/tree/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/transformer
+      - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/transformer.py

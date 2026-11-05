@@ -15,10 +15,11 @@ import torch.nn.functional as F
 
 from fastvideo import envs
 from fastvideo.attention import DistributedAttention
-from fastvideo.attention.backends.abstract import layer_idx_from_prefix
+from fastvideo.attention.backends.abstract import AttentionMetadata, layer_idx_from_prefix
 from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
+from fastvideo.attention.utils.nvfp4_qk_precondition import parse_block_indices
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -38,6 +39,7 @@ from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
                                                        vsa_fp4_requested, vsa_tile_first_attention)
 from fastvideo.models.dits.minimax_h3_fusions import exact as exact_kernels
+from fastvideo.models.dits.minimax_h3_fusions import mk as mk_kernels
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
     fused_qknorm_rope,
@@ -52,9 +54,13 @@ from fastvideo.utils import get_compute_dtype
 logger = init_logger(__name__)
 
 MINIMAX_H3_MODALITY_NUM = 3
+#: eps baked into the MotionKernel H3 kernels; their call sites require it.
+_MK_NORM_EPS = 1e-5
 _CFG = MiniMaxH3Config()
 _MINIMAX_H3_FUSION_NAMES = frozenset({"modulate", "qknorm_rope", "swiglu"})
 _MINIMAX_H3_EXACT_KERNEL_NAMES = frozenset({"rope", "modulate", "swiglu"})
+#: Whole-tier opt-in that replaces the Sol kernels with the MotionKernel ones.
+_MINIMAX_H3_MK_MODE = "mk"
 
 
 def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
@@ -65,7 +71,14 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
         return frozenset()
     if normalized in {"1", "all"}:
         return _MINIMAX_H3_FUSION_NAMES
+    if normalized == _MINIMAX_H3_MK_MODE:
+        # ``mk`` is a whole-tier mode: every fusion is on, and each fused call
+        # site dispatches to the MotionKernel kernel instead of the Sol one.
+        return _MINIMAX_H3_FUSION_NAMES | {_MINIMAX_H3_MK_MODE}
     enabled = frozenset(item.strip() for item in normalized.split(",") if item.strip())
+    if _MINIMAX_H3_MK_MODE in enabled:
+        raise ValueError(f"'{_MINIMAX_H3_MK_MODE}' is a whole-tier mode and cannot be combined with individual "
+                         f"fusions: {sorted(enabled - {_MINIMAX_H3_MK_MODE})}")
     unknown = enabled - _MINIMAX_H3_FUSION_NAMES
     if unknown:
         supported = ",".join(sorted(_MINIMAX_H3_FUSION_NAMES))
@@ -139,6 +152,7 @@ class MiniMaxH3FeedForward(nn.Module):
         prefix: str = "",
         fuse_swiglu: bool = False,
         exact_swiglu: bool = False,
+        mk_swiglu: bool = False,
     ) -> None:
         super().__init__()
         self.fc_in = ReplicatedLinear(
@@ -157,6 +171,7 @@ class MiniMaxH3FeedForward(nn.Module):
         )
         self.fuse_swiglu = fuse_swiglu
         self.exact_swiglu = exact_swiglu
+        self.mk_swiglu = mk_swiglu
         self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
             self.fc_out.quant_method, MXFP8QuantizeMethod)
         # Inference-only token chunking: the 2 * ffn_dim intermediate is ~5.3x the block input
@@ -181,7 +196,10 @@ class MiniMaxH3FeedForward(nn.Module):
             return mxfp8_swiglu_feed_forward(hidden_states, self.fc_in, self.fc_out)
         hidden_states, _ = self.fc_in(hidden_states)
         if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
-            hidden_states = minimax_h3_swiglu(hidden_states)
+            if self.mk_swiglu and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling():
+                hidden_states = mk_kernels.swiglu(hidden_states)
+            else:
+                hidden_states = minimax_h3_swiglu(hidden_states)
         elif self.exact_swiglu and exact_kernels.supports_rowwise(hidden_states):
             hidden_states = exact_kernels.swiglu(hidden_states)
         else:
@@ -205,8 +223,11 @@ class MiniMaxH3Attention(nn.Module):
         prefix: str,
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_rope: bool = False,
+        mk_qkv: bool = False,
         vsa_fp4: dict[str, Any] | None = None,
+        bf16_attention: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -244,6 +265,7 @@ class MiniMaxH3Attention(nn.Module):
         )
         self.fuse_qknorm_rope = fuse_qknorm_rope
         self.exact_rope = exact_rope
+        self.mk_qkv = mk_qkv
         # VSA carries a learned gate on its pooled-compression branch. The H3
         # checkpoint has no such weight, so the loader zero-initializes it
         # (ALLOWED_NEW_PARAM_PATTERNS) and the branch is exactly disabled
@@ -254,6 +276,8 @@ class MiniMaxH3Attention(nn.Module):
                                             supported_attention_backends=supported_attention_backends)
         use_vsa = resolved_backend.get_name() == "VIDEO_SPARSE_ATTN_H3"
         attention_cls = DistributedAttention_VSA if use_vsa else DistributedAttention
+        # Blocks listed in FASTVIDEO_NVFP4_FA4_BF16_BLOCKS opt out of the process-wide NVFP4 FA4 Q/K quantization.
+        precision_args: dict[str, Any] = {"nvfp4_fa4": False} if bf16_attention else {}
         self.distributed_attention = attention_cls(
             num_heads=num_attention_heads,
             head_size=attention_head_dim,
@@ -261,6 +285,8 @@ class MiniMaxH3Attention(nn.Module):
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
+            **precision_args,
         )
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
@@ -275,6 +301,7 @@ class MiniMaxH3Attention(nn.Module):
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
         self._gate_compress_active: bool | None = None
+        self._gate_compress_training = False
         if use_vsa:
             self.to_gate_compress = ReplicatedLinear(
                 hidden_size,
@@ -290,10 +317,11 @@ class MiniMaxH3Attention(nn.Module):
         The zero-initialized (not-yet-finetuned) gate makes the whole branch
         a guaranteed zero — a full GEMM plus a third more all-to-all/tile
         traffic per layer for nothing — so test the loaded weight once and
-        cache the answer. Under grad the branch always runs (gradients must
-        reach a zero gate for it to ever train).
+        cache the answer. Trainable model roles keep this branch active even
+        during no-grad rollouts: their weights can change after an update.
+        Under grad it always runs so gradients can reach an initially zero gate.
         """
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() or getattr(self, "_gate_compress_training", False):
             return True
         if self._gate_compress_active is None:
             if torch.compiler.is_compiling():
@@ -354,6 +382,7 @@ class MiniMaxH3Attention(nn.Module):
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
@@ -361,7 +390,7 @@ class MiniMaxH3Attention(nn.Module):
             meta = get_forward_context().attn_metadata
             # Exempt mode lists the first prefix tile for every query, which the
             # FP4 kernel relies on to start each row from a finite running max.
-            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt:
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt and not meta.pad_tokens:
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 if not model_parallel_is_initialized() or get_sp_world_size() == 1:
                     hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
@@ -375,22 +404,24 @@ class MiniMaxH3Attention(nn.Module):
                 and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
                 and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
             meta = get_forward_context().attn_metadata
-            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64:
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64 and not meta.pad_tokens:
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
                 with STAGES.span("out_proj"):
                     hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
+        gate_linear = (self.to_gate_compress if self.to_gate_compress is not None and self._gate_active() else None)
         with STAGES.span("qkv_proj"):
-            # All three projections see the same activations. Reuse their FP8
-            # quantization when the loaded methods have identical granularity.
+            # q/k/v and the VSA gate see the same activations; share compatible input quantization.
             from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
+            projections = (self.to_q, self.to_k, self.to_v) + ((gate_linear, ) if gate_linear is not None else ())
             if not torch.is_grad_enabled() and not torch.compiler.is_compiling():
-                query, key, value = _shared_input_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+                projected = _shared_input_projections(projections, hidden_states)
             else:
-                query, _ = self.to_q(hidden_states)
-                key, _ = self.to_k(hidden_states)
-                value, _ = self.to_v(hidden_states)
+                projected = [projection(hidden_states)[0] for projection in projections]
+            query, key, value, *gate_out = projected
+            gate_compress = gate_out[0] if gate_out else None
+            del projected, gate_out
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
@@ -398,6 +429,22 @@ class MiniMaxH3Attention(nn.Module):
             cos, sin = rotary_emb
             cos = cos.to(query.dtype)
             sin = sin.to(query.dtype)
+            if (self.mk_qkv and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
+                    and self.norm_q.eps == _MK_NORM_EPS
+                    and self.norm_k.eps == _MK_NORM_EPS and type(self.distributed_attention) is DistributedAttention
+                    and not (self.to_gate_compress is not None and self._gate_active())):
+                # One launch replaces the two Sol QK-norm/RoPE kernels and the
+                # ``torch.cat`` stack: the prologue writes a contiguous
+                # ``[3*B, S, H, D]`` buffer that ``forward_stacked`` feeds to the
+                # backend directly, so q/k/v are never copied again.
+                qkv = mk_kernels.qkv_prologue(query, key, value, self.norm_q.weight, self.norm_k.weight, cos, sin)
+                with STAGES.span("attention"):
+                    hidden_states, _ = self.distributed_attention.forward_stacked(
+                        qkv, original_seq_len=original_seq_len, attn_metadata=attn_metadata)
+                hidden_states = hidden_states.flatten(2, 3).type_as(qkv)
+                with STAGES.span("out_proj"):
+                    hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
             query = fused_qknorm_rope(query, self.norm_q.weight, cos, sin, self.norm_q.eps)
             key = fused_qknorm_rope(key, self.norm_k.weight, cos, sin, self.norm_k.eps)
         else:
@@ -410,8 +457,7 @@ class MiniMaxH3Attention(nn.Module):
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
         extra_attention_kwargs = {}
-        if self.to_gate_compress is not None and self._gate_active():
-            gate_compress, _ = self.to_gate_compress(hidden_states)
+        if gate_compress is not None:
             extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
                 -1, (self.num_attention_heads, self.attention_head_dim))
         with STAGES.span("attention"):
@@ -421,6 +467,7 @@ class MiniMaxH3Attention(nn.Module):
                 value,
                 original_seq_len=original_seq_len,
                 freqs_cis=None,
+                attn_metadata=attn_metadata,
                 **extra_attention_kwargs,
             )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
@@ -463,8 +510,18 @@ class MiniMaxH3TokenRefinerBlock(nn.Module):
             prefix=f"{prefix}.ff",
         )
 
-    def forward(self, hidden_states: torch.Tensor, original_seq_len: int) -> torch.Tensor:
-        hidden_states = hidden_states + self.attn(self.norm1(hidden_states), None, original_seq_len)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
+        hidden_states = hidden_states + self.attn(
+            self.norm1(hidden_states),
+            None,
+            original_seq_len,
+            attn_metadata=attn_metadata,
+        )
         return hidden_states + self.ff(self.norm2(hidden_states))
 
 
@@ -501,9 +558,14 @@ class MiniMaxH3TokenRefiner(nn.Module):
         ])
         self.final_norm = nn.RMSNorm(hidden_size, eps=final_norm_eps)
 
-    def forward(self, hidden_states: torch.Tensor, original_seq_len: int) -> torch.Tensor:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        original_seq_len: int,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
         for block in self.refiner_blocks:
-            hidden_states = block(hidden_states, original_seq_len)
+            hidden_states = block(hidden_states, original_seq_len, attn_metadata=attn_metadata)
         return self.final_norm(hidden_states)
 
 
@@ -637,8 +699,11 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
+        cudnn_sdpa: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
         vsa_fp4: dict[str, Any] | None = None,
+        mk_tier: bool = False,
+        bf16_attention: bool = False,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -652,8 +717,11 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
+            cudnn_sdpa=cudnn_sdpa,
             exact_rope="rope" in exact_kernels,
             vsa_fp4=vsa_fp4,
+            mk_qkv=mk_tier,
+            bf16_attention=bf16_attention,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -663,6 +731,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.ff",
             fuse_swiglu=fuse_swiglu,
             exact_swiglu="swiglu" in exact_kernels,
+            mk_swiglu=mk_tier,
         )
         self.adaln_proj = MiniMaxH3AdaLayerNormModulation(
             time_embed_dim,
@@ -673,6 +742,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         )
         self.fuse_modulate = fuse_modulate
         self.exact_modulate = "modulate" in exact_kernels
+        self.mk_tier = mk_tier
 
     def forward(
         self,
@@ -692,15 +762,20 @@ class MiniMaxH3TransformerBlock(nn.Module):
                               and exact_kernels.supports_rowwise(hidden_states, shift_msa, scale_msa, gate_msa,
                                                                  shift_mlp, scale_mlp, gate_mlp))
         if use_modulate_fusion:
-            with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
-                norm_hidden_states = fused_rmsnorm_modulate(
-                    hidden_states,
-                    self.norm1.weight,
-                    scale_msa,
-                    shift_msa,
-                    adaln_indices,
-                    self.norm1.eps,
-                )
+            if (self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
+                    and self.norm1.eps == _MK_NORM_EPS):
+                norm_hidden_states = mk_kernels.rmsnorm_modulate(hidden_states, self.norm1.weight, scale_msa,
+                                                                 shift_msa, adaln_indices)
+            else:
+                with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
+                    norm_hidden_states = fused_rmsnorm_modulate(
+                        hidden_states,
+                        self.norm1.weight,
+                        scale_msa,
+                        shift_msa,
+                        adaln_indices,
+                        self.norm1.eps,
+                    )
         elif use_exact_modulate:
             with nvtx_range("minimax_h3.transformer_block.exact_modulate"):
                 norm_hidden_states = exact_kernels.modulate(self.norm1(hidden_states), scale_msa, shift_msa,
@@ -716,17 +791,23 @@ class MiniMaxH3TransformerBlock(nn.Module):
         # overlaps three full-width activations during the residual fusion.
         del norm_hidden_states
         if use_modulate_fusion:
-            with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
-                hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
-                    hidden_states,
-                    attention_output,
-                    gate_msa,
-                    self.norm2.weight,
-                    scale_mlp,
-                    shift_mlp,
-                    adaln_indices,
-                    self.norm2.eps,
-                )
+            if (self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
+                    and self.norm2.eps == _MK_NORM_EPS):
+                hidden_states, norm_hidden_states = mk_kernels.residual_gate_rmsnorm_modulate(
+                    hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp, shift_mlp,
+                    adaln_indices)
+            else:
+                with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
+                    hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
+                        hidden_states,
+                        attention_output,
+                        gate_msa,
+                        self.norm2.weight,
+                        scale_mlp,
+                        shift_mlp,
+                        adaln_indices,
+                        self.norm2.eps,
+                    )
         elif use_exact_modulate:
             with nvtx_range("minimax_h3.transformer_block.exact_modulate"):
                 hidden_states = exact_kernels.gate_residual(hidden_states, gate_msa, attention_output, adaln_indices)
@@ -742,6 +823,8 @@ class MiniMaxH3TransformerBlock(nn.Module):
         with nvtx_range("minimax_h3.transformer_block.feed_forward"), STAGES.span("feed_forward"):
             feed_forward_output = self.ff(norm_hidden_states)
         if use_modulate_fusion and not torch.compiler.is_compiling():
+            if self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling():
+                return mk_kernels.gated_residual(hidden_states, gate_mlp, feed_forward_output, adaln_indices)
             return _gated_residual(hidden_states, gate_mlp, adaln_indices, feed_forward_output)
         if use_exact_modulate:
             return exact_kernels.gate_residual(hidden_states, gate_mlp, feed_forward_output, adaln_indices)
@@ -802,6 +885,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 logger.warning(
                     "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
                     "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
+        self.use_mk_kernels = _MINIMAX_H3_MK_MODE in self.enabled_fusions
+        if self.use_mk_kernels and not mk_kernels.HAVE_TRITON:
+            logger.warning("FASTVIDEO_MINIMAX_H3_FUSIONS=mk requested but the MotionKernel kernels are "
+                           "unavailable (Triton missing); every forward stays on the eager path.")
         self.enabled_exact_kernels = _enabled_minimax_h3_exact_kernels()
         if self.enabled_exact_kernels:
             if exact_kernels.HAVE_TRITON:
@@ -897,6 +984,11 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             config.quant_config,
             prefix=f"{config.prefix}.token_refiner",
         )
+        bf16_blocks = parse_block_indices(envs.FASTVIDEO_NVFP4_FA4_BF16_BLOCKS.get())
+        unknown_blocks = sorted(index for index in bf16_blocks if index >= arch.num_layers)
+        if unknown_blocks:
+            raise ValueError(f"FASTVIDEO_NVFP4_FA4_BF16_BLOCKS {unknown_blocks} exceed the {arch.num_layers} "
+                             "transformer_blocks")
         self.transformer_blocks = nn.ModuleList([
             MiniMaxH3TransformerBlock(
                 arch.hidden_size,
@@ -914,8 +1006,11 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
+                cudnn_sdpa=envs.FASTVIDEO_MINIMAX_H3_DENSE_ATTN.get() == "cudnn",
                 exact_kernels=self.enabled_exact_kernels,
                 vsa_fp4=config.vsa_fp4,
+                mk_tier=self.use_mk_kernels,
+                bf16_attention=index in bf16_blocks,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
@@ -963,6 +1058,60 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             # report a misleading missing-attribute message.
             raise RuntimeError("This MiniMax H3 transformer has no PDD heads (arch_config.pdd_steps is None)")
         return {"video": self.proj_out, "audio": self.audio_proj_out}
+
+    _PDD_HEAD_NAMES = ("proj_out", "audio_proj_out")
+
+    def _pdd_linear_for_parameter(self, name: str) -> PDDReplicatedLinear | None:
+        if self.pdd_steps is None:
+            return None
+        head, _, _ = name.rpartition(".")
+        if head in self._PDD_HEAD_NAMES:
+            return getattr(self, head)
+        return None
+
+
+    @property
+    def _fastvideo_shard_cache_key_extra(self) -> dict[str, Any] | None:
+        """Keep widened-head shards out of the base model's shard cache entry."""
+        return self.inference_config_overrides() or None
+
+
+    def inference_config_overrides(self) -> dict[str, Any]:
+        """Extra ``config.json`` keys a deployable checkpoint of this model needs."""
+        if self.pdd_steps is None:
+            return {}
+        return {"pdd_steps": self.pdd_steps}
+
+
+    def inference_export_expected_shape(self, output_key: str, base_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Return the PDD head shape for narrow or already-widened bases.
+
+        A continued PDD run may use an earlier exported PDD checkpoint as its
+        ``init_from`` model.  In that case the exporter's base component
+        already carries the same widened heads, so applying the grid factor a
+        second time would reject the live DCP state.  Accept either the
+        released single-head width or this transformer's exact grid width and
+        fail closed for every other structural shape.
+        """
+        linear = self._pdd_linear_for_parameter(output_key)
+        if linear is None:
+            return tuple(base_shape)
+        base_rows = int(base_shape[0])
+        if base_rows == linear.output_size:
+            return tuple(base_shape)
+        if base_rows != linear.head_output_size:
+            raise ValueError(
+                f"PDD export base tensor {output_key!r} has {base_rows} output rows; expected "
+                f"{linear.head_output_size} single-head rows or {linear.output_size} Grid-{linear.grid_size} rows"
+            )
+        return (linear.output_size, *tuple(base_shape[1:]))
+
+
+    def preprocess_loaded_weight(self, name: str, tensor: torch.Tensor) -> torch.Tensor:
+        """Expand narrow teacher heads; resumed wide heads pass through unchanged."""
+        linear = self._pdd_linear_for_parameter(name)
+        return tensor if linear is None else linear.expand_loaded_tensor(name, tensor)
+
 
     @contextlib.contextmanager
     def fuse_pdd_block(
@@ -1147,21 +1296,26 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         torch.save({repr(k): v.detach().cpu() for k, v in first.items()}, path + ".inputs")
         logger.info("Dumped AdaLN modulation tables (%d entries) to %s", entries, path)
 
-    def _refined_text(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
+    def _refined_text(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        text_attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
         """The prompt embedding is constant across the denoising loop and the
         refiner blocks are timestep-free, so refine once per generation
         (saves two transformer blocks and four collectives per step). Skipped
         under grad (training needs the graph) and under compile."""
         cacheable = not torch.is_grad_enabled() and not torch.compiler.is_compiling()
         if (cacheable and self._text_cache is not None and self._text_cache[0] is encoder_hidden_states
-                and self._text_cache[1].device == encoder_hidden_states.device):
+                and self._text_cache[1].device == encoder_hidden_states.device
+                and self._text_cache[2] is text_attn_metadata):
             return self._text_cache[1]
         text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
             text_embeds = self._block_input(sequence_model_parallel_shard(text_embeds, dim=1)[0])
-        text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
+        text_embeds = self.token_refiner(text_embeds, text_original_seq_len, attn_metadata=text_attn_metadata)
         if sp_world_size > 1:
             text_embeds = sequence_model_parallel_all_gather_with_unpad(
                 text_embeds,
@@ -1169,7 +1323,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 dim=1,
             )
         if cacheable:
-            self._text_cache = (encoder_hidden_states, text_embeds)
+            self._text_cache = (encoder_hidden_states, text_embeds, text_attn_metadata)
         return text_embeds
 
     def forward(
@@ -1184,12 +1338,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         video_indices: torch.Tensor,
         audio_indices: torch.Tensor,
         text_indices: torch.Tensor,
+        text_attn_metadata: AttentionMetadata | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout."""
         late = self.__dict__.get("_splice_late")
         if late is not None and get_forward_context().current_timestep >= self._splice_from_step:
             return late(hidden_states, audio_hidden_states, encoder_hidden_states, timestep, timestep_indices,
-                        token_tags, position_ids, video_indices, audio_indices, text_indices)
+                        token_tags, position_ids, video_indices, audio_indices, text_indices,
+                        text_attn_metadata=text_attn_metadata)
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
@@ -1204,14 +1360,26 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
 
         video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
         audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
-        text_embeds = self._refined_text(encoder_hidden_states)
+        text_embeds = self._refined_text(encoder_hidden_states, text_attn_metadata=text_attn_metadata)
         rotary_emb = self._rotary_for(position_ids, text_embeds.dtype)
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
 
-        # text/video/audio indices partition [0, sequence_length), so the
-        # uninitialized buffer is fully overwritten; in-place index_copy_ avoids
-        # the three full-buffer clones out-of-place index_copy would make.
-        packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+        # Real text/video/audio indices partition the prefix; optional capacity
+        # rows trail it and have no input/output modality indices. Fail closed
+        # if those rows lack attention boundaries, then initialize them to zero.
+        real_tokens = text_indices.numel() + video_indices.numel() + audio_indices.numel()
+        pad_tokens = sequence_length - real_tokens
+        if pad_tokens < 0:
+            raise ValueError("Real H3 token counts exceed the packed sequence length")
+        if pad_tokens:
+            metadata = get_forward_context().attn_metadata
+            packed_sequence = getattr(metadata, "packed_sequence", None)
+            metadata_padding = getattr(packed_sequence if packed_sequence is not None else metadata, "pad_tokens", 0)
+            if metadata_padding != pad_tokens:
+                raise ValueError("H3 capacity padding requires matching masked attention metadata")
+            packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+        else:
+            packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         packed_hidden_states.index_copy_(1, text_indices, text_embeds)
         packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
         packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))

@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+DEFAULT_MEDIA_REFERENCE_MAX_BYTES = 2 * 1024**3
 
 
 @dataclass
@@ -11,6 +14,17 @@ class ServerConfig:
     port: int = 8000
     output_dir: str = "outputs/"
     served_model_name: str | None = None
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
+    # Directories whose files HTTP callers may reference by local path. Empty rejects local paths.
+    media_roots: list[str] = field(default_factory=list)
+    # Allows media URLs that resolve to loopback, private, or link-local addresses.
+    allow_private_media_urls: bool = False
+
+    def __post_init__(self) -> None:
+        if self.media_reference_max_bytes <= 0:
+            raise ValueError("server.media_reference_max_bytes must be positive")
+        if any(not isinstance(root, str) or not root.strip() for root in self.media_roots):
+            raise ValueError("server.media_roots entries must be non-empty paths")
 
 
 @dataclass
@@ -107,6 +121,7 @@ class ComponentConfig:
     transformer_weights: str | None = None
     transformer_2_weights: str | None = None
     vae_weights: str | None = None
+    h3_vae_nvfp4_decoder: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
     lora_nickname: str = "default"
@@ -171,6 +186,8 @@ class SamplingConfig:
     height_sr: int = 1072
     width_sr: int = 1920
     fps: int = 24
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
@@ -293,6 +310,50 @@ class StreamingConfig:
 
 
 @dataclass
+class LoRAAdapterConfig:
+    """One community LoRA that a server may apply to a request.
+
+    ``id`` is the only name a client sees. ``path`` is the local file or directory, or the Hugging Face repo id,
+    that ``VideoGenerator.set_lora_adapter`` loads. Strength 0 is exactly the base model.
+    """
+    id: str
+    path: str
+    default_strength: float = 0.8
+    min_strength: float = 0.0
+    max_strength: float = 2.0
+    description: str = ""
+    license: str = ""
+    source_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("lora.adapters[].id must not be empty")
+        if not self.path.strip():
+            raise ValueError(f"LoRA adapter {self.id!r} has an empty path")
+        if not all(
+                math.isfinite(strength) for strength in (self.min_strength, self.default_strength, self.max_strength)):
+            raise ValueError(f"LoRA adapter {self.id!r} has a non-finite strength")
+        if not self.min_strength <= self.default_strength <= self.max_strength:
+            raise ValueError(f"LoRA adapter {self.id!r} needs min_strength <= default_strength <= "
+                             f"max_strength, got {self.min_strength}, {self.default_strength}, {self.max_strength}")
+
+
+@dataclass
+class ServeLoRAConfig:
+    """The LoRAs a request to the OpenAI server may select.
+
+    No adapter loads at startup: the transformer gains LoRA layers when the first request selects one.
+    """
+    adapters: list[LoRAAdapterConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        ids = [adapter.id for adapter in self.adapters]
+        duplicates = sorted({adapter_id for adapter_id in ids if ids.count(adapter_id) > 1})
+        if duplicates:
+            raise ValueError(f"lora.adapters repeats id(s): {', '.join(duplicates)}")
+
+
+@dataclass
 class ServeConfig:
     """Typed serve config loaded from ``fastvideo serve --config``.
 
@@ -317,6 +378,16 @@ class ServeConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)
     streaming: StreamingConfig | None = None
+    lora: ServeLoRAConfig | None = None
+
+    def __post_init__(self) -> None:
+        if not self.lora or not self.lora.adapters:
+            return
+        if self.generator.pipeline.components.lora_path:
+            raise ValueError("`lora.adapters` cannot be combined with a startup adapter "
+                             "(generator.pipeline.components.lora_path); use one or the other.")
+        if self.streaming is not None:
+            raise ValueError("`lora.adapters` applies to the OpenAI server and cannot be combined with `streaming:`.")
 
 
 __all__ = [
@@ -329,6 +400,7 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "LoRAAdapterConfig",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",
@@ -341,6 +413,7 @@ __all__ = [
     "RunConfig",
     "SamplingConfig",
     "ServeConfig",
+    "ServeLoRAConfig",
     "ServerConfig",
     "StreamingConfig",
     "WarmupConfig",

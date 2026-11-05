@@ -231,6 +231,9 @@ class FastVideoArgs:
     video_decode_backend: str = "h3-vae"
     taeh3_checkpoint: str | None = None
     taeh3_chunk_size: int = 5
+    # Exported NVFP4 MiniMax-H3 decoder file (decoder-nvfp4.safetensors or decoder.safetensors) that replaces
+    # the VAE decoder at load. Overrides FASTVIDEO_H3_VAE_NVFP4_DECODER. Needs Blackwell FP4 hardware.
+    h3_vae_nvfp4_decoder: str | None = None
 
     # Load each heavy component on first use and free it once the last stage
     # that holds it has run, instead of keeping every component resident from
@@ -1027,6 +1030,8 @@ class FastVideoArgs:
             kwargs['workload_type'] = WorkloadType.from_string(kwargs['workload_type'])
 
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
+        # PipelineConfig also has a disable_autocast field and pops it from kwargs, but the stages read this one.
+        kwargs.setdefault('disable_autocast', kwargs['pipeline_config'].disable_autocast)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
         # args live in PipelineConfig and must not be forwarded to the
