@@ -408,7 +408,6 @@ async def _assert_cancelled_decoding_removes_its_file(tmp_path: Path, monkeypatc
     preparing.cancel()
     with pytest.raises(asyncio.CancelledError):
         await preparing
-    # The thread writes its file only after the request is gone, so cleanup has to wait for the thread.
     release.set()
     assert await asyncio.to_thread(finished.wait, 5)
     assert written == [True]
