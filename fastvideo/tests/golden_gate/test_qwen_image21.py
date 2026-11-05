@@ -6,10 +6,12 @@ the target image. Causal text segments use masked SDPA; reference and target
 segments use FlashAttention, including their unequal query/key lengths. Complex RoPE and
 the two modulation rows match the causal-conditioning block interface.
 
-Requires a BF16-capable CUDA GPU and FlashAttention. Select FA4 with
-FASTVIDEO_FA4=1 before starting Python. The shared harness downloads
-only checkpoint shards containing block 0 and compares a device/runtime-matched
-golden exactly; it never loads the text encoder or VAE.
+Requires a BF16-capable CUDA GPU and FlashAttention. Like the other block
+goldens, the published references match the golden-gate CI lane: FA2 with
+FASTVIDEO_FA4 off. Running with FASTVIDEO_FA4=1 reports an environment
+mismatch rather than drift. The shared harness downloads only checkpoint
+shards containing block 0 and compares a device/runtime-matched golden
+exactly; it never loads the text encoder or VAE.
 """
 
 from __future__ import annotations

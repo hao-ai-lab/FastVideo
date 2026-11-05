@@ -120,6 +120,7 @@ class ComponentConfig:
     transformer_weights: str | None = None
     transformer_2_weights: str | None = None
     vae_weights: str | None = None
+    h3_vae_nvfp4_decoder: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
     lora_nickname: str = "default"

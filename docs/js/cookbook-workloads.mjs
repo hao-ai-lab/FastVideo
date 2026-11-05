@@ -32,6 +32,14 @@ export const WORKLOADS = Object.freeze({
     extension: "wav",
     media_type: "audio/wav",
   }),
+  v2v: Object.freeze({
+    input: "video",
+    output: "video",
+    endpoint: "/v1/videos/sync",
+    extension: "mp4",
+    media_type: "video/mp4",
+    reference: "video_reference",
+  }),
   v2a: Object.freeze({
     input: "video",
     output: "audio",
