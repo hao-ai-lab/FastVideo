@@ -37,7 +37,8 @@ def _merge_mode_modules(pipeline: Any, transformer_modules: dict[str, nn.Module]
 
     Side-branch LoRA layers leave their base weights alone, so packed NVFP4/FP8 linears behind them never
     block an adapter or strength change. In a transformer that has LoRA layers only the merge-mode ones can
-    block it; in a transformer without them, every module is a candidate.
+    block it; in a transformer without them, every module is a candidate. Keep the wrappers so the preflight
+    can inspect their CPU base snapshots as well as the underlying packed linears.
     """
     lora_layers = getattr(pipeline, "lora_layers", None) or {}
     for transformer_name, transformer in transformer_modules.items():
@@ -52,27 +53,28 @@ def _merge_mode_modules(pipeline: Any, transformer_modules: dict[str, nn.Module]
         for _, layers in transformer_layers.lora_layers_by_block():
             for layer in layers.values():
                 if not getattr(layer, "side_branch", False):
-                    yield getattr(layer, "base_layer", layer)
+                    yield layer
 
 
-def _has_nvfp4_weights_without_bf16(pipeline: Any, transformer_modules: dict[str, nn.Module]) -> bool:
-    """Return whether NVFP4 quantization removed the BF16 weight of a layer an adapter must merge into."""
+def _has_nvfp4_weights_without_bf16(pipeline: Any,
+                                    transformer_modules: dict[str, nn.Module],
+                                    *,
+                                    allow_cpu_restore: bool = False) -> bool:
+    """Return whether a merge-mode NVFP4 layer lacks the dense state needed for this operation.
+
+    Replacement/unmerge can restore an original CPU base snapshot. Accumulation needs the current merged
+    weight, so its caller leaves ``allow_cpu_restore`` false.
+    """
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 
-    return any(
-        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
-        and getattr(module, "_nvfp4_weight", None) is not None and getattr(module, "weight", None) is None
-        for module in _merge_mode_modules(pipeline, transformer_modules))
-
-
-def _has_quantized_nvfp4_weights(pipeline: Any, transformer_modules: dict[str, nn.Module]) -> bool:
-    """Return whether a layer an adapter must merge into contains an initialized NVFP4 weight."""
-    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
-
-    return any(
-        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
-        and getattr(module, "_nvfp4_weight", None) is not None
-        for module in _merge_mode_modules(pipeline, transformer_modules))
+    for layer in _merge_mode_modules(pipeline, transformer_modules):
+        module = getattr(layer, "base_layer", layer)
+        if (isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+                and getattr(module, "_nvfp4_weight", None) is not None and getattr(module, "weight", None) is None):
+            snapshot = getattr(layer, "cpu_weight", None)
+            if not allow_cpu_restore or snapshot is None or isinstance(snapshot, DTensor):
+                return True
+    return False
 
 
 def _get_hook_ctx(module: nn.Module | None):
@@ -613,7 +615,9 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
             strength: Scale for the low-rank adapter. Hybrid adapters must set this at construction
                 so their dense payload receives the same scale.
-            accumulate: Add this adapter to an already merged pure low-rank adapter.
+            accumulate: Add this adapter to an already merged pure low-rank adapter. Merge-mode NVFP4
+                accumulation requires retain_original_weights=True; a base-only CPU snapshot cannot recover
+                the previously accumulated weight after its BF16 parameter is purged.
         """
 
         if not math.isfinite(strength):
@@ -630,11 +634,11 @@ class LoRAPipeline(ComposedPipelineBase):
             self.convert_to_lora_layers()
 
         if not self._setting_constructor_adapter and _has_nvfp4_weights_without_bf16(
-                self, self.trainable_transformer_modules):
-            # TODO(David): Restore the BF16 weights and requantize them after an NVFP4 LoRA adapter change.
+                self, self.trainable_transformer_modules, allow_cpu_restore=not accumulate):
             raise RuntimeError(
-                "Runtime LoRA adapter changes are unsupported after NVFP4 quantization removed the BF16 weights. "
-                "Create a new VideoGenerator with the desired LoRA adapter.")
+                "Runtime LoRA adapter changes are unsupported after NVFP4 quantization without the required BF16 "
+                "state. Replacement needs a CPU base snapshot; accumulation needs retained BF16 weights. "
+                "Create a new VideoGenerator with the desired LoRA adapter or retain_original_weights=True.")
 
         if not self._setting_constructor_adapter:
             if self._constructor_dense_lora_path is not None:
@@ -808,14 +812,12 @@ class LoRAPipeline(ComposedPipelineBase):
     def merge_lora_weights(self) -> None:
         """Merge LoRA weights, then repack the packed quantized buffers for the merged state.
 
-        NVFP4 layers are only supported while their BF16 weight is retained: a purged
-        BF16 weight cannot be unmerged and remerged.
+        Merge-mode NVFP4 layers can recreate a purged parameter from their CPU base snapshot.
         """
-        if _has_nvfp4_weights_without_bf16(self, self.trainable_transformer_modules):
-            # TODO(David): Merge from the packed FP4 weight instead of rejecting.
+        if _has_nvfp4_weights_without_bf16(self, self.trainable_transformer_modules, allow_cpu_restore=True):
             raise RuntimeError(
-                "LoRA merge is unsupported after NVFP4 weight quantization removed the BF16 weights because the "
-                "FP4 weights would not reflect the merged LoRA adapter.")
+                "LoRA merge is unsupported after NVFP4 weight quantization without retained BF16 weights or "
+                "an unsharded CPU base snapshot.")
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -859,13 +861,12 @@ class LoRAPipeline(ComposedPipelineBase):
     def unmerge_lora_weights(self) -> None:
         """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state.
 
-        NVFP4 is rejected: its FP4 buffers cannot be rebuilt from a purged BF16 weight.
+        A merge-mode NVFP4 layer restores its CPU base snapshot before repacking; side branches leave the base alone.
         """
-        if _has_quantized_nvfp4_weights(self, self.trainable_transformer_modules):
-            # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
+        if _has_nvfp4_weights_without_bf16(self, self.trainable_transformer_modules, allow_cpu_restore=True):
             raise RuntimeError(
-                "LoRA unmerge is unsupported after NVFP4 weight quantization because the quantized weights would "
-                "not reflect the unmerged LoRA adapter.")
+                "LoRA unmerge is unsupported after NVFP4 weight quantization without retained BF16 weights or "
+                "an unsharded CPU base snapshot.")
         for (
                 transformer_name,
                 transformer_lora_layers,
