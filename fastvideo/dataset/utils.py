@@ -39,10 +39,12 @@ def read_video_tchw(path: str) -> torch.Tensor:
     with av.open(path) as container:
         if not container.streams.video:
             raise RuntimeError(f"No video stream found in {path}")
-        frames = [torch.from_numpy(frame.to_ndarray(format="rgb24")) for frame in container.decode(video=0)]
+        frames = [
+            torch.from_numpy(frame.to_ndarray(format="rgb24")).permute(2, 0, 1) for frame in container.decode(video=0)
+        ]
     if not frames:
         raise RuntimeError(f"No video frames decoded from {path}")
-    return torch.stack(frames).permute(0, 3, 1, 2).contiguous()
+    return torch.stack(frames)
 
 
 @functools.lru_cache(maxsize=None)

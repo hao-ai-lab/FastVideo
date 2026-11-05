@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""read_video_tchw: preprocessing's video reader, which survives torchvision.io.read_video's removal."""
 
 import wave
 
