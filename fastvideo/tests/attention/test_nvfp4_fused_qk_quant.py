@@ -6,6 +6,7 @@ scale-factor bytes in FlashAttention-4's layout, and therefore the same FA4 NVFP
 ``precondition_qk`` followed by ``_nvfp4_quantize_for_fa4``. GPU tests need Blackwell (sm_100a/sm_103a), flashinfer
 and the FA4 NVFP4 kernel; the selection tests run anywhere.
 """
+import inspect
 from unittest.mock import patch
 
 import pytest
@@ -210,3 +211,17 @@ def test_fused_path_env_opt_out(env_overrides, fa4_runtime_available) -> None:
 def test_fused_path_off_for_non_default_flashinfer_recipe(env_overrides) -> None:
     env_overrides.enter_context(envs.override_external("FLASHINFER_DISABLE_FP4_QUANT_FAST_MATH", "1"))
     assert fused.fused_qk_quant_available() is False
+
+
+def test_fp4_availability_tracks_the_installed_kernel() -> None:
+    """flash_attn.cute importing is not enough to run the FP4 path.
+
+    The repo's flash-attn-4 pin is upstream FA4, whose kernel rejects the mSFQ/mSFK scale-factor kwargs the FP4
+    forward passes; only the flash-attention-fp4 fork accepts them. A build with the upstream kernel must not
+    report the FP4 path available (and so must skip the GPU tests above), or its unit lane dies with TypeError.
+    """
+    flash_attn_cute = pytest.importorskip("fastvideo.attention.utils.flash_attn_cute",
+                                          reason="no usable flash-attention package installed")
+    kernel_accepts_fp4 = {"mSFQ", "mSFK"} <= set(inspect.signature(flash_attn_cute._flash_attn_fwd).parameters)
+    assert flash_attn_cute.fp4_forward_available() is kernel_accepts_fp4
+    assert flash_attn_module._FA4_FP4_AVAILABLE is kernel_accepts_fp4

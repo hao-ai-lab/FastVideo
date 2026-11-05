@@ -49,8 +49,11 @@ logger.info("Worker %s Using FlashAttention-%s backend",
 # The FP4 path uses a dedicated custom_op wrapper (flash_attn_fp4_func) so that
 # torch.compile treats the CuTeDSL kernel as an opaque boundary.
 try:
-    from fastvideo.attention.utils.flash_attn_cute import flash_attn_fp4_func
-    _FA4_FP4_AVAILABLE = True
+    from fastvideo.attention.utils.flash_attn_cute import flash_attn_fp4_func, fp4_forward_available
+    # flash_attn.cute importing is not enough: the FP4 forward passes mSFQ/mSFK, which
+    # only the flash-attention-fp4 fork's kernel accepts, not the upstream FA4 build the
+    # repo pins. Gate on the installed kernel.
+    _FA4_FP4_AVAILABLE = fp4_forward_available()
 except ImportError:
     flash_attn_fp4_func = None
     _FA4_FP4_AVAILABLE = False
