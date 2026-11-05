@@ -6,7 +6,9 @@ weights). Skips the fMP4 assertions when ``ffmpeg`` is missing.
 """
 from __future__ import annotations
 
+import contextlib
 import shutil
+import signal
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,7 +105,7 @@ class TestSessionHandshake:
 
     def test_rejects_opening_frame_that_is_not_json(self):
         client, _ = _build_client()
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_text("{not json")
             err = ws.receive_json()
             assert err["type"] == "error"
@@ -113,7 +115,7 @@ class TestSessionHandshake:
 
     def test_rejects_binary_opening_frame(self):
         client, _ = _build_client()
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_bytes(b"\x00\x01")
             err = ws.receive_json()
             assert err["type"] == "error"
@@ -167,7 +169,7 @@ class TestMalformedFramesMidSession:
                              ids=["text_not_json", "binary"])
     def test_malformed_frame_is_reported_and_session_stays_open(self, send):
         client, _ = _build_client()
-        with client.websocket_connect("/v1/stream") as ws:
+        with _deadline(), client.websocket_connect("/v1/stream") as ws:
             ws.send_json({
                 "type": "session_init_v2",
                 "preset": "ltx2_two_stage",
@@ -188,7 +190,6 @@ class TestMalformedFramesMidSession:
             assert err["code"] == "invalid_message"
             assert err["retryable"] is True
 
-            # The session is still serving requests after the bad frame.
             ws.send_json({"type": "snapshot_state"})
             snap = ws.receive_json()
             assert snap["type"] == "continuation_state_snapshot"
@@ -261,6 +262,29 @@ class TestContinuationStatePersistence:
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _deadline(seconds: float = 10.0):
+    """Fail instead of hanging when the server never sends the frame a test waits for.
+
+    ``TestClient`` websocket receives block with no timeout, and the server
+    sending nothing is exactly the regression these tests guard against.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _expired(signum, frame):
+        raise TimeoutError(f"no server frame within {seconds:g} s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _drain_until(ws, target_type: str) -> dict[str, Any]:
