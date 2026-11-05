@@ -49,7 +49,7 @@ class _MockGenerator:
         }
 
 
-def _build_serve_config() -> ServeConfig:
+def _build_serve_config(session_timeout_seconds: int = 60) -> ServeConfig:
     return ServeConfig(
         generator=GeneratorConfig(model_path="/models/fake"),
         default_request=GenerationRequest(sampling=SamplingConfig(
@@ -60,15 +60,15 @@ def _build_serve_config() -> ServeConfig:
             num_inference_steps=1,
         ), ),
         streaming=StreamingConfig(
-            session_timeout_seconds=60,
+            session_timeout_seconds=session_timeout_seconds,
             generation_segment_cap=2,
         ),
     )
 
 
-def _build_client() -> tuple[TestClient, _MockGenerator]:
+def _build_client(session_timeout_seconds: int = 60) -> tuple[TestClient, _MockGenerator]:
     generator = _MockGenerator()
-    app = build_app(_build_serve_config(), generator)
+    app = build_app(_build_serve_config(session_timeout_seconds), generator)
     return TestClient(app), generator
 
 
@@ -177,6 +177,56 @@ class TestSegmentFlow:
             final = ws.receive_json()
             assert final["type"] == "ltx2_segment_complete"
             assert final["segment_idx"] == 0
+
+
+class TestSessionEnd:
+    """The session's last frame says why it ended (docs/design/server_contracts/streaming.md)."""
+
+    def test_segment_cap_ends_with_segment_cap_reason(self):
+        if not _FFMPEG_AVAILABLE:
+            pytest.skip("ffmpeg not installed")
+        client, _ = _build_client()
+        with client.websocket_connect("/v1/stream") as ws:
+            ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
+            for _ in range(3):
+                ws.receive_json()
+            for i in range(2):  # generation_segment_cap=2
+                ws.send_json({"type": "segment_prompt_source", "prompt": f"segment {i}", "num_inference_steps": 1})
+                _drain_until(ws, "ltx2_segment_complete")
+            final = ws.receive_json()
+            assert final == {"type": "ltx2_stream_complete", "reason": "segment_cap"}
+            assert ws.receive() == {"type": "websocket.close", "code": 1000, "reason": "segment_cap"}
+
+    def test_idle_session_is_told_it_timed_out(self):
+        client, _ = _build_client(session_timeout_seconds=1)
+        with client.websocket_connect("/v1/stream") as ws:
+            ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
+            for _ in range(3):
+                ws.receive_json()
+            assert ws.receive_json() == {"type": "session_timeout", "timeout_seconds": 1}
+            assert ws.receive() == {"type": "websocket.close", "code": 1000, "reason": "session_timeout"}
+
+    def test_missing_opening_frame_is_told_it_timed_out(self):
+        client, _ = _build_client(session_timeout_seconds=1)
+        with client.websocket_connect("/v1/stream") as ws:
+            assert ws.receive_json() == {"type": "session_timeout", "timeout_seconds": 1}
+            assert ws.receive() == {"type": "websocket.close", "code": 1000, "reason": "session_timeout"}
+
+    def test_unexpected_failure_ends_with_error_reason(self, monkeypatch):
+        import fastvideo.entrypoints.streaming.server as server
+
+        async def _fail(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(server, "_run_segment", _fail)
+        client, _ = _build_client()
+        with client.websocket_connect("/v1/stream") as ws:
+            ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
+            for _ in range(3):
+                ws.receive_json()
+            ws.send_json({"type": "segment_prompt_source", "prompt": "x", "num_inference_steps": 1})
+            assert ws.receive_json() == {"type": "ltx2_stream_complete", "reason": "error"}
+            assert ws.receive() == {"type": "websocket.close", "code": 1011, "reason": "error"}
 
 
 class TestContinuationStatePersistence:
