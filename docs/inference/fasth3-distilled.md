@@ -172,6 +172,24 @@ runs only with `VIDEO_SPARSE_ATTN_H3`. The pipeline reads the shard index (or
 the safetensors headers) and rejects any other backend, including automatic
 selection, before it loads any component.
 
+### Reference-image size
+
+The request option `reference_resize_mode` sizes every image reference. It
+takes SGLang's values for the same option and keeps the aspect ratio and the
+32-pixel grid in all of them:
+
+| Value | Image size |
+| --- | --- |
+| `diffusers` (default) | Short edge scaled to 2048 pixels, enlarging smaller images, as the released pipeline does |
+| `max` | Its own size, shrunk to a 2048-pixel short edge only when larger |
+| `match` | Shrunk to the target canvas's area, never enlarged |
+
+An image costs prompt tokens and condition rows in proportion to its pixels.
+`max` drops the cost of enlarging small images, and `match` also bounds each
+image by the canvas area. Pass the option per request (`extra_params` of the
+OpenAI-compatible server, a `generate_video` keyword) or as a server default
+(`default_request.extensions`). Video and audio references are unaffected.
+
 ### Reference-video sparsity
 
 Every PDD contract sets `"vsa_ref_policy": "p2_multi_region"`, the only value FastVideo accepts, which means:
