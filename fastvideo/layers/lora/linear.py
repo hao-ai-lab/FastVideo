@@ -322,10 +322,12 @@ class BaseLayerWithLoRA(nn.Module):
         if self.cpu_weight is None:
             raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
         if self.base_layer.weight is None:
+            if isinstance(self.cpu_weight, DTensor):
+                raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot.")
+            # Use the NVFP4 packed weight's current device.
             packed_weight = getattr(self.base_layer, "_nvfp4_weight", None)
-            if packed_weight is None or isinstance(self.cpu_weight, DTensor):
-                raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot and "
-                                   "an NVFP4 packed weight.")
+            if packed_weight is None:
+                raise RuntimeError("Restoring a removed LoRA weight requires an NVFP4 packed weight.")
             restored_weight = self.cpu_weight.to(packed_weight.device, non_blocking=True, copy=True)
             self.base_layer.weight = nn.Parameter(restored_weight, requires_grad=False)
         elif isinstance(self.base_layer.weight, DTensor):
