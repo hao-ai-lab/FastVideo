@@ -22,7 +22,7 @@ from fastvideo.distributed.communication_op import (sequence_model_parallel_all_
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift)
+                                        ScaleResidualLayerNormScaleShift, norm_modulate)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import (_apply_rotary_emb, get_rotary_pos_embed)
@@ -272,7 +272,9 @@ class CausalWanTransformerBlock(nn.Module):
                                                                         norm_type="layer",
                                                                         eps=eps,
                                                                         elementwise_affine=True,
-                                                                        dtype=torch.float32)
+                                                                        dtype=torch.float32,
+                                                                        fuse_inference=True,
+                                                                        fused_norm=False)
 
         # 2. Cross-attention
         # Only T2V for now
@@ -281,11 +283,13 @@ class CausalWanTransformerBlock(nn.Module):
                                                                          norm_type="layer",
                                                                          eps=eps,
                                                                          elementwise_affine=False,
-                                                                         dtype=torch.float32)
+                                                                         dtype=torch.float32,
+                                                                         fuse_inference=True,
+                                                                         fused_norm=False)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
-        self.mlp_residual = ScaleResidual()
+        self.mlp_residual = ScaleResidual(fuse_inference=True)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
@@ -323,8 +327,11 @@ class CausalWanTransformerBlock(nn.Module):
         # assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(temb_seq_len, tokens_per_temb)) *
-                              (1 + scale_msa) + shift_msa).flatten(1, 2)
+        # norm1 + per-frame modulate: eager is norm1(h).unflatten(1, (F, T)) * (1 + scale) + shift, flattened.
+        # The stream-dtype cast is where the q/k/v projections cast anyway
+        # (autocast), or a no-op when the chain is already bf16.
+        norm_hidden_states = norm_modulate(hidden_states, self.norm1, shift_msa, scale_msa, out_dtype=orig_dtype,
+                                           norm_input_fp32=False, fused_norm=False)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -353,11 +360,10 @@ class CausalWanTransformerBlock(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        # torch.zeros(...) allocates straight on the device; torch.tensor([0],
-        # device=...) builds on the host and copies, once per block per step.
-        null_shift = null_scale = torch.zeros(1, device=hidden_states.device, dtype=torch.long)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
-                                                                         null_shift, null_scale)
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
         norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
@@ -367,6 +373,9 @@ class CausalWanTransformerBlock(nn.Module):
                                  crossattn_cache=crossattn_cache)
         norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
                                                                           c_scale_msa)
+        # Same cast as above: the feed-forward projection casts here under
+        # autocast, and the fused/exact paths return the stream dtype directly.
+        norm_hidden_states = norm_hidden_states.to(orig_dtype)
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
@@ -639,6 +648,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         hidden_states = self.patch_embedding(hidden_states)
         grid_sizes = torch.stack([torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        # The transpose leaves the residual stream seq-minor and eager elementwise
+        # ops keep that layout through every block; one copy here keeps the
+        # Triton residual/modulation kernels eligible (see transformer.py).
+        hidden_states = hidden_states.contiguous()
 
         encoder_hidden_states = torch.cat([
             encoder_hidden_states,
