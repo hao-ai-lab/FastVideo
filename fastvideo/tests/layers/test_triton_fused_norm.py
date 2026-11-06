@@ -242,7 +242,7 @@ def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
     if decoder:
         block.cross_attention = _Tanh()
     mod = block.visual_modulation if decoder else block.text_modulation
-    torch.nn.init.normal_(mod.out_layer.weight, std=0.1)  # zero-initialised by default
+    torch.nn.init.normal_(mod.out_layer.weight, std=0.1)
     block = block.cuda().to(torch.bfloat16)
     x = torch.randn(2, 256, D, device="cuda", dtype=torch.bfloat16)
     t = torch.randn(2, T, device="cuda", dtype=torch.bfloat16)
