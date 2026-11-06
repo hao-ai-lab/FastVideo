@@ -260,6 +260,12 @@ class WanTimeTextImageEmbedding(nn.Module):
 
 
 class WanSelfAttention(nn.Module):
+    _supported_attention_backends = (
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+        AttentionBackendEnum.FLASHINFER,
+    )
 
     def __init__(self,
                  dim: int,
@@ -269,7 +275,8 @@ class WanSelfAttention(nn.Module):
                  eps=1e-6,
                  parallel_attention=False,
                  quant_config: QuantizationConfig | None = None,
-                 prefix: str = "") -> None:
+                 prefix: str = "",
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -288,15 +295,18 @@ class WanSelfAttention(nn.Module):
         self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-        # Scaled dot product attention
+        # A kernel must be supported by both this layer and the calling model.
+        # Unscoped callers retain the shared Wan family's capabilities.
+        if supported_attention_backends is None:
+            supported_attention_backends = WanVideoConfig()._supported_attention_backends
+        cross_backends = tuple(backend for backend in self._supported_attention_backends
+                               if backend in supported_attention_backends)
         self.attn = LocalAttention(num_heads=num_heads,
                                    head_size=self.head_dim,
                                    dropout_rate=0,
                                    softmax_scale=None,
                                    causal=False,
-                                   supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                                                 AttentionBackendEnum.TORCH_SDPA,
-                                                                 AttentionBackendEnum.ATTN_QAT_INFER))
+                                   supported_attention_backends=cross_backends)
 
     def forward(self, x: torch.Tensor, context: torch.Tensor, context_lens: int):
         r"""
@@ -365,7 +375,7 @@ class WanI2VCrossAttention(WanSelfAttention):
                          window_size,
                          qk_norm,
                          eps,
-                         supported_attention_backends,
+                         supported_attention_backends=supported_attention_backends,
                          quant_config=quant_config,
                          prefix=prefix)
 
@@ -461,7 +471,8 @@ class WanTransformerBlock(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
-                                              prefix=f"{prefix}.attn2")
+                                              prefix=f"{prefix}.attn2",
+                                              supported_attention_backends=supported_attention_backends)
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
@@ -469,7 +480,8 @@ class WanTransformerBlock(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
-                                              prefix=f"{prefix}.attn2")
+                                              prefix=f"{prefix}.attn2",
+                                              supported_attention_backends=supported_attention_backends)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                          norm_type="layer",
                                                                          eps=eps,
@@ -633,7 +645,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
-                                              prefix=f"{prefix}.attn2")
+                                              prefix=f"{prefix}.attn2",
+                                              supported_attention_backends=supported_attention_backends)
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
@@ -641,7 +654,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
-                                              prefix=f"{prefix}.attn2")
+                                              prefix=f"{prefix}.attn2",
+                                              supported_attention_backends=supported_attention_backends)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                          norm_type="layer",
                                                                          eps=eps,
@@ -729,7 +743,20 @@ class WanTransformerBlock_VSA(nn.Module):
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
-    _supported_attention_backends = WanVideoConfig()._supported_attention_backends
+    # Model-level opt-in: shared arch configs retain the family defaults.
+    _supported_attention_backends = (
+        AttentionBackendEnum.SAGE_ATTN,
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        AttentionBackendEnum.VMOBA_ATTN,
+        AttentionBackendEnum.SAGE_ATTN_THREE,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+        AttentionBackendEnum.ATTN_QAT_TRAIN,
+        AttentionBackendEnum.SLA_ATTN,
+        AttentionBackendEnum.SAGE_SLA_ATTN,
+        AttentionBackendEnum.FLASHINFER,
+    )
     param_names_mapping = WanVideoConfig().param_names_mapping
     reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping
