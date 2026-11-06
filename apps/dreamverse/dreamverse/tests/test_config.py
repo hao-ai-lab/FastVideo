@@ -93,6 +93,50 @@ def test_config_ignores_legacy_groq_primary_override(monkeypatch):
     assert module.PROMPT_API_BASE_URL is None
 
 
+def test_config_atlascloud_is_opt_in_and_uses_only_its_key(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_PROMPT_PROVIDER", "atlascloud")
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "atlas-test-key")
+    monkeypatch.delenv("FASTVIDEO_PROMPT_MODEL", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    module = _load_config_module()
+
+    assert module.PROMPT_PROVIDER == "atlascloud"
+    assert module.PROMPT_PROVIDER_PRIORITY == ("atlascloud", )
+    assert module.PROMPT_PROVIDER_RUNTIME_STAGES == (("atlascloud", ), )
+    assert module.PROMPT_API_KEYS == {"atlascloud": "atlas-test-key"}
+    assert module.PROMPT_API_KEY == "atlas-test-key"
+    assert module.PROMPT_API_BASE_URL == "https://api.atlascloud.ai/v1"
+    assert module.PROMPT_PROVIDER_MODELS == {"atlascloud": "openai/gpt-4.1-mini"}
+    assert module.PROMPT_REWRITE_MODEL_OPTIONS == ["openai/gpt-4.1-mini"]
+
+
+def test_config_atlascloud_preserves_explicit_model(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_PROMPT_PROVIDER", "atlascloud")
+    monkeypatch.setenv("FASTVIDEO_PROMPT_MODEL", "vendor/custom-model")
+    monkeypatch.delenv("ATLASCLOUD_API_KEY", raising=False)
+
+    module = _load_config_module()
+
+    assert module.PROMPT_API_KEY is None
+    assert module.PROMPT_MODEL == "vendor/custom-model"
+    assert module.PROMPT_PROVIDER_MODELS == {"atlascloud": "vendor/custom-model"}
+    assert module.PROMPT_REWRITE_MODEL == "vendor/custom-model"
+
+
+def test_config_atlascloud_key_does_not_change_default_provider(monkeypatch):
+    monkeypatch.delenv("FASTVIDEO_PROMPT_PROVIDER", raising=False)
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "atlas-test-key")
+    _set_required_prompt_keys(monkeypatch)
+
+    module = _load_config_module()
+
+    assert module.PROMPT_PROVIDER == "cerebras"
+    assert module.PROMPT_PROVIDER_PRIORITY == ("cerebras", "groq")
+    assert "atlascloud" not in module.PROMPT_API_KEYS
+
+
 def test_config_uses_local_overlay_paths_when_devtools_enabled(monkeypatch, tmp_path):
     _set_required_prompt_keys(monkeypatch)
     monkeypatch.setenv("FASTVIDEO_ENABLE_DEVTOOLS", "true")
