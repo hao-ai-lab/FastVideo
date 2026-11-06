@@ -171,6 +171,9 @@ non-causal, head-dimension-128 configuration with a 16-aligned KV length. SM120
 (including RTX 5090) keeps the previous tiling but joins the quantized and STE
 P@V operations and uses a shallower backward pipeline for long sequences. Set
 `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=0` to compare against the split P@V path.
+GB10 (SM121) always uses the split P@V path because joining changes its softmax
+statistics, outputs and gradients; `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` only
+applies to SM120.
 Unsupported configurations retain the previous implementation. Set
 `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED=0` to benchmark that previous path on SM100. Forward tuning is available through
 `FASTVIDEO_ATTN_QAT_FWD_MODE=fast|balanced|reference`; exact reference-order
