@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.layers.quantization import QUANTIZATION_METHODS, QuantizationMethods
 from fastvideo.logger import init_logger
@@ -296,6 +297,11 @@ class FastVideoArgs:
     inference_torch_compile: bool = False
 
     h3_vsa_fp4: dict[str, Any] = field(default_factory=dict)
+    # Training-free horizontal pairing of MiniMax-H3's generated-video tokens in
+    # the middle DiT blocks (antirez/h3.c --token-reduction). Keys: enabled,
+    # blocks [BEGIN, END], early [STEPS, END], update_scale. See
+    # fastvideo/configs/pipelines/minimax_h3_token_reduction.py.
+    h3_token_reduction: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 
@@ -453,6 +459,8 @@ class FastVideoArgs:
             raise ValueError("h3_vsa_fp4.prefix_precision must be empty, fp8 or bf16")
         if self.h3_vsa_fp4.get("enabled") and (self.inference_torch_compile or self.enable_torch_compile):
             raise ValueError("h3_vsa_fp4 requires eager DiT inference; disable DiT torch.compile")
+        # The DiT depth is checked against the checkpoint's own config when the transformer loads.
+        MiniMaxH3TokenReductionSchedule.from_options(self.h3_token_reduction)
         self._fold_vae_parallel_env()
         self._fold_h3_encoder_split_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
