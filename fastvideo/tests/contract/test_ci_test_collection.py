@@ -100,7 +100,7 @@ def test_encoder_lane_collects_native_h3_text_cache_gpu_test(tmp_path):
     pytest.chmod(0o755)
     result = subprocess.run(
         ["bash", str(REPO_ROOT / ".buildkite/scripts/lanes/encoder.sh")],
-        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
+        env={"PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
         capture_output=True, text=True, check=True,
     )
     commands = [shlex.split(line) for line in result.stdout.splitlines()]
