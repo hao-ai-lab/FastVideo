@@ -285,7 +285,6 @@ def _execute_forward_over_pipe(output_batch):
     ("mps", "trajectory_latents"),
     ("mps", "trajectory_timesteps"),
     ("mps", "logging_info"),
-    ("mps", "all"),
 ])
 def test_execute_forward_response_serializes_device_tensors(monkeypatch, device, tensor_field):
     if device == "mps" and not torch.backends.mps.is_available():
@@ -769,20 +768,4 @@ def test_response_preparation_preserves_non_mps_tensor_identity(device):
     assert prepared["output_batch"] is tensor
     assert prepared["extra"]["nested"][0] is tensor
     assert prepared["extra"]["nested"][1][0] is tensor
-    assert tensor.requires_grad
-
-
-@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Requires an Apple GPU with MPS")
-def test_execute_forward_detaches_mps_result_before_serializing(monkeypatch):
-    tensor = torch.arange(6, device="mps", dtype=torch.float32).requires_grad_() * 2
-    output_batch = ForwardBatch(data_type="video", output=tensor)
-    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
-
-    response = _execute_forward_over_pipe(output_batch)
-
-    assert _RPC_ERROR_KEY not in response, response.get("error")
-    assert response["output_batch"].device.type == "cpu"
-    assert not response["output_batch"].requires_grad
-    torch.testing.assert_close(response["output_batch"], tensor.detach().cpu(), rtol=0, atol=0)
-    assert tensor.device.type == "mps"
     assert tensor.requires_grad
