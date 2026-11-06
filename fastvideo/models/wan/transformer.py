@@ -830,8 +830,10 @@ class WanTransformer3DModel(BaseDiT):
                                                     self.num_attention_heads,
                                                     rope_dim_list,
                                                     dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-                                                    rope_theta=10000)
-        freqs_cis = (freqs_cos.to(hidden_states.device).float(), freqs_sin.to(hidden_states.device).float())
+                                                    rope_theta=10000,
+                                                    device=hidden_states.device,
+                                                    output_dtype=torch.float32)
+        freqs_cis = (freqs_cos, freqs_sin)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
