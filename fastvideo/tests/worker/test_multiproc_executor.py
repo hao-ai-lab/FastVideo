@@ -191,6 +191,7 @@ def _run_output_worker(pipe, device):
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
             monkeypatch.setattr("fastvideo.worker.multiproc_executor.envs.FASTVIDEO_STAGE_LOGGING.get", lambda: True)
+            monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: device == "mps")
             proc.worker_busy_loop()
     finally:
         pipe.close()
@@ -306,6 +307,7 @@ def test_execute_forward_response_serializes_device_tensors(monkeypatch, device,
     output_batch.logging_info.add_stage_metric("decode", "metric", {"values": (tensor("logging_info"),)})
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
     monkeypatch.setattr("fastvideo.worker.multiproc_executor.envs.FASTVIDEO_STAGE_LOGGING.get", lambda: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: device == "mps")
 
     response = _execute_forward_over_pipe(output_batch)
 
@@ -345,6 +347,42 @@ def test_execute_forward_response_serializes_device_tensors(monkeypatch, device,
     for field, original in original_tensors.items():
         expected_device = device if tensor_field in (field, "all") else "cpu"
         assert original.device.type == expected_device
+
+
+def test_non_mps_response_bypasses_preparation(monkeypatch):
+    output_batch = ForwardBatch(data_type="video", output=torch.ones(1), extra={"nested": [torch.ones(1)]})
+    pipe = _ScriptedPipe([
+        {"method": "execute_forward", "kwargs": {"forward_batch": None, "fastvideo_args": None}},
+        {"method": "shutdown"},
+    ])
+    proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
+    proc.rank = 0
+    proc.pipe = pipe
+    proc.worker = _OutputWorker(output_batch)
+
+    def unexpected_preparation(response):
+        raise AssertionError("Non-MPS responses must not enter the copy helper")
+
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+    monkeypatch.setattr("fastvideo.worker.multiproc_executor._copy_mps_tensors_to_cpu", unexpected_preparation)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+    proc.worker_busy_loop()
+
+    assert pipe.responses[0]["output_batch"] is output_batch.output
+    assert pipe.responses[0]["extra"] is output_batch.extra
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Requires an Apple GPU with MPS")
+def test_mps_response_preparation_preserves_cpu_tensor_identity():
+    cpu_tensor = torch.ones(2, requires_grad=True)
+    mps_tensor = torch.arange(2, device="mps", dtype=torch.float32)
+
+    response = _copy_mps_tensors_to_cpu({"output_batch": mps_tensor, "extra": {"cpu_tensor": cpu_tensor}})
+
+    assert response["extra"]["cpu_tensor"] is cpu_tensor
+    assert response["extra"]["cpu_tensor"].requires_grad
+    assert response["output_batch"].device.type == "cpu"
+    torch.testing.assert_close(response["output_batch"], mps_tensor.cpu(), rtol=0, atol=0)
 
 
 def test_worker_rpc_error_does_not_exit_busy_loop(monkeypatch) -> None:
