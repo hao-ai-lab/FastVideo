@@ -272,7 +272,8 @@ def test_nvfp4_without_lora_layers_is_a_lifecycle_noop(retain_bf16_weight: bool,
         pytest.fail("An adapter-free lifecycle operation must not repack the model")
 
     monkeypatch.setattr(nvfp4, "convert_model_to_nvfp4", unexpected_pack)
-    assert not _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules)
+    # The conservative helper still scans an unwrapped transformer; public operations have no layers to change.
+    assert _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules) is (not retain_bf16_weight)
     getattr(LoRAPipeline, operation)(pipeline)
     assert transformer.linear.weight is previous_weight
     assert transformer.linear._nvfp4_weight is previous_packed
