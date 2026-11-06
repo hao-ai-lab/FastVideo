@@ -834,6 +834,8 @@ class WorkerMultiprocProc:
 
     def worker_busy_loop(self) -> None:
         """Main busy loop for Multiprocessing Workers"""
+        from fastvideo.platforms import current_platform
+
         while True:
             logger.info("Worker %d starting event loop...", self.rank)
             try:
@@ -883,8 +885,10 @@ class WorkerMultiprocProc:
                             "trajectory_latents": output_batch.trajectory_latents,
                             "trajectory_timesteps": output_batch.trajectory_timesteps,
                         }
-                        # CUDA tensors retain CUDA IPC; MPS tensors need CPU storage.
-                        self.pipe.send(_copy_mps_tensors_to_cpu(response))
+                        if current_platform.is_mps():
+                            self.pipe.send(_copy_mps_tensors_to_cpu(response))
+                        else:
+                            self.pipe.send(response)
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)
                         self.pipe.send(result)
