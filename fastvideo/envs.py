@@ -469,7 +469,9 @@ FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
     False,
     category="performance",
     doc="Opt into the Wan and Kandinsky-5 inference-only Triton residual + LayerNorm + modulation fusion. "
-    "Its reduction order changes numerical outputs; the default keeps eager reference compatibility.")
+    "Its reduction order changes numerical outputs. With it off, Wan matches the eager reference; Kandinsky-5 can "
+    "differ from its earlier outputs by a few bf16 steps because its LayerNorms now read the residual before "
+    "bf16 rounding.")
 # Global kill switch for the opt-in, inference-only Triton fusion in
 # fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
 FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
