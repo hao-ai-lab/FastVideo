@@ -316,19 +316,17 @@ class BaseLayerWithLoRA(nn.Module):
     def _restore_base_weight(self) -> None:
         """Restore the immutable inference snapshot, recreating an NVFP4-purged parameter when necessary.
 
-        The pipeline calls this inside the block's offload mutation scope. Its packed weight is then resident
-        on the correct device, even when there is no BF16 parameter left from which to obtain that device.
+        The pipeline calls this inside the block's offload mutation scope; the placement buffer follows its weights.
         """
         if self.cpu_weight is None:
             raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
         if self.base_layer.weight is None:
             if isinstance(self.cpu_weight, DTensor):
                 raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot.")
-            # Use the NVFP4 packed weight's current device.
-            packed_weight = getattr(self.base_layer, "_nvfp4_weight", None)
-            if packed_weight is None:
-                raise RuntimeError("Restoring a removed LoRA weight requires an NVFP4 packed weight.")
-            restored_weight = self.cpu_weight.to(packed_weight.device, non_blocking=True, copy=True)
+            weight_device = getattr(self.base_layer, "weight_device", None)
+            if weight_device is None:
+                raise RuntimeError("Restoring a removed LoRA weight requires its weight_device placement buffer.")
+            restored_weight = self.cpu_weight.to(weight_device.device, non_blocking=True, copy=True)
             self.base_layer.weight = nn.Parameter(restored_weight, requires_grad=False)
         elif isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
