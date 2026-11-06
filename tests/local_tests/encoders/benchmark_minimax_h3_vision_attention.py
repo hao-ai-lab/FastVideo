@@ -191,7 +191,6 @@ def main() -> None:
                 del output
             peak = torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None
             peak_reserved = torch.cuda.max_memory_reserved(device) if device.type == "cuda" else None
-            # Compare outside the timing and memory-measurement interval.
             output = run()
             error = (output.float() - reference.float()).abs()
             tolerance = {torch.bfloat16: (1e-2, 3e-3), torch.float16: (2e-3, 3e-4),

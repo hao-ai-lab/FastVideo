@@ -157,7 +157,7 @@ def test_metadata_rejects_int32_overflow_before_allocation():
 
 def test_model_rejects_grid_token_mismatch_before_position_processing():
     model = vision.MiniMaxH3Qwen3VLVisionModel(_config()).eval()
-    grid = torch.tensor([[1, 2, 2]])  # Describes four patch tokens.
+    grid = torch.tensor([[1, 2, 2]])
     pixels = torch.randn(3, 12)
     with patch.object(model, "_interpolate_position_embeddings",
                       side_effect=AssertionError("processed invalid pixel/grid geometry")):
