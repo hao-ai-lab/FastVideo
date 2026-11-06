@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 from fastvideo.layers.layernorm import ScaleResidualLayerNormScaleShift
 import fastvideo.envs as envs
@@ -228,8 +227,12 @@ class _Tanh(torch.nn.Module):
 @cuda_only
 @pytest.mark.parametrize("decoder", [False, True], ids=["encoder", "decoder"])
 def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
-    """Every post-residual norm of a Kandinsky-5 block takes the fused path, and the
-    block output matches main's unfused forward (bf16-rounded residual, then norm)."""
+    """Every post-residual norm of a Kandinsky-5 block takes the fused path, and the block
+    output stays within 8 bf16 steps of the residual stream of main's unfused forward.
+
+    The only change from main is that each LayerNorm reads the fp32 residual instead of its
+    bf16 rounding (at most 2^-8 relative). LayerNorm, modulation and the gate amplify that to
+    a few bf16 steps of the stream (measured <= 4.5); a miswired gate is off by thousands."""
     import fastvideo.layers.triton_fused_norm as tfn
     from fastvideo.models.dits import kandinsky5 as k5
     from fastvideo.platforms import AttentionBackendEnum
@@ -249,17 +252,21 @@ def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
 
     with torch.no_grad():
         params = [torch.chunk(p, 3, dim=-1) for p in torch.chunk(mod(t).unsqueeze(1), 3 if decoder else 2, dim=-1)]
+        norm = block.self_attention_norm
         shift, scale, gate = params[0]
-        out = block.self_attention_norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
-        ref = x
+        out = norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
+        ref, stream = x, x.float().abs()
         for shift, scale, next_gate in params[1:]:
             ref = (ref.float() + gate.float() * torch.tanh(out).float()).type_as(x)
-            out = (F.layer_norm(ref.float(), (D, ), eps=1e-5) * (1 + scale) + shift).type_as(x)
+            stream = torch.maximum(stream, ref.float().abs())
+            out = norm(ref.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
             gate = next_gate
         ref = (ref.float() + gate.float() * torch.tanh(out).float()).type_as(x)
+        stream = torch.maximum(stream, ref.float().abs())
 
         with patch.object(tfn, "fused_residual_norm_mod", wraps=tfn.fused_residual_norm_mod) as spy:
             actual = block(x, x, t, None, None) if decoder else block(x, t, None)
 
     assert spy.call_count == len(params) - 1
-    torch.testing.assert_close(actual, ref, rtol=2e-2, atol=2e-2)
+    diff = (actual.float() - ref.float()).abs()
+    assert (diff <= 8 * 2**-7 * stream).all(),         f"max diff is {(diff / (2**-7 * stream)).max().item():.1f} bf16 steps of the residual stream"
