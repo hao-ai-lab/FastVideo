@@ -219,6 +219,7 @@ def _pipeline_with_layers(names: list[str], adapter_modules: list[str], min_frac
     return SimpleNamespace(lora_adapters={"default": adapter},
                            lora_layers={"transformer": layers},
                            lora_min_match_fraction=min_fraction,
+                           trainable_transformer_names=["transformer"],
                            trainable_transformer_modules={"transformer": object()})
 
 
@@ -238,7 +239,7 @@ def test_coverage_check_waits_for_a_released_lazy_transformer() -> None:
     pipeline = _pipeline_with_layers([], ["transformer_blocks.0.attn.to_q"])
     # A released lazy DiT drops its LoRA layers, so a valid adapter has nothing to match yet.
     pipeline.lora_layers.pop("transformer")
-    LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
+    assert not LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
 
 
 def test_coverage_check_rejects_a_mostly_unmatched_adapter() -> None:
@@ -307,6 +308,7 @@ def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch:
         lora_adapters={"default": previous},
         lora_adapter_paths={"default": "a.safetensors"},
         lora_layers={"transformer": layers},
+        trainable_transformer_names=["transformer"],
         trainable_transformer_modules={},
         modules={"transformer": SimpleNamespace(param_names_mapping={}, lora_param_names_mapping={})},
         cur_adapter_name="default",
@@ -322,6 +324,7 @@ def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch:
         convert_adapter_state_dict=lambda state, path: state,
     )
     pipeline._check_adapter_coverage = lambda *a: LoRAPipeline._check_adapter_coverage(pipeline, *a)
+    pipeline._transformer_name_mappings = lambda: LoRAPipeline._transformer_name_mappings(pipeline)
     with pytest.raises(ValueError, match="reaches 0 of 1"):
         LoRAPipeline.set_lora_adapter(pipeline, "default", "b.safetensors")
     assert pipeline.lora_adapters["default"] is previous
@@ -370,3 +373,49 @@ def test_h3_pipeline_converts_and_rejects_foreign_adapters() -> None:
     with pytest.raises(ValueError, match="no MiniMax-H3 LoRA layers"):
         MiniMaxH3BasePipeline.convert_adapter_state_dict(pipeline, {"unet.down.0.lora_A.weight": torch.zeros(1)},
                                                          "adapter")
+
+
+class _RecordingLoRALayer(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.disable_lora = False
+        self.applied = False
+
+    def set_lora_weights(self, *args, **kwargs) -> None:
+        self.applied = True
+
+    def unmerge_lora_weights(self) -> None:
+        pass
+
+
+def test_layers_without_adapter_weights_log_one_summary_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An adapter that trains a subset of the wrapped linears warns once, not once per layer."""
+    import fastvideo.pipelines.lora_pipeline as lp
+
+    names = ["blocks.0.attn.to_q"] + [f"blocks.{i}.adaln_proj.linear" for i in range(40)]
+    layers = {name: _RecordingLoRALayer() for name in names}
+    adapter = {"blocks.0.attn.to_q.lora_A": torch.zeros(2, 4), "blocks.0.attn.to_q.lora_B": torch.zeros(4, 2)}
+    warnings: list[str] = []
+    monkeypatch.setattr(lp.dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(lp.logger, "warning", lambda message, *args: warnings.append(message % args))
+    pipeline = SimpleNamespace(
+        lora_adapters={"default": adapter},
+        lora_adapter_paths={"default": "pika.safetensors"},
+        lora_layers={"transformer": SimpleNamespace(lora_layers_by_block=lambda: iter([(None, layers)]))},
+        trainable_transformer_modules={},
+        cur_adapter_name="",
+        cur_adapter_path="",
+        cur_adapter_strength=1.0,
+        lora_initialized=True,
+        _setting_constructor_adapter=True,
+        _constructor_dense_lora_path=None,
+        fastvideo_args=SimpleNamespace(training_mode=False),
+    )
+
+    LoRAPipeline.set_lora_adapter(pipeline, "default", "pika.safetensors")
+
+    assert layers["blocks.0.attn.to_q"].applied and not layers["blocks.0.attn.to_q"].disable_lora
+    assert all(layers[name].disable_lora for name in names[1:])
+    assert len(warnings) == 1
+    assert "no weights for 40 wrapped layers" in warnings[0] and "blocks.0.adaln_proj.linear" in warnings[0]

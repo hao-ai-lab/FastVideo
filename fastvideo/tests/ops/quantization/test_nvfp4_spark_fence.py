@@ -51,6 +51,7 @@ def _spy_sync(monkeypatch):
 @pytest.mark.skipif(torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 1),
                     reason="needs a non-GB10 Blackwell GPU")
 def test_fenced_quantize_matches_flashinfer_without_a_fence_off_spark(monkeypatch) -> None:
+    monkeypatch.setattr(nv, "_is_dgx_spark", lambda _index: False)  # also true when run on a real Spark
     real, pdl = _spy_quantize(monkeypatch)
     syncs = _spy_sync(monkeypatch)
     x, global_sf = _activation()
@@ -84,6 +85,7 @@ def test_qat_linear_quantizes_through_the_fence_with_unchanged_numerics(monkeypa
     x = torch.randn(4, 64, 256, device="cuda", dtype=torch.bfloat16)
     weight = torch.randn(512, 256, device="cuda", dtype=torch.bfloat16) / 16
     bias = torch.randn(512, device="cuda", dtype=torch.bfloat16)
+    monkeypatch.setattr(nv, "_is_dgx_spark", lambda _index: False)
     off_spark = fp4linear._LinearFWD4BWD16Fn.apply(x, weight, bias, "cutlass", 16, True)
 
     _, pdl = _spy_quantize(monkeypatch)

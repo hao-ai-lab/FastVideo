@@ -89,7 +89,7 @@ surfaces:
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
-      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; model-specific optimization not yet represented in the typed public schema."
+      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; represented as ComponentConfig.h3_vae_nvfp4_decoder."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
@@ -150,9 +150,22 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      output_channels: "Decoded pixel channel count fixed by the model; used to allocate the output buffer."
 
   pipeline_config_extensions:
     preset_owned:
+      draft_size:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_start_sigma:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_transformer_dir:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      draft_latent_path:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig
@@ -443,6 +456,18 @@ surfaces:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
       sample_fps:
         sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      reference_resolution:
+        target: generator.pipeline.experimental.reference_resolution
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      use_kv_cache:
+        target: generator.pipeline.experimental.use_kv_cache
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      kv_cache_device:
+        target: generator.pipeline.experimental.kv_cache_device
+        sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      pika_resolution_tier:
+        target: generator.pipeline.experimental.pika_resolution_tier
+        sources: [fastvideo.configs.pipelines.pika_h3_flex.PikaH3FlexPipelineConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -456,11 +481,14 @@ surfaces:
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
       pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      pika_denoising_steps: "Pika H3 Flex six-forward re-noise ladder fixed by the adapter contract; check_pipeline_config rejects any other value."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
       vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
+      video_scheduler_shift: "MiniMax-H3 training-time video noise clock; inference samples with the checkpoint's scheduler config."
+      audio_scheduler_shift: "MiniMax-H3 training-time audio noise clock; inference samples with the checkpoint's scheduler config."
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
@@ -601,6 +629,7 @@ surfaces:
       audio_reference: request.inputs.references
       video_path: request.inputs.video_path
       video_url: request.inputs.video_path
+      continuation_video: request.inputs.references
       video_params: request.sampling.width,height,num_frames,fps
       size:
         target: request.sampling.width,height

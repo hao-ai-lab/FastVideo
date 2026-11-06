@@ -109,6 +109,64 @@ the consumer profiles already use, for packed NVFP4 and for bf16. Pass `lora_pat
 adapter is attached when the transformer arrives: as a bf16 side branch beside packed weights, or merged into a
 dense bf16 transformer. You do not load the LoRA as a separate resident copy of the model.
 
+## Per-request adapters on the OpenAI API
+
+`fastvideo serve` can hold an allow-list of adapters and apply one per request on `POST /v1/videos/sync` (the whole
+MP4 comes back in the response) and on the async `POST /v1/videos` job route. Name each adapter and its strength
+range in the serve config; see `examples/serving/openai_fasth3_nvfp4_lora_allowlist.yaml`:
+
+```yaml
+generator:
+  model_path: /models/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer
+  engine:
+    quantization:
+      transformer_quant: NVFP4  # required: per-request adapters need the packed NVFP4 side-branch layers
+      layer_profile: h3_dit_vsa
+lora:
+  adapters:
+    - id: fal/MiniMax-H3-Realism-People-LoRA
+      path: fal/MiniMax-H3-Realism-People-LoRA
+      default_strength: 0.8
+      min_strength: 0.0
+      max_strength: 1.5
+      license: Apache-2.0
+      source_url: https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA
+```
+
+An allow-list cannot be combined with a startup adapter (`generator.pipeline.components.lora_path`); the server
+refuses to start with both. Without an allow-list, the startup-adapter behavior is unchanged.
+
+`GET /v1/model_info` reports the allow-list in its `lora` block, never the load paths. A request selects one
+adapter with the vLLM-style `lora` object:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/videos/sync \
+  -H 'content-type: application/json' \
+  -d '{"prompt": "...", "size": "1344x768", "num_frames": 124, "seed": 7,
+       "lora": {"name": "fal/MiniMax-H3-Realism-People-LoRA", "scale": 0.8}}' \
+  -o out.mp4
+```
+
+`name` (or `lora_name`, `adapter`) must be an allow-listed `id`. `scale` (or `lora_scale`) is the strength; it
+defaults to the adapter's `default_strength` and must lie in `[min_strength, max_strength]`. A client-supplied `path`
+is rejected. A bad selection gets HTTP 400 before any job is stored.
+
+Strength `0` is exactly the base model, with output identical to a request without `lora`. A request without `lora`
+sets the last-used adapter to strength 0 instead of unloading it, so one request never inherits another's
+adapter. The server applies the adapter under the same lock as the generation, so requests never interleave. If
+a change fails, that request fails with the loader's message, and the server clears every LoRA layer back to the
+base weights without reading an adapter file, so it never renders with an adapter the request did not select and
+requests without `lora` keep working.
+
+Per-request adapters need side-branch LoRA layers, so the server refuses an allow-list unless the model is a packed
+NVFP4 export (a `transformer/nvfp4_weights.safetensors` file with `transformer_quant: NVFP4`) or
+`FASTVIDEO_LORA_SIDE_BRANCH=1` is set. At startup it also checks that every adapter resolves to a safetensors file
+and is purely low-rank: adapters with dense replacement payloads (`.diff` and `.set_weight` tensors, as in the
+[FastH3 adapter](fasth3-distilled.md)) can only be applied when the model loads, and the server refuses to start with
+one. A side-branch layer holds one adapter at a time. Linears that a packed export leaves unquantized still merge the
+adapter into their weights; switching to another adapter first restores each of them, including those the new
+adapter does not cover.
+
 ## Limitations
 
 - Block-pruned models (FastH3 Trim, 42 of 50 blocks) are not supported yet. Community LoRAs index the full

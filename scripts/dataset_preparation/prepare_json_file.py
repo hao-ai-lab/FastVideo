@@ -6,19 +6,21 @@ import time
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
-import torchvision
 from tqdm import tqdm
+
+from fastvideo.dataset.utils import read_video_tchw
+from fastvideo.eval.io.video import probe_video_fps
 
 
 def get_video_info(video_path):
-    """Get video information using torchvision."""
+    """Get video information."""
     # Read video tensor (T, C, H, W)
-    video_tensor, _, info = torchvision.io.read_video(str(video_path), output_format="TCHW", pts_unit="sec")
+    video_tensor = read_video_tchw(str(video_path))
 
     num_frames = video_tensor.shape[0]
     height = video_tensor.shape[2]
     width = video_tensor.shape[3]
-    fps = info.get("video_fps", 0)
+    fps = probe_video_fps(video_path) or 0
     duration = num_frames / fps if fps > 0 else 0
 
     # Extract name

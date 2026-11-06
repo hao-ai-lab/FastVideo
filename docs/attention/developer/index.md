@@ -157,15 +157,22 @@ __all__ = [
 
 ## 4. Register the Backend
 
-Update `fastvideo/attention/backends/__init__.py` to export your new class.
+Registration is two edits:
 
-```python
-from .mynew_attn import MyNewAttnBackend
-```
+1. Add a member to `AttentionBackendEnum` in `fastvideo/platforms/interface.py`.
+2. Add the selection branch in `fastvideo/platforms/cuda.py`, next to the
+   existing backends, so `--attention-backend` maps the enum to your class.
 
-## 5. Platform Integration
+`fastvideo/attention/backends/__init__.py` is empty and does not register
+anything.
 
-If your backend requires specific platform checks (e.g., checking for H100 support), handle that in `fastvideo/platforms/cuda.py` or within your backend's `__init__`.
+## 5. Platform integration
+
+If your backend needs platform checks, such as an H100 guard, put them in
+`fastvideo/platforms/cuda.py` or in the backend constructor.
+
+The maintained version of this guide is
+[Add an attention backend](../../contributing/attention_backend.md).
 
 ## 6. Add Documentation
 

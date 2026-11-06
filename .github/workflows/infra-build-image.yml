@@ -56,7 +56,9 @@ jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
   # builds natively and pushes only by digest; publish-cuda-manifests is the sole
   # owner of the shared tags. CUDA 12.6 arm64 targets Hopper (sm_90a / GH200 class),
-  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 (sm_121).
+  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 as 12.1a
+  # (sm_121a), as a native Spark build does: the plain 12.1 target drops the
+  # arch-specific attn_qat_infer FP4 kernels.
   # 12.6.3/cu126 owns the default `py3.12`/`latest` tags and keeps its versioned
   # aliases; 13.0.0/cu130 is published under explicit versioned tags. Flash-attn
   # 2.8.3 comes from the architecture-specific prebuilt releases.
@@ -78,6 +80,12 @@ jobs:
             torch_cuda_arch_list:
               amd64: '9.0a'
               arm64: '9.0a'
+            install_flash_attn:
+              amd64: '1'
+              arm64: '1'
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '1'
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
             torch_backend: 'cu130'
@@ -85,7 +93,17 @@ jobs:
             cmake_build_parallel_level: '1'
             torch_cuda_arch_list:
               amd64: '9.0a'
-              arm64: '12.1'
+              arm64: '12.1a'
+            # FA4 cute does not run on GB10 (sm_12x), and its cutlass-dsl pin
+            # breaks flashinfer there; GB10 FP4 attention uses fastvideo-kernel.
+            # FA2 gives no measured GB10 speedup and changes the output relative
+            # to a native Spark install, so the GB10 image matches that install.
+            install_flash_attn:
+              amd64: '1'
+              arm64: '0'
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '0'
         architecture:
           - name: amd64
             runner: ubuntu-latest
@@ -105,6 +123,8 @@ jobs:
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
         TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.torch_cuda_arch_list[matrix.architecture.name] }}
+        INSTALL_FLASH_ATTN=${{ matrix.cuda.install_flash_attn[matrix.architecture.name] }}
+        INSTALL_FA4_CUTE=${{ matrix.cuda.install_fa4_cute[matrix.architecture.name] }}
         CMAKE_BUILD_PARALLEL_LEVEL=${{ matrix.cuda.cmake_build_parallel_level }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
         FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17

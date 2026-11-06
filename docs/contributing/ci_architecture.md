@@ -17,7 +17,7 @@ PR opened or updated
   |     style, lint, type, spelling, Markdown, workflow syntax, filenames
   |
   |-- Tier 2: Fastcheck
-  |     Buildkite schedules six lanes on the Slinky Slurm cluster
+  |     Buildkite schedules six lanes across Spark 4 and Slinky Slurm
   |     encoder, VAE, transformer, kernel, unit, DreamVerse
   |
   |-- /merge or ready label
@@ -25,7 +25,7 @@ PR opened or updated
         `-- Tier 3: Change-aware merge gate
               trusted base-branch planner classifies the complete PR diff
               Buildkite adds only relevant integration, quality, training,
-              API, or performance lanes on Slinky Slurm
+              API, or performance lanes on Spark 4 or Slinky Slurm
               |
               pass -> Mergify squash-merges when all merge conditions pass
               fail -> fix, push, and re-run
@@ -34,7 +34,7 @@ PR opened or updated
         `-- Explicit all-20-lane diagnostic run
 
   `-- weekly schedule on main
-        `-- Complete four-GPU SSIM matrix
+        `-- Complete Full Suite, including the four-GPU SSIM matrix
 ```
 
 CI is not one monolithic job:
@@ -43,11 +43,12 @@ CI is not one monolithic job:
   updates, docs deployment, image builds, package publishing, and community
   automations.
 - Buildkite owns the GPU test graph, statuses, and trusted dispatch control
-  plane. Its agent runs on the Slurm login plane; it does not execute test
-  payloads.
-- Slinky Slurm is the only active CI compute backend. A host-owned dispatcher
-  leases GPUs from a persistent four-GPU allocation and runs each lane in an
-  isolated Enroot container at the immutable PR SHA.
+  plane. Slinky agents dispatch tests from the login plane; the Spark 4 agent
+  dispatches local Slurm jobs.
+- Slinky Slurm runs cluster lanes in isolated Enroot containers using a
+  persistent four-GPU allocation. Spark 4 runs eligible single-GPU lanes in
+  isolated Docker containers through its own Slurm queue. Both test the
+  immutable PR SHA.
 - Mergify owns merge protection, labeling, and the final squash merge.
 
 The old files under `fastvideo/tests/modal/` are retained as dormant manual
@@ -59,7 +60,7 @@ Three Buildkite entry pipelines share the validated graph:
 | Pipeline | Trigger | Scope |
 |---|---|---|
 | `pr-fastcheck` | Automatic pull-request webhook | Six Fastcheck lanes |
-| `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, scheduled SSIM, explicit Full Suite, Fastcheck reruns, or one direct lane |
+| `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, the weekly Full Suite, explicit Full Suite, Fastcheck reruns, or one direct lane |
 | `fastvideo-performance-lane` | GitHub weekly scheduler | Direct performance lane |
 
 Each entry pipeline starts with the same trusted `pipeline-upload` job on the
@@ -99,7 +100,7 @@ debugging a hook implementation.
 | Attribute | Value |
 |---|---|
 | Triggered by | Buildkite PR builds with `TEST_SCOPE=fastcheck` or unset |
-| Compute | Slinky Slurm (`ci-runner` queue) |
+| Compute | Spark 4 when connected and unpaused at upload time; otherwise Slinky Slurm. Both use `ci-runner`. |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | Trusted host driver -> `.buildkite/scripts/unit_test.sh` or `.buildkite/scripts/lanes/*.sh` |
 
@@ -108,12 +109,75 @@ kernels, unit tests, and DreamVerse. Static steps replace the former
 host-side path-filter plugin: the login plane never checks out or executes PR
 code.
 
+#### Backend routing (Slurm or DGX Spark)
+
+Every step keeps `queue: "ci-runner"` and adds a `backend` agent tag.
+
+| Lanes | `backend` tag |
+|---|---|
+| unit, dreamverse, encoder, vae, transformer, kernel-tests, lora-inference, lora-extraction, inference-vmoba, api-server, eval, train-framework, golden-gate | `"${FV_SPARK_BACKEND:-slurm}"` (Spark-capable) |
+| ssim, training, distillation, self-forcing, lora-training, training-vsa, performance | `"slurm"` (multi-GPU or GB200 baselines) |
+
+With `FV_SPARK_BACKEND` unset every lane routes to Slurm exactly as before.
+Setting it to `spark4` moves only the Spark-capable lanes to a GB10 runner.
+That runner exports `FASTVIDEO_CI_BACKEND=spark4`, which the lane scripts and
+a few tests honor to skip GB200-only coverage (for example the LTX-2 finetune
+test, which needs more than 128 GB). GB10 golden references are keyed by
+`NVIDIA_GB10`; see `fastvideo/tests/golden_gate`.
+
+The trusted uploader on the Slurm login plane picks the value at upload time.
+It sets `FV_SPARK_BACKEND=spark4` only when both hold:
+
+- the build's `TEST_SCOPE` is `fastcheck`, `merge` or `direct`, or is unset;
+- the Buildkite agents API reports an agent tagged
+  `queue=ci-runner,backend=spark4` that is connected and not paused.
+
+Otherwise it sets `slurm`. For pipelines with the backend tags above,
+`/test full`, the weekly Full Suite, a paused or disconnected Spark agent, and
+any failure to read the agents API select Slurm for every lane. This choice
+happens at upload time; it does not move jobs already queued for Spark.
+Older graphs without backend tags need the normalization described below.
+
+The uploader rejects any `backend` value other than the two forms in the
+table, so a pull request cannot pin a lane to the Spark runner directly. The upload step in each entry pipeline requires `backend=slurm`, so
+the Spark runner never takes it and this policy always runs on the login plane.
+
+The regular GB10 inference image intentionally omits FlashAttention to match
+native Spark output. CI uses `docker/Dockerfile.spark-ci` to add the pinned
+FA2 wheel required by VMoBA and Wan causal tests. This image keeps the base
+Torch, FlashInfer, and CUTLASS packages and removes the wheel's unsupported
+FA4 CuTe implementation. Build it separately from the inference image:
+
+```bash
+docker build -f docker/Dockerfile.spark-ci \
+  --build-arg SPARK_BASE_IMAGE=<validated-GB10-image> \
+  -t fastvideo-ci-gb10:<version> .
+```
+
+Golden references must match this CI image, including its FA2 version. Seed
+only from unchanged upstream main, verify in separate processes, and review
+before publishing new `golden_gates/NVIDIA_GB10/` files. Preserve existing
+references for other GPUs. A successful import alone is insufficient; validate
+an actual FA2 forward, the VMoBA tests, and each lane's complete payload before
+selecting the new image in the host-owned runner configuration.
+
+The host runner must allowlist Spark-capable lane types before allocating the
+GPU. Label each Docker container with its job token and remove it from the
+outer runner on completion or cancellation. Slurm killing the Docker client
+does not stop a container owned by the Docker daemon.
+
+The trusted uploader must preserve each literal `backend: "slurm"` even when
+it selects `FV_SPARK_BACKEND=spark4`. Older PR revisions without backend tags
+must be normalized to `backend: "slurm"` before upload; `queue: "ci-runner"`
+alone also matches the Spark agent. Update the private uploader's lane policy
+with routing changes and verify the resolved agent queries on a canary build.
+
 ### Tier 3: Change-Aware Merge Gate
 
 | Attribute | Value |
 |---|---|
 | Triggered by | `/merge`, adding `ready`, or a new push to a PR that already has `ready` |
-| Compute | Slinky Slurm only (`ci-runner` queue) |
+| Compute | Spark 4 or Slinky Slurm, selected per lane (`ci-runner` queue) |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `/opt/fastvideo-ci-runner/run-ci` (`run-unit` is a compatibility wrapper) |
 
@@ -144,7 +208,7 @@ selection never deletes or dynamically invents a Buildkite step.
 Integration steps depend on `golden-gate`. A failed selected golden prevents
 the expensive downstream jobs from starting; `/test full` still selects all
 twenty lanes. A condition-skipped golden satisfies the dependency, so direct
-lane reruns, scheduled SSIM, and training-only merge plans keep their existing
+lane reruns, the scheduled Full Suite, and training-only merge plans keep their existing
 meaning. This follows Buildkite's
 [conditional dependency rules](https://buildkite.com/docs/pipelines/configure/depends-on).
 No dependency allows failures. The trusted uploader accepts either the old
@@ -185,8 +249,8 @@ switch and VAE gates do not depend on an unused attention backend.
 Golden-gate and SSIM selections are basenames, not arbitrary pytest arguments.
 The private host checks the comma-separated allowlist before staging, and the
 container checks it again before invoking pytest. Shared quality-harness
-changes still run the complete owning lane. The full SSIM matrix also runs on
-`main` every Sunday at 05:00 UTC through `ci-scheduled-ssim.yml`; `/test ssim`
+changes still run the complete owning lane. The full suite, including the complete SSIM matrix, also runs on
+`main` every Sunday at 05:00 UTC through `ci-scheduled-full-suite.yml`; `/test ssim`
 and `/test full` remain available for deliberate complete runs.
 
 The four Buildkite workers may accept multiple jobs concurrently. The
@@ -379,7 +443,7 @@ Valid direct test names:
 | `/test eval` | `eval` |
 
 The temporary `<name>-ci` spellings remain accepted as compatibility aliases;
-they select the same Slurm lane and do not identify a second backend.
+they select the same test lane and do not identify a second backend.
 
 When a direct test completes successfully, Buildkite posts
 `direct-test-completed`. `.github/workflows/ci-aggregate-status.yml` then reads
@@ -459,7 +523,7 @@ Every active test selection lives in `.buildkite/scripts/unit_test.sh` or a
 focused `.buildkite/scripts/lanes/<lane>.sh`. The private, agent-owned lane
 table binds each internal `*_ci` type to that script, its GPU count, wall-clock
 limit, dependency extras, kernel-build policy, secrets, and artifacts. The
-internal suffix is an implementation detail; there is only one active backend.
+internal suffix is an implementation detail; backend tags select the compute host.
 
 SSIM uses `fastvideo/tests/ssim/ci_runner.py` inside a single four-GPU lease.
 It discovers `REQUIRED_GPUS` and `*_MODEL_TO_PARAMS` with AST parsing, then
@@ -564,7 +628,7 @@ through checks, commit statuses, or labels instead of PR/issue comments.
 | `.github/workflows/ci-precommit.yml` | Tier 1 pre-commit |
 | `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
 | `.github/workflows/ci-trigger-full-suite.yml` | Change-aware merge-gate trigger for `ready` PRs and new pushes |
-| `.github/workflows/ci-scheduled-ssim.yml` | Weekly complete SSIM trigger on `main` |
+| `.github/workflows/ci-scheduled-full-suite.yml` | Weekly Full Suite trigger on `main` |
 | `.github/workflows/ci-scheduled-performance.yml` | Weekly performance trigger with an immutable source SHA |
 | `.github/scripts/plan_merge_ci.py` | Trusted changed-path to integration-lane planner |
 | `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |

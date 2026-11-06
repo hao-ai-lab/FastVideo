@@ -23,6 +23,10 @@ Execution backends:
 - **simd** — flash-style SIMD-group 8x8 matrix operations over the reference tile
   map for tile sizes 64 and 128 and head dimension 128. Unsupported shapes and kernel
   failures fall back to the reference backend.
+- **sdpa** — opt-in fused SDPA with the same tile mask and shared K/V. Intended
+  for M5; visits masked keys but can use faster matrix operations. ``auto`` is unchanged.
+- **nax** — opt-in M5 TensorOps kernel that visits only selected blocks and valid
+  key rows. Uses the installed MLX NAX helpers; ``auto`` is unchanged.
 
 Dense fused SDPA remains the default when VSA is disabled, the geometry is
 unsupported, or a dense-only checkpoint is loaded.
@@ -50,7 +54,7 @@ VSA_H3_TILE_SHAPES: dict[int, tuple[int, int, int]] = {
 VSA_REF_POLICIES = ("p2_multi_region", )
 VSA_GATE_KEY_SUFFIX = "attn.to_gate_compress.weight"
 VSA_PREFIX_MODES = ("exempt", "compete")
-PUBLIC_VSA_IMPLS = ("auto", "reference", "simd")
+PUBLIC_VSA_IMPLS = ("auto", "reference", "simd", "sdpa", "nax")
 VSA_IMPLS = PUBLIC_VSA_IMPLS
 # Tile sizes where ``auto`` picks the SIMD kernel (trained Omni tiles); other tiles stay opt-in.
 _AUTO_SIMD_TILES: tuple[int, ...] = (128, )
@@ -58,7 +62,7 @@ _REFERENCE_FULL_MASK_TILE_LIMIT = 24
 _REFERENCE_FULL_MASK_MAX_ELEMENTS = 256 * 1024**2
 
 PrefixMode = Literal["exempt", "compete"]
-VSAImpl = Literal["auto", "reference", "simd"]
+VSAImpl = Literal["auto", "reference", "simd", "sdpa", "nax"]
 
 
 def validate_ref_policy(ref_policy: str | None, ref_keep_rate: float | None) -> None:
@@ -873,6 +877,20 @@ def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeo
 
 
 def resolve_impl(requested: VSAImpl, head_dim: int, tile_elems: int) -> str:
+    if requested == "nax":
+        from fastvideo.mlx_runtime.minimax_h3_vsa_nax import NAX_HEAD_DIM, NAX_TILE_SIZES
+
+        if tile_elems not in NAX_TILE_SIZES or head_dim != NAX_HEAD_DIM:
+            raise ValueError("NAX VSA requires tile 64 or 128 and head dimension 128 "
+                             f"(got tile={tile_elems}, head_dim={head_dim})")
+        return "nax"
+    if requested == "sdpa":
+        from fastvideo.mlx_runtime.minimax_h3_vsa_sdpa import SDPA_HEAD_DIM, SDPA_TILE_SIZES
+
+        if tile_elems not in SDPA_TILE_SIZES or head_dim != SDPA_HEAD_DIM:
+            raise ValueError("SDPA VSA requires tile 64 or 128 and head dimension 128 "
+                             f"(got tile={tile_elems}, head_dim={head_dim})")
+        return "sdpa"
     if requested == "reference" or (requested == "auto" and tile_elems not in _AUTO_SIMD_TILES):
         return "reference"
 
@@ -987,6 +1005,16 @@ def h3_vsa_attention(
                 if stats is not None:
                     stats.dense_fallback_reason = f"simd kernel failed: {error}"
                 video_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
+        elif chosen == "nax":
+            from fastvideo.mlx_runtime.minimax_h3_vsa_nax import nax_block_sparse
+
+            video_tiled = nax_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry,
+                                           scale)[n_prefix_pad:]
+        elif chosen == "sdpa":
+            from fastvideo.mlx_runtime.minimax_h3_vsa_sdpa import sdpa_block_sparse
+
+            video_tiled = sdpa_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry,
+                                            scale)[n_prefix_pad:]
         elif _reference_full_mask_fits(geometry, heads):
             scores_np = np.array(scores, dtype=np.float32)
             mask = build_block_mask(

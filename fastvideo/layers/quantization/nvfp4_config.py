@@ -509,14 +509,27 @@ def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_
     return _mm_fp4_chunked(*args, _SPLIT_CHOICE[key])
 
 
-def _mm_fp4_backend() -> str:
+_H3_LAYER_PROFILES = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+
+
+@functools.cache
+def _is_sm100() -> bool:
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
+
+
+def _mm_fp4_backend(layer_profile: str | None = None) -> str:
     """FlashInfer ``mm_fp4`` backend (``FASTVIDEO_NVFP4_MM_BACKEND``, default ``auto``).
 
     On sm_120 ``auto`` picks a kernel about 2x slower than ``cutlass`` or
     ``cudnn`` once activations reach tens of thousands of rows (measured at
-    73k rows on an RTX PRO 6000); short sequences are unaffected.
+    73k rows on an RTX PRO 6000); short sequences are unaffected. On sm_100,
+    ``auto`` resolves to ``cudnn`` for the MiniMax-H3 DiT profiles, where it is
+    bitwise identical to the default kernel and faster at H3 shapes.
     """
-    return envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
+    backend = envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
+    if backend == "auto" and layer_profile in _H3_LAYER_PROFILES and _is_sm100():
+        return "cudnn"
+    return backend
 
 
 def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
@@ -552,6 +565,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
     # Lazily resolved by _static_activation_global_sf; class defaults also cover object.__new__ test doubles.
     _static_sf_checked: bool = False
     _static_sf: torch.Tensor | None = None
+    _layer_profile: str | None = None
 
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
@@ -708,7 +722,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend=_mm_fp4_backend(),
+            backend=_mm_fp4_backend(self._layer_profile),
         )
 
         if bias is not None:
@@ -804,6 +818,7 @@ class NVFP4Config(QuantizationConfig):
         if tagged:
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
+            method._layer_profile = self.layer_profile
             return method
         if (self.layer_profile == "h3_dit_ffn" and envs.FASTVIDEO_H3_FP8_ATTENTION.get()
                 and _H3_BLOCK_ATTN_PROJ.search(prefix) is not None):

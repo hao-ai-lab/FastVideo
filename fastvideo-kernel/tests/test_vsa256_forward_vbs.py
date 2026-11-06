@@ -9,6 +9,8 @@ import torch
 
 from fastvideo_kernel import video_sparse_attn
 
+from .utils import skip_cute_block_sparse_on_sm12x
+
 
 @pytest.fixture(autouse=True)
 def _require_cute_backend(monkeypatch):
@@ -17,6 +19,7 @@ def _require_cute_backend(monkeypatch):
     VSA-256 defaults to Triton; this file targets the CuTe path, so it
     opts in explicitly and skips when ``flash_attn.cute`` is not installed.
     """
+    skip_cute_block_sparse_on_sm12x()
     pytest.importorskip(
         "flash_attn.cute.block_sparsity",
         reason="optional FA4 CuTe build (flash_attn.cute) not installed",
