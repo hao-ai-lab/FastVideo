@@ -5,7 +5,7 @@ import os
 import random
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from os.path import join as opj
 from typing import Any
 
@@ -513,7 +513,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
 
     def _get_item(self, idx: int) -> dict:
         """Get a single processed data item."""
-        batch = self.processed_batches[idx]
+        batch = replace(self.processed_batches[idx])
 
         # Apply transformation stages
         batch = self.video_transform_stage.process(batch)
