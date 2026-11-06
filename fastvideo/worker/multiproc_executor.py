@@ -78,39 +78,29 @@ def _wait_for_processes_to_exit(processes: list[BaseProcess], timeout: float) ->
     return all(not process.is_alive() for process in processes)
 
 
-def _copy_mps_tensors_to_cpu(value: Any, tensor_memo: dict[int, torch.Tensor] | None = None) -> Any:
-    """Stage MPS inference results for IPC, leaving CPU/CUDA tensors unchanged.
-
-    MPS copies carry values, not autograd history or storage aliasing between views.
-    Repeated references to the same tensor share one CPU copy. Copy containers
-    and dataclasses so preparing a response does not offload pipeline state.
-    """
-    if tensor_memo is None:
-        tensor_memo = {}
+def _copy_mps_tensors_to_cpu(value: Any) -> Any:
+    """Copy nested MPS results to CPU without changing the worker's tensors."""
     if isinstance(value, torch.Tensor):
-        if value.device.type != "mps":
-            return value
-        # PyTorch's multiprocessing reducer has no MPS storage-sharing path.
-        if id(value) not in tensor_memo:
-            tensor_memo[id(value)] = value.detach().cpu()
-        return tensor_memo[id(value)]
+        if value.device.type == "mps":
+            return value.detach().cpu()
+        return value
     if isinstance(value, PipelineLoggingInfo):
         logging_info = copy.copy(value)
-        logging_info.stages = _copy_mps_tensors_to_cpu(value.stages, tensor_memo)
+        logging_info.stages = _copy_mps_tensors_to_cpu(value.stages)
         return logging_info
     if is_dataclass(value) and not isinstance(value, type):
         result = copy.copy(value)
         for field in fields(value):
-            object.__setattr__(result, field.name, _copy_mps_tensors_to_cpu(getattr(value, field.name), tensor_memo))
+            object.__setattr__(result, field.name, _copy_mps_tensors_to_cpu(getattr(value, field.name)))
         return result
     if isinstance(value, dict):
         mapping = value.copy()
-        mapping.update((key, _copy_mps_tensors_to_cpu(item, tensor_memo)) for key, item in value.items())
+        mapping.update((key, _copy_mps_tensors_to_cpu(item)) for key, item in value.items())
         return mapping
     if isinstance(value, list):
-        return [_copy_mps_tensors_to_cpu(item, tensor_memo) for item in value]
+        return [_copy_mps_tensors_to_cpu(item) for item in value]
     if isinstance(value, tuple):
-        items = tuple(_copy_mps_tensors_to_cpu(item, tensor_memo) for item in value)
+        items = tuple(_copy_mps_tensors_to_cpu(item) for item in value)
         return type(value)(*items) if hasattr(value, "_fields") else items
     return value
 

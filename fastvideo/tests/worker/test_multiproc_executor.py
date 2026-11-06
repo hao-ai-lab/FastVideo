@@ -224,10 +224,11 @@ def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
             metadata = response["extra"]["metadata"]
             assert isinstance(metadata, _TensorMetadata)
             assert metadata.label == "test"
-            assert metadata.features[0] is output
-            assert response["extra"]["audio"][0].samples is output
+            torch.testing.assert_close(metadata.features[0], expected, rtol=0, atol=0)
+            torch.testing.assert_close(response["extra"]["audio"][0].samples, expected, rtol=0, atol=0)
             assert response["extra"]["audio"][0].sample_rate == 24000
-            assert response["logging_info"].get_stage_info("decode")["metric"]["values"][0] is output
+            metric = response["logging_info"].get_stage_info("decode")["metric"]["values"][0]
+            torch.testing.assert_close(metric, expected, rtol=0, atol=0)
             torch.testing.assert_close(response["trajectory_latents"], expected.half(), rtol=0, atol=0)
             torch.testing.assert_close(response["trajectory_timesteps"][0], torch.arange(2, dtype=torch.int32))
 
