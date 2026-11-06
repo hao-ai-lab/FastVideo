@@ -791,10 +791,7 @@ class LoRAPipeline(ComposedPipelineBase):
             self._runtime_adapter = (lora_nickname, strength)
 
     def merge_lora_weights(self) -> None:
-        """Merge LoRA weights, then repack the packed quantized buffers for the merged state.
-
-        Merge-mode NVFP4 layers can recreate a purged parameter from their CPU base snapshot.
-        """
+        """Merge LoRA weights, then repack the packed quantized buffers for the merged state."""
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -836,10 +833,7 @@ class LoRAPipeline(ComposedPipelineBase):
         self._apply_constructor_adapter()
 
     def unmerge_lora_weights(self) -> None:
-        """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state.
-
-        A merge-mode NVFP4 layer restores its CPU base snapshot before repacking; side branches leave the base alone.
-        """
+        """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state."""
         for (
                 transformer_name,
                 transformer_lora_layers,
