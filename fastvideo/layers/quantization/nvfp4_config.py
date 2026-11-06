@@ -965,7 +965,7 @@ def load_minimax_h3_nvfp4_dit_export(
                     continue
                 tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
                 module.register_buffer(buffer_name, tensor, persistent=False)
-            # Dense parameters may still be meta; record the export's destination.
+            # Preserve weight placement after purge.
             module.register_buffer("weight_device", torch.empty(0, device=device, dtype=torch.uint8), persistent=False)
             module.register_parameter("weight", None)
             loaded_names.add(next(name for name, candidate in modules.items() if candidate is module))
