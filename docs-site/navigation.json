@@ -58,6 +58,10 @@
         "href": "/inference/optimizations"
       },
       {
+        "label": "FastWan FullAttn",
+        "href": "/inference/wan_fastwan_fullattn"
+      },
+      {
         "label": "LoRA adapters",
         "href": "/utilities/lora"
       },
