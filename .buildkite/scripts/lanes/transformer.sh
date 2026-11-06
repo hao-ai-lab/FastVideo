@@ -6,4 +6,5 @@ set -euo pipefail
 # that reference identity; the component lane also selects FA2 explicitly.
 env -u FASTVIDEO_FA4 pytest ./fastvideo/tests/golden_gate/test_wan_t2v.py -xvs
 pytest ./fastvideo/tests/golden_gate/test_wan_causal.py -xvs
+pytest ./fastvideo/tests/stages/test_causal_cuda_graph.py ./fastvideo/tests/ops/test_causal_timestep_cache.py -m gpu -xvs
 exec pytest ./fastvideo/tests/transformers -vs

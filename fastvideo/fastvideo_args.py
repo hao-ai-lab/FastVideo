@@ -265,6 +265,8 @@ class FastVideoArgs:
     # Per-component flags below let callers compile additional submodules
     # independently; ``False`` leaves the component eager.
     enable_torch_compile: bool = False
+    # Request-local fixed-window CUDA graphs for causal Wan; experimental.
+    enable_causal_cuda_graph: bool = False
     # Regional fullgraph compile of repeated blocks (modular fastvideo/train
     # stack). False preserves the legacy whole-model torch.compile semantics
     # for fastvideo/training recipes; the modular moduleloader sets it True.
@@ -772,6 +774,12 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_torch_compile,
             help="Use torch.compile to speed up DiT inference." +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
+        )
+        parser.add_argument(
+            "--enable-causal-cuda-graph",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_causal_cuda_graph,
+            help="Enable experimental single-GPU CUDA graphs for fixed-window causal Wan inference.",
         )
         parser.add_argument(
             "--torch-compile-kwargs",

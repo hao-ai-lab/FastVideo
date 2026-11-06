@@ -117,6 +117,23 @@ def test_build_generate_run_config_accepts_dashed_dotted_overrides(tmp_path):
     assert config.request.output.output_path == "outputs/dashed"
 
 
+@pytest.mark.parametrize("value,expected", [("true", True), ("false", False)])
+def test_cli_can_enable_and_disable_causal_cuda_graph(value, expected):
+    from pathlib import Path
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+
+    config_path = Path(__file__).resolve().parents[3] / "examples/inference/optimizations/causal_cuda_graph.yaml"
+    args, unknown = _parse_generate_args([
+        "--config", str(config_path), "--generator.engine.enable_causal_cuda_graph", value,
+    ])
+    config = build_generate_run_config(args, unknown)
+    assert config.generator.engine.enable_causal_cuda_graph is expected
+    runtime = generator_config_to_fastvideo_args(config.generator)
+    assert runtime.enable_causal_cuda_graph is expected
+    assert runtime.pipeline_config.dit_config.arch_config.local_attn_size == 9
+    assert runtime.dit_cpu_offload is False and runtime.dit_layerwise_offload is False
+
+
 def test_build_generate_run_config_loads_nested_json_config(tmp_path):
     config_path = tmp_path / "run.json"
     config_path.write_text(
