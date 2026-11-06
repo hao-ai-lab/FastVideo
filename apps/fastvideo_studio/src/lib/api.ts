@@ -78,6 +78,8 @@ export interface CreateJobRequest {
 	guidance_rescale?: number;
 	fps?: number;
 	seed?: number;
+	attention_backend?: string | null;
+	vsa_tile_size?: number | null;
 	num_gpus?: number;
 	dit_cpu_offload?: boolean | null;
 	text_encoder_cpu_offload?: boolean | null;
@@ -294,7 +296,8 @@ export async function createJob(job: CreateJobRequest): Promise<Job> {
 		body: JSON.stringify(job),
 	});
 	if (!response.ok) {
-		throw new Error("Failed to create job");
+		const error = await response.json().catch(() => ({}));
+		throw new Error(typeof error.detail === "string" ? error.detail : "Failed to create job");
 	}
 	return response.json();
 }
@@ -478,4 +481,20 @@ export function getDatasetMediaUrl(
 ): string {
 	const baseApiUrl = getApiBaseUrl();
 	return `${baseApiUrl}/datasets/${datasetId}/media/${encodeURIComponent(fileName)}`;
+}
+
+
+export interface InferenceOptions {
+  auto_attention_backend?: string | null;
+  auto_vsa_tile_size?: number | null;
+  attention_backends: string[];
+  defaults: Partial<Pick<CreateJobRequest, 'attention_backend' | 'vsa_tile_size' | 'vsa_sparsity' |
+    'num_inference_steps' | 'num_frames' | 'height' | 'width' | 'guidance_scale' | 'fps'>>;
+  source: string | null;
+}
+
+export async function getInferenceOptions(modelId: string, workloadType = 't2v'): Promise<InferenceOptions> {
+  const response = await fetch(`${getApiBaseUrl()}/inference-options?model_id=${encodeURIComponent(modelId)}&workload_type=${encodeURIComponent(workloadType)}`);
+  if (!response.ok) throw new Error('Could not load inference options');
+  return response.json();
 }
