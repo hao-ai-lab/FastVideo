@@ -1252,6 +1252,26 @@ def get_current_fastvideo_args() -> FastVideoArgs:
     return _current_fastvideo_args
 
 
+def dit_compile_uses_cudagraphs(fastvideo_args: Any) -> bool:
+    """Whether the pipeline-level DiT torch.compile records CUDA graphs (cudagraph trees).
+
+    Mirrors ``ComposedPipelineBase._apply_inference_compile``: no pipeline-level
+    DiT compile runs for training, for FSDP-wrapped inference, or when
+    ``inference_torch_compile`` compiles DiT regions in the loader instead.
+    """
+    if (not getattr(fastvideo_args, "enable_torch_compile", False) or getattr(fastvideo_args, "training_mode", False)
+            or getattr(fastvideo_args, "inference_torch_compile", False)
+            or getattr(fastvideo_args, "use_fsdp_inference", False)):
+        return False
+    # Same precedence as ComposedPipelineBase._apply_inference_compile.
+    kwargs = getattr(fastvideo_args, "torch_compile_kwargs_dit", None)
+    kwargs = kwargs or getattr(fastvideo_args, "torch_compile_kwargs", None) or {}
+    if kwargs.get("disable"):
+        return False
+    options = kwargs.get("options") or {}
+    return kwargs.get("mode") in ("reduce-overhead", "max-autotune") or bool(options.get("triton.cudagraphs"))
+
+
 @dataclasses.dataclass
 class TrainingArgs(FastVideoArgs):
     """
