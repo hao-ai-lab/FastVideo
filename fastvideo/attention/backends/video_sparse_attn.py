@@ -1,19 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 import functools
 import math
+from contextlib import suppress
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
-
-try:
-    from fastvideo_kernel import video_sparse_attn
-except ImportError:
-    video_sparse_attn = None
-try:
-    from fastvideo_kernel import video_sparse_attn_bshd
-except ImportError:
-    video_sparse_attn_bshd = None
 
 from typing import Any
 
@@ -23,6 +15,8 @@ from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionIm
 from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
 
+video_sparse_attn = None
+video_sparse_attn_bshd = None
 logger = init_logger(__name__)
 # VSA tile shape. The tile volume picks the kernel path automatically in
 # forward(): (4,4,4)=64 -> existing TK/Triton path (default, unchanged);
@@ -214,7 +208,7 @@ def _get_tile_to_bhsd() -> Callable[..., Any] | None:
 
 def _can_fuse_vsa64_layout(x: torch.Tensor, metadata: VideoSparseAttentionMetadata) -> bool:
     """Restrict the fused layout to the validated SM100 BF16 inference route."""
-    if envs.FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT.get():
+    if not x.is_cuda or envs.FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT.get():
         return False
     if _get_tile_to_bhsd() is None:
         return False
@@ -374,6 +368,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
         block_elements = math.prod(VSA_TILE_SIZE)
+        global video_sparse_attn, video_sparse_attn_bshd
+        if video_sparse_attn is None:
+            with suppress(ImportError):
+                from fastvideo_kernel import video_sparse_attn
+        if block_elements == 256 and video_sparse_attn_bshd is None:
+            with suppress(ImportError):
+                from fastvideo_kernel import video_sparse_attn_bshd
         cur_topk = _compute_cur_topk(attn_metadata)
 
         # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
