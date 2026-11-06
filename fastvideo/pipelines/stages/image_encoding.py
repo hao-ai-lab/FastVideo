@@ -179,14 +179,11 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
 
         self.vae = self.vae.to(device)
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            # The decoding stage turns tiling on and nothing turns it back off,
-            # and both stages hold the same VAE. Without this the first
-            # generation in a process encodes the reference image untiled and
-            # every later one encodes it tiled, so the same image and seed give
-            # different conditioning. Decide from the config, as the other
-            # VAE-encoding stages in this file do.
+            # Encoding and decoding share a VAE; apply the current request in both directions.
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             cond_latents = self.vae.encode(pixels).mode()
             cond_latents = cond_latents * self.vae.config.scaling_factor
         if fastvideo_args.vae_cpu_offload:
@@ -560,6 +557,8 @@ class ImageVAEEncodingStage(PipelineStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
@@ -736,6 +735,8 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
             encoder_output = self.vae.encode(video_condition)
@@ -924,6 +925,8 @@ class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
             encoder_output = self.vae.encode(video_condition)
@@ -1041,6 +1044,8 @@ class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
             encoder_output = self.vae.encode(video_condition)
