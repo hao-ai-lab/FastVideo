@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
+from weakref import ReferenceType, ref
 
 import numpy as np
 import torch
 from torch.distributed.tensor import DTensor
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_world_size
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
 from fastvideo.pipelines.basic.minimax_h3.memo import ContentMemo, image_key
@@ -25,6 +27,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, sample_reference_video_frames
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.lazy_module import LazyModule
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -109,6 +112,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         *,
         ref2va: bool = False,
         manage_cpu_offload: bool = True,
+        text_conditioning_cache_max_bytes: int = 0,
     ) -> None:
         super().__init__()
         self.conditioner = conditioner
@@ -117,6 +121,71 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         self.ref2va = ref2va
         self.manage_cpu_offload = manage_cpu_offload
         self._ref2va_memo = ContentMemo()
+        if type(text_conditioning_cache_max_bytes) is not int or text_conditioning_cache_max_bytes < 0:
+            raise ValueError("text_conditioning_cache_max_bytes must be a non-negative integer.")
+        self._text_cache_max_bytes = text_conditioning_cache_max_bytes
+        self._text_cache: OrderedDict[tuple, tuple[torch.Tensor, torch.Tensor]] = OrderedDict()
+        self._text_cache_bytes = 0
+        self._text_cache_owner: ReferenceType[MiniMaxH3Qwen3VLConditioner] | None = None
+        self._text_cache_revision: tuple[int, torch.dtype, str, bool, torch.dtype | None, str] | None = None
+        if self._text_cache_max_bytes:
+            if ref2va:
+                raise ValueError("Text conditioning reuse supports pure MiniMax-H3 T2VA, not Ref2VA.")
+            self._require_single_rank_text_cache()
+
+    @staticmethod
+    def _require_single_rank_text_cache() -> None:
+        try:
+            world_size = get_world_size()
+        except AssertionError as exc:
+            raise ValueError("Text conditioning reuse requires an initialized single-rank runtime.") from exc
+        if world_size != 1:
+            raise ValueError("Text conditioning reuse supports a single-rank runtime only.")
+
+    def _clear_text_cache(self) -> None:
+        self._text_cache.clear()
+        self._text_cache_bytes = 0
+
+    def _encode_text_tokens(
+        self,
+        token_ids: list[int],
+        token_tags: list[int],
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self._text_cache_max_bytes:
+            return self._encode_tokens(token_ids, token_tags, device)
+        self._require_single_rank_text_cache()
+        # A LazyModule proxy can outlive several real encoder instances.
+        owner = self.conditioner.materialize() if isinstance(self.conditioner, LazyModule) else self.conditioner
+        if owner.training or torch.is_grad_enabled():
+            self._clear_text_cache()
+            return self._encode_tokens(token_ids, token_tags, device)
+        autocast = torch.is_autocast_enabled(device.type)
+        revision = (owner.conditioning_revision, owner.dtype, str(device), autocast,
+                    torch.get_autocast_dtype(device.type) if autocast else None, torch.get_float32_matmul_precision())
+        same_owner = self._text_cache_owner is not None and self._text_cache_owner() is owner
+        if not same_owner or self._text_cache_revision != revision:
+            self._clear_text_cache()
+            self._text_cache_owner = ref(owner)
+            self._text_cache_revision = revision
+        key = (tuple(token_ids), tuple(token_tags))
+        cached = self._text_cache.get(key)
+        if cached is not None:
+            self._text_cache.move_to_end(key)
+            return cached[0].to(device=device, copy=True), cached[1].clone()
+        result = self._encode_tokens(token_ids, token_tags, device)
+        size = sum(value.numel() * value.element_size() for value in result)
+        if size <= self._text_cache_max_bytes:
+            while self._text_cache and (len(self._text_cache) >= 8
+                                        or self._text_cache_bytes + size > self._text_cache_max_bytes):
+                _, evicted = self._text_cache.popitem(last=False)
+                self._text_cache_bytes -= sum(value.numel() * value.element_size() for value in evicted)
+            self._text_cache[key] = (
+                result[0].detach().to(device="cpu", copy=True),
+                result[1].detach().to(device="cpu", copy=True),
+            )
+            self._text_cache_bytes += size
+        return result
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -191,6 +260,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         prompt_ids = _token_ids(self.tokenizer(batch.prompt, add_special_tokens=False))
         token_ids.extend(prompt_ids)
         token_tags.extend([MINIMAX_H3_TEXT_TAG] * len(prompt_ids))
+        if self._text_cache_max_bytes and not images and not getattr(batch, "references", None):
+            return self._encode_text_tokens(token_ids, token_tags, device)
         return self._encode_tokens(
             token_ids,
             token_tags,

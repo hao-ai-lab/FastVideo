@@ -165,6 +165,8 @@ surfaces:
       draft_latent_path:
         sources:
           - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      text_conditioning_cache_max_bytes:
+        sources: [fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig]
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig

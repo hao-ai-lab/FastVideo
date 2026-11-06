@@ -558,8 +558,27 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__(config)
+        self._conditioning_revision = 0
         self.visual = MiniMaxH3Qwen3VLVisionModel(config)
         self.language_model = MiniMaxH3Qwen3VLLanguageModel(config)
+
+    @property
+    def conditioning_revision(self) -> int:
+        """Invalidate prompt results on root reload, including partially failed loads."""
+        return self._conditioning_revision
+
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        self._conditioning_revision += 1
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -791,6 +810,9 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
         )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        # The loaders may use param.data.copy_, which does not increment the
+        # Parameter version. Invalidate before a failed load can partially write.
+        self._conditioning_revision += 1
         parameters = dict(self.named_parameters())
         loaded: set[str] = set()
 

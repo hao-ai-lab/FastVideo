@@ -90,6 +90,28 @@ def test_every_test_directory_is_collected_or_allowlisted():
                       f"allowlist entry with a reason in {__file__}.")
 
 
+def test_encoder_lane_collects_native_h3_text_cache_gpu_test(tmp_path):
+    import os
+    import shlex
+    import subprocess
+
+    pytest = tmp_path / "pytest"
+    pytest.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*"\n')
+    pytest.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / ".buildkite/scripts/lanes/encoder.sh")],
+        env={"PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
+        capture_output=True, text=True, check=True,
+    )
+    commands = [shlex.split(line) for line in result.stdout.splitlines()]
+    target = ("./fastvideo/tests/stages/test_minimax_h3_text_conditioning_cache.py::"
+              "test_native_qwen_conditioner_cuda_reuse_and_reload")
+    gpu_commands = [args for args in commands if target in args]
+    assert len(gpu_commands) == 1
+    assert "-m" not in gpu_commands[0], "Do not apply the unit lane's GPU exclusion to this CUDA test"
+    assert any("./fastvideo/tests/encoders" in args for args in commands)
+
+
 def test_local_tests_stays_out_of_ci():
     # tests/local_tests/ (repo root) is developer-local by design (author
     # decision, 2026-07-05): parity scaffolds and machine-specific checks
