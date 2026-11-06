@@ -1,0 +1,179 @@
+# Dependabot keeps the Python and JavaScript dependencies patched.
+#
+# Each project gets at most two update pull requests: one grouped security
+# update and one grouped minor/patch update. Major version updates stay
+# separate because they need a human decision.
+version: 2
+updates:
+  # --- npm -----------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /apps/dreamverse/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /apps/fastvideo_studio
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /apps/performance_dashboard/frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /docs-site
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /examples/serving/clients
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  # --- pip -----------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: pip
+    directory: /apps/dreamverse
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: pip
+    directory: /apps/infinite_livestream
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: pip
+    directory: /fastvideo-kernel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
