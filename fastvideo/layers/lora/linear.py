@@ -207,6 +207,13 @@ class BaseLayerWithLoRA(nn.Module):
                          lora_path: str | None = None,
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
+        if not training_mode and not self.side_branch and self.base_layer.weight is None:
+            if accumulate and self.merged:
+                # The base snapshot cannot reconstruct earlier accumulated adapters. Keep this failure before
+                # replacing the current factors so the caller can still unmerge or replace the active adapter.
+                raise RuntimeError("Accumulating LoRA after NVFP4 removed the BF16 weight requires retained BF16 "
+                                   "weights; load with NVFP4Config(retain_original_weights=True).")
+            self._restore_base_weight()
         if self.side_branch:
             if accumulate and self.lora_A is not None:
                 raise ValueError("Accumulating adapters is unsupported on a side-branch LoRA layer (packed or "
@@ -238,6 +245,11 @@ class BaseLayerWithLoRA(nn.Module):
 
         if self.merged and not accumulate:
             self.unmerge_lora_weights()
+        elif self.base_layer.weight is None:
+            if self.merged:
+                raise RuntimeError("Accumulating LoRA after NVFP4 removed the BF16 weight requires retained BF16 "
+                                   "weights; load with NVFP4Config(retain_original_weights=True).")
+            self._restore_base_weight()
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
@@ -298,12 +310,28 @@ class BaseLayerWithLoRA(nn.Module):
                 return
             raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
-        # avoid precision loss
+        self._restore_base_weight()
+
+    @torch.no_grad()
+    def _restore_base_weight(self) -> None:
+        """Restore the immutable inference snapshot, recreating an NVFP4-purged parameter when necessary.
+
+        The pipeline calls this inside the block's offload mutation scope; the placement buffer follows its weights.
+        """
         if self.cpu_weight is None:
             raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
-        if isinstance(self.base_layer.weight, DTensor):
+        if self.base_layer.weight is None:
+            if isinstance(self.cpu_weight, DTensor):
+                raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot.")
+            weight_device = getattr(self.base_layer, "weight_device", None)
+            if weight_device is None:
+                raise RuntimeError("Restoring a removed LoRA weight requires its weight_device placement buffer.")
+            restored_weight = self.cpu_weight.to(weight_device.device, non_blocking=True, copy=True)
+            self.base_layer.weight = nn.Parameter(restored_weight, requires_grad=False)
+        elif isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
-            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True, copy=True))
+            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True, copy=True),
+                                                  requires_grad=self.base_layer.weight.requires_grad)
         else:
             # copy=True: on the snapshot's own device .to() would alias it, and the next merge would write into it.
             self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight, non_blocking=True, copy=True)

@@ -47,8 +47,9 @@ def test_dense_transformer_safetensors_drops_packed_export(tmp_path) -> None:
     assert nv.find_minimax_h3_nvfp4_dit_export([str(shard)]) == str(packed)
 
 
-def test_load_minimax_h3_nvfp4_dit_export_overlays_and_purges_weight(tmp_path) -> None:
-    model = _model()
+@pytest.mark.parametrize("dense_device", ["cpu", "meta"])
+def test_load_minimax_h3_nvfp4_dit_export_overlays_and_purges_weight(tmp_path, dense_device: str) -> None:
+    model = _model().to(dense_device)
     linear = model.transformer_blocks[0].attn.to_q
     prefix = "transformer_blocks.0.attn.to_q"
     tensors = {
@@ -68,6 +69,9 @@ def test_load_minimax_h3_nvfp4_dit_export_overlays_and_purges_weight(tmp_path) -
     assert tuple(linear._nvfp4_weight.shape) == (8, 8)
     assert linear._nvfp4_alpha.item() == 0.5
     assert linear._weight_global_sf.item() == 2.0
+    assert linear.weight_device.device.type == "cpu"
+    assert linear.weight_device.untyped_storage().nbytes() == 0
+    assert "weight_device" not in linear.state_dict()
 
 
 def test_load_minimax_h3_nvfp4_dit_export_rejects_untagged_linear(tmp_path) -> None:

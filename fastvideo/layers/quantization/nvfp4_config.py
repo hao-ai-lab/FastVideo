@@ -884,6 +884,10 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
             else:
                 purged_bytes += weight.numel() * weight.element_size()
                 purged += 1
+                # Preserve weight placement after purge.
+                mod.register_buffer("weight_device",
+                                    torch.empty(0, device=weight.device, dtype=weight.dtype),
+                                    persistent=False)
                 mod.register_parameter("weight", None)
 
     if purged or retained:
@@ -961,6 +965,8 @@ def load_minimax_h3_nvfp4_dit_export(
                     continue
                 tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
                 module.register_buffer(buffer_name, tensor, persistent=False)
+            # Preserve weight placement after purge.
+            module.register_buffer("weight_device", torch.empty(0, device=device, dtype=torch.uint8), persistent=False)
             module.register_parameter("weight", None)
             loaded_names.add(next(name for name, candidate in modules.items() if candidate is module))
 
