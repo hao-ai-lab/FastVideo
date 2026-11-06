@@ -1102,10 +1102,13 @@ class JobRunner:
 
             # Without a name FastVideo derives the filename from the prompt.
             safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
-            output_target = (os.path.join(job_output_dir, f"{safe_name[:80]}.mp4") if safe_name else job_output_dir)
+            output_video_name = safe_name[:80] or None
+            if output_video_name and job.workload_type.endswith("2i"):
+                output_video_name = str(Path(output_video_name).with_suffix(".png"))
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
-                "output_path": output_target,
+                "output_path": job_output_dir,
+                "output_video_name": output_video_name,
                 "save_video": True,
                 "num_inference_steps": job.num_inference_steps,
                 "num_frames": job.num_frames,
@@ -1126,24 +1129,14 @@ class JobRunner:
                 # _prepare_fl2va requires a PIL image, not a path.
                 from PIL import Image as _PILImage
                 gen_kwargs["last_image"] = _PILImage.open(job.last_image_path)
-            generator.generate_video(**gen_kwargs)
+            result = generator.generate_video(**gen_kwargs)
 
             buf.phase = "saving"
-            logger.info("Generation completed, searching for output file...")
-
-            # Find the generated video file
-            video_files = sorted(Path(job_output_dir).glob("*.mp4"))
-            if video_files:
-                job.output_path = str(video_files[0])
-                logger.info("Found video output: %s", job.output_path)
-            else:
-                # Could be an image workload
-                image_files = sorted(Path(job_output_dir).glob("*.png"))
-                if image_files:
-                    job.output_path = str(image_files[0])
-                    logger.info("Found image output: %s", job.output_path)
-                else:
-                    logger.warning("No output file found in job directory")
+            output_path = result.get("video_path") if isinstance(result, dict) else None
+            if not output_path or not os.path.isfile(output_path):
+                raise RuntimeError("Generation did not return a saved output file.")
+            job.output_path = str(output_path)
+            logger.info("Saved output: %s", job.output_path)
 
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
