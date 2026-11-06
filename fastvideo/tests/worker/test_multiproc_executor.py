@@ -336,7 +336,6 @@ def test_execute_forward_response_serializes_device_tensors(monkeypatch, device,
     expected_metric = output_batch.logging_info.get_stage_info("decode")["metric"]["values"]
     assert type(actual_metric) is tuple
     assert_tensor(actual_metric[0], expected_metric[0])
-    # Preparing the response must not offload the worker's original tensors.
     original_tensors = {
         "output": output_batch.output,
         "extra": output_batch.extra["audio"][0].samples,
