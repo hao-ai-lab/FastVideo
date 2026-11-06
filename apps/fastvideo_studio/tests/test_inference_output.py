@@ -29,15 +29,18 @@ def runner(tmp_path):
         instance._shutdown()
 
 
-@pytest.mark.parametrize("workload, extension, media_type", [
-    ("t2i", ".png", "image/png"),
-    ("t2v", ".mp4", "video/mp4"),
+@pytest.mark.parametrize("workload, name, output_name, media_type", [
+    ("t2i", "MPS handoff test", "MPS handoff test.png", "image/png"),
+    ("t2i", "portrait.jpg", "portrait.png", "image/png"),
+    ("t2i", "portrait.jpeg", "portrait.png", "image/png"),
+    ("t2i", "portrait.webp", "portrait.png", "image/png"),
+    ("t2v", "MPS handoff test", "MPS handoff test.mp4", "video/mp4"),
 ])
-def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, extension, media_type):
+def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, name, output_name, media_type):
     job = runner.create_job(
         job_id=str(uuid.uuid4()),
         model_id="test/model",
-        name="MPS handoff test",
+        name=name,
         prompt="a red dinosaur",
         workload_type=workload,
     )
@@ -69,7 +72,7 @@ def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, exte
                         lambda *args, **kwargs: SimpleNamespace(generate_video=generate_video))
     runner._run_inference_job(job)
 
-    expected = output_dir / f"MPS handoff test{extension}"
+    expected = output_dir / output_name
     assert job.status == JobStatus.COMPLETED, job.error
     assert job.output_path == str(expected)
     assert expected.is_file()
@@ -83,6 +86,7 @@ def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, exte
     if workload == "t2i":
         with Image.open(io.BytesIO(response.content)) as image:
             image.load()
+            assert image.format == "PNG"
             assert image.size == (8, 8)
             assert image.getpixel((0, 0)) == (255, 0, 0)
 

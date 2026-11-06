@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PipelineLoggingInfo
 from fastvideo.worker.multiproc_executor import (
     _RPC_ERROR_KEY,
     _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
@@ -768,3 +768,50 @@ def test_response_preparation_preserves_non_mps_tensor_identity(device):
     assert prepared["extra"]["nested"][0] is tensor
     assert prepared["extra"]["nested"][1][0] is tensor
     assert tensor.requires_grad
+
+
+def test_response_preparation_rebuilds_nested_containers_on_cpu():
+    tensor = torch.arange(3, dtype=torch.float32)
+    metadata = _TensorMetadata((tensor,), label="features")
+    values = OrderedDict(
+        audio=_Audio(tensor, 24000),
+        metadata=metadata,
+        tags=["ready", 7, None],
+        empty=(),
+    )
+    logging_info = PipelineLoggingInfo()
+    logging_info.add_stage_metric("decode", "result", values)
+    response = {"logging_info": logging_info}
+
+    prepared = _copy_mps_tensors_to_cpu(response)
+
+    assert prepared is not response
+    copied_logging = prepared["logging_info"]
+    assert type(copied_logging) is PipelineLoggingInfo
+    assert copied_logging is not logging_info
+    assert type(copied_logging.stages) is OrderedDict
+    assert copied_logging.stages is not logging_info.stages
+    assert copied_logging.get_execution_order() == ["decode"]
+    copied_stage = copied_logging.get_stage_info("decode")
+    assert copied_stage is not logging_info.get_stage_info("decode")
+    copied_values = copied_stage["result"]
+    assert type(copied_values) is OrderedDict
+    assert copied_values is not values
+    assert list(copied_values) == ["audio", "metadata", "tags", "empty"]
+    assert type(copied_values["audio"]) is _Audio
+    assert copied_values["audio"] is not values["audio"]
+    assert copied_values["audio"].samples is tensor
+    assert copied_values["audio"].sample_rate == 24000
+    copied_metadata = copied_values["metadata"]
+    assert type(copied_metadata) is _TensorMetadata
+    assert copied_metadata is not metadata
+    assert copied_metadata.label == "features"
+    assert type(copied_metadata.features) is tuple
+    assert copied_metadata.features is not metadata.features
+    assert copied_metadata.features[0] is tensor
+    assert copied_values["empty"] == ()
+    assert copied_values["tags"] == ["ready", 7, None]
+    assert copied_values["tags"] is not values["tags"]
+    copied_values["tags"].append("changed")
+    assert values["tags"] == ["ready", 7, None]
+    assert logging_info.get_stage_info("decode")["result"] is values
