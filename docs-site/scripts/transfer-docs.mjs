@@ -265,7 +265,7 @@ export async function transferDocs() {
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       .split(/:\s|\.\s/)[0]
       .replace(/\.$/, "");
-    const href = links.at(-1)?.[2] ?? "https://github.com/hao-ai-lab/FastVideo#news";
+    const href = links.at(-1)?.[2] ?? "https://hao-ai-lab.github.io/FastVideo/news/";
     const iso = date.replaceAll("/", "-");
     const label = new Intl.DateTimeFormat("en", {
       month: "short",
@@ -277,7 +277,7 @@ export async function transferDocs() {
   });
   await writeFile(
     join(content, "_snippets/home-news.mdx"),
-    `<section className="home-news not-prose" aria-labelledby="recent-news">\n<div className="home-news-heading"><h2 id="recent-news">Recent news</h2><a className="home-news-more" href="https://github.com/hao-ai-lab/FastVideo#news">All announcements →</a></div>\n<ul>\n${recent.join("\n")}\n</ul>\n</section>\n`,
+    `<section className="home-news not-prose" aria-labelledby="recent-news">\n<div className="home-news-heading"><h2 id="recent-news">Recent news</h2><a className="home-news-more" href="https://hao-ai-lab.github.io/FastVideo/news/">All announcements →</a></div>\n<ul>\n${recent.join("\n")}\n</ul>\n</section>\n`,
   );
   await writeFile(join(content, "_snippets/home-projects.mdx"), asMdx(projects.trim()));
   await rm(join(content, "index.md"));
