@@ -1,6 +1,6 @@
 # FastH3 Preview on four H100 80 GB GPUs (sm_90).
 #
-# Hopper has no FA4 and no sm_100a VSA kernel. This profile keeps the checkpoint,
+# Hopper has no FA4 and no ptx_blackwell VSA kernel. This profile keeps the checkpoint,
 # the four forwards and the 90% VSA sparsity of the GB200 profile and changes
 # three things: the 64-token VSA path runs on the ThunderKittens sm_90a kernel
 # (build fastvideo-kernel with CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON'), the
