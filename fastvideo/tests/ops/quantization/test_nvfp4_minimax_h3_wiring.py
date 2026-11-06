@@ -335,6 +335,7 @@ def _cpu_pack_nvfp4(model: nn.Module) -> None:
             for name, value in _cpu_packed_state(layer.weight.detach()).items():
                 layer.register_buffer(name, value, persistent=False)
             if not layer.quant_method.retain:
+                layer.register_buffer("weight_device", torch.empty(0, device=layer.weight.device), persistent=False)
                 layer.register_parameter("weight", None)
 
 
@@ -506,7 +507,7 @@ def test_nvfp4_purged_accumulation_rejects_before_mutation(cpu_nvfp4_lifecycle, 
         torch.testing.assert_close(getattr(wrapped.base_layer, name), value, rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("missing", ["snapshot", "packed_weight"])
+@pytest.mark.parametrize("missing", ["snapshot", "weight_device"])
 def test_nvfp4_invalid_restore_fails_at_layer_boundary_without_mutation(cpu_nvfp4_lifecycle, missing: str) -> None:
     """Restoration checks its own required state rather than scanning unrelated pipeline modules."""
     from fastvideo.pipelines.lora_pipeline import LoRAPipeline
@@ -515,12 +516,23 @@ def test_nvfp4_invalid_restore_fails_at_layer_boundary_without_mutation(cpu_nvfp
     if missing == "snapshot":
         wrapped.cpu_weight = None
     else:
-        wrapped.base_layer._nvfp4_weight = None
+        wrapped.base_layer.weight_device = None
     previous_a, previous_b = wrapped.lora_A, wrapped.lora_B
-    with pytest.raises(RuntimeError, match="snapshot|packed weight"):
+    with pytest.raises(RuntimeError, match="snapshot|weight_device"):
         LoRAPipeline.unmerge_lora_weights(pipeline)
     assert wrapped.base_layer.weight is None and wrapped.merged
     assert wrapped.lora_A is previous_a and wrapped.lora_B is previous_b
+
+
+def test_nvfp4_restore_uses_placement_marker_without_reading_packed_values(cpu_nvfp4_lifecycle) -> None:
+    _, wrapped, original, _, _ = _nvfp4_lifecycle_pipeline(False)
+    # Payloads are not needed to recover the original full-precision snapshot.
+    wrapped.base_layer._nvfp4_weight = None
+    wrapped._restore_base_weight()
+    torch.testing.assert_close(wrapped.base_layer.weight, original, rtol=0, atol=0)
+    assert wrapped.base_layer.weight.device == wrapped.base_layer.weight_device.device
+    assert wrapped.base_layer.weight_device.numel() == 0
+    assert "weight_device" not in wrapped.base_layer.state_dict()
 
 
 @pytest.mark.parametrize("requires_grad", [False, True])
@@ -691,3 +703,6 @@ def test_nvfp4_lora_round_trip_matches_bf16_on_blackwell(retain: bool, layerwise
         assert relative_error(transformer(inputs), dense_merged) < 0.20
     assert (quantized.fc_in.base_layer.weight is not None) is retain
     assert (quantized.fc_out.base_layer.weight is not None) is retain
+    if not retain:
+        assert quantized.fc_in.base_layer.weight_device.device == inputs.device
+        assert quantized.fc_out.base_layer.weight_device.device == inputs.device
