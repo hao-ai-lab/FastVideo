@@ -197,3 +197,18 @@ def test_vace_mask_padding_covers_more_references_than_latent_frames():
     packed = stage._prepare_masks(mask, references, args.pipeline_config)
 
     assert packed.shape[2] == 2 + len(references)
+
+
+@pytest.mark.parametrize("config_cls", [pipeline_config.WanVACE1_3B_Config, pipeline_config.WanVACE14B_Config])
+@pytest.mark.parametrize("precision", ["fp16", "fp32"])
+def test_vace_rejects_non_bf16_dit_precision(config_cls, precision):
+    config = config_cls()
+    config.check_pipeline_config()
+    config.dit_precision = precision
+    with pytest.raises(ValueError, match="dit_precision='bf16'"):
+        config.check_pipeline_config()
+
+
+def test_vace_transformer_offloads_control_blocks_before_main_blocks():
+    from fastvideo.models.wan.vace_transformer import WanVACETransformer3DModel
+    assert WanVACETransformer3DModel.layerwise_offload_module_lists == ("vace_blocks", "blocks")
