@@ -20,11 +20,12 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 |---|---|---|
 | Triton: STA, VSA block-sparse, SLA, fused compress+topk, FP4 QAT training, quant/norm utils | `python/fastvideo_kernel/triton_kernels/` | automatic fallback when the matching C++ op is absent (`ops.py`, `turbodiffusion_ops.py`) |
 | FA4 CuTe-DSL block-sparse forward/backward (VSA-128/256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
-| Gluon BF16 tile-64 sparse forward on `sm_120` | `block_sparse_attn_sm120.py` | opt-in eager H3 inference via `FASTVIDEO_H3_VSA_SM120=1`; not bit-exact with native Triton |
+| Gluon BF16 tile-64 sparse forward on `sm_120` | `triton_kernels/block_sparse_attn_gluon.py` | opt-in eager H3 inference via `FASTVIDEO_H3_VSA_SM120=1`; not bit-exact with native Triton |
 | VMoBA `moba_attn_varlen` | `vmoba.py` | wraps flash-attn varlen |
 
-For the SM120 forward's numerical tests, microbenchmark, single-GPU FastH3
-comparison and quality limitations, see the [SM120 benchmark guide](../scripts/benchmarks/minimax_h3_sm120/README.md).
+The public entry point is `block_sparse_attn.block_sparse_attn_gluon_fwd`, which
+imports the Gluon implementation only when called. For tests, benchmarks and
+single-GPU usage, see the [SM120 benchmark guide](../scripts/benchmarks/minimax_h3_sm120/README.md).
 
 ## What gets built where, and when
 

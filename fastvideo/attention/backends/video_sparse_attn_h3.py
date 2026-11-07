@@ -990,15 +990,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             mask = mask | force_dense
 
         if self._sm120:
-            from fastvideo_kernel.block_sparse_attn_sm120 import block_sparse_attn_sm120
+            from fastvideo_kernel.block_sparse_attn import block_sparse_attn_gluon_fwd
 
             if map_to_index is None:
                 raise RuntimeError("SM120 VSA requires fastvideo_kernel.triton_kernels.index")
             q_bhsd, k_bhsd, v_bhsd = (t.transpose(1, 2).contiguous()
                                       for t in (logical_query, logical_key, logical_value))
             q2k_idx, q2k_num = map_to_index(mask)
-            out_bhsd, _ = block_sparse_attn_sm120(q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num,
-                                                  attn_metadata.variable_block_sizes)
+            out_bhsd, _ = block_sparse_attn_gluon_fwd(q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num,
+                                                      attn_metadata.variable_block_sizes)
             # Reuse dead layout-copy storage for the full-size BSHD output.
             del q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num
             out = out_bhsd.transpose(1, 2).contiguous()
@@ -1188,7 +1188,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # in training the autograd node retains any inputs its backward needs.
             del q_bhsd, k_bhsd, v_bhsd
             out = out_bhsd.transpose(1, 2).contiguous()
-            # Drop the BHSD output before compression creates more temporaries.
             del out_bhsd
         else:
             out, _ = block_sparse_attn_256_bshd(

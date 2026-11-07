@@ -45,13 +45,13 @@ export FASTVIDEO_H3_PARK_MODULES=vae,audio_vae
     python - <<'PY'
 import torch
 import triton
-import fastvideo_kernel.block_sparse_attn_sm120 as kernel
+import fastvideo_kernel.triton_kernels.block_sparse_attn_gluon as kernel
 
 if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 0):
     raise RuntimeError("The paired model benchmark requires an SM120 CUDA GPU")
 print(f"GPU: {torch.cuda.get_device_name()}")
 print(f"PyTorch: {torch.__version__}; CUDA: {torch.version.cuda}; Triton: {triton.__version__}")
-print(f"SM120 kernel source: {kernel.__file__}")
+print(f"Gluon kernel source: {kernel.__file__}")
 PY
     python -u examples/inference/basic/basic_fasth3_8step.py \
         --model-path "${model_path}" \

@@ -1,4 +1,4 @@
-"""Autograd-enabled block-sparse attention. Index-native ops with a bool-mask compat shim."""
+"""Block-sparse attention interfaces: native autograd ops and an opt-in eager Gluon forward."""
 
 from __future__ import annotations
 
@@ -519,6 +519,24 @@ block_sparse_attn_ptx_blackwell_op.register_autograd(_backward_ptx_blackwell,
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def block_sparse_attn_gluon_fwd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Run the eager-only Gluon forward on SM120 BF16 tile-64 inputs.
+
+    Returns BF16 output and FP32 log2-LSE. No backward is registered.
+    """
+    from fastvideo_kernel.triton_kernels.block_sparse_attn_gluon import (
+        gluon_block_sparse_attn_forward, )
+
+    return gluon_block_sparse_attn_forward(q, k, v, q2k_idx, q2k_num, variable_block_sizes)
 
 
 def block_sparse_attn_from_indices(

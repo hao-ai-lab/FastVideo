@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Opt-in SM120 BF16 tile-64 sparse attention forward (eager inference only).
+"""Gluon BF16 tile-64 sparse attention forward for SM120 eager inference.
 
 K/V async copies overlap QK, softmax and PV using distinct shared buffers.
 The sparse graph and its index order are unchanged. The MMA reduction layout
@@ -123,7 +123,7 @@ def _sm120_sparse_async_overlap2_fwd(
     gl.store(Lse + head * n_query + lse_rows, maximum + gl.log2(denominator))
 
 
-def block_sparse_attn_sm120(
+def gluon_block_sparse_attn_forward(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,

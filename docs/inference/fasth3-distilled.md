@@ -198,6 +198,57 @@ forwards. With the DiT sharded, peak allocated memory is about 66 GiB per GPU
 (about 95 GiB in use), against 83 GiB (103 GiB) with a full DiT copy on each
 GPU; the output is identical. Model loading and decoding come on top of this.
 
+## Optional Gluon sparse forward on SM120
+
+BF16 tile-64 inference can opt into a Gluon sparse forward on RTX PRO 6000
+Blackwell (compute capability 12.0) with `FASTVIDEO_H3_VSA_SM120=1`. The default
+is `0`. It requires contiguous BF16 inputs, head dimension 128 and eager
+execution; backward, DiT compilation and conflicting fine-attention overrides
+are rejected. This is a Python JIT kernel, so no additional CUDA extension or
+checkpoint conversion is needed. It changes floating-point reduction order
+and is not bit-exact with native Triton. Validate generated videos separately
+from kernel-level numerical tolerances before adopting it.
+
+From a checkout with FastVideo and its CUDA dependencies installed, use the
+source kernel package for the numerical tests and microbenchmark:
+
+```bash
+export PYTHONPATH="$PWD/fastvideo-kernel/python${PYTHONPATH:+:$PYTHONPATH}"
+pytest fastvideo-kernel/tests/test_vsa_gluon_forward.py -v
+pytest fastvideo/tests/attention/test_vsa_h3_gluon.py -v
+python fastvideo-kernel/benchmarks/bench_vsa_gluon.py
+```
+
+The kernel tests compare native Triton and an independent FP32 reference,
+including partial tiles, empty selections, padded values, repeatability and
+input contracts. H3 tests cover routing and compression separately. Both
+files skip on non-SM120 GPUs. The microbenchmark validates output and log2-LSE
+before alternating CUDA-event measurements; it excludes mask/index creation
+and layout conversion. Reports use `native_triton` and `gluon` labels and
+default to `../outputs/profiles/YYYYMMDD_HHMMSS/result.{json,log}`.
+
+For a paired single-GPU model comparison, use the same checkpoint, prompt,
+sampling, online AdaLN cache and component placement in both modes:
+
+```bash
+export MODEL_PATH=/path/to/FastH3-8-Step-V2
+bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native
+bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh sm120
+```
+
+The script selects the source kernel package automatically. `native` disables
+the opt-in switch, while `sm120` enables the Gluon forward. See the
+[benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md) for
+output paths and a single-generation check.
+
+The encoder streams its layers from CPU, the DiT stays on GPU between
+requests, and the VAEs are CPU-offloaded. Host RAM must accommodate those
+weights. Each process excludes one warmup and reports three measured
+generations; the requested 360 frames align to 362 at 24 FPS. E2E includes
+per-request transfers, decoding and saving, but excludes initial generator
+construction and warmup. Report both modes' timings, GPU memory and video
+similarity with the checkpoint, runtime versions and execution settings.
+
 ## Apple Silicon
 
 `mlx_fasth3.py` stays on FastH3 V1 and its uniform AdaLN cache.
