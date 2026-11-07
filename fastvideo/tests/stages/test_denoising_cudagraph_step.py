@@ -110,10 +110,17 @@ class _Block(torch.nn.Module):
         return hidden_states + torch.tanh(self.proj(hidden_states) + context.mean(dim=1, keepdim=True) + temb)
 
 
+def _is_tiny_block(name: str, submodule: torch.nn.Module) -> bool:
+    return isinstance(submodule, _Block)
+
+
 class _TinyBlockDiT(torch.nn.Module):
     """Eager embed/head around per-block compiled blocks, like Wan."""
     hidden_size = 1
     num_attention_heads = 1
+    # Declared so _compile_with_conditions compiles the blocks rather than the
+    # whole module, which is the shape this test is about.
+    _compile_conditions = [_is_tiny_block]
 
     def __init__(self, dim=32, num_blocks=3):
         super().__init__()
@@ -141,8 +148,16 @@ def _run_compiled_stage(monkeypatch, env_overrides, mode):
     monkeypatch.setattr(denoising, "get_local_torch_device", lambda: device)
     torch.manual_seed(0)
     model = _TinyBlockDiT().to(device)
-    for block in model.blocks:
-        block.forward = torch.compile(block.forward, mode=mode, dynamic=False)
+    # Compile through the pipeline's own entry point rather than calling
+    # torch.compile on the blocks here. That is what production does, and it is
+    # also what stamps the DiT with what the compile records; hand-rolling the
+    # per-block compile skips the stamp, so the loop would not mark and this
+    # test would reproduce the very crash it guards against.
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    model = ComposedPipelineBase._compile_pipeline_module_instance(
+        "transformer", model, None, {"mode": mode, "dynamic": False}
+    )
     stage = denoising.DenoisingStage(model, TinyScheduler())
     stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
     outputs = []
@@ -208,3 +223,28 @@ def test_cudagraph_compile_warns_when_layerwise_offload_moves_weights(monkeypatc
     pipeline._apply_inference_compile(("transformer", ))
 
     assert len([msg for msg in logger.warnings if "dit_layerwise_offload" in msg]) == (1 if warned else 0)
+
+
+@pytest.mark.parametrize("kwargs, records", [
+    ({"options": {"triton.cudagraphs": True}}, True),
+    ({"fullgraph": True}, False),
+])
+def test_regional_compile_stamps_what_it_recorded(monkeypatch, kwargs, records):
+    """The regional path reaches cudagraphs through options, so it must stamp too.
+
+    _compile_model_regions rejects `mode` but merges the caller's `options`,
+    which is how {"triton.cudagraphs": True} gets to inductor on the
+    inference_torch_compile path. Before the stamp, the helper read False there
+    and the loop never marked.
+    """
+    from fastvideo.fastvideo_args import DIT_COMPILE_CUDAGRAPHS_ATTR, dit_compile_uses_cudagraphs
+    from fastvideo.models.loader.fsdp_load import _compile_model_regions
+
+    monkeypatch.setattr(torch, "compile", lambda target, **kw: target)
+    model = _TinyBlockDiT()
+
+    compiled = _compile_model_regions(model, dict(kwargs))
+
+    assert compiled == 3, "the tiny DiT's blocks should match _compile_conditions"
+    assert getattr(model, DIT_COMPILE_CUDAGRAPHS_ATTR) is records
+    assert dit_compile_uses_cudagraphs(model) is records

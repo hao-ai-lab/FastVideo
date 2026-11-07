@@ -865,10 +865,8 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any], *, 
 
     if compiled_count == 0:
         raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
-    # Regional compile refuses ``mode`` above, but it merges the caller's
-    # ``options``, so {"triton.cudagraphs": True} still records graphs here.
-    # Stamp the model for the same reason the pipeline-level compile does:
-    # the denoising loop has to know what the attached compile does.
+    # Regional compile rejects ``mode`` above but merges the caller's
+    # ``options``, so {"triton.cudagraphs": True} records graphs here too.
     from fastvideo.fastvideo_args import DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs
     setattr(model, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(kwargs))
     logger.info(

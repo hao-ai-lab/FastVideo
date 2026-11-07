@@ -223,12 +223,9 @@ class ComposedPipelineBase(ABC):
             logger.info("Running prepare_for_compile for %s", module_name)
             prepare_for_compile()
 
-        # Record what this compile actually does, before any wrapper goes around
-        # the module. The denoising loop decides whether to mark cudagraph steps
-        # from the compile attached to the DiT it is about to call, not from the
-        # flags that asked for one: the FSDP check above is an instance test, so
-        # use_fsdp_inference=True still reaches this line for a transformer that
-        # was never FSDP-wrapped.
+        # The FSDP check above is an instance test, so use_fsdp_inference=True
+        # still reaches here for a transformer that was never wrapped. Stamp
+        # before any wrapper goes on, so the loop reads the compile off the DiT.
         setattr(module, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(compile_kwargs))
 
         compiled_count = ComposedPipelineBase._compile_with_conditions(module, compile_kwargs)

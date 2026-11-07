@@ -310,14 +310,10 @@ class DenoisingStage(PipelineStage):
 
                 current_model, current_guidance_scale = self.select_model(t, batch, fastvideo_args, state)
                 # Without a mark, cudagraph trees start a new generation on
-                # every compiled call (including resume frames after graph
-                # breaks), so a replay can overwrite outputs that the step
-                # still reads. Only mark when the DiT records CUDA graphs: the
-                # first mark switches the process to manual step boundaries.
-                # Asked of the selected model rather than of the args: Wan 2.2
-                # swaps DiTs mid-loop, and only the module knows what compile
-                # was attached to it. select_model moves devices but never
-                # calls the model, so this still precedes any compiled call.
+                # every compiled call, so a replay can overwrite outputs the
+                # step still reads. Asked of the selected model, not the args:
+                # Wan 2.2 swaps DiTs mid-loop. select_model moves devices but
+                # never calls the model, so the mark still precedes the call.
                 if dit_compile_uses_cudagraphs(current_model):
                     torch.compiler.cudagraph_mark_step_begin()
                 latent_model_input = self.prepare_model_input(latents, batch, target_dtype, state)
