@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from collections.abc import Sequence
 from itertools import chain
 from typing import Any
 import torch
@@ -176,7 +177,13 @@ def enable_layerwise_offload(model: nn.Module,
                              is_replace: bool = False,
                              *,
                              resident_blocks: int | None = None,
-                             cyclic: bool = True):
+                             cyclic: bool = True,
+                             module_list_names: Sequence[str] | None = None):
+    """Stream the entries of ``nn.ModuleList`` children through the GPU one at a time.
+
+    By default only the first ``nn.ModuleList`` child is scheduled. A model whose forward runs several
+    lists passes ``module_list_names`` in execution order, so each list is prefetched ahead of its use.
+    """
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())
     else:
@@ -194,24 +201,34 @@ def enable_layerwise_offload(model: nn.Module,
         except ValueError as error:
             logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS: %s", error)
             resident = 0
-    for name, submodule in model.named_children():
-        if isinstance(submodule, nn.ModuleList):
-            for idx, module_entry in enumerate(submodule):
-                if idx < resident:
-                    continue
-                state = LayerwiseOffloadState(async_copy_stream=async_stream, device=device)
-                state_list.append(state)
-                hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
-                hook = LayerwiseOffloadHook(state)
-                if is_replace:
-                    existing_hook = hook_mgr.forward_hooks.get(hook.name())
-                    if existing_hook is not None:
-                        hook_mgr.replace_forward_hook(hook.name(), hook)
-                    else:
-                        raise AssertionError(f"Expect hook exists in {name} for replacement.")
-                else:
-                    hook_mgr.append_forward_hook(hook)
-            break
+    if module_list_names is None:
+        module_lists = [(name, submodule) for name, submodule in model.named_children()
+                        if isinstance(submodule, nn.ModuleList)][:1]
+    else:
+        children = dict(model.named_children())
+        module_lists = []
+        for name in module_list_names:
+            submodule = children.get(name)
+            if not isinstance(submodule, nn.ModuleList):
+                raise ValueError(f"Layerwise offload expects {name!r} to be an nn.ModuleList child of "
+                                 f"{type(model).__name__}.")
+            module_lists.append((name, submodule))
+    entries = [(name, module_entry) for name, submodule in module_lists for module_entry in submodule]
+    for idx, (name, module_entry) in enumerate(entries):
+        if idx < resident:
+            continue
+        state = LayerwiseOffloadState(async_copy_stream=async_stream, device=device)
+        state_list.append(state)
+        hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
+        hook = LayerwiseOffloadHook(state)
+        if is_replace:
+            existing_hook = hook_mgr.forward_hooks.get(hook.name())
+            if existing_hook is not None:
+                hook_mgr.replace_forward_hook(hook.name(), hook)
+            else:
+                raise AssertionError(f"Expect hook exists in {name} for replacement.")
+        else:
+            hook_mgr.append_forward_hook(hook)
     if len(state_list) == 0:
         if resident > 0:
             logger.info("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%d keeps every block resident; nothing to offload",
