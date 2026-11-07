@@ -137,6 +137,13 @@ class WanVACE1_3B_Config(WanT2V480PConfig):
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
+    def check_pipeline_config(self) -> None:
+        super().check_pipeline_config()
+        # VACE runs without autocast and the denoising stage feeds it bf16 inputs, so other weight dtypes
+        # would fail at the first convolution.
+        if self.dit_precision != "bf16":
+            raise ValueError(f"Wan-VACE supports only dit_precision='bf16'; got {self.dit_precision!r}.")
+
 
 @dataclass
 class WanVACE14B_Config(WanVACE1_3B_Config):

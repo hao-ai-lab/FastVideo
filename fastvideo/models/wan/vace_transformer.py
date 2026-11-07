@@ -155,6 +155,8 @@ class WanVACETransformer3DModel(BaseDiT):
     param_names_mapping = WanVACEVideoConfig().param_names_mapping
     reverse_param_names_mapping = WanVACEVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVACEVideoConfig().lora_param_names_mapping
+    # forward() runs the control blocks before the main blocks, so offload streams them in that order.
+    layerwise_offload_module_lists = ("vace_blocks", "blocks")
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
         # Diffusers keeps modulation tables, time embeddings, and norm2 in FP32.

@@ -347,3 +347,56 @@ if __name__ == "__main__":
         print("\n All tests passed!")
     else:
         print("CUDA not available, skipping tests")
+
+
+class TwoListModel(nn.Module):
+    """Runs ``control`` before ``blocks``, like Wan-VACE."""
+
+    def __init__(self, hidden_size: int = 64):
+        super().__init__()
+        self.blocks = nn.ModuleList([SimpleBlock(hidden_size) for _ in range(3)])
+        self.control = nn.ModuleList([SimpleBlock(hidden_size) for _ in range(2)])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for block in self.control:
+            x = block(x)
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_layerwise_offload_module_list_names_cover_every_list_in_order():
+    """Named lists are all offloaded, chained in the given order."""
+    model = TwoListModel().cuda()
+    x = torch.randn(2, 8, 64, device="cuda")
+    with torch.no_grad():
+        reference = model(x.clone())
+
+    enable_layerwise_offload(model, module_list_names=("control", "blocks"))
+
+    for module in (*model.control, *model.blocks):
+        assert all(p.numel() == 0 for p in module.parameters())
+    states = [ModuleHookManager.get_from_or_default(m).forward_hooks["LayerwiseOffloadHook"].state
+              for m in (*model.control, *model.blocks)]
+    for i, state in enumerate(states):
+        assert state.next_state is states[(i + 1) % len(states)]
+
+    with torch.no_grad():
+        output = model(x.clone())
+    torch.testing.assert_close(output, reference, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_layerwise_offload_default_schedules_only_first_module_list():
+    model = TwoListModel().cuda()
+    enable_layerwise_offload(model)
+    assert all(p.numel() == 0 for p in model.blocks.parameters())
+    assert all(p.numel() > 0 for p in model.control.parameters())
+
+
+def test_layerwise_offload_rejects_unknown_module_list_name():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    with pytest.raises(ValueError, match="missing"):
+        enable_layerwise_offload(TwoListModel(), module_list_names=("missing", ))

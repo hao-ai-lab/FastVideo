@@ -1344,7 +1344,8 @@ class TransformerLoader(ComponentLoader):
             # Check if model has nn.ModuleList for layerwise offload compatibility
             has_module_list = any(isinstance(m, nn.ModuleList) for m in model.children())
             if has_module_list:
-                enable_layerwise_offload(model)
+                enable_layerwise_offload(model,
+                                         module_list_names=getattr(model, "layerwise_offload_module_lists", None))
                 # Blocks now hold placeholders; the remaining (non-block) weights and buffers belong on the GPU.
                 model = model.to(get_local_torch_device())
             else:
