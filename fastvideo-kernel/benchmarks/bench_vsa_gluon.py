@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Compare native Triton and SM120 forward on identical compact indices."""
+"""Compare native Triton and Gluon sparse forwards on identical compact indices."""
 
 import argparse
 import json
@@ -11,8 +11,7 @@ from pathlib import Path
 import torch
 import triton
 
-from fastvideo_kernel.block_sparse_attn import block_sparse_attn_triton
-from fastvideo_kernel.block_sparse_attn_sm120 import block_sparse_attn_sm120
+from fastvideo_kernel.block_sparse_attn import block_sparse_attn_gluon_fwd, block_sparse_attn_triton
 from fastvideo_kernel.triton_kernels.index import map_to_index
 
 
@@ -117,13 +116,13 @@ def main():
             log.flush()
 
         try:
-            record("Preparing identical inputs for native Triton and SM120 async_overlap2.")
+            record("Preparing identical inputs for native Triton and Gluon async_overlap2 on SM120.")
             inputs = make_inputs(args)
             validate_inputs(inputs)
-            operations = {"native_triton": block_sparse_attn_triton, "sm120": block_sparse_attn_sm120}
+            operations = {"native_triton": block_sparse_attn_triton, "gluon": block_sparse_attn_gluon_fwd}
             record("Compiling and checking numerical output and log2-LSE; excluded from timing.")
             reference = operations["native_triton"](*inputs)
-            actual = operations["sm120"](*inputs)
+            actual = operations["gluon"](*inputs)
             numerical = {"output": compare(actual[0], reference[0], 0.02, 0.02),
                          "log2_lse": compare(actual[1], reference[1], 0.005, 0.001)}
             del reference, actual
@@ -152,8 +151,8 @@ def main():
                 "synthetic_sparsity": args.sparsity if not args.capture else None,
                 "warmup": args.warmup, "repeats": args.repeats, "numerical": numerical,
                 "cuda_median_ms": medians, "cuda_samples_ms": timings, "peak_extra_allocated_bytes": peaks,
-                "attention_speedup": medians["native_triton"] / medians["sm120"],
-                "attention_time_reduction_pct": 100 * (1 - medians["sm120"] / medians["native_triton"]),
+                "attention_speedup": medians["native_triton"] / medians["gluon"],
+                "attention_time_reduction_pct": 100 * (1 - medians["gluon"] / medians["native_triton"]),
             }
             with args.output.open("x", encoding="utf-8") as output:
                 json.dump(report, output, indent=2, allow_nan=False)
