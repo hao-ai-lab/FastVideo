@@ -256,6 +256,7 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
     if sorted(block_keys) != list(range(num_blocks)):
         raise ValueError(f"MLX DiT checkpoint {checkpoint_dir} is missing block weights: "
                          f"manifest says {num_blocks} blocks, found indices {sorted(block_keys)}.")
+    mx.eval(list(arrays.values()))
 
     inner_dim = int(config["num_attention_heads"]) * int(config["attention_head_dim"])
     blocks = []
