@@ -70,6 +70,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | minimax_h3 | `MiniMaxAI/MiniMax-H3` | T2V, I2V | [T2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_t2v.py)<br />[FL2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_fl2va.py)<br />[Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_minimax_h3_ref2va.py) |
 | pika_h3_flex | `Pika-Labs/Pika-H3-Flex` | T2V, I2V | [T2VA/I2VA/L2VA/FL2VA/Ref2VA](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pika_h3_flex.py) |
 | open_h3_regenerate_2k | `Efficient-Large-Model/Open-H3-Regenerate-2K` | — | [basic_open_h3_regenerate_2k.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_open_h3_regenerate_2k.py) |
+| pan2 | `IFM/PAN2` | T2V, I2V | [basic_pan2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pan2.py) |
 | sd35 | `stabilityai/stable-diffusion-3.5-medium` | T2I | [basic_sd35_t2i.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_sd35_t2i.py) |
 | qwen_image21 | `Qwen/Qwen-Image-2.1` | T2I, I2I | [basic_qwen_image21.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_qwen_image21.py) |
 | stable_audio | `FastVideo/stable-audio-open-1.0-Diffusers` | T2V | [basic_stable_audio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio.py) |
