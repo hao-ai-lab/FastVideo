@@ -214,6 +214,7 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
         ensure_quantization_supported(spec)
 
     arrays = mx.load(str(weights_path))
+    mx.eval(list(arrays.values()))
     quantized_keys: dict[str, dict[str, Any]] = manifest["quantized_keys"]
 
     def rebuild(key: str):
