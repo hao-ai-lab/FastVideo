@@ -15,7 +15,6 @@ class WanVACEDenoisingStage(WanDenoisingStage):
     def prepare_family_transformer_kwargs(self, batch, state: DenoisingState, target_dtype) -> dict:
         if batch.vace_control_latents is None:
             return {}
-        # The transformer validates and broadcasts the per-VACE-layer scale.
         return {
             "control_hidden_states": batch.vace_control_latents.to(target_dtype),
             "control_hidden_states_scale": batch.conditioning_scale,
