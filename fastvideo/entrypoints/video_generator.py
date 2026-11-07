@@ -868,7 +868,10 @@ class VideoGenerator:
         sampling_param.prompt = prompt
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
-            sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
+            keep_single_space = (sampling_param.negative_prompt == " " and getattr(
+                fastvideo_args.pipeline_config, "preserve_single_space_negative_prompt", False))
+            if not keep_single_space:
+                sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
 
         # Validate dimensions
         if (sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0):

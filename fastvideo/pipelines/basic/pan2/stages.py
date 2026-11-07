@@ -30,6 +30,14 @@ from fastvideo.utils import PRECISION_TO_TYPE
 _USER_HEADER = "<|im_start|>user\n"
 
 
+def _set_default_negative_prompt(batch: ForwardBatch) -> None:
+    if not getattr(batch, "do_classifier_free_guidance", False) or getattr(batch, "negative_prompt", None):
+        return
+    num_frames = batch.num_frames[0] if isinstance(batch.num_frames, list) else batch.num_frames
+    fps = batch.fps[0] if isinstance(batch.fps, list) else batch.fps
+    batch.negative_prompt = render_pan2_default_negative_prompt(num_frames, fps or 24)
+
+
 class PAN2InputValidationStage(InputValidationStage):
     """Rejects geometry the PAN2 VAE and patch embedding cannot represent.
 
@@ -38,6 +46,7 @@ class PAN2InputValidationStage(InputValidationStage):
     """
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        _set_default_negative_prompt(batch)
         image_path = batch.image_path
         if image_path is not None and not image_path.endswith(".mp4"):
             batch.pil_image = load_image(image_path, exif_transpose=False)
@@ -71,10 +80,7 @@ class PAN2TextEncodingStage(TextEncodingStage):
     """
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        if batch.do_classifier_free_guidance and not batch.negative_prompt:
-            num_frames = batch.num_frames[0] if isinstance(batch.num_frames, list) else batch.num_frames
-            fps = batch.fps[0] if isinstance(batch.fps, list) else batch.fps
-            batch.negative_prompt = render_pan2_default_negative_prompt(num_frames, fps or 24)
+        _set_default_negative_prompt(batch)
         return super().forward(batch, fastvideo_args)
 
     @staticmethod

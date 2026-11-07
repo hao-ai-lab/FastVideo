@@ -634,6 +634,38 @@ def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_pat
     assert result["video_path"] is None
 
 
+@pytest.mark.parametrize(("preserve_space", "negative_prompt", "expected"), [
+    (False, " ", ""),
+    (True, " ", " "),
+    (True, " custom negative ", "custom negative"),
+])
+def test_generate_single_video_respects_single_space_negative_prompt_policy(
+        tmp_path, preserve_space, negative_prompt, expected):
+    output_batch = _single_video_output_batch(torch.zeros(1, 3, 2, 16, 16))
+    fastvideo_args = _single_video_args()
+    fastvideo_args.pipeline_config.preserve_single_space_negative_prompt = preserve_space
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    captured = {}
+
+    def execute_forward(batch, args):
+        captured["batch"] = batch
+        return output_batch
+
+    generator.executor.execute_forward = execute_forward
+    sampling = _small_sampling_param()
+    sampling.negative_prompt = negative_prompt
+    generator._prepare_output_path = lambda *args: str(tmp_path / "unused.mp4")
+
+    generator._generate_single_video(
+        prompt="negative prompt",
+        sampling_param=sampling,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert captured["batch"].negative_prompt == expected
+
+
 def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_path):
     audio = torch.ones(8)
     audio_latents = torch.ones(2)

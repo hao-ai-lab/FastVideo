@@ -2,6 +2,7 @@
 """PAN2 pipeline configuration: text-to-video, and image-to-video from a first frame."""
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import PAN2VideoConfig
@@ -51,6 +52,8 @@ class PAN2PipelineConfig(PipelineConfig):
     # Keep the guard models on CPU and move each to the GPU only for its check.
     offload_guardrail_models: bool = False
 
+    # A single space is PAN2's trained unconditional prompt; normalization must not turn it into an empty string.
+    preserve_single_space_negative_prompt: ClassVar[bool] = True
     # Prompt encoding: PAN2 conditions on the tokens after the chat template's user header, taken from the text
     # encoder's hidden states with its last two layers skipped (``hidden_states[-3]``).
     text_system_prompt: str = PAN2_SYSTEM_PROMPT
@@ -58,7 +61,6 @@ class PAN2PipelineConfig(PipelineConfig):
     text_max_sequence_length: int = 1536
 
     def __post_init__(self) -> None:
-        # The encoder is needed for the image-to-video first frame.
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         self.text_encoder_configs[0].arch_config.output_hidden_states = True

@@ -89,7 +89,6 @@ def _randomize(model: torch.nn.Module, seed: int) -> None:
             parameter.copy_(torch.randn(parameter.shape, generator=generator) * 0.1)
 
 
-
 def _qkv(batch: int, seq: int, heads: int, dim: int, dtype: torch.dtype, seed: int = 0):
     generator = torch.Generator().manual_seed(seed)
     qkv = torch.randn(batch, seq, 3 * heads * dim, generator=generator).to(dtype)
@@ -111,9 +110,6 @@ def _eager_qk(x: torch.Tensor, weight: torch.Tensor, eps: float, rope: tuple[tor
     rows = y.flatten(0, 1)
     cos, sin = (table.repeat(x.shape[0], 1) for table in rope)
     return _apply_rotary_emb(rows, cos, sin, is_neox_style=False).unflatten(0, x.shape[:2])
-
-
-# ---- references against the eager arithmetic -----------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("with_rope", [False, True])
@@ -186,9 +182,6 @@ def test_fused_ops_compile_with_their_backwards_on_gpu() -> None:
         torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
 
 
-# ---- the Triton kernels against the references ----------------------------------------------------------------------
-
-
 def check_triton_kernels(device: str, dtypes: tuple[torch.dtype, ...]) -> None:
     """Every Triton kernel against its reference, forward and backward; raises on a mismatch."""
     for dtype in dtypes:
@@ -237,9 +230,6 @@ def test_triton_kernels_match_their_references(env_overrides) -> None:
     env_overrides.enter_context(envs.override_external("TRITON_INTERPRET", "1"))
     process = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
     assert process.returncode == 0, f"Triton interpreter check failed:\n{process.stdout}\n{process.stderr}"
-
-
-# ---- the fused model against the eager model -----------------------------------------------------------------------
 
 
 def _forward_backward(model: torch.nn.Module, inputs: dict[str, torch.Tensor]):

@@ -120,8 +120,6 @@ NUM_FRAMES = 241  # 10 s at 24 fps, the caption's length.
 OUTPUT_PATH = "video_samples_pan2"
 MODEL_PATH = os.environ.get("PAN2_MODEL_PATH", "IFM/PAN2")
 
-# Set to a first frame (e.g. "assets/images/girl.png") for image-to-video; the same pipeline runs both modes. The
-# caption's `init_frame_visual_description` should then describe that frame.
 IMAGE_PATH = None
 
 
