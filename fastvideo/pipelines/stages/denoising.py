@@ -301,8 +301,6 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_reused_delta = 0
         _cfg_gate_invalidations = 0
 
-        mark_cudagraph_steps = dit_compile_uses_cudagraphs(fastvideo_args)
-
         # Run denoising loop
         with profiler_region("inference_denoising"), self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -310,14 +308,18 @@ class DenoisingStage(PipelineStage):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
+                current_model, current_guidance_scale = self.select_model(t, batch, fastvideo_args, state)
                 # Without a mark, cudagraph trees start a new generation on
                 # every compiled call (including resume frames after graph
                 # breaks), so a replay can overwrite outputs that the step
                 # still reads. Only mark when the DiT records CUDA graphs: the
                 # first mark switches the process to manual step boundaries.
-                if mark_cudagraph_steps:
+                # Asked of the selected model rather than of the args: Wan 2.2
+                # swaps DiTs mid-loop, and only the module knows what compile
+                # was attached to it. select_model moves devices but never
+                # calls the model, so this still precedes any compiled call.
+                if dit_compile_uses_cudagraphs(current_model):
                     torch.compiler.cudagraph_mark_step_begin()
-                current_model, current_guidance_scale = self.select_model(t, batch, fastvideo_args, state)
                 latent_model_input = self.prepare_model_input(latents, batch, target_dtype, state)
                 assert not torch.isnan(latent_model_input).any(), "latent_model_input contains nan"
                 t_expand = self.prepare_timestep(t, latent_model_input, batch, state)

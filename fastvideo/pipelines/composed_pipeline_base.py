@@ -21,7 +21,8 @@ from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs, dit_compile_uses_cudagraphs
+from fastvideo.fastvideo_args import (DIT_COMPILE_CUDAGRAPHS_ATTR, FastVideoArgs, TrainingArgs,
+                                      compile_kwargs_record_cudagraphs)
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -222,6 +223,14 @@ class ComposedPipelineBase(ABC):
             logger.info("Running prepare_for_compile for %s", module_name)
             prepare_for_compile()
 
+        # Record what this compile actually does, before any wrapper goes around
+        # the module. The denoising loop decides whether to mark cudagraph steps
+        # from the compile attached to the DiT it is about to call, not from the
+        # flags that asked for one: the FSDP check above is an instance test, so
+        # use_fsdp_inference=True still reaches this line for a transformer that
+        # was never FSDP-wrapped.
+        setattr(module, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(compile_kwargs))
+
         compiled_count = ComposedPipelineBase._compile_with_conditions(module, compile_kwargs)
         if compiled_count > 0:
             logger.info(
@@ -327,7 +336,7 @@ class ComposedPipelineBase(ABC):
                     )
             if any(name in self.modules for name in ("transformer", "transformer_refine", "transformer_2")):
                 logger.info("Torch Compile enabled for DiT")
-                if (self.fastvideo_args.dit_layerwise_offload and dit_compile_uses_cudagraphs(self.fastvideo_args)
+                if (self.fastvideo_args.dit_layerwise_offload and compile_kwargs_record_cudagraphs(dit_compile_kwargs)
                         and not getattr(self, "_warned_cudagraph_offload", False)):
                     self._warned_cudagraph_offload = True
                     logger.warning(

@@ -26,34 +26,78 @@ def _compile_args(args, compile_kwargs, **overrides):
     return args
 
 
-@pytest.mark.parametrize("compile_kwargs, overrides, expected_marks", [
-    ({"mode": "reduce-overhead"}, {}, [0, 2, 4, 6]),
-    ({"mode": "max-autotune"}, {}, [0, 2, 4, 6]),
-    ({"options": {"triton.cudagraphs": True}}, {}, [0, 2, 4, 6]),
-    ({"mode": "default"}, {}, []),
-    ({"mode": "max-autotune-no-cudagraphs"}, {}, []),
-    (None, {}, []),
-    ({"mode": "reduce-overhead", "disable": True}, {}, []),
-    ({"mode": "reduce-overhead"}, {"use_fsdp_inference": True}, []),
-    ({"mode": "reduce-overhead"}, {"inference_torch_compile": True}, []),
-    ({"mode": "reduce-overhead"}, {"training_mode": True}, []),
+class _FakeFSDPModule:
+    """Stands in for torch.distributed.fsdp.FSDPModule, which needs no GPU here."""
+
+
+def _compiled_dit(monkeypatch, compile_kwargs, *, fsdp_wrapped=False):
+    """A DiT put through the real pipeline compile path, so it carries its stamp.
+
+    Going through ``_compile_pipeline_module_instance`` rather than setting
+    flags is the point of these cases: the mark has to follow the compile that
+    was actually attached, and that function decides from an ``isinstance``
+    check, not from ``use_fsdp_inference``.
+    """
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    monkeypatch.setattr(torch, "compile", lambda target, **kwargs: target)
+    model = TinyDenoiser()
+    if fsdp_wrapped:
+        model.__class__ = type("FSDPTinyDenoiser", (TinyDenoiser, _FakeFSDPModule), {})
+    return ComposedPipelineBase._compile_pipeline_module_instance("transformer", model, _FakeFSDPModule,
+                                                                  compile_kwargs or {})
+
+
+@pytest.mark.parametrize("compile_kwargs, fsdp_wrapped, expected_marks", [
+    ({"mode": "reduce-overhead"}, False, [0, 2, 4, 6]),
+    ({"mode": "max-autotune"}, False, [0, 2, 4, 6]),
+    ({"options": {"triton.cudagraphs": True}}, False, [0, 2, 4, 6]),
+    ({"mode": "default"}, False, []),
+    ({"mode": "max-autotune-no-cudagraphs"}, False, []),
+    ({"mode": "reduce-overhead", "disable": True}, False, []),
+    # Really FSDP-wrapped: the pipeline skips the compile, so nothing to mark.
+    ({"mode": "reduce-overhead"}, True, []),
 ])
-def test_denoising_marks_one_cudagraph_step_per_timestep(monkeypatch, env_overrides, compile_kwargs, overrides,
+def test_denoising_marks_one_cudagraph_step_per_timestep(monkeypatch, env_overrides, compile_kwargs, fsdp_wrapped,
                                                          expected_marks):
     denoising, _ = _patch_denoising_module(monkeypatch, env_overrides, None)
     marks = []
-    model = TinyDenoiser()
+    model = _compiled_dit(monkeypatch, compile_kwargs, fsdp_wrapped=fsdp_wrapped)
     monkeypatch.setattr(torch.compiler, "cudagraph_mark_step_begin", lambda: marks.append(len(model.calls)))
     stage = denoising.DenoisingStage(model, TinyScheduler())
     stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
 
-    stage.forward(_tiny_batch(), _compile_args(_tiny_args(), compile_kwargs, **overrides))
+    stage.forward(_tiny_batch(), _compile_args(_tiny_args(), compile_kwargs))
 
     # With CUDA graphs: one mark before each step's cond+uncond pair, never
     # between them. Without: no mark, so other cudagraph users keep
     # automatic step boundaries.
     assert model.calls == ["cond", "uncond"] * 4
     assert marks == expected_marks
+
+
+def test_marks_follow_the_attached_compile_not_the_fsdp_flag(monkeypatch, env_overrides):
+    """Regression: use_fsdp_inference=True on a DiT the pipeline still compiled.
+
+    ``from_pretrained(loaded_modules=...)`` hands the pipeline a plain module,
+    and a model that declares no shard conditions is never wrapped either. In
+    both cases the FSDP instance check does not fire, the DiT is compiled with
+    CUDA graphs, and the flag says otherwise. Marking has to happen anyway, or
+    the crash this guards against comes back.
+    """
+    denoising, _ = _patch_denoising_module(monkeypatch, env_overrides, None)
+    marks = []
+    model = _compiled_dit(monkeypatch, {"mode": "reduce-overhead"}, fsdp_wrapped=False)
+    monkeypatch.setattr(torch.compiler, "cudagraph_mark_step_begin", lambda: marks.append(len(model.calls)))
+    stage = denoising.DenoisingStage(model, TinyScheduler())
+    stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
+
+    args = _compile_args(_tiny_args(), {"mode": "reduce-overhead"})
+    args.use_fsdp_inference = True  # the flag says no compile; the module says otherwise
+
+    stage.forward(_tiny_batch(), args)
+
+    assert marks == [0, 2, 4, 6]
 
 
 class _Block(torch.nn.Module):

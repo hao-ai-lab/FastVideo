@@ -1250,24 +1250,34 @@ def get_current_fastvideo_args() -> FastVideoArgs:
     return _current_fastvideo_args
 
 
-def dit_compile_uses_cudagraphs(fastvideo_args: Any) -> bool:
-    """Whether the pipeline-level DiT torch.compile records CUDA graphs (cudagraph trees).
+# Stamped on a DiT by whichever code path actually attaches the compile:
+# ``ComposedPipelineBase._compile_pipeline_module_instance`` for the
+# pipeline-level compile, ``_compile_model_regions`` for the regional one.
+DIT_COMPILE_CUDAGRAPHS_ATTR = "_fastvideo_compile_records_cudagraphs"
 
-    Mirrors ``ComposedPipelineBase._apply_inference_compile``: no pipeline-level
-    DiT compile runs for training, for FSDP-wrapped inference, or when
-    ``inference_torch_compile`` compiles DiT regions in the loader instead.
-    """
-    if (not getattr(fastvideo_args, "enable_torch_compile", False) or getattr(fastvideo_args, "training_mode", False)
-            or getattr(fastvideo_args, "inference_torch_compile", False)
-            or getattr(fastvideo_args, "use_fsdp_inference", False)):
-        return False
-    # Same precedence as ComposedPipelineBase._apply_inference_compile.
-    kwargs = getattr(fastvideo_args, "torch_compile_kwargs_dit", None)
-    kwargs = kwargs or getattr(fastvideo_args, "torch_compile_kwargs", None) or {}
+
+def compile_kwargs_record_cudagraphs(compile_kwargs: dict[str, Any] | None) -> bool:
+    """Whether these ``torch.compile`` kwargs make inductor record CUDA graphs."""
+    kwargs = compile_kwargs or {}
     if kwargs.get("disable"):
         return False
     options = kwargs.get("options") or {}
     return kwargs.get("mode") in ("reduce-overhead", "max-autotune") or bool(options.get("triton.cudagraphs"))
+
+
+def dit_compile_uses_cudagraphs(module: Any) -> bool:
+    """Whether the compile attached to ``module`` records CUDA graphs (cudagraph trees).
+
+    Reads the stamp left by the code path that compiled this module, so the
+    answer never depends on which flag asked for the compile. A request flag
+    cannot answer it: ``_compile_pipeline_module_instance`` skips the compile
+    only when the module *is* an ``FSDPModule``, so ``use_fsdp_inference=True``
+    still compiles a transformer handed in through
+    ``from_pretrained(loaded_modules=...)``, or one whose model declares no
+    shard conditions; and ``inference_torch_compile`` reaches cudagraphs
+    through ``torch_compile_kwargs["options"]["triton.cudagraphs"]``.
+    """
+    return bool(getattr(module, DIT_COMPILE_CUDAGRAPHS_ATTR, False))
 
 
 @dataclasses.dataclass
