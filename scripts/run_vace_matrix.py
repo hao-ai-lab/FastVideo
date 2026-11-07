@@ -21,7 +21,6 @@ MATRIX_DIR = ROOT / "outputs" / "vace_matrix"
 ASSETS_DIR = MATRIX_DIR / "assets"
 RESULTS_JSON = MATRIX_DIR / "results.json"
 
-# Reuse the example's prompt and reference-asset download so both stay in sync.
 _EXAMPLE_SPEC = importlib.util.spec_from_file_location("basic_wan_vace",
                                                        ROOT / "examples/inference/basic/basic_wan_vace.py")
 assert _EXAMPLE_SPEC is not None and _EXAMPLE_SPEC.loader is not None

@@ -39,25 +39,27 @@ class WanVACEContextStage(PipelineStage):
         original_device = next(self.vae.parameters()).device
         self.vae = self.vae.to(device)
 
-        video = batch.video_latent.to(device=device, dtype=torch.float32)
-        mask = batch.mask_video
-        if mask is None:
-            mask = torch.ones_like(video)
-        else:
-            mask = torch.clamp((mask.to(device=device, dtype=torch.float32) + 1) / 2, min=0, max=1)
+        try:
+            video = batch.video_latent.to(device=device, dtype=torch.float32)
+            mask = batch.mask_video
+            if mask is None:
+                mask = torch.ones_like(video)
+            else:
+                mask = torch.clamp((mask.to(device=device, dtype=torch.float32) + 1) / 2, min=0, max=1)
 
-        reference_images = batch.vace_reference_images or []
-        conditioning_latents = self._prepare_video_latents(video, mask, reference_images, device, vae_dtype)
-        mask_latents = self._prepare_masks(mask, reference_images, config)
-        # Match Diffusers WanVACEPipeline: keep packed control in VAE fp32 until the
-        # denoising stage casts once to DiT dtype immediately before transformer.
-        batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1).to(device=device)
-        # The pixels are fully encoded into the control latents; drop them so the
-        # Wan denoising stage does not keep them or allocate ``video_padding``.
-        batch.video_latent = None
-        batch.mask_video = None
-        if fastvideo_args.vae_cpu_offload:
-            self.vae = self.vae.to(original_device)
+            reference_images = batch.vace_reference_images or []
+            conditioning_latents = self._prepare_video_latents(video, mask, reference_images, device, vae_dtype)
+            mask_latents = self._prepare_masks(mask, reference_images, config)
+            # Match Diffusers WanVACEPipeline: keep packed control in VAE fp32 until the
+            # denoising stage casts once to DiT dtype immediately before transformer.
+            batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1).to(device=device)
+            # The pixels are fully encoded into the control latents; drop them so the
+            # Wan denoising stage does not keep them or allocate ``video_padding``.
+            batch.video_latent = None
+            batch.mask_video = None
+        finally:
+            if fastvideo_args.vae_cpu_offload:
+                self.vae = self.vae.to(original_device)
         return batch
 
     def _normalize_latent(self, latent: torch.Tensor) -> torch.Tensor:

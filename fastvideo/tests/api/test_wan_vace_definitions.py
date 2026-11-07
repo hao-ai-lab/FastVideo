@@ -212,3 +212,42 @@ def test_vace_rejects_non_bf16_dit_precision(config_cls, precision):
 def test_vace_transformer_offloads_control_blocks_before_main_blocks():
     from fastvideo.models.wan.vace_transformer import WanVACETransformer3DModel
     assert WanVACETransformer3DModel.layerwise_offload_module_lists == ("vace_blocks", "blocks")
+
+
+def test_vace_context_stage_restores_vae_device_when_encoding_fails(monkeypatch):
+    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    class FailingVAE:
+
+        def __init__(self):
+            self.device = torch.device("cpu")
+
+        def parameters(self):
+            return iter((torch.zeros(1, device=self.device), ))
+
+        def to(self, device):
+            self.device = torch.device(device)
+            return self
+
+        def encode(self, x):
+            raise RuntimeError("out of memory")
+
+    args = FastVideoArgs.from_kwargs(model_path="Wan-AI/Wan2.1-VACE-1.3B-diffusers", vae_cpu_offload=True)
+    batch = ForwardBatch(data_type="video",
+                         height=32,
+                         width=32,
+                         num_frames=5,
+                         video_latent=torch.zeros(1, 3, 5, 32, 32),
+                         mask_video=torch.ones(1, 3, 5, 32, 32),
+                         vace_reference_images=[],
+                         conditioning_scale=1.0)
+    vae = FailingVAE()
+    stage = WanVACEContextStage(vae)
+    monkeypatch.setattr("fastvideo.pipelines.basic.wan.stages.vace_conditioning.get_local_torch_device",
+                        lambda: torch.device("meta"))
+
+    with pytest.raises(RuntimeError, match="out of memory"):
+        stage.forward(batch, args)
+
+    assert vae.device == torch.device("cpu")
