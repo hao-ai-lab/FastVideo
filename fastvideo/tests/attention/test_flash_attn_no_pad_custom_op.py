@@ -313,7 +313,7 @@ def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kin
     elif mask_rank == 4:
         mask = mask[:, None, None, :]
 
-    scale = 0.37  # Deliberately different from head_dim**-0.5.
+    scale = 0.37
     impl = FlashAttentionImpl(num_heads=heads, head_size=head_dim, causal=False,
                               softmax_scale=scale, nvfp4_fa4=False)
     metadata = SDPAMetadata(current_timestep=0, attn_mask=mask)
