@@ -200,54 +200,80 @@ GPU; the output is identical. Model loading and decoding come on top of this.
 
 ## Optional Gluon sparse forward on SM120
 
-BF16 tile-64 inference can opt into a Gluon sparse forward on RTX PRO 6000
-Blackwell (compute capability 12.0) with `FASTVIDEO_H3_VSA_GLUON=1`. The default
-is `0`. It requires contiguous BF16 inputs, head dimension 128 and eager
-execution; backward, DiT compilation and conflicting fine-attention overrides
-are rejected. This is a Python JIT kernel, so no additional CUDA extension or
-checkpoint conversion is needed. It changes floating-point reduction order
-and is not bit-exact with native Triton. Validate generated videos separately
-from kernel-level numerical tolerances before adopting it.
+Set `FASTVIDEO_H3_VSA_GLUON=1` to enable the Gluon block-sparse attention
+forward on SM120 (compute capability 12.0). It is disabled by default and
+supports BF16, head dimension 128, 64-token tiles and eager inference only.
+It preserves VSA tile selection and compression but is not bit-exact with
+native Triton.
 
-From a checkout with FastVideo and its CUDA dependencies installed, use the
-source kernel package for the numerical tests and microbenchmark:
+Measured on one RTX PRO 6000 Blackwell Server Edition (96 GB), with PyTorch
+2.12.0+cu130 and Triton 3.7.0. FastH3-8-Step-V2 used BF16, 1344x768,
+362 frames at 24 FPS and eight DiT forwards:
+
+| Measurement | Native Triton | Gluon | Latency reduction |
+| --- | ---: | ---: | ---: |
+| Sparse forward median | 346.87 ms | 247.04 ms | 28.78% |
+| DiT median | 282.72 s | 244.05 s | 13.68% |
+| E2E median | 314.45 s | 276.73 s | 12.00% |
+
+Model times are medians of three generations after one excluded warmup,
+using identical AdaLN cache and CPU-offload settings. E2E includes transfers,
+decoding and saving, excluding initial generator construction. The synthetic
+kernel benchmark excludes mask/index creation and layout conversion.
+
+See the [benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md)
+for reproduction commands and tests.
+
+## Token reduction
+
+`--token-reduction` is an opt-in, training-free speed mode that follows the
+`--token-reduction` mode of [antirez/h3.c](https://github.com/antirez/h3.c).
+Inside DiT blocks 4 to 29, every two horizontally adjacent tokens of the
+generated video are averaged into one, so those blocks see the video at half
+width. During the first 4 of the 8 forwards, where the coarse layout forms,
+the interval extends to block 39. Before the first full-width block, each
+token gets back its own value plus the update its pair received. Text, audio,
+reference and condition tokens are never paired.
+
+FastH3 8-Step V2 and the OmniRef PDD export both support it:
 
 ```bash
-export PYTHONPATH="$PWD/fastvideo-kernel/python${PYTHONPATH:+:$PYTHONPATH}"
-pytest fastvideo-kernel/tests/test_vsa_gluon_forward.py -v
-pytest fastvideo/tests/attention/test_vsa_h3_gluon.py -v
-python fastvideo-kernel/benchmarks/bench_vsa_gluon.py
+python examples/inference/basic/basic_fasth3_8step.py \
+  --prompt 'Two people walk along a beach at sunset, talking and laughing' \
+  --num-gpus 4 --token-reduction
+
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <OmniRef export> --image reference.png \
+  --prompt '<Picture 1> ...' --num-gpus 4 --token-reduction
 ```
 
-The kernel tests compare native Triton and an independent FP32 reference,
-including partial tiles, empty selections, padded values, repeatability and
-input contracts. H3 tests cover routing and compression separately. Both
-files skip on non-SM120 GPUs. The microbenchmark validates output and log2-LSE
-before alternating CUDA-event measurements; it excludes mask/index creation
-and layout conversion. Reports use `native_triton` and `gluon` labels and
-default to `../outputs/profiles/YYYYMMDD_HHMMSS/result.{json,log}`.
+In a recipe, set `pipeline.experimental.h3_token_reduction` to
+`{enabled: true}`. The optional keys `blocks`, `early` and `update_scale`
+match the `--token-reduction-blocks`, `--token-reduction-early` and
+`--token-reduction-scale` flags. Malformed values, and intervals past the
+checkpoint's DiT depth, fail before any weights load.
 
-For a paired single-GPU model comparison, use the same checkpoint, prompt,
-sampling, online AdaLN cache and component placement in both modes:
+Measured on one GB200 tray with 4 GPUs, 1344x768, 124 frames and BF16
+weights, after warm-up:
 
-```bash
-export MODEL_PATH=/path/to/FastH3-8-Step-V2
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh gluon
-```
+| Checkpoint | Denoising, 8 forwards | Whole request |
+|---|---|---|
+| FastH3 8-Step V2, default profile with regional compile | 5.08 s to 3.53 s, 30.6% less | 9.13 s to 7.58 s, 17.0% less |
+| FastH3 8-Step V2, regional compile off | 6.10 s to 4.26 s, 30.2% less | 10.18 s to 8.41 s, 17.4% less |
+| OmniRef PDD with one image reference, eager | 12.07 s to 9.33 s, 22.7% less | 24.67 s to 21.62 s, 12.3% less |
 
-The script selects the source kernel package automatically. `native` disables
-the opt-in switch, while `gluon` enables the Gluon forward. See the
-[benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md) for
-output paths and a single-generation check.
+The saving follows how many rows the middle blocks drop. A V2 request has a
+short text and audio prefix, so the reduced blocks see about half the rows.
+An OmniRef request also carries the reference tokens, which stay unpaired, so
+it saves less. Decoding takes the same time either way.
 
-The encoder streams its layers from CPU, the DiT stays on GPU between
-requests, and the VAEs are CPU-offloaded. Host RAM must accommodate those
-weights. Each process excludes one warmup and reports three measured
-generations; the requested 360 frames align to 362 at 24 FPS. E2E includes
-per-request transfers, decoding and saving, but excludes initial generator
-construction and warmup. Report both modes' timings, GPU memory and video
-similarity with the checkpoint, runtime versions and execution settings.
+The reduced video keeps the quality of the unreduced one, but it is not the
+same video. Most scenes keep their overall layout, while details can change,
+such as one of two people in a scene or the venue of a concert. The
+checkpoints were not trained with token reduction, and fine-tuning with it
+enabled is the expected way to keep the original shot. Only the GB200 BF16
+path has been validated so far; the NVFP4 and FP8 consumer profiles have not
+been tested with it.
 
 ## Apple Silicon
 

@@ -4,17 +4,24 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 from typing import Any
 
 import torch
 
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.layers.pdd import PDDModalitySchedule, PDDSamplingPlan, build_pdd_sampling_plan
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.minimax_h3_token_reduction import (
+    MiniMaxH3TokenReduction,
+    build_token_reduction,
+    reduced_token_width,
+)
 from fastvideo.profiler import nvtx_range, profiler_region
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -122,6 +129,35 @@ def _h3_vsa_ref2va_segments(
     return tuple(segments)
 
 
+def _h3_token_reduction_plan(
+    layout: MiniMaxH3PackedLayout,
+    patch_size: tuple[int, int, int],
+    schedule: MiniMaxH3TokenReductionSchedule,
+) -> MiniMaxH3TokenReduction:
+    """Pair rows of the generated video, which every H3 packing places last in row-major ``(t, h, w)`` order."""
+    if layout.pad_tokens:
+        raise ValueError("MiniMax-H3 token reduction does not support capacity padding rows.")
+    grid = (layout.num_video_latent_frames // patch_size[0], layout.latent_height // patch_size[1],
+            layout.latent_width // patch_size[2])
+    num_target_rows = grid[0] * grid[1] * grid[2]
+    video_start = layout.sequence_length - num_target_rows
+    target_rows = layout.video_indices[layout.num_condition_video_rows:]
+    if target_rows.numel() != num_target_rows or not torch.equal(target_rows.cpu(),
+                                                                 torch.arange(video_start, layout.sequence_length)):
+        raise ValueError("MiniMax-H3 token reduction needs the generated video to end the packed sequence.")
+    return build_token_reduction(layout.position_ids, video_start, grid, schedule)
+
+
+def _h3_token_reduced_segments(
+    segments: tuple[int | tuple[int, int, int], ...],
+    patch_size: tuple[int, int, int],
+) -> tuple[int | tuple[int, int, int], ...]:
+    """VSA-H3 segments of the reduced sequence: the generated video (last region) at half token width."""
+    frames, height, width = segments[-1]  # type: ignore[misc]
+    reduced_width = reduced_token_width(width // patch_size[2]) * patch_size[2]
+    return (*segments[:-1], (frames, height, reduced_width))
+
+
 class MiniMaxH3DenoisingStage(PipelineStage):
     """Build both schedules and denoise both modalities in one transformer call."""
 
@@ -133,14 +169,21 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         self.scheduler = scheduler
         self.audio_scheduler = audio_scheduler
 
-    def _set_dmd_schedule(self, steps: list[int], grid_points: int, device: torch.device) -> None:
-        """Run the trained rungs, shifting the shared noise clock once per modality."""
+    def _set_shifted_schedule(
+        self,
+        steps: list[int],
+        grid_points: int,
+        device: torch.device,
+        *,
+        label: str = "MiniMax-H3 DMD",
+    ) -> None:
+        """Build one modality-shifted sigma grid from explicit clean-time rungs."""
         if (not steps or any(type(step) is not int or not 0 < step <= 1000 for step in steps)
                 or any(left <= right for left, right in zip(steps, steps[1:], strict=False))):
-            raise ValueError("MiniMax-H3 DMD rungs must be strictly decreasing integers in (0, 1000].")
+            raise ValueError(f"{label} rungs must be strictly decreasing integers in (0, 1000].")
         if grid_points != len(steps) + 1:
-            raise ValueError("MiniMax-H3 num_inference_steps counts sigma-grid points: "
-                             f"{len(steps)} DMD forwards require {len(steps) + 1} grid points, got {grid_points}.")
+            raise ValueError(f"{label} num_inference_steps counts sigma-grid points: "
+                             f"{len(steps)} forwards require {len(steps) + 1} grid points, got {grid_points}.")
         base = torch.tensor([step / 1000.0 for step in steps] + [0.0], dtype=torch.float32)
         for scheduler in (self.scheduler, self.audio_scheduler):
             shift = float(scheduler.shift)
@@ -148,6 +191,38 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # Explicit sigmas are already shifted. Scheduler timesteps are H3
             # clean time (1 - sigma); passing integer rungs to step() is wrong.
             scheduler.set_timesteps(sigmas=sigmas, device=device)
+
+    def _set_dmd_schedule(self, steps: list[int], grid_points: int, device: torch.device) -> None:
+        """Run the trained rungs, shifting the shared noise clock once per modality."""
+        self._set_shifted_schedule(steps, grid_points, device, label="MiniMax-H3 DMD")
+
+    def _configure_schedules(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+        device: torch.device,
+    ) -> PDDSamplingPlan | None:
+        """Install this checkpoint's sigma schedules and return a PDD plan, if any.
+
+        Families with a fixed sampler (Pika H3 Flex) override this hook; the
+        default keeps MiniMax-H3's PDD and DMD checkpoint contracts.
+        """
+        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        pdd_plan = self._pdd_sampling_plan(fastvideo_args, device)
+        if pdd_plan is not None:
+            # One runtime step fuses one block of heads into their weighted
+            # mean velocity; the ordinary Euler step over the block's two node
+            # sigmas then applies the block's total increment per modality.
+            self.scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["video"].to(torch.float32), device=device)
+            self.audio_scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["audio"].to(torch.float32), device=device)
+            logger.info("MiniMax-H3 PDD denoising: %d fused block(s) %s over a %d-interval fine grid.",
+                        pdd_plan.num_steps, pdd_plan.block_sizes, pdd_plan.pdd_steps)
+        elif dmd_steps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+        else:
+            self._set_dmd_schedule(dmd_steps, batch.num_inference_steps, device)
+        return pdd_plan
 
     def _pdd_sampling_plan(self, fastvideo_args: FastVideoArgs, device: torch.device) -> PDDSamplingPlan | None:
         """The fused-block plan of a PDD checkpoint, or None for any other checkpoint.
@@ -207,21 +282,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             and not fastvideo_args.use_fsdp_inference)
         device = get_local_torch_device()
 
-        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
-        pdd_plan = self._pdd_sampling_plan(fastvideo_args, device)
-        if pdd_plan is not None:
-            # One runtime step fuses one block of heads into their weighted
-            # mean velocity; the ordinary Euler step over the block's two node
-            # sigmas then applies the block's total increment per modality.
-            self.scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["video"].to(torch.float32), device=device)
-            self.audio_scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["audio"].to(torch.float32), device=device)
-            logger.info("MiniMax-H3 PDD denoising: %d fused block(s) %s over a %d-interval fine grid.",
-                        pdd_plan.num_steps, pdd_plan.block_sizes, pdd_plan.pdd_steps)
-        elif dmd_steps is None:
-            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
-            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        else:
-            self._set_dmd_schedule(dmd_steps, batch.num_inference_steps, device)
+        pdd_plan = self._configure_schedules(batch, fastvideo_args, device)
         video_timesteps = self.scheduler.timesteps
         audio_timesteps = self.audio_scheduler.timesteps
         if video_timesteps is None or audio_timesteps is None:
@@ -284,6 +345,31 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 logger.info("MiniMax-H3 VSA-H3: %d reference video region(s); %s; %d-token tiles.",
                             num_reference_regions, effect, vsa_tile_size)
 
+        token_reduction_schedule = MiniMaxH3TokenReductionSchedule.from_options(
+            getattr(fastvideo_args, "h3_token_reduction", {}))
+        token_reduction = None
+        reduced_vsa_metadata_builder = None
+        reduced_vsa_packed_segments: tuple[int | tuple[int, int, int], ...] = ()
+        if token_reduction_schedule is not None:
+            dit_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+            token_reduction = _h3_token_reduction_plan(layout, dit_patch_size, token_reduction_schedule).to(device)
+            logger.info(
+                "MiniMax-H3 token reduction: %d -> %d rows in blocks %d:%d (%d:%d for the first %d step(s)), "
+                "update scale %g.", token_reduction.sequence_length, token_reduction.reduced_length,
+                token_reduction_schedule.begin, token_reduction_schedule.end, token_reduction_schedule.begin,
+                token_reduction_schedule.early_end, token_reduction_schedule.early_steps,
+                token_reduction_schedule.update_scale)
+            if (token_reduction_schedule.early_steps >= len(video_timesteps)
+                    and token_reduction_schedule.early_end != token_reduction_schedule.end):
+                logger.warning(
+                    "MiniMax-H3 token reduction: the early interval covers all %d forwards, so every forward "
+                    "reduces blocks %d:%d.", len(video_timesteps), token_reduction_schedule.begin,
+                    token_reduction_schedule.early_end)
+            if vsa_metadata_builder is not None:
+                # Its own builder, so each sequence length keeps its own tile buffers.
+                reduced_vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+                reduced_vsa_packed_segments = _h3_token_reduced_segments(vsa_packed_segments, vsa_patch_size)
+
         try:
             if full_cpu_offload:
                 self.transformer.to(device)
@@ -302,6 +388,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         break
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
+                    step_token_reduction = None
+                    if token_reduction is not None:
+                        assert token_reduction_schedule is not None
+                        step_token_reduction = dataclasses.replace(token_reduction,
+                                                                   end=token_reduction_schedule.end_for_step(index))
                     if vsa_metadata_builder is not None:
                         # Optional schedule: run the first N steps dense (sparsity 0
                         # selects every tile — parity-proven ≡ dense ≤2e-4); early
@@ -318,6 +409,23 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             tile_size=vsa_tile_size,
                             ref_keep_rate=vsa_ref_keep_rate,
                         )
+                        if step_token_reduction is not None:
+                            assert reduced_vsa_metadata_builder is not None
+                            reduced_attn_metadata = reduced_vsa_metadata_builder.build(
+                                current_timestep=index,
+                                patch_size=vsa_patch_size,
+                                VSA_sparsity=vsa_sparsity,
+                                packed_segments=reduced_vsa_packed_segments,
+                                device=device,
+                                exempt=vsa_exempt,
+                                dense_layers=vsa_dense_layers,
+                                tile_size=vsa_tile_size,
+                                ref_keep_rate=vsa_ref_keep_rate,
+                            )
+                            step_token_reduction = dataclasses.replace(step_token_reduction,
+                                                                       attn_metadata=reduced_attn_metadata)
+                    # Only pass the argument when reducing, so transformers without it keep working.
+                    reduction_kwargs = {} if step_token_reduction is None else {"token_reduction": step_token_reduction}
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
                     # reuse of pooled outputs as "accessing tensor output of
@@ -342,6 +450,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             video_indices=video_indices,
                             audio_indices=audio_indices,
                             text_indices=text_indices,
+                            **reduction_kwargs,
                         )
 
                     video_start = layout.num_condition_video_rows

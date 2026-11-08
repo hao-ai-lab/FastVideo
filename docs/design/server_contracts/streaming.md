@@ -79,6 +79,11 @@ The opening frame must be `session_init_v2`. Any other first frame is
 rejected with an `error` (code `invalid_message`) and the WebSocket is
 closed.
 
+Client frames are JSON text. A binary frame, or text that is not JSON, is
+answered with an `error` (code `invalid_message`) as well: as the opening
+frame it closes the WebSocket with 1003 `invalid_init`; later in the session
+the error is `retryable` and the session continues.
+
 ### Server → client
 
 | `type` | Carries | When emitted |

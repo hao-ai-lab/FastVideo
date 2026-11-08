@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -249,7 +250,7 @@ async def _read_init_message(
 ) -> SessionInitV2 | None:
     try:
         raw = await asyncio.wait_for(
-            websocket.receive_json(),
+            _receive_client_json(websocket),
             timeout=state.sessions.session_timeout_seconds,
         )
     except asyncio.TimeoutError:
@@ -258,6 +259,9 @@ async def _read_init_message(
             session.transition(SessionState.TIMEOUT)
         return None
     except WebSocketDisconnect:
+        return None
+    except _MalformedClientFrame as exc:
+        await _reject_init(websocket, session, f"opening frame failed validation: {exc}", "invalid_init")
         return None
     try:
         parsed = parse_client_message(raw)
@@ -322,7 +326,7 @@ async def _run_segment_loop(
 
         try:
             raw = await asyncio.wait_for(
-                websocket.receive_json(),
+                _receive_client_json(websocket),
                 timeout=state.sessions.session_timeout_seconds,
             )
         except asyncio.TimeoutError:
@@ -332,6 +336,10 @@ async def _run_segment_loop(
             return
         except WebSocketDisconnect:
             return
+        except _MalformedClientFrame as exc:
+            session.touch()
+            await _send_error(websocket, "invalid_message", str(exc), retryable=True)
+            continue
         session.touch()
 
         try:
@@ -543,6 +551,30 @@ def _extract_state(result: Any) -> ContinuationState | None:
     if isinstance(state, dict):
         return _coerce_state(state)
     return None
+
+
+class _MalformedClientFrame(ValueError):
+    """A client frame that is not a JSON text frame."""
+
+
+async def _receive_client_json(websocket: WebSocket) -> Any:
+    """Receive one client frame and decode it as JSON.
+
+    Client frames are JSON text. ``WebSocket.receive_json`` raises ``KeyError``
+    for a binary frame and ``JSONDecodeError`` for text that is not JSON, and
+    neither reached the ``invalid_message`` handling, so one bad frame closed
+    the session with no error. Raise ``_MalformedClientFrame`` for both instead.
+    """
+    message = await websocket.receive()
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000), message.get("reason"))
+    text = message.get("text")
+    if text is None:
+        raise _MalformedClientFrame("client frames must be JSON text, got a binary frame")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _MalformedClientFrame(f"client frame is not valid JSON: {exc}") from exc
 
 
 async def _send_json(websocket: WebSocket, message: Any) -> None:

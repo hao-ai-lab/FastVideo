@@ -395,6 +395,20 @@ function resolveConfig(catalog, selections = {}) {
     }
   }
   validateTopology(catalog, config);
+  const engine = config.generator?.engine ?? {};
+  const experimental = config.generator?.pipeline?.experimental ?? {};
+  if (engine.quantization?.layer_profile && engine.quantization.transformer_quant?.toLowerCase() !== "nvfp4") {
+    throw invalidValue(
+      "A quantization layer profile requires NVFP4 transformer quantization.",
+      "generator.engine.quantization.transformer_quant",
+    );
+  }
+  if (experimental.video_decode_backend === "taeh3" && experimental.h3_vae_nvfp4_decoder) {
+    throw invalidValue(
+      "TAEH3 uses its own decoder. Clear the NVFP4 decoder override or select h3-vae.",
+      "generator.pipeline.experimental.h3_vae_nvfp4_decoder",
+    );
+  }
   const argv = [...catalog.runtime.launch_argv];
   const environment = Object.entries(catalog.env).map(([key, value]) => `${key}=${shellQuote(value)}`);
   const sample = sampleRequest(catalog, config);

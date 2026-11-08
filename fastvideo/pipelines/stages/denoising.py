@@ -16,7 +16,7 @@ import fastvideo.envs as envs
 from fastvideo.attention import get_attn_backend
 from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs, dit_compile_uses_cudagraphs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -309,6 +309,13 @@ class DenoisingStage(PipelineStage):
                     continue
 
                 current_model, current_guidance_scale = self.select_model(t, batch, fastvideo_args, state)
+                # Without a mark, cudagraph trees start a new generation on
+                # every compiled call, so a replay can overwrite outputs the
+                # step still reads. Asked of the selected model, not the args:
+                # Wan 2.2 swaps DiTs mid-loop. select_model moves devices but
+                # never calls the model, so the mark still precedes the call.
+                if dit_compile_uses_cudagraphs(current_model):
+                    torch.compiler.cudagraph_mark_step_begin()
                 latent_model_input = self.prepare_model_input(latents, batch, target_dtype, state)
                 assert not torch.isnan(latent_model_input).any(), "latent_model_input contains nan"
                 t_expand = self.prepare_timestep(t, latent_model_input, batch, state)

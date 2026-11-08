@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(36);
+  await expect(cards).toHaveCount(38);
   await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -252,8 +252,8 @@ test("hardware preferences stay distinct from schema-backed GPU count and topolo
   const yaml = page.getByLabel("Generated YAML", { exact: true });
   await expect(yaml).toContainText('"num_gpus": 1');
   await expect(yaml).not.toContainText('"hardware"');
-  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
-  await expect(page.getByText("Weights fit", { exact: true })).toBeVisible();
+  await expect(page.getByText("Schema checks passed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await page.getByLabel("GPU count", { exact: true }).fill("0");
   await expect(yaml).toHaveCount(0);
   await expect(page.getByLabel("GPU count", { exact: true })).toHaveAttribute("aria-invalid", "true");
@@ -276,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -394,6 +394,35 @@ test("source-backed controls update the copied command without changing models",
   await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--num-gpus '2'");
 });
 
+test("Pika H3 Flex knobs select the tier, bucket, duration, task, and NVFP4 decoder", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3");
+  const pika = page.locator(".recipe-card").filter({ hasText: "Pika H3 Flex" });
+  await expect(pika.locator("img")).toHaveAttribute("src", /\/pika\.webp$/);
+  await expect(pika).toContainText("Pika");
+  await pika.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/models\/pika-h3-flex-t2va$/);
+  const command = page.getByLabel("Inference command", { exact: true });
+  await expect(command).toContainText("FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1");
+  await chip(page, "Resolution", "480p");
+  await chip(page, "Aspect ratio", "9:16");
+  await chip(page, "Duration", "10 s (243 frames)");
+  await chip(page, "VAE decoder", "NVFP4 36L quality");
+  await expect(command).toContainText("--resolution '480p'");
+  await expect(command).toContainText("--aspect '9:16'");
+  await expect(command).toContainText("--duration '10'");
+  await expect(command).toContainText("--nvfp4-decoder './fasth3-nvfp4-vae/quality-36L/decoder-nvfp4.safetensors'");
+  await page
+    .getByRole("group", { name: "Recipe variant", exact: true })
+    .getByRole("button", { name: "Pika H3 Flex keyframes", exact: true })
+    .click();
+  await expect(command).toContainText("--task fl2va --offload resident");
+  await chip(page, "Task", "First frame (I2VA)");
+  await chip(page, "Memory", "Lazy load + offload");
+  await expect(command).toContainText("--task 'i2va'");
+  await expect(command).toContainText("--offload 'lazy'");
+  await expect(page.getByRole("button", { name: "Copy example + command", exact: true })).toBeEnabled();
+});
+
 test("Wan I2V requires an image for CLI and SDK examples without changing server defaults", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
   await chip(page, "Run mode", "CLI");
@@ -496,7 +525,7 @@ test("hardware is never preselected and a desktop card keeps the recipe GPU coun
   await expect(page.getByText(/GeForce RTX 5090 .*32 GB VRAM/)).toBeVisible();
   await expect(yaml).toContainText('"num_gpus": 4');
   await expect(yaml).not.toContainText('"hardware"');
-  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Schema checks passed", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear hardware", exact: true }).click();
   await expect(page.getByText("No hardware selected.", { exact: true })).toBeVisible();
 });
@@ -509,7 +538,7 @@ test("lowering the GPU count resets parallelism that no longer fits", async ({ p
   await expect(page.getByText("Parallelism set to automatic for 2 GPUs.")).toBeVisible();
   await expect(yaml).toContainText('"num_gpus": 2');
   await expect(yaml).toContainText('"sp_size": -1');
-  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Schema checks passed", { exact: true })).toBeVisible();
 });
 
 test("browser back after a hardware-only change keeps the editor loaded", async ({ page }) => {
@@ -535,10 +564,48 @@ test("hardware links resolve catalog aliases and non-CUDA devices are not CUDA t
 test("recipe facts state validity and why memory has no estimate", async ({ page }) => {
   await page.goto(route);
   const facts = page.locator(".recipe-facts");
-  await expect(facts.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Schema checks passed", { exact: true })).toBeVisible();
   await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(page.getByText(/Select a device to estimate memory/)).toBeVisible();
+});
+
+test("component defaults are selected and decoder choices stay consistent with copied YAML", async ({ page }) => {
+  await page.goto(route);
+  const decoder = page.getByRole("group", { name: "NVFP4 video decoder", exact: true });
+  await expect(decoder.getByRole("button", { name: "Original", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page
+      .getByRole("group", { name: "Text encoder", exact: true })
+      .getByRole("button", { name: "Bundled", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await chip(page, "Video decoder", "taeh3");
+  await decoder.getByRole("button", { name: /8L/ }).click();
+  await expect(
+    page
+      .getByRole("group", { name: "Video decoder", exact: true })
+      .getByRole("button", { name: "h3-vae", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"video_decode_backend": "h3-vae"');
+  await expect(page.getByLabel("Generated YAML")).toContainText("fast-8L/decoder-nvfp4.safetensors");
+  await chip(page, "Video decoder", "taeh3");
+  await expect(page.getByLabel("Generated YAML")).toContainText('"h3_vae_nvfp4_decoder": null');
+  await expect(decoder.getByRole("button", { name: "Original", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Reset changes", exact: true }).click();
+  await expect(page.getByLabel("Generated YAML")).not.toContainText("h3_vae_nvfp4_decoder");
+});
+
+test("failed memory metadata is visible and retry restores checkpoint data", async ({ page }) => {
+  await page.route("**/capacity/index.json", (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.goto(`${route}?hardware=custom&hwName=GPU&hwType=dedicated&hwMemory=80&hwUnit=GiB&hwBackend=cuda`);
+  await expect(page.getByText(/Memory data could not load/)).toBeVisible();
+  await expect(page.getByText(/Known checkpoint data/)).toHaveCount(0);
+  await page.unroute("**/capacity/index.json");
+  await page.getByRole("button", { name: "Retry memory data", exact: true }).click();
+  await expect(page.getByText(/Known checkpoint data: 137\.7 GiB. Device budget: 80\.0 GiB/)).toBeVisible();
+  await expect(page.getByText(/Memory data could not load/)).toHaveCount(0);
+  await expect(page.getByText("Weights fit", { exact: true })).toHaveCount(0);
 });
 
 test("host-only system RAM cannot produce a GPU weights fit verdict", async ({ page }) => {
@@ -554,38 +621,38 @@ test("host-only system RAM cannot produce a GPU weights fit verdict", async ({ p
 test("TAEH3 stops using the bundled VAE weights in memory facts", async ({ page }) => {
   await page.goto(`${route}?hardware=custom&hwName=GPU&hwType=dedicated&hwMemory=80&hwUnit=GB&hwBackend=cuda`);
   const facts = page.locator(".recipe-facts");
-  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await chip(page, "Video decoder", "taeh3");
   await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Details", exact: true }).click();
-  await expect(facts.getByText(/TAEH3 decoder weights are not modeled/)).toBeVisible();
+  await expect(facts.getByText(/Missing sizes for TAEH3 decoder/)).toBeVisible();
   await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
   await output(page, "config.yaml");
   await expect(page.getByLabel("Generated YAML")).toContainText('"video_decode_backend": "taeh3"');
   await chip(page, "Video decoder", "h3-vae");
-  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
 });
 
 test("FastH3 keeps unmodeled quantization and decoder residency unknown", async ({ page }) => {
   await page.goto(route);
   await chooseHardware(page, "RTX 5090");
   const facts = page.locator(".recipe-facts");
-  await expect(facts.getByText("Weights exceed memory", { exact: true })).toBeVisible();
+  await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Details", exact: true }).click();
-  await expect(page.getByText(/Resident weights need 75\.6 GiB of 29\.8 GiB/)).toBeVisible();
+  await expect(page.getByText(/Known checkpoint data: 137\.7 GiB. Device budget: 29\.8 GiB/)).toBeVisible();
   await page
     .getByRole("group", { name: "Transformer quantization", exact: true })
     .getByRole("button", { name: "NVFP4", exact: true })
     .click();
   await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
-  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await expect(facts.getByText(/selected quantization and layer profile/)).toBeVisible();
   await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
   await page
     .getByRole("group", { name: "NVFP4 video decoder", exact: true })
     .getByRole("button", { name: /8L · fast/ })
     .click();
   await expect(facts.getByText("Memory not estimated", { exact: true })).toBeVisible();
-  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/VAE with the NVFP4 decoder and retained encoder/)).toBeVisible();
   await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
   await output(page, "config.yaml");
   await expect(page.getByLabel("Generated YAML")).toContainText('"transformer_quant": "NVFP4"');
@@ -598,13 +665,13 @@ test("4-Step quantization and full-depth decoder swaps also stay unestimated", a
   const facts = page.locator(".recipe-facts");
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await chip(page, "Transformer quantization", "FP8");
-  await expect(facts.getByText(/checkpoint and layer profile/)).toBeVisible();
+  await expect(facts.getByText(/selected quantization and layer profile/)).toBeVisible();
   await chip(page, "Transformer quantization", "Default");
   await page
     .getByRole("group", { name: "NVFP4 video decoder", exact: true })
     .getByRole("button", { name: /36L/ })
     .click();
-  await expect(facts.getByText(/VAE retains its encoder and packs decoder weights/)).toBeVisible();
+  await expect(facts.getByText(/VAE with the NVFP4 decoder and retained encoder/)).toBeVisible();
   await expect(facts.getByText(/Resident weights need/)).toHaveCount(0);
 });
 
@@ -645,7 +712,7 @@ test("packed FastH3 checkpoints keep their fixed precision", async ({ page }) =>
   await page.getByRole("tab", { name: "config.yaml" }).click();
   await expect(page.getByLabel("Generated YAML")).toContainText('"transformer_quant": "NVFP4"');
   await expect(page.getByLabel("Generated YAML")).toContainText('"layer_profile": "h3_dit_vsa"');
-  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Schema checks passed", { exact: true })).toBeVisible();
   await expect(page.getByRole("group", { name: "Transformer quantization", exact: true })).toHaveCount(0);
 });
 
@@ -660,7 +727,7 @@ test("MLX FastH3 stays unestimated and a GiB device keeps its unit", async ({ pa
   await page.goto(
     "/FastVideo/cookbook/minimax-h3/fasth3-8step?hardware=custom&hwName=Big&hwType=dedicated&hwMemory=80&hwUnit=GiB&hwBackend=cuda",
   );
-  await expect(page.getByText("Weights fit, little headroom", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Device budget: 80\.0 GiB/)).toBeVisible();
 });
 
 test("catalog lookup resolves aliases, variants, and unified memory without pooling", async ({ page }) => {
@@ -722,7 +789,7 @@ test("MLX Omni discovery and its original route expose the MLX launch command", 
 
 test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await expect(page.locator(".recipe-card")).toHaveCount(36);
+  await expect(page.locator(".recipe-card")).toHaveCount(38);
   for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
     const button = page.getByRole("button", { name: category, exact: true });
     const count = Number(await button.locator(".recipe-filter-count").innerText());
@@ -789,4 +856,22 @@ test("WebSocket deployments expose only the serving interface", async ({ page })
   await expect(modes.getByRole("button", { name: "Python SDK", exact: true })).toHaveCount(0);
   await expect(modes.getByRole("button", { name: "CLI", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Only serving is recorded for it/)).toBeVisible();
+});
+
+test("video-to-video deployments expose only the serving interface", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/open-h3-regenerate-2k");
+  const modes = page.getByRole("group", { name: "Run mode" });
+  await expect(modes.getByRole("button")).toHaveCount(1);
+  await expect(modes.getByRole("button", { name: "Serving", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Send it to the server as video_reference/)).toBeVisible();
+});
+
+test("Open-H3-Regenerate-2K is discoverable as a video upscale with its serving page", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Task", { exact: true }).selectOption("Video upscale");
+  const card = page.locator(".recipe-card").filter({ hasText: "Open-H3-Regenerate-2K" });
+  await expect(card).toHaveCount(1);
+  await card.click();
+  await expect(page).toHaveURL(/cookbook\/minimax-h3\/open-h3-regenerate-2k\/?$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Open-H3-Regenerate-2K");
 });

@@ -637,6 +637,7 @@ class VideoGenerator:
         prompt_embeds = kwargs.pop("prompt_embeds", None)
         sampling_param.update(kwargs)
         kwargs["_extra_overrides"] = extra_overrides
+        save_to_disk = sampling_param.save_video and fastvideo_args.output_type != "latent"
 
         prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
         if self.executor.uses_spmd_execution:
@@ -667,7 +668,11 @@ class VideoGenerator:
                 try:
                     # Generate video for this prompt using the same logic below
                     output_path = self._run_on_output_rank(
-                        partial(self._prepare_output_path, sampling_param.output_path, batch_prompt),
+                        partial(self._prepare_output_path,
+                                sampling_param.output_path,
+                                batch_prompt,
+                                output_video_name=sampling_param.output_video_name,
+                                save_to_disk=save_to_disk),
                         description="output-path setup",
                     )
                     kwargs["output_path"] = output_path
@@ -712,8 +717,10 @@ class VideoGenerator:
             else:
                 raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._run_on_output_rank(
-            lambda: self._prepare_output_path(sampling_param.output_path, output_name_hint
-                                              if output_name_hint else prompt),
+            lambda: self._prepare_output_path(sampling_param.output_path,
+                                              output_name_hint if output_name_hint else prompt,
+                                              output_video_name=sampling_param.output_video_name,
+                                              save_to_disk=save_to_disk),
             description="output-path setup",
         )
         kwargs["output_path"] = output_path
@@ -744,26 +751,23 @@ class VideoGenerator:
         self,
         output_path: str,
         prompt: str,
+        output_video_name: str | None = None,
+        *,
+        save_to_disk: bool = True,
     ) -> str:
-        """Build a unique, sanitized output file path.
+        if not save_to_disk:
+            return output_path
 
-        Image workloads preserve explicit PNG, JPEG, or WebP extensions and
-        otherwise default to ``.png``. Video workloads use ``.mp4``.
-
-        - If ``output_path`` already carries the correct extension, treat it
-          as a file path.
-        - Otherwise, treat ``output_path`` as a directory and derive the
-          filename from the prompt.
-        - Invalid filename characters are removed; if the name changes, a
-          warning is logged.
-        - If the target path already exists, a numeric suffix is appended.
-        """
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
         is_directory = os.path.isdir(output_path)
         if self._is_image_workload():
-            target_ext = extension_lower if not is_directory and extension_lower in {".png", ".jpg", ".jpeg", ".webp"
-                                                                                     } else ".png"
+            image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
+            name_extension = os.path.splitext(output_video_name or "")[1].lower()
+            if not is_directory and extension_lower in image_extensions:
+                target_ext = extension_lower
+            else:
+                target_ext = name_extension if name_extension in image_extensions else ".png"
         elif self._is_audio_workload():
             target_ext = ".wav"
         else:
@@ -801,20 +805,34 @@ class VideoGenerator:
                     target_ext,
                 )
             output_dir = output_path
-            prompt_component = _sanitize_filename_component(prompt[:100])
-            out_name = f"{prompt_component}{target_ext}"
+            name_component = output_video_name or prompt[:100]
+            if output_video_name and name_component.lower().endswith(target_ext):
+                name_component = name_component[:-len(target_ext)]
+            sanitized_name = _sanitize_filename_component(name_component)
+            out_name = f"{sanitized_name}{target_ext}"
 
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
-        new_output_path = os.path.join(output_dir, out_name)
-        counter = 1
-        while os.path.exists(new_output_path):
-            name_part, ext_part = os.path.splitext(out_name)
-            new_name = f"{name_part}_{counter}{ext_part}"
-            new_output_path = os.path.join(output_dir, new_name)
+        try:
+            name_max = os.pathconf(output_dir or ".", "PC_NAME_MAX")
+        except (AttributeError, OSError, ValueError):
+            name_max = 255
+        if name_max <= 0:
+            name_max = 255
+
+        name_part, ext_part = os.path.splitext(out_name)
+        candidate_name = out_name
+        counter = 0
+        while True:
+            if len(os.fsencode(candidate_name)) > name_max:
+                raise ValueError(f"Output filename exceeds the {name_max}-byte filesystem limit "
+                                 "(including extension and collision suffix). Use a shorter output name.")
+            new_output_path = os.path.join(output_dir, candidate_name)
+            if not os.path.exists(new_output_path):
+                return new_output_path
             counter += 1
-        return new_output_path
+            candidate_name = f"{name_part}_{counter}{ext_part}"
 
     def _generate_single_video(
         self,
@@ -1041,10 +1059,16 @@ class VideoGenerator:
             # `samples` above is just the pinned-CPU mirror of `output_batch.output` (`samples.copy_(output)` or
             # `output.cpu()`) with no intervening preprocessing, so reading `output_batch.output` here is the same
             # data. See `_quantize_video_frames_to_uint8` for why this quantizes on-device and its OOM fallback.
-            vid_u8 = _quantize_video_frames_to_uint8(output_batch.output)
-            frames = [
-                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
-            ]
+            src_frames = output_batch.output
+            if (isinstance(src_frames, torch.Tensor) and src_frames.dim() == 5 and src_frames.dtype == torch.uint8
+                    and src_frames.shape[0] == 1 and src_frames.shape[2] > 1):
+                frames = list(src_frames[0].permute(1, 2, 3, 0).contiguous().cpu().numpy())
+            else:
+                vid_u8 = _quantize_video_frames_to_uint8(src_frames)
+                frames = [
+                    torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy()
+                    for x in vid_u8
+                ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
@@ -1503,6 +1527,10 @@ class VideoGenerator:
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
+
+    def clear_lora_adapter(self) -> None:
+        """Return the transformer to its base weights (plus any constructor adapter), without reading an adapter."""
+        self.executor.clear_lora_adapter()
 
     def unmerge_lora_weights(self) -> None:
         """

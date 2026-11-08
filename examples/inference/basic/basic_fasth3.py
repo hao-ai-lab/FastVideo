@@ -37,6 +37,8 @@ from fastvideo.api import (
     PipelineSelection,
     SamplingConfig,
 )
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 
 DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
 
@@ -163,12 +165,55 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=None,
                         help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
                         "--no-inference-torch-compile")
+    parser.add_argument("--token-reduction",
+                        action="store_true",
+                        help="training-free speed mode after antirez/h3.c: pair horizontally adjacent generated-video "
+                        "tokens inside the middle DiT blocks; faster, but can change composition")
+    parser.add_argument("--token-reduction-blocks",
+                        default=None,
+                        metavar="BEGIN:END",
+                        help="blocks that run reduced (default 4:30)")
+    parser.add_argument("--token-reduction-early",
+                        default=None,
+                        metavar="STEPS:END",
+                        help="for the first STEPS forwards, reduce up to block END instead (default 4:40; 0:0 "
+                        "disables)")
+    parser.add_argument("--token-reduction-scale",
+                        type=float,
+                        default=None,
+                        help="scale of the update each paired token gets from its pair (default 1.0); unpaired "
+                        "tokens, such as the last column of an odd-width video, take the full update as in h3.c")
     return parser
+
+
+def token_reduction_options(args: argparse.Namespace) -> dict[str, object] | None:
+    """``h3_token_reduction`` options from the command line, or None when it is off."""
+    if not getattr(args, "token_reduction", False):
+        return None
+    options: dict[str, object] = {"enabled": True}
+    if args.token_reduction_blocks is not None:
+        options["blocks"] = args.token_reduction_blocks
+    if args.token_reduction_early is not None:
+        options["early"] = args.token_reduction_early
+    if args.token_reduction_scale is not None:
+        options["update_scale"] = args.token_reduction_scale
+    return options
 
 
 def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
+    tuning = (args.token_reduction_blocks, args.token_reduction_early, args.token_reduction_scale)
+    if not args.token_reduction and any(value is not None for value in tuning):
+        parser.error("--token-reduction-blocks/-early/-scale need --token-reduction")
+    if args.token_reduction:
+        # Reject malformed values and intervals past H3's 50 blocks before any download; the
+        # transformer loader checks a shallower checkpoint, such as FastH3 Trim, against its own depth.
+        try:
+            MiniMaxH3TokenReductionSchedule.from_options(token_reduction_options(args) or {},
+                                                         num_blocks=MiniMaxH3ArchConfig().num_layers)
+        except ValueError as error:
+            parser.error(str(error))
     if args.num_gpus < 1:
         parser.error("--num-gpus must be at least 1")
     if not 0.0 <= args.vsa_sparsity < 1.0:
@@ -303,6 +348,9 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
             "VSA_sparsity": args.vsa_sparsity,
             "VSA_tile_size": args.vsa_tile_size,
         })
+    token_reduction = token_reduction_options(args)
+    if token_reduction is not None:
+        experimental["h3_token_reduction"] = token_reduction
     return GeneratorConfig(
         model_path=args.model_path,
         pipeline=PipelineSelection(
