@@ -201,7 +201,7 @@ GPU; the output is identical. Model loading and decoding come on top of this.
 ## Optional Gluon sparse forward on SM120
 
 BF16 tile-64 inference can opt into a Gluon sparse forward on RTX PRO 6000
-Blackwell (compute capability 12.0) with `FASTVIDEO_H3_VSA_SM120=1`. The default
+Blackwell (compute capability 12.0) with `FASTVIDEO_H3_VSA_GLUON=1`. The default
 is `0`. It requires contiguous BF16 inputs, head dimension 128 and eager
 execution; backward, DiT compilation and conflicting fine-attention overrides
 are rejected. This is a Python JIT kernel, so no additional CUDA extension or
@@ -233,11 +233,11 @@ sampling, online AdaLN cache and component placement in both modes:
 ```bash
 export MODEL_PATH=/path/to/FastH3-8-Step-V2
 bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh sm120
+bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh gluon
 ```
 
 The script selects the source kernel package automatically. `native` disables
-the opt-in switch, while `sm120` enables the Gluon forward. See the
+the opt-in switch, while `gluon` enables the Gluon forward. See the
 [benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md) for
 output paths and a single-generation check.
 

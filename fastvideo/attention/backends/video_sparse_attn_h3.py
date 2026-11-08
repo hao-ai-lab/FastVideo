@@ -718,17 +718,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # logical tile-ordered rows. Quantization-aware training installs its
         # FP4 emulator here; it is also the only grad-capable tile-128 route.
         self.fine_attention_override: Any = fine_attention_from_env()
-        self._sm120 = envs.FASTVIDEO_H3_VSA_SM120.get()
-        if self._sm120:
+        self._use_gluon = envs.FASTVIDEO_H3_VSA_GLUON.get()
+        if self._use_gluon:
             if causal or head_size != 128:
                 raise ValueError("SM120 VSA requires non-causal attention with head dimension 128")
             if (self.fine_attention_override is not None or self._sm89_kernel != "original"
                     or envs.FASTVIDEO_VSA_PTX_BLACKWELL.get() or envs.FASTVIDEO_H3_VSA_FP4.get()):
-                raise ValueError("FASTVIDEO_H3_VSA_SM120 cannot be combined with another fine-attention override")
+                raise ValueError("FASTVIDEO_H3_VSA_GLUON cannot be combined with another fine-attention override")
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
-        if self._sm120:
+        if self._use_gluon:
             raise RuntimeError("SM120 VSA requires eager execution; disable both DiT compilation switches")
         self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
         if self.fine_attention_override is not None:
@@ -898,7 +898,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         attn_metadata: MiniMaxH3VSAMetadata,
     ) -> torch.Tensor:
         compiling = torch.compiler.is_compiling()
-        if self._sm120 and (compiling or attn_metadata.tile_elems != 64):
+        if self._use_gluon and (compiling or attn_metadata.tile_elems != 64):
             raise RuntimeError("SM120 VSA supports eager tile-64 inference only")
         regional_compiling = compiling and self._regional_compile_ptx_blackwell_enabled is True
 
@@ -989,7 +989,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # preserves the eager dense-layer contract without a Python branch.
             mask = mask | force_dense
 
-        if self._sm120:
+        if self._use_gluon:
             from fastvideo_kernel.block_sparse_attn import block_sparse_attn_gluon_fwd
 
             if map_to_index is None:

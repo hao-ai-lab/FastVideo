@@ -270,8 +270,8 @@ class MiniMaxH3Attention(nn.Module):
         if requested and not use_vsa:
             raise ValueError("h3_vsa_fp4 requires the VIDEO_SPARSE_ATTN_H3 attention backend")
         self._vsa_fp4 = use_vsa and (vsa_fp4_requested() if requested is None else requested)
-        if self._vsa_fp4 and envs.FASTVIDEO_H3_VSA_SM120.get():
-            raise ValueError("h3_vsa_fp4 and FASTVIDEO_H3_VSA_SM120 select different fine-attention kernels")
+        if self._vsa_fp4 and envs.FASTVIDEO_H3_VSA_GLUON.get():
+            raise ValueError("h3_vsa_fp4 and FASTVIDEO_H3_VSA_GLUON select different fine-attention kernels")
         self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and

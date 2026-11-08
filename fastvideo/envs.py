@@ -644,7 +644,7 @@ FASTVIDEO_H3_VSA_TILE_FIRST = EnvBool(False,
                                       category="attention",
                                       doc="Single-rank MiniMax-H3 VSA with one tile gather of the block input "
                                       "instead of separate Q/K/V/gate scatters.")
-FASTVIDEO_H3_VSA_SM120 = EnvBool(
+FASTVIDEO_H3_VSA_GLUON = EnvBool(
     False,
     category="attention",
     doc="Opt into SM120 BF16 tile-64 async-overlap sparse attention. Eager inference only; "
