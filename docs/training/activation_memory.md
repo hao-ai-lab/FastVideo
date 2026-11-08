@@ -20,8 +20,10 @@ training:
 `activation_memory_host_budget_gib` optionally bounds activation storage on the
 CPU. The budget uses GiB (2^30 bytes). Omit the manual
 `enable_gradient_checkpointing_type` when enabling the planner. Roles with
-planned blocks must use an adapter that accepts `activation_memory_plan`;
-the Wan adapter applies the plan before FSDP wrapping.
+planned blocks must use an adapter that explicitly declares
+`activation_memory_plan` in its constructor. Unsupported adapters are rejected
+before the plan is exported or any model is loaded. The Wan adapter applies
+the plan before FSDP wrapping.
 
 ## Profiles and role lifetimes
 
@@ -45,7 +47,7 @@ temporary scoring allocations belong in fixed storage.
 
 The solver selects exactly one alternative for each block. A plan records the
 chosen policies, predicted per-event device and host storage, measured block
-time, budget, and profile metadata. Infeasible budgets raise an error before
+time, device and optional host budgets, and profile metadata. Infeasible budgets raise an error before
 models load. Rank zero writes the exported plan.
 
 Use `MemoryProfile.save` and `MemoryProfile.load` for JSON profiles, and
@@ -114,9 +116,10 @@ Actual single-role increments calibrated on Cosmos predict 1192.46 ms for the
 joint plan; the measured complete-step cost is substantially higher. All DMD2
 configurations use the same optimizer and `expandable_segments:True` setting.
 
-Ten CPU tests check optimal selection against enumeration, role lifetimes,
+CPU tests check optimal selection against enumeration, role lifetimes,
 host constraints, configuration, gradients, AdamW updates, dropout RNG, and
-checkpoint restoration. Native FSDP restores all 3,300 model and optimizer
+checkpoint restoration, adapter support, exported constraints, and cross-rank
+measurement aggregation. Native FSDP restores all 3,300 model and optimizer
 state tensors exactly. A two-rank automatic-plan checkpoint after ten updates
 reloads and generates a finite 17-frame video with public UMT5 conditions and
 VAE. Export and generation are outside the training timing interval.
@@ -125,6 +128,8 @@ VAE. Export and generation are outside the training timing interval.
 include every final step, rank-local measurements, frozen profiles, selected
 plans, and independent manual-tuning decisions. The profiling examples reproduce
 the workload and separate profile acquisition, planning, and steady-state timing.
+Multi-rank DMD2 reports retain every rank's records and take the maximum step
+time, allocated memory, and reserved memory across ranks for each step.
 
 ## Limitations
 

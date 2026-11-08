@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.train.utils.instantiate import (
@@ -38,6 +39,16 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
         unknown_roles = {block.role for block in profile.blocks} - set(cfg.models)
         if unknown_roles:
             raise ValueError(f"Activation profile contains unknown model roles: {sorted(unknown_roles)}")
+        for role in sorted({block.role for block in profile.blocks}):
+            target = cfg.models[role]["_target_"]
+            adapter = resolve_target(str(target))
+            parameter = inspect.signature(adapter.__init__).parameters.get("activation_memory_plan")
+            if parameter is None or parameter.kind not in (
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+            ):
+                raise ValueError(f"models.{role}._target_ ({target}) must explicitly accept "
+                                 "activation_memory_plan to use an activation memory budget")
         host_budget = memory_config.activation_memory_host_budget_gib
         plan = plan_activation_memory(
             profile,

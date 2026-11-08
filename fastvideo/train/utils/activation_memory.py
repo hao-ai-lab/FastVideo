@@ -65,6 +65,7 @@ class MemoryPlan:
     host_bytes: tuple[int, ...]
     time_ms: float
     budget_bytes: int
+    host_budget_bytes: int | None
     events: tuple[str, ...]
     profile_metadata: dict[str, Any]
 
@@ -98,8 +99,8 @@ def plan_activation_memory(
     if max(profile.fixed_device_bytes) > budget_bytes:
         raise ValueError("The memory budget is smaller than the profile's fixed storage")
     if not profile.blocks:
-        return MemoryPlan({}, profile.fixed_device_bytes, (0, ) * event_count, 0.0, budget_bytes, profile.events,
-                          profile.metadata)
+        return MemoryPlan({}, profile.fixed_device_bytes, (0, ) * event_count, 0.0, budget_bytes, host_budget_bytes,
+                          profile.events, profile.metadata)
 
     identifiers = [(block.role, block.block) for block in profile.blocks]
     if len(set(identifiers)) != len(identifiers):
@@ -162,8 +163,8 @@ def plan_activation_memory(
         time_ms += choice.time_ms
     if max(device_bytes) > budget_bytes or (host_budget_bytes is not None and max(host_bytes) > host_budget_bytes):
         raise RuntimeError("The solver returned a policy outside the integer-byte budget")
-    return MemoryPlan(policies, tuple(device_bytes), tuple(host_bytes), time_ms, budget_bytes, profile.events,
-                      profile.metadata)
+    return MemoryPlan(policies, tuple(device_bytes), tuple(host_bytes), time_ms, budget_bytes, host_budget_bytes,
+                      profile.events, profile.metadata)
 
 
 def apply_activation_memory_plan(module: torch.nn.Module, policies: dict[str, str]) -> torch.nn.Module:

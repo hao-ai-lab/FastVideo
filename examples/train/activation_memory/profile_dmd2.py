@@ -30,6 +30,7 @@ from fastvideo.train.utils.training_config import (
 )
 
 from profile_wan import policy_for
+from measurements import gather_step_records
 
 
 def main() -> None:
@@ -199,12 +200,14 @@ def main() -> None:
                       peak_reserved_bytes=torch.npu.max_memory_reserved())
         records.append(record)
     torch.npu.synchronize()
+    records, rank_records = gather_step_records(records)
     result = {
         'executor': 'FastVideo DMD2Method / WanModel / FSDP2',
         'world_size': world,
         'model': args.model,
         'training_sample': args.training_sample,
         'steps': records,
+        'rank_measurements': rank_records,
         'warmup_steps': args.warmup,
         'teacher_trainable': method.teacher._trainable,
         'policy': args.policy if not args.profile else 'budget',
