@@ -288,7 +288,8 @@ def test_varlen_qk_opcheck_with_grad_inputs(no_pad_impls):
 
 @pytest.mark.parametrize("query_len", [48, 64])
 @pytest.mark.parametrize("mask_kind", ["bool", "integer", "additive"])
-def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kind):
+@pytest.mark.parametrize("mask_rank", [2, 3, 4])
+def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kind, mask_rank):
     """Masked FlashAttention agrees with SDPA for tokenizer and additive masks."""
     from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
     from fastvideo.attention.backends.sdpa import SDPAMetadata
@@ -307,6 +308,10 @@ def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kin
         mask = torch.where(valid, 0.0, float("-inf"))
     else:
         mask = valid
+    if mask_rank == 3:
+        mask = mask[:, None, :]
+    elif mask_rank == 4:
+        mask = mask[:, None, None, :]
 
     scale = 0.37  # Deliberately different from head_dim**-0.5.
     impl = FlashAttentionImpl(num_heads=heads, head_size=head_dim, causal=False,
