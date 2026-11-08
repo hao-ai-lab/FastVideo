@@ -179,7 +179,6 @@ def apply_activation_memory_plan(module: torch.nn.Module, policies: dict[str, st
             with torch.autograd.graph.save_on_cpu(pin_memory=True, device_type=device_type):
                 return self._checkpoint_wrapped_module(*args, **kwargs)
 
-    # Resolve all paths before changing the model, including save-only entries.
     blocks = {name: module.get_submodule(name) for name in policies}
     for name, policy in policies.items():
         if policy not in {"save", "recompute", "offload", "ops"}:
