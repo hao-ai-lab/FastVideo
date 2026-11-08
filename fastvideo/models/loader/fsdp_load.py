@@ -865,6 +865,10 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any], *, 
 
     if compiled_count == 0:
         raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
+    # Regional compile rejects ``mode`` above but merges the caller's
+    # ``options``, so {"triton.cudagraphs": True} records graphs here too.
+    from fastvideo.fastvideo_args import DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs
+    setattr(model, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(kwargs))
     logger.info(
         "Enabled regional torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
         compiled_count,

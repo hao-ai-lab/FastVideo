@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.layers.quantization import QUANTIZATION_METHODS, QuantizationMethods
 from fastvideo.logger import init_logger
@@ -296,6 +297,11 @@ class FastVideoArgs:
     inference_torch_compile: bool = False
 
     h3_vsa_fp4: dict[str, Any] = field(default_factory=dict)
+    # Training-free horizontal pairing of MiniMax-H3's generated-video tokens in
+    # the middle DiT blocks (antirez/h3.c --token-reduction). Keys: enabled,
+    # blocks [BEGIN, END], early [STEPS, END], update_scale. See
+    # fastvideo/configs/pipelines/minimax_h3_token_reduction.py.
+    h3_token_reduction: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 
@@ -453,6 +459,8 @@ class FastVideoArgs:
             raise ValueError("h3_vsa_fp4.prefix_precision must be empty, fp8 or bf16")
         if self.h3_vsa_fp4.get("enabled") and (self.inference_torch_compile or self.enable_torch_compile):
             raise ValueError("h3_vsa_fp4 requires eager DiT inference; disable DiT torch.compile")
+        # The DiT depth is checked against the checkpoint's own config when the transformer loads.
+        MiniMaxH3TokenReductionSchedule.from_options(self.h3_token_reduction)
         self._fold_vae_parallel_env()
         self._fold_h3_encoder_split_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
@@ -1030,6 +1038,8 @@ class FastVideoArgs:
             kwargs['workload_type'] = WorkloadType.from_string(kwargs['workload_type'])
 
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
+        # PipelineConfig also has a disable_autocast field and pops it from kwargs, but the stages read this one.
+        kwargs.setdefault('disable_autocast', kwargs['pipeline_config'].disable_autocast)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
         # args live in PipelineConfig and must not be forwarded to the
@@ -1248,6 +1258,36 @@ def get_current_fastvideo_args() -> FastVideoArgs:
         # TODO(will): may need to handle this for CI.
         raise ValueError("Current fastvideo args is not set.")
     return _current_fastvideo_args
+
+
+# Stamped on a DiT by whichever code path actually attaches the compile:
+# ``ComposedPipelineBase._compile_pipeline_module_instance`` for the
+# pipeline-level compile, ``_compile_model_regions`` for the regional one.
+DIT_COMPILE_CUDAGRAPHS_ATTR = "_fastvideo_compile_records_cudagraphs"
+
+
+def compile_kwargs_record_cudagraphs(compile_kwargs: dict[str, Any] | None) -> bool:
+    """Whether these ``torch.compile`` kwargs make inductor record CUDA graphs."""
+    kwargs = compile_kwargs or {}
+    if kwargs.get("disable"):
+        return False
+    options = kwargs.get("options") or {}
+    return kwargs.get("mode") in ("reduce-overhead", "max-autotune") or bool(options.get("triton.cudagraphs"))
+
+
+def dit_compile_uses_cudagraphs(module: Any) -> bool:
+    """Whether the compile attached to ``module`` records CUDA graphs (cudagraph trees).
+
+    Reads the stamp left by the code path that compiled this module, so the
+    answer never depends on which flag asked for the compile. A request flag
+    cannot answer it: ``_compile_pipeline_module_instance`` skips the compile
+    only when the module *is* an ``FSDPModule``, so ``use_fsdp_inference=True``
+    still compiles a transformer handed in through
+    ``from_pretrained(loaded_modules=...)``, or one whose model declares no
+    shard conditions; and ``inference_torch_compile`` reaches cudagraphs
+    through ``torch_compile_kwargs["options"]["triton.cudagraphs"]``.
+    """
+    return bool(getattr(module, DIT_COMPILE_CUDAGRAPHS_ATTR, False))
 
 
 @dataclasses.dataclass

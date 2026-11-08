@@ -139,6 +139,21 @@ class Trainer:
         if self.global_rank == 0 and validation_metrics:
             self.tracker.log(validation_metrics, iteration)
 
+    def _consume_method_requests(self, method: TrainingMethod, checkpoint_manager: Any | None, step: int) -> bool:
+        """Save a method-requested tagged checkpoint and report whether training should stop.
+
+        Runs immediately after every evaluation, including the pre-loop one, so
+        a request always refers to the weights that were just evaluated.
+        """
+        request_hook = getattr(method, "consume_checkpoint_request", None)
+        tag = request_hook() if callable(request_hook) else None
+        if tag and checkpoint_manager is not None:
+            checkpoint_manager.save_tagged(str(tag), step)
+        stop = bool(getattr(method, "stop_requested", False))
+        if stop and self.global_rank == 0:
+            self.tracker.log({"stopped_early_at": float(step)}, step)
+        return stop
+
     def run(
         self,
         method: TrainingMethod,
@@ -186,6 +201,7 @@ class Trainer:
             iteration=start_step,
         )
         self._run_method_validation(method, start_step)
+        stop_early = self._consume_method_requests(method, checkpoint_manager, start_step)
         method.optimizers_zero_grad(start_step)
 
         data_stream = self._iter_dataloader(dataloader,
@@ -210,7 +226,10 @@ class Trainer:
         )
         # Allow method-specific optimization flow (e.g. DiffusionNFT).
         method_manages_optimization = bool(method.manages_optimization())
+        last_step = start_step
         for step in progress:
+            if stop_early:
+                break
             t0 = time.perf_counter()
             if performance_enabled:
                 self.performance_monitor.reset()
@@ -332,14 +351,20 @@ class Trainer:
                 method,
                 iteration=step,
             )
+            last_step = step
+
+            if self._consume_method_requests(method, checkpoint_manager, step):
+                break
+        else:
+            last_step = max_steps
 
         self.callbacks.on_train_end(
             method,
-            iteration=max_steps,
+            iteration=last_step,
         )
 
         if checkpoint_manager is not None:
-            checkpoint_manager.save_final(max_steps)
+            checkpoint_manager.save_final(last_step)
 
         self.performance_monitor.close()
         self.tracker.finish()

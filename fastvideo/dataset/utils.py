@@ -18,6 +18,35 @@ _DTYPE_ALIASES = {
 }
 
 
+
+def read_video_tchw(path: str) -> torch.Tensor:
+    """Read every frame of a video as a ``(T, C, H, W)`` uint8 tensor.
+
+    Tries ``torchvision.io.read_video`` first (available in older
+    torchvision) and falls back to PyAV when the function has been removed
+    (torchvision >= 0.26), the same order as ``fastvideo/tests/utils.py``.
+    """
+    try:
+        from torchvision.io import read_video
+
+        frames, _, _ = read_video(path, output_format="TCHW")
+        return frames
+    except (ImportError, AttributeError):
+        pass
+
+    import av
+
+    with av.open(path) as container:
+        if not container.streams.video:
+            raise RuntimeError(f"No video stream found in {path}")
+        frames = [
+            torch.from_numpy(frame.to_ndarray(format="rgb24")).permute(2, 0, 1) for frame in container.decode(video=0)
+        ]
+    if not frames:
+        raise RuntimeError(f"No video frames decoded from {path}")
+    return torch.stack(frames)
+
+
 @functools.lru_cache(maxsize=None)
 def _normalize_tensor_dtype(dtype_value: Any) -> str:
     """Normalize dtype strings written by NumPy or PyTorch record creators."""
