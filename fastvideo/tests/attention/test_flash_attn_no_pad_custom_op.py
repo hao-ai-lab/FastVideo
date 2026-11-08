@@ -295,6 +295,8 @@ def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kin
 
     torch.manual_seed(42)
     batch, key_len, heads, head_dim = 2, 64, 2, 64
+    if query_len != key_len:
+        _fa2_only(no_pad_impls)
     query = torch.randn(batch, query_len, heads, head_dim, device="cuda", dtype=torch.float16)
     key = torch.randn(batch, key_len, heads, head_dim, device="cuda", dtype=torch.float16)
     value = torch.randn_like(key)
