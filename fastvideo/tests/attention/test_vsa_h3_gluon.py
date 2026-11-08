@@ -38,10 +38,10 @@ def test_h3_dispatch_preserves_mask_and_compression(gated, monkeypatch):
     )
     gate = torch.randn_like(query) * 0.1 if gated else None
     monkeypatch.setattr(backend, "probe_enabled", lambda: None)
-    with envs.FASTVIDEO_H3_VSA_SM120.override(False), envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(False):
+    with envs.FASTVIDEO_H3_VSA_GLUON.override(False), envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(False):
         native = backend.MiniMaxH3VSAImpl(3, 128, False, 128**-0.5)
         expected = native.forward(query, key, value, gate, metadata)
-        with envs.FASTVIDEO_H3_VSA_SM120.override(True):
+        with envs.FASTVIDEO_H3_VSA_GLUON.override(True):
             candidate = backend.MiniMaxH3VSAImpl(3, 128, False, 128**-0.5)
             actual = candidate.forward(query, key, value, gate, metadata)
             with pytest.raises(RuntimeError, match="eager execution"):
@@ -56,7 +56,7 @@ def test_h3_conflicting_routes():
     import fastvideo.envs as envs
     from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAImpl
 
-    with envs.FASTVIDEO_H3_VSA_SM120.override(True):
+    with envs.FASTVIDEO_H3_VSA_GLUON.override(True):
         with pytest.raises(ValueError, match="head dimension 128"):
             MiniMaxH3VSAImpl(3, 64, False, 64**-0.5)
         with envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True):

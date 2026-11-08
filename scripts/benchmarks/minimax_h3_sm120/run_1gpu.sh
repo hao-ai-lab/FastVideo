@@ -6,8 +6,8 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 mode="${1:-}"
 case "${mode}" in
     native) enabled=0 ;;
-    sm120) enabled=1 ;;
-    *) echo "Usage: bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native|sm120 [example arguments]" >&2; exit 2 ;;
+    gluon) enabled=1 ;;
+    *) echo "Usage: bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native|gluon [example arguments]" >&2; exit 2 ;;
 esac
 shift
 model_path="${MODEL_PATH:-/path/to/FastH3-8-Step-V2}"
@@ -21,7 +21,7 @@ mkdir -p "${profile_dir}"
 cd -- "${repo_dir}"
 export PYTHONPATH="${repo_dir}/fastvideo-kernel/python${PYTHONPATH:+:${PYTHONPATH}}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-export FASTVIDEO_H3_VSA_SM120="${enabled}"
+export FASTVIDEO_H3_VSA_GLUON="${enabled}"
 export FASTVIDEO_H3_VSA_SM89_KERNEL=original
 export FASTVIDEO_H3_VSA_FINE_ATTENTION=""
 export FASTVIDEO_H3_VSA_FP4=0
@@ -36,7 +36,7 @@ export FASTVIDEO_H3_ADALN_DUMP=""
 export FASTVIDEO_H3_PARK_MODULES=vae,audio_vae
 
 {
-    echo "SM120 comparison mode: ${mode}; FASTVIDEO_H3_VSA_SM120=${enabled}"
+    echo "Gluon comparison mode: ${mode}; FASTVIDEO_H3_VSA_GLUON=${enabled}"
     echo "Model: ${model_path}"
     echo "Placement: layerwise text encoder; DiT stays on GPU between requests; VAEs offloaded to CPU"
     echo "Log: ${profile_dir}/${mode}.log"

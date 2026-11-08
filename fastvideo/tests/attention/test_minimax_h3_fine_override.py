@@ -69,7 +69,7 @@ def test_bf16_override_keeps_tile128_without_quantization(monkeypatch, env_overr
 def test_compile_warns_that_the_fine_override_is_ignored(monkeypatch, override):
     warnings = []
     monkeypatch.setattr(video_sparse_attn_h3.logger, "warning_once", warnings.append)
-    impl = SimpleNamespace(fine_attention_override=override, layer_idx=3, _sm120=False)
+    impl = SimpleNamespace(fine_attention_override=override, layer_idx=3, _use_gluon=False)
     video_sparse_attn_h3.MiniMaxH3VSAImpl.prepare_for_compile(impl, torch.device("cpu"))
     assert impl._compile_layer_idx.item() == 3
     assert len(warnings) == (override is not None)

@@ -13,10 +13,10 @@ From the FastVideo checkout, with FastVideo and its CUDA dependencies installed:
 ```bash
 export MODEL_PATH=/path/to/FastH3-8-Step-V2
 bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh sm120
+bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh gluon
 ```
 
-`native` sets `FASTVIDEO_H3_VSA_SM120=0`; `sm120` sets it to `1`. The script
+`native` sets `FASTVIDEO_H3_VSA_GLUON=0`; `gluon` sets it to `1`. The script
 automatically uses the source kernel package, including
 `triton_kernels/block_sparse_attn_gluon.py`. No additional CUDA extension
 build or checkpoint conversion is required.
@@ -31,15 +31,15 @@ CPU-offloaded. Host RAM must accommodate the offloaded weights.
 For a single generation without performance warmup:
 
 ```bash
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh sm120 --no-warmup --repeats 1
+bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh gluon --no-warmup --repeats 1
 ```
 
 Additional example arguments can be appended. Use identical sampling and
 execution overrides for both modes when comparing results.
 
 For a checkout at `/root/code/FastVideo`, videos are saved to
-`/root/code/outputs/fasth3_sm120/{native,sm120}/` and logs to
-`/root/code/outputs/profiles/YYYYMMDD_HHMMSS/{native,sm120}.log`.
+`/root/code/outputs/fasth3_sm120/{native,gluon}/` and logs to
+`/root/code/outputs/profiles/YYYYMMDD_HHMMSS/{native,gluon}.log`.
 E2E includes per-request transfers, decoding and saving, but excludes initial
 generator construction and warmup.
 
