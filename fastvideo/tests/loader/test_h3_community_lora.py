@@ -219,6 +219,7 @@ def _pipeline_with_layers(names: list[str], adapter_modules: list[str], min_frac
     return SimpleNamespace(lora_adapters={"default": adapter},
                            lora_layers={"transformer": layers},
                            lora_min_match_fraction=min_fraction,
+                           trainable_transformer_names=["transformer"],
                            trainable_transformer_modules={"transformer": object()})
 
 
@@ -238,7 +239,7 @@ def test_coverage_check_waits_for_a_released_lazy_transformer() -> None:
     pipeline = _pipeline_with_layers([], ["transformer_blocks.0.attn.to_q"])
     # A released lazy DiT drops its LoRA layers, so a valid adapter has nothing to match yet.
     pipeline.lora_layers.pop("transformer")
-    LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
+    assert not LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
 
 
 def test_coverage_check_rejects_a_mostly_unmatched_adapter() -> None:
@@ -307,6 +308,7 @@ def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch:
         lora_adapters={"default": previous},
         lora_adapter_paths={"default": "a.safetensors"},
         lora_layers={"transformer": layers},
+        trainable_transformer_names=["transformer"],
         trainable_transformer_modules={},
         modules={"transformer": SimpleNamespace(param_names_mapping={}, lora_param_names_mapping={})},
         cur_adapter_name="default",
@@ -322,6 +324,7 @@ def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch:
         convert_adapter_state_dict=lambda state, path: state,
     )
     pipeline._check_adapter_coverage = lambda *a: LoRAPipeline._check_adapter_coverage(pipeline, *a)
+    pipeline._transformer_name_mappings = lambda: LoRAPipeline._transformer_name_mappings(pipeline)
     with pytest.raises(ValueError, match="reaches 0 of 1"):
         LoRAPipeline.set_lora_adapter(pipeline, "default", "b.safetensors")
     assert pipeline.lora_adapters["default"] is previous
@@ -381,6 +384,9 @@ class _RecordingLoRALayer(torch.nn.Module):
 
     def set_lora_weights(self, *args, **kwargs) -> None:
         self.applied = True
+
+    def unmerge_lora_weights(self) -> None:
+        pass
 
 
 def test_layers_without_adapter_weights_log_one_summary_warning(monkeypatch: pytest.MonkeyPatch) -> None:

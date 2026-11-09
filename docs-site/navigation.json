@@ -9,6 +9,10 @@
     "icon": "boxes"
   },
   {
+    "label": "News",
+    "href": "/news"
+  },
+  {
     "label": "Get started",
     "icon": "rocket",
     "items": [
@@ -309,6 +313,14 @@
       {
         "label": "Attn-QAT Training",
         "href": "/training/attn_qat"
+      },
+      {
+        "label": "FastH3 NVFP4 QAD",
+        "href": "/training/minimax_h3_fp4_qad"
+      },
+      {
+        "label": "Pika H3 Flex NVFP4 QAD",
+        "href": "/training/pika_h3_flex_qad"
       },
       {
         "label": "HunyuanVideo 1.5 T2V",

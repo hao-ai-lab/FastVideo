@@ -46,6 +46,18 @@ def _accepted(params: frozenset[str], **kwargs) -> dict:
     return {name: value for name, value in kwargs.items() if name in params}
 
 
+# The block-scaled NVFP4 forward (the mSFQ/mSFK scale-factor tensors) only exists in the
+# hao-ai-lab/flash-attention-fp4 fork; the upstream FA4 build the repo's flash-attn-4 pin
+# installs accepts neither kwarg. Probe the signature so callers gate the FP4 paths on the
+# kernel actually installed, not on flash_attn.cute merely importing.
+_FP4_FORWARD_KWARGS = ("mSFQ", "mSFK")
+
+
+def fp4_forward_available() -> bool:
+    """The installed flash_attn.cute accepts the NVFP4 block-scaled forward."""
+    return all(name in _FWD_PARAMS for name in _FP4_FORWARD_KWARGS)
+
+
 try:
     # FA2 serves the calls FA4 cute cannot on pre-sm90 GPUs (backward, GQA).
     # Optional so FA4-only installs can still import this module.
