@@ -260,54 +260,30 @@ GPU; the output is identical. Model loading and decoding come on top of this.
 
 ## Optional Gluon sparse forward on SM120
 
-BF16 tile-64 inference can opt into a Gluon sparse forward on RTX PRO 6000
-Blackwell (compute capability 12.0) with `FASTVIDEO_H3_VSA_GLUON=1`. The default
-is `0`. It requires contiguous BF16 inputs, head dimension 128 and eager
-execution; backward, DiT compilation and conflicting fine-attention overrides
-are rejected. This is a Python JIT kernel, so no additional CUDA extension or
-checkpoint conversion is needed. It changes floating-point reduction order
-and is not bit-exact with native Triton. Validate generated videos separately
-from kernel-level numerical tolerances before adopting it.
+Set `FASTVIDEO_H3_VSA_GLUON=1` to enable the Gluon block-sparse attention
+forward on SM120 (compute capability 12.0). It is disabled by default and
+supports BF16, head dimension 128, 64-token tiles and eager inference only.
+Backward, DiT compilation and conflicting fine-attention overrides are rejected.
+It preserves VSA tile selection and compression but is not bit-exact with
+native Triton.
 
-From a checkout with FastVideo and its CUDA dependencies installed, use the
-source kernel package for the numerical tests and microbenchmark:
+Measured on one RTX PRO 6000 Blackwell Server Edition (96 GB), with PyTorch
+2.12.0+cu130 and Triton 3.7.0. FastH3-8-Step-V2 used BF16, 1344x768,
+362 frames at 24 FPS and eight DiT forwards:
 
-```bash
-export PYTHONPATH="$PWD/fastvideo-kernel/python${PYTHONPATH:+:$PYTHONPATH}"
-pytest fastvideo-kernel/tests/test_vsa_gluon_forward.py -v
-pytest fastvideo/tests/attention/test_vsa_h3_gluon.py -v
-python fastvideo-kernel/benchmarks/bench_vsa_gluon.py
-```
+| Measurement | Native Triton | Gluon | Latency reduction |
+| --- | ---: | ---: | ---: |
+| Sparse forward median | 346.87 ms | 247.04 ms | 28.78% |
+| DiT median | 282.72 s | 244.05 s | 13.68% |
+| E2E median | 314.45 s | 276.73 s | 12.00% |
 
-The kernel tests compare native Triton and an independent FP32 reference,
-including partial tiles, empty selections, padded values, repeatability and
-input contracts. H3 tests cover routing and compression separately. Both
-files skip on non-SM120 GPUs. The microbenchmark validates output and log2-LSE
-before alternating CUDA-event measurements; it excludes mask/index creation
-and layout conversion. Reports use `native_triton` and `gluon` labels and
-default to `../outputs/profiles/YYYYMMDD_HHMMSS/result.{json,log}`.
+Model times are medians of three generations after one excluded warmup,
+using identical AdaLN cache and CPU-offload settings. E2E includes transfers,
+decoding and saving, excluding initial generator construction. The synthetic
+kernel benchmark excludes mask/index creation and layout conversion.
 
-For a paired single-GPU model comparison, use the same checkpoint, prompt,
-sampling, online AdaLN cache and component placement in both modes:
-
-```bash
-export MODEL_PATH=/path/to/FastH3-8-Step-V2
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh native
-bash scripts/benchmarks/minimax_h3_sm120/run_1gpu.sh gluon
-```
-
-The script selects the source kernel package automatically. `native` disables
-the opt-in switch, while `gluon` enables the Gluon forward. See the
-[benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md) for
-output paths and a single-generation check.
-
-The encoder streams its layers from CPU, the DiT stays on GPU between
-requests, and the VAEs are CPU-offloaded. Host RAM must accommodate those
-weights. Each process excludes one warmup and reports three measured
-generations; the requested 360 frames align to 362 at 24 FPS. E2E includes
-per-request transfers, decoding and saving, but excludes initial generator
-construction and warmup. Report both modes' timings, GPU memory and video
-similarity with the checkpoint, runtime versions and execution settings.
+See the [benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md)
+for reproduction commands and tests.
 
 ## Token reduction
 

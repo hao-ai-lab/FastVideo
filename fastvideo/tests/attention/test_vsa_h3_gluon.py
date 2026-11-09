@@ -6,11 +6,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 0),
-    reason="Requires an SM120 CUDA GPU",
-)
-
 
 def _inputs():
     torch.manual_seed(123)
@@ -25,6 +20,10 @@ def _inputs():
     return query, key, value, sizes
 
 
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 0),
+    reason="Requires an SM120 CUDA GPU",
+)
 @pytest.mark.parametrize("gated", [False, True])
 @torch.no_grad()
 def test_h3_dispatch_preserves_mask_and_compression(gated, monkeypatch):
