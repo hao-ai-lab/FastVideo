@@ -203,6 +203,7 @@ GPU; the output is identical. Model loading and decoding come on top of this.
 Set `FASTVIDEO_H3_VSA_GLUON=1` to enable the Gluon block-sparse attention
 forward on SM120 (compute capability 12.0). It is disabled by default and
 supports BF16, head dimension 128, 64-token tiles and eager inference only.
+Backward, DiT compilation and conflicting fine-attention overrides are rejected.
 It preserves VSA tile selection and compression but is not bit-exact with
 native Triton.
 
