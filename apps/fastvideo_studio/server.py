@@ -661,8 +661,7 @@ def get_video(job_id: str) -> FileResponse:
     if not os.path.isfile(job.output_path):
         raise HTTPException(status_code=404, detail="Output file not found on disk")
 
-    media_type = ("video/mp4" if job.output_path.endswith(".mp4") else "image/png")
-    return FileResponse(job.output_path, media_type=media_type)
+    return FileResponse(job.output_path)
 
 
 @app.get("/api/jobs/{job_id}/download_log")

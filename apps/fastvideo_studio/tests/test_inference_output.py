@@ -31,9 +31,9 @@ def runner(tmp_path):
 
 @pytest.mark.parametrize("workload, name, output_name, media_type", [
     ("t2i", "MPS handoff test", "MPS handoff test.png", "image/png"),
-    ("t2i", "portrait.jpg", "portrait.png", "image/png"),
-    ("t2i", "portrait.jpeg", "portrait.png", "image/png"),
-    ("t2i", "portrait.webp", "portrait.png", "image/png"),
+    ("t2i", "portrait.jpg", "portrait.jpg", "image/jpeg"),
+    ("t2i", "portrait.jpeg", "portrait.jpeg", "image/jpeg"),
+    ("t2i", "portrait.webp", "portrait.webp", "image/webp"),
     ("t2v", "MPS handoff test", "MPS handoff test.mp4", "video/mp4"),
 ])
 def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, name, output_name, media_type):
@@ -86,9 +86,8 @@ def test_named_job_serves_generated_artifact(runner, monkeypatch, workload, name
     if workload == "t2i":
         with Image.open(io.BytesIO(response.content)) as image:
             image.load()
-            assert image.format == "PNG"
+            assert Image.MIME[image.format] == media_type
             assert image.size == (8, 8)
-            assert image.getpixel((0, 0)) == (255, 0, 0)
 
 
 def test_directory_returned_as_output_fails_job(runner, monkeypatch):

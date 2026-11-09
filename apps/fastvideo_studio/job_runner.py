@@ -1103,8 +1103,6 @@ class JobRunner:
             # Without a name FastVideo derives the filename from the prompt.
             safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
             output_video_name = safe_name[:80] or None
-            if output_video_name and job.workload_type.endswith("2i"):
-                output_video_name = str(Path(output_video_name).with_suffix(".png"))
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
                 "output_path": job_output_dir,
