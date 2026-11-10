@@ -87,7 +87,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 # Filter out samples without text
                 valid_indices = []
                 for i, text in enumerate(data["text"]):
-                    if text and text.strip():  # Check if text is not empty
+                    if text and text.strip():
                         valid_indices.append(i)
                 self.num_processed_samples += len(valid_indices)
 
@@ -265,8 +265,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        self.video_data: dict[str, Any] = {}  # Store video metadata and paths
-        self.latent_data: dict[str, Any] = {}  # Store latent tensors
+        self.video_data: dict[str, Any] = {}
+        self.latent_data: dict[str, Any] = {}
         self.preprocess_text_and_trajectory(fastvideo_args, args)
 
 

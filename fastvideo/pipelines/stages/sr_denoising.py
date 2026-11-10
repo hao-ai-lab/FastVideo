@@ -61,10 +61,10 @@ class SRDenoisingStage(PipelineStage):
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
-            dtype=torch.float16,  # TODO(will): hack
+            dtype=torch.float16,
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
                                           AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+                                          AttentionBackendEnum.SAGE_ATTN_THREE),
             # See DenoisingStage: use this transformer's recorded decision
             # rather than the environment.
             requested=component_attention_backend(self.transformer),

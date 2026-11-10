@@ -945,7 +945,7 @@ class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
         # Create mask_cond: ones for first frame, zeros for rest
         # Shape: (B, 16, latent_frames, latent_height, latent_width)
         mask_cond = torch.ones_like(img_cond)
-        mask_cond[:, :, 1:] = 0  # Set all frames except first to 0
+        mask_cond[:, :, 1:] = 0
 
         # Create cond_concat: first 4 channels of mask + all 16 channels of img_cond
         # Shape: (B, 20, latent_frames, latent_height, latent_width)

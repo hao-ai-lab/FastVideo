@@ -1,4 +1,3 @@
-# export WANDB_MODE="offline"
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 MODEL_TYPE="wan"

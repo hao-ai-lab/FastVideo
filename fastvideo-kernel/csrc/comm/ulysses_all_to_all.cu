@@ -267,7 +267,6 @@ void ulysses_a2a_tuned(int64_t handle, torch::Tensor inp, torch::Tensor out, int
 #undef LAUNCH_ULYSSES_A2A
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "ulysses_a2a kernel launch failed");
-  // Copy this rank's completed result out of the window.
   auto status = cudaMemcpyAsync(out.data_ptr(), ctx->buf, out_bytes, cudaMemcpyDeviceToDevice,
                                 stream);
   TORCH_CHECK(status == cudaSuccess, "ulysses_a2a copy-out failed: ", cudaGetErrorString(status));

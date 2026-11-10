@@ -252,7 +252,7 @@ def select_aligned_memory_frames(
 
     historical_clip_indices = list(range(4, current_frame_idx - temporal_context_size, 4))
 
-    memory_frames_indices = [0, 1, 2, 3]  # add the first chunk as context
+    memory_frames_indices = [0, 1, 2, 3]
     memory_frames = memory_frames - temporal_context_size
 
     for hist_idx in historical_clip_indices:

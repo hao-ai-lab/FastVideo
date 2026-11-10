@@ -1117,7 +1117,7 @@ class DistillationPipeline(TrainingPipeline):
             if self.rank_in_sp_group == 0:
                 if self.global_rank == 0:
                     # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
+                    all_videos = step_videos
                     all_captions = step_captions
                     all_audios = step_audios
                     all_audio_sample_rates = step_audio_sample_rates

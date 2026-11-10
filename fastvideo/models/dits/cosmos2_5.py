@@ -96,7 +96,7 @@ class Cosmos25TimestepEmbedding(nn.Module):
 
         if self.use_adaln_lora:
             adaln_lora = emb  # (B, T, 3D)
-            emb_standard = sample  # Use input as standard embedding
+            emb_standard = sample
         else:
             emb_standard = emb
             adaln_lora = None
@@ -736,7 +736,7 @@ class Cosmos25Transformer3DModel(BaseDiT):
         patch_embed_in_channels = config.in_channels  # Base VAE channels (16)
         patch_embed_in_channels += 1  # Always add 1 for condition_mask
         if config.concat_padding_mask:
-            patch_embed_in_channels += 1  # Add 1 for padding_mask
+            patch_embed_in_channels += 1
         # Total: 16 + 1 + 1 = 18 (with concat_padding_mask=True)
 
         self.patch_embed = Cosmos25PatchEmbed(patch_embed_in_channels, inner_dim, config.patch_size)

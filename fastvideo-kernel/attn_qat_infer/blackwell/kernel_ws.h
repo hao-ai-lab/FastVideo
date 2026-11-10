@@ -97,7 +97,6 @@ __global__ void __launch_bounds__(Ktraits::kNWarps * cutlass::NumThreadsPerWarp,
         CollectiveEpilogue::prefetch_tma_descriptors(epilogue_params);
     }
 
-    // Obtain warp index
 
     PipelineParams pipeline_params_v;
     pipeline_params_v.transaction_bytes = CollectiveMainloop::TmaTransactionBytesV;
@@ -142,7 +141,7 @@ __global__ void __launch_bounds__(Ktraits::kNWarps * cutlass::NumThreadsPerWarp,
         cutlass::arch::warpgroup_reg_dealloc<24>();
         TileScheduler scheduler;
         
-        if (producer_warp_role == ProducerWarpRole::Mainloop) {  // Load Q, K, V
+        if (producer_warp_role == ProducerWarpRole::Mainloop) {
             PipelineStateQ smem_pipe_write_q = cutlass::make_producer_start_state<MainloopPipelineQ>();
             PipelineState smem_pipe_write_k = cutlass::make_producer_start_state<MainloopPipeline>();
             PipelineState smem_pipe_write_v = cutlass::make_producer_start_state<MainloopPipeline>();
@@ -179,8 +178,6 @@ __global__ void __launch_bounds__(Ktraits::kNWarps * cutlass::NumThreadsPerWarp,
         for (auto work_tile_info = scheduler.get_initial_work(); work_tile_info.is_valid(scheduler_params); work_tile_info = scheduler.get_next_work(scheduler_params, work_tile_info)) {
             // Attention output (GEMM-II) accumulator.
             Tensor tOrO = partition_fragment_C(tiled_mma_pv, select<0, 2>(TileShape_MNK{}));
-            // flash::Softmax<2 * (2 * kBlockM / NumMmaThreads)> softmax;
-            // Pass single_level_p_quant flag to control P quantization mode
             flash::SoftmaxFused<2 * (2 * kBlockM / NumMmaThreads)> softmax_fused(params.single_level_p_quant);
             auto block_coord = work_tile_info.get_block_coord(scheduler_params);
             auto [m_block, bidh, bidb] = block_coord;

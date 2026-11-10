@@ -218,7 +218,6 @@ class TestSegmentFlow:
             assert step["type"] == "step_complete"
             media_init = ws.receive_json()
             assert media_init["type"] == "media_init"
-            # Then one or more binary frames until media_segment_complete.
             saw_binary = False
             while True:
                 msg = ws.receive()

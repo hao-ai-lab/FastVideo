@@ -243,7 +243,6 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         if self.solver_p:
             self.solver_p.set_timesteps(self.num_inference_steps, device=device)
 
-        # add an index counter for schedulers that allow duplicated timesteps
         self._step_index = None
         self._begin_index = None
         self.sigmas = self.sigmas.to("cpu")  # to avoid too much CPU/GPU communication

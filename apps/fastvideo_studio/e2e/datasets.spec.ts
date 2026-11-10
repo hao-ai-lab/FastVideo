@@ -10,7 +10,6 @@ test.describe('datasets', () => {
   skipWithoutMock();
 
   test('lists the seeded datasets', async ({ page, request }) => {
-    // Read the seeded names from the mock so the assertion tracks the fixture.
     const res = await request.get(`${API_BASE}/datasets`);
     const datasets = (await res.json()) as Array<{ name: string }>;
     expect(datasets.length).toBeGreaterThan(0);

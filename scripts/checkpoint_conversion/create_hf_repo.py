@@ -81,7 +81,7 @@ def main():
     # Remove existing weights in target component dir to avoid mixing shards/files
     existing_weights = glob.glob(os.path.join(target_component_dir, "*.safetensors")) + \
                        glob.glob(os.path.join(target_component_dir, "*.bin")) + \
-                       glob.glob(os.path.join(target_component_dir, "*.index.json")) # Remove index if present
+                       glob.glob(os.path.join(target_component_dir, "*.index.json"))
 
     for ew in existing_weights:
         print(f"Removing existing weight file: {ew}")

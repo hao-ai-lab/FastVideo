@@ -155,7 +155,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         # Create mask_cond: ones for first frame, zeros for rest
         # Shape: (B, 16, latent_frames, latent_height, latent_width)
         mask_cond = torch.ones_like(latent_condition)
-        mask_cond[:, :, 1:] = 0  # Set all frames except first to 0
+        mask_cond[:, :, 1:] = 0
         # Create cond_concat: first 4 channels of mask + all 16 channels of img_cond
         # Shape: (B, 20, latent_frames, latent_height, latent_width)
         cond_concat = torch.cat([mask_cond[:, :4], latent_condition], dim=1)
@@ -193,7 +193,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                 # Filter out invalid samples (those with all zeros)
                 valid_indices = []
                 for i, pixel_values in enumerate(data["pixel_values"]):
-                    if not torch.all(pixel_values == 0):  # Check if all values are zero
+                    if not torch.all(pixel_values == 0):
                         valid_indices.append(i)
                 self.num_processed_samples += len(valid_indices)
 
@@ -362,8 +362,8 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        self.video_data: dict[str, Any] = {}  # Store video metadata and paths
-        self.latent_data: dict[str, Any] = {}  # Store latent tensors
+        self.video_data: dict[str, Any] = {}
+        self.latent_data: dict[str, Any] = {}
         self.preprocess_action_and_trajectory(fastvideo_args, args)
 
 

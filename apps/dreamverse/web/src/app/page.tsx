@@ -2853,7 +2853,6 @@ export default function Page() {
 							onSelectCurrent={() => {
 								const clips = completedClips as any[];
 								if (sessionStarted && !sessionExpired) {
-									// Return to live playback
 									streamStore.patch({ activeClipId: "", activePlaybackStartTime: 0 });
 								} else if (clips.length > 0) {
 									selectClip(clips[clips.length - 1].id, 0);

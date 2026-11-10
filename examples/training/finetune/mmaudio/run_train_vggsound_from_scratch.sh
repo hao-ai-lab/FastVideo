@@ -6,9 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
-# ---------------------------------------------------------------------------
 # Edit the training run here. No environment variables are required.
-# ---------------------------------------------------------------------------
 VARIANT="small_44k"
 
 FEATURE_DIR="/mnt/lustre/vlm-kai/datasets/VGGSound/mmaudio_features_torio/train"

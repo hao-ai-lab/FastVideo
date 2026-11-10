@@ -191,7 +191,7 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id, env_overrides):
 
             # Try match with unsanitized prefix (for legacy reference videos)
             # Remove .mp4 and compare the base names after sanitization
-            base_filename = filename[:-4]  # Remove .mp4
+            base_filename = filename[:-4]
             if _sanitize_filename_component(base_filename) == output_video_name:
                 reference_video_name = filename
                 break

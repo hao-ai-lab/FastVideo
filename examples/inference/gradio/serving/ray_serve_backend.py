@@ -187,8 +187,8 @@ class BaseModelDeployment:
             num_gpus=1,
             use_fsdp_inference=True,
             text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],  # TODO: hardocde for I2V
-            dit_precision="fp32",  # TODO: hardocde for I2V
+            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],
+            dit_precision="fp32",
             dit_cpu_offload=config["dit_cpu_offload"],
             vae_cpu_offload=config["vae_cpu_offload"],
             VSA_sparsity=config["VSA_sparsity"],

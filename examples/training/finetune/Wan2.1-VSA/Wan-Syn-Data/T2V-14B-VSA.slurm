@@ -31,7 +31,6 @@ export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
@@ -41,8 +40,6 @@ NUM_GPUS=8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DATASET_FILE=your_validation_dataset_file
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
 
 # Core training arguments
 core_training_args=(

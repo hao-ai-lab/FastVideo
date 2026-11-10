@@ -118,7 +118,7 @@ def score_all_metrics(video_path: str) -> None:
     for name in ev.metric_names:
         r = results[0].get(name)
         if r is None:
-            continue  # set metric, will show in corpus section
+            continue
         if r.score is None:
             print(f"  {name}: SKIPPED — {r.details.get('skipped', 'no score')}")
         else:

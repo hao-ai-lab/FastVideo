@@ -68,9 +68,7 @@ void set_params_fprop(Flash_fwd_params &params,
                       bool single_level_p_quant=false,
                       bool seqlenq_ngroups_swapped=false) {
 
-    // Reset the parameters
     params = {};
-    // Set the pointers and strides.
     params.q_ptr = q.data_ptr();
     params.k_ptr = k.data_ptr();
     params.v_ptr = v.data_ptr();
@@ -119,13 +117,11 @@ void set_params_fprop(Flash_fwd_params &params,
     params.cu_seqlens_k = static_cast<int *>(cu_seqlens_k_d);
     params.seqused_k = static_cast<int *>(seqused_k);
 
-    // P = softmax(QK^T)
     params.p_ptr = p_d;
 
     // Softmax sum
     params.softmax_lse_ptr = softmax_lse_d;
 
-    // Set the dimensions.
     params.b = b;
     params.h = h;
     params.h_k = h_k;
@@ -140,7 +136,6 @@ void set_params_fprop(Flash_fwd_params &params,
 
     params.head_divmod = cutlass::FastDivmod(int(h));
 
-    // Set the different scale values.
     params.scale_softmax = softmax_scale;
     params.scale_softmax_log2 = softmax_scale * M_LOG2E;
     __half scale_softmax_log2_half = __float2half(params.scale_softmax_log2);
@@ -149,10 +144,6 @@ void set_params_fprop(Flash_fwd_params &params,
 
     // Set this to probability of keeping an element to simplify things.
     params.p_dropout = 1.f - p_dropout;
-    // Convert p from float to int so we don't have to convert the random uint to float to compare.
-    // [Minor] We want to round down since when we do the comparison we use <= instead of <
-    // params.p_dropout_in_uint = uint32_t(std::floor(params.p_dropout * 4294967295.0));
-    // params.p_dropout_in_uint16_t = uint16_t(std::floor(params.p_dropout * 65535.0));
     params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0));
     params.rp_dropout = 1.f / params.p_dropout;
     params.scale_softmax_rp_dropout = params.rp_dropout * params.scale_softmax;
@@ -276,18 +267,12 @@ mha_fwd_impl(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head
     CHECK_SHAPE(q, batch_size, num_heads, seqlen_q, head_size_og);
     CHECK_SHAPE(k, batch_size, num_heads_k, seqlen_k, head_size_og);
     CHECK_SHAPE(v, batch_size, num_heads_k, unpacked_head_size, seqlen_k/2);
-    // CHECK_SHAPE(delta_s, batch_size, num_heads, seqlen_q / 128, seqlen_k);
-    // CHECK_SHAPE(sfq, batch_size, seqlen_q, num_heads, unpacked_head_size);
-    // CHECK_SHAPE(sfk, batch_size, seqlen_k, num_heads_k, unpacked_head_size);
-    // CHECK_SHAPE(sfv, batch_size, unpacked_head_size, num_heads_k, seqlen_k);
     TORCH_CHECK(unpacked_head_size % 8 == 0, "head_size must be a multiple of 8");
     
     auto dtype = is_bf16 ? at::ScalarType::BFloat16 : at::ScalarType::Half;
     at::Tensor out = torch::empty({batch_size, num_heads, seqlen_q, unpacked_head_size}, opts.dtype(dtype));
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    // const int head_size = round_multiple(head_size_og, 8);
-    // const int head_size_rounded = round_multiple(head_size, 32);
     const int seqlen_q_rounded = round_multiple(seqlen_q, flash::BLOCK_M);
     const int seqlen_k_rounded = round_multiple(seqlen_k, flash::BLOCK_N);
 
@@ -348,10 +333,6 @@ mha_fwd_impl(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head
     //     if (out_.has_value()) { out_.value().copy_(out); }
     // }
 
-    // return {out, q_padded, k_padded, v_padded, out_padded, softmax_lse, p};
-    // cudaDeviceSynchronize();
-    // auto err = cudaGetLastError();
-    // printf("%s\n", cudaGetErrorString(err));
     return {out, softmax_lse};
 }
 

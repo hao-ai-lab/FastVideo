@@ -77,7 +77,6 @@ training_args=(
   --simulate_generator_forward
   --num_frames 81
   --num_frame_per_block 3
-  # --init_weights_from_safetensors "path/to/generator_ema.safetensors"
 )
 
 parallel_args=(

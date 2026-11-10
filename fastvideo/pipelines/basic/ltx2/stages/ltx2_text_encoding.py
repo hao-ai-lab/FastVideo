@@ -158,7 +158,6 @@ class LTX2TextEncodingStage(TextEncodingStage):
         # LTX2 audio negative embeddings
         has_audio_neg = int(d["_has_audio_neg"].item()) == 1
         if has_audio_neg:
-            # Use same count as audio embeds
             num_audio = int(d["_num_audio_embeds"].item())
             audio_neg = [d[f"audio_neg_embed_{i}"] for i in range(num_audio)]
             batch.extra["ltx2_audio_negative_embeds"] = audio_neg

@@ -56,14 +56,12 @@ public:
     int tidx = threadIdx.x;
     float x[NumElementPerThread];
 
-    // load
     Loader<InputDtype, 1, MaxHiddenSize, NumThrPerCta, true, IsEven> loader;
     loader.load(params.Iptr, x, params.m, params.n, blk_m, 0, tidx);
 
     // rms reduction
     float rms = sqrtf(_reduce_square(x, shared_data) / params.n + params.eps);
 
-    // load weight
     Loader<WeightDtype, 1, MaxHiddenSize, NumThrPerCta, true, IsEven> weight_loader;
     float w[NumElementPerThread];
     loader.load(params.Wptr, w, 1, params.n, 0, 0, tidx);
@@ -73,7 +71,6 @@ public:
     for (int i = 0; i < NumElementPerThread; ++i)
       x[i] = w[i] * x[i] / rms ;
 
-    // save y
     OutputDtype *output_reg = (OutputDtype*)x;
     if constexpr (!std::is_same_v<OutputDtype, float>) {
       output_reg = (OutputDtype*)w;

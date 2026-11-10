@@ -81,7 +81,7 @@ for k, v in state_dict.items():
     for pattern, replacement in _self_forcing_to_diffusers_param_names_mapping.items():
         if re.match(pattern, k):
             new_key = re.sub(pattern, replacement, k)
-            break  # Stop at the first match
+            break
     else:
         raise ValueError(f"No match found for {k}")
     new_state_dict[new_key] = v

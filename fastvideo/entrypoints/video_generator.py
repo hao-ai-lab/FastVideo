@@ -321,7 +321,7 @@ class VideoGenerator:
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
-            log_stats=False,  # TODO: implement
+            log_stats=False,
             log_queue=log_queue,
         )
 

@@ -393,7 +393,6 @@ class TestReconstructPruned:
 
         full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
 
-        # Check that kept positions match exactly
         for n in range(N):
             for i, pos in enumerate(keep_indices[0, 0, n].tolist()):
                 assert torch.allclose(
@@ -426,7 +425,6 @@ class TestReconstructPruned:
 
         assert torch.allclose(full_output, sparse_output, atol=1e-6)
 
-# ---------------------------------------------------------------------------
 
 
 # End-to-end BSAAttentionImpl.forward tests

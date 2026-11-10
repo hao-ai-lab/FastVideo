@@ -418,7 +418,7 @@ class ActionModule(nn.Module):
             ]
 
         group_mouse = torch.stack(group_mouse, dim=1)
-        actual_num_frames = group_mouse.shape[1]  # Use actual stacked frame count
+        actual_num_frames = group_mouse.shape[1]
 
         S = th * tw
         group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)

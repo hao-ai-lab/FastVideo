@@ -310,9 +310,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                 else                   { mul(max_vec_last_scaled, max_vec_last_scaled, 1.44269504089f*0.08838834764f); }
                 
                 warpgroup::mma_async_wait();
-                // apply non-pad mask
                 int offset = g.text_L - (kv_idx - (kv_iters + 1)) * K::kv_height;
-                // printf("k_idx_start: %d, k_idx_end: %d, text_end: %d, offset: %d\n", k_idx_start, k_idx_end, text_end, offset);
                 right_fill(att_block, att_block, offset, base_types::constants<float>::neg_infty());
 
 
@@ -437,7 +435,6 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    //cudadevicesynchronize();
     const c10::cuda::OptionalCUDAGuard device_guard(q.device());
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
@@ -578,10 +575,8 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
 
         }
         CHECK_CUDA_ERROR(cudaGetLastError());
-        // cudaStreamSynchronize(stream);
     }
 
     return o;
-    //cudadevicesynchronize();
 }
 

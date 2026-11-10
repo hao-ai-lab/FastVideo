@@ -219,15 +219,12 @@ describe('createAvPipeline', () => {
       updating = false;
 
       addEventListener(): void {
-        // noop for test
       }
 
       removeEventListener(): void {
-        // noop for test
       }
 
       appendBuffer(): void {
-        // noop for test
       }
     }
 
@@ -335,11 +332,9 @@ describe('createAvPipeline', () => {
       appendBuffer = vi.fn();
 
       addEventListener(): void {
-        // noop for test
       }
 
       removeEventListener(): void {
-        // noop for test
       }
     }
 

@@ -170,7 +170,7 @@ class HYWorldDenoisingStage(DenoisingStage):
                 for chunk_start_idx in range(
                         current_frame_idx,
                         current_frame_idx + chunk_latent_frames,
-                        4,  # Process every 4 frames
+                        4,
                 ):
                     selected_history_frame_id = select_aligned_memory_frames(
                         viewmats[0].cpu().detach().numpy(),

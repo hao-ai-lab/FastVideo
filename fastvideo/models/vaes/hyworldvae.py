@@ -865,7 +865,6 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
 
         self.clear_cache()
 
-        # Process in chunks: first frame alone, then groups of 4 frames
         iter_ = 1 + (num_frame - 1) // 4
         for i in range(iter_):
             self._enc_conv_idx = [0]

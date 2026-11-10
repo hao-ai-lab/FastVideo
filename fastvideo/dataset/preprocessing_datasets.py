@@ -569,7 +569,7 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
         with open(self.data_merge_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line:  # Skip empty lines
+                if line:
                     prompts.append(line)
 
         logger.info(f"Loaded {len(prompts)} text prompts from {self.data_merge_path}")

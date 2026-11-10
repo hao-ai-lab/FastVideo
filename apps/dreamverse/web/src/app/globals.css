@@ -110,7 +110,6 @@
 	--radius-xl: calc(var(--radius) + 4px);
 }
 
-/* ——— Resets ——— */
 
 *,
 *::before,
@@ -194,7 +193,6 @@ summary::-webkit-details-marker {
 	color: #ffffff;
 }
 
-/* ——— Base layer ——— */
 
 @layer base {
 	* {
@@ -205,7 +203,6 @@ summary::-webkit-details-marker {
 	}
 }
 
-/* ——— Utilities ——— */
 
 @layer utilities {
 	.scrollbar-hidden {
@@ -269,7 +266,6 @@ summary::-webkit-details-marker {
 	animation: stt-pulse 1.4s ease-in-out infinite;
 }
 
-/* ——— Theme transition ——— */
 
 html.theme-transition,
 html.theme-transition *,
@@ -284,7 +280,6 @@ html.theme-transition *::after {
 		stroke 300ms ease !important;
 }
 
-/* —————————————— CUSTOM TAILWIND —————————————— */
 
 @layer components {
 	.debug {

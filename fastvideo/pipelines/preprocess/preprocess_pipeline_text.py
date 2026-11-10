@@ -61,7 +61,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                 # Filter out samples without text
                 valid_indices = []
                 for i, text in enumerate(data["text"]):
-                    if text and text.strip():  # Check if text is not empty
+                    if text and text.strip():
                         valid_indices.append(i)
                 self.num_processed_samples += len(valid_indices)
 
@@ -160,7 +160,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        self.text_data: dict[str, Any] = {}  # Store text metadata and paths
+        self.text_data: dict[str, Any] = {}
 
         self.preprocess_text_only(fastvideo_args, args)
 

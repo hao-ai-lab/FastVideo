@@ -327,7 +327,7 @@ def test_cosmos25_transformer():
                     forward_batch=forward_batch,
             ):
                 # FastVideo expects padding_mask in [B, 1, H, W] format
-                padding_mask_fv = padding_mask.unsqueeze(1)  # Add channel dimension for FastVideo
+                padding_mask_fv = padding_mask.unsqueeze(1)
                 # FastVideo supports both [B] and [B, T] formats - use [B, T] to match official model
                 # This ensures each frame gets its own timestep embedding (even if values are the same)
                 timestep_fv = timestep  # Already in [B, T] format

@@ -9,7 +9,6 @@ import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .quant_utils import fake_quantize_q, fake_quantize_kv, fake_quantize
-# from attn_qat_infer.api import triton_group_mean
 
 
 def is_cuda():
@@ -141,7 +140,6 @@ def _attn_fwd_inner(acc,
     elif STAGE == 2:
         lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
         lo = tl.multiple_of(lo, BLOCK_M)
-    # causal = False
     else:
         lo, hi = 0, N_CTX
     offsetk_y = offset_y + lo  # offset from the start of the current batch-head combination
@@ -149,7 +147,6 @@ def _attn_fwd_inner(acc,
         offsetv_y = offset_y * HEAD_DIM + lo
     else:
         offsetv_y = offset_y + lo
-    # loop over k, v and update accumulator
     for start_n in tl.range(lo, hi, BLOCK_N, warp_specialize=warp_specialize):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         kv_valid = (start_n + offs_n) < N_CTX
@@ -191,7 +188,6 @@ def _attn_fwd_inner(acc,
             acc = acc * alpha[:, None]
             if IS_QAT:
                 high_prec_acc = high_prec_acc * alpha[:, None]
-        # prepare p and v for the dot
         if dtype == tl.float8e5:
             v = desc_v.load([0, offsetv_y]).T
         else:
@@ -298,7 +294,6 @@ configs = [
     for s in NUM_STAGES_OPTIONS for w in [4, 8]
 ]
 if "PYTEST_VERSION" in os.environ:
-    # Use a single config in testing for reproducibility
     configs = [
         triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=2, num_warps=4, pre_hook=_host_descriptor_pre_hook),
     ]
@@ -329,8 +324,6 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
-# @triton.autotune(configs=list(filter(keep, configs)), key=["N_CTX_Q", "N_CTX_KV", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-#                  prune_configs_by={'early_config_prune': prune_invalid_configs}, cache_results=True)
 @triton.jit
 def _attn_fwd(
     sm_scale,
@@ -398,11 +391,9 @@ def _attn_fwd(
     offset_y_q = off_z * (N_CTX_Q * H) + off_h * N_CTX_Q  # offset for query tensor
     offset_y_kv = off_z * (N_CTX_KV * H) + off_h * N_CTX_KV  # offset for key/value tensors
     qo_offset_y = offset_y_q + start_m * BLOCK_M
-    # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)  # for kv blocks
     q_valid = offs_m < N_CTX_Q
-    # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
     acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
@@ -411,10 +402,8 @@ def _attn_fwd(
     else:
         # dummy value
         high_prec_acc = acc
-    # load scales
     qk_scale = sm_scale
     qk_scale *= 1.44269504  # 1/log(2)
-    # load q: it will stay in SRAM throughout
     q = desc_q.load([qo_offset_y, 0])  # load from start of q block and start of the entire head dimension
     q = tl.where(q_valid[:, None], q, 0.0)
     # stage 1: off-band
@@ -434,7 +423,6 @@ def _attn_fwd(
                                                            BLOCK_N, 4 - STAGE, offs_m, offs_n, N_CTX_KV,
                                                            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P,
                                                            two_level_quant_P, use_global_sf_P, JOIN_QAT_PV)
-    # stage 2: on-band
     if STAGE & 2:
         acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
                                                        offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
@@ -505,12 +493,10 @@ def _attn_bwd_preprocess(O, DO, Delta, Z, H, N_CTX, BLOCK_M: tl.constexpr, HEAD_
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     valid = off_m < N_CTX
-    # load
     o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None])
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
                  mask=valid[:, None]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
-    # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=valid)
 
 
@@ -573,7 +559,6 @@ def _attn_bwd_dkdv(
             qk = tl.where(mask, qk, -1.0e6)
         p = tl.math.exp2(qk - m[:, None])
         do = tl.load(do_ptrs, mask=q_valid[:, None])
-        # Compute dV.
         p_quant = p
         if IS_QAT and fake_quant_P:
             p_quant, _ = fake_quantize(src_tensor=p,
@@ -586,7 +571,6 @@ def _attn_bwd_dkdv(
         dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m, mask=q_valid)
-        # Compute dP and dS.
         dp = tl.dot(do, tl.trans(v))
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.bfloat16)
@@ -659,7 +643,6 @@ def _attn_bwd_dq(
             mask = (offs_m[:, None] >= offs_n[None, :])
             qk = tl.where(mask, qk, -1.0e6)
         p = tl.math.exp2(qk - m)
-        # Compute dP and dS.
         dp = tl.dot(do, tl.trans(v))
         ds = p * (dp - Di[:, None])
         # Compute dQ.
@@ -1037,7 +1020,6 @@ def _attn_bwd(
     if SMOOTH_Q:
         Q_MEAN += adj
 
-    # load scales
     offs_k = tl.arange(0, HEAD_DIM)
 
     start_n = pid * BLOCK_N1
@@ -1050,7 +1032,6 @@ def _attn_bwd(
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
     dk = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
 
-    # load K and V: they stay in SRAM throughout the inner loop.
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d, mask=kv_valid[:, None])
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d, mask=kv_valid[:, None])
 
@@ -1101,7 +1082,6 @@ def _attn_bwd(
         start_m = 0
         num_steps = (N_CTX + BLOCK_M1 - 1) // BLOCK_M1
 
-    # Compute dK and dV for non-masked blocks.
     dk, dv = _attn_bwd_dkdv(dk,
                             dv,
                             Q,
@@ -1133,7 +1113,6 @@ def _attn_bwd(
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
-    # Write back dK.
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     tl.store(dk_ptrs, dk, mask=kv_valid[:, None])
@@ -1185,14 +1164,12 @@ def _attn_bwd(
             warp_specialize=warp_specialize,
         )
         end_n -= num_steps * MASK_BLOCK_N2
-        # stage 2: process KV blocks from 0 to end_n (before diagonal), ceiling division to include remainder
         num_steps = (end_n + BLOCK_N2 - 1) // BLOCK_N2
         start_n = 0
     else:
         # For non-causal, process all KV blocks from 0 to N_CTX (ceiling division to include remainder)
         num_steps = (N_CTX + BLOCK_N2 - 1) // BLOCK_N2
         start_n = 0
-    # stage 2
     dq = _attn_bwd_dq(
         dq,
         q,
@@ -1299,7 +1276,6 @@ class _attention(torch.autograd.Function):
         if IS_QAT:
             high_prec_o = torch.empty_like(q)
         else:
-            # Initialize to a dummy value
             high_prec_o = o
         stage = 3 if causal else 1
         extra_kern_args = {}
@@ -1442,7 +1418,6 @@ class _attention(torch.autograd.Function):
                 use_global_sf=use_global_sf_QKV,
             )
 
-        # Apply pre-hook to set block shapes on tensor descriptors
         _host_descriptor_pre_hook({
             "BLOCK_M": fwd_block_m,
             "BLOCK_N": fwd_block_n,
@@ -1647,7 +1622,6 @@ class _attention(torch.autograd.Function):
                 num_stages=dkdv_launch[1],
             )
         elif N_CTX_Q == N_CTX_KV:
-            # Use existing kernel for self-attention (same sequence lengths)
             grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
             _attn_bwd[grid](q,
                             arg_k,
@@ -1684,7 +1658,6 @@ class _attention(torch.autograd.Function):
                             num_warps=NUM_WARPS,
                             num_stages=NUM_STAGES)
         else:
-            # Use separate kernels for cross-attention (different sequence lengths)
             grid_dq = ((N_CTX_Q + BLOCK_M2 - 1) // BLOCK_M2, 1, BATCH * N_HEAD)
             _attn_bwd_dq_cross[grid_dq](
                 q,

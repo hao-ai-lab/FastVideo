@@ -5,7 +5,6 @@ MODEL_PATH="Matrix-Game-2.0-Base-Diffusers"
 DATA_MERGE_PATH="footsies-dataset/merge.txt"
 OUTPUT_DIR="footsies-dataset/preprocessed/"
 
-# export CUDA_VISIBLE_DEVICES=0
 export MASTER_ADDR=localhost
 export MASTER_PORT=29500
 export RANK=0

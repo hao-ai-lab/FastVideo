@@ -497,7 +497,7 @@ def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None, pipeline
         model_path=str(vae_dir),
         pipeline_config=pipeline_config or PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
         h3_vae_nvfp4_decoder=decoder)
-    args.vae_cpu_offload = cpu  # load on CPU
+    args.vae_cpu_offload = cpu
     return VAELoader().load(str(vae_dir), args)
 
 

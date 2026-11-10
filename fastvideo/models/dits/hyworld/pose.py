@@ -235,7 +235,7 @@ def pose_to_input(
         if move_norms > move_norm_valid:  # threshold for movement
             move_norm_dirs = move_dirs / move_norms
             angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
-            trans_angles_deg = angles_rad * (180.0 / np.pi)  # convert to degrees
+            trans_angles_deg = angles_rad * (180.0 / np.pi)
         else:
             trans_angles_deg = np.zeros(3)
 

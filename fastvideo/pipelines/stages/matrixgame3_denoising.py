@@ -99,7 +99,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
         target_h = latent_h * spatial_ratio
         target_w = latent_w * spatial_ratio
         num_iterations = self._infer_num_iterations(batch)
-        clip_frame = 56  # hardcode for now
+        clip_frame = 56
         first_clip_frame = clip_frame + 1
         past_frame = 16
 

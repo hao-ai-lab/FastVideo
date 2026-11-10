@@ -529,7 +529,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
     def _convert_to_karras(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
         """Constructs the noise schedule of Karras et al. (2022)."""
 
-        # Hack to make sure that other schedulers which copy this function don't break
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -548,7 +547,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
     def _convert_to_exponential(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
         """Constructs an exponential noise schedule."""
 
-        # Hack to make sure that other schedulers which copy this function don't break
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -567,7 +565,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
                          beta: float = 0.6) -> torch.Tensor:
         """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
 
-        # Hack to make sure that other schedulers which copy this function don't break
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None

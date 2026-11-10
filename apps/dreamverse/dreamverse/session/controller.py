@@ -1704,7 +1704,6 @@ class SessionController:
                                         and slot.shared_stream_buffer is not None):
                                     start = chunk_offset
                                     end = start + chunk_length
-                                    # Copy out of shared buffer for websocket send.
                                     chunk = bytes(slot.shared_stream_buffer[start:end])
                                 else:
                                     chunk = chunk_bytes or b""

@@ -43,8 +43,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        self.video_data: dict[str, Any] = {}  # Store video metadata and paths
-        self.latent_data: dict[str, Any] = {}  # Store latent tensors
+        self.video_data: dict[str, Any] = {}
+        self.latent_data: dict[str, Any] = {}
         self.preprocess_video_and_text(fastvideo_args, args)
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
@@ -256,7 +256,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # Filter out invalid samples (those with all zeros)
                 valid_indices = []
                 for i, pixel_values in enumerate(data["pixel_values"]):
-                    if not torch.all(pixel_values == 0):  # Check if all values are zero
+                    if not torch.all(pixel_values == 0):
                         valid_indices.append(i)
                 num_processed_samples += len(valid_indices)
 

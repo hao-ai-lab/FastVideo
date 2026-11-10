@@ -307,7 +307,7 @@ def gpu_worker_process(
                         message=str(e),
                     ))
 
-            return True  # Continue loop
+            return True
 
         if first_cmd is not None:
             if first_cmd.type == CommandType.SHUTDOWN:

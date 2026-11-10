@@ -9,7 +9,7 @@ from .utils import (
     generate_block_sparse_mask_for_function,
     create_full_mask_from_block_mask,
 )
-from .test_vsa import BLOCK_M  # Import from local test_vsa
+from .test_vsa import BLOCK_M
 from . import test_vsa as ref
 
 
@@ -66,7 +66,6 @@ def block_sparse_forward_test(
     except RuntimeError as e:
         pytest.skip(str(e))
 
-    # Remove padding on the query side
     out = out_padded[:, :, q_non_pad_index, :]
     return out
 

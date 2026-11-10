@@ -276,7 +276,6 @@ def test_split_model_index_enables_distilled_refine_without_lora() -> None:
 
 def test_split_ltx2_5_conversion_preserves_enabled_transformer_gates(tmp_path: Path) -> None:
     """Transformer config filtering retains True-valued 2.5 architecture gates."""
-    # Create a fresh fixture with all 2.5 gates enabled
     transformer_config = {
         "transformer": {
             "num_attention_heads": 2,

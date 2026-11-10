@@ -142,7 +142,7 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
     if mmap:
         # Check if PyTorch version supports mmap (2.1+)
         try:
-            version_str = torch.__version__.split("+")[0]  # Remove +cu118 suffix etc.
+            version_str = torch.__version__.split("+")[0]
             major, minor = version_str.split(".")[:2]
             torch_version = (int(major), int(minor))
             if torch_version >= (2, 1):
@@ -280,7 +280,6 @@ def convert_weights(
             if verbose:
                 print(f"  {key} -> {new_key}")
 
-        # Free memory by deleting processed tensor from source
         if memory_efficient:
             del state_dict[key]
             if i % 100 == 0:

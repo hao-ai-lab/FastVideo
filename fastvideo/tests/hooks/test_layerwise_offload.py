@@ -98,7 +98,6 @@ def test_layerwise_offload_bf16():
     with torch.no_grad():
         offloaded_output = model(input_tensor.clone())
 
-    # Check output correctness (looser tolerance for bf16)
     assert torch.allclose(reference_output, offloaded_output, rtol=1e-2,
                           atol=1e-3), "Output with offloading should match reference output for bf16"
 

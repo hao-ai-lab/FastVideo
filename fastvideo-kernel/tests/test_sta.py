@@ -2,7 +2,6 @@ import torch
 from .support_flex_sta import get_sliding_tile_attention_mask
 from fastvideo_kernel import sliding_tile_attention
 from torch.nn.attention.flex_attention import flex_attention
-# from flash_attn_interface import flash_attn_func
 from tqdm import tqdm
 
 flex_attention = torch.compile(flex_attention, dynamic=False)
@@ -83,7 +82,6 @@ def test_sliding_tile_attention():
     mean = 1e-1
     std = 10
 
-    # Run correctness check directly
     results = check_correctness(b, h, n, d, causal, mean, std, error_mode='output')
     assert results['TK vs FLEX'][
         'avg_diff'] < 3e-6, f"Average difference: {results['TK vs FLEX']['avg_diff']} is too large"

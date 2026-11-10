@@ -166,7 +166,7 @@ def save_checkpoint(transformer,
 
         config_dict = transformer.hf_config
         if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
+            del config_dict["dtype"]
         config_path = os.path.join(transformer_save_dir, "config.json")
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
@@ -425,7 +425,7 @@ def save_distillation_checkpoint(
 
         config_dict = generator_transformer.hf_config
         if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
+            del config_dict["dtype"]
         config_path = os.path.join(inference_save_dir, "config.json")
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
@@ -454,7 +454,7 @@ def save_distillation_checkpoint(
 
             config_dict_2 = generator_transformer_2.hf_config
             if "dtype" in config_dict_2:
-                del config_dict_2["dtype"]  # TODO
+                del config_dict_2["dtype"]
             config_path_2 = os.path.join(inference_save_dir_2, "config.json")
             with open(config_path_2, "w") as f:
                 json.dump(config_dict_2, f, indent=4)

@@ -29,10 +29,8 @@ NODE_ID=${2:-0}  # Node identifier (0-7)
 
 num_gpus=1
 export MODEL_BASE=Wan-AI/Wan2.1-T2V-1.3B-Diffusers
-# Start port number - we'll increment for each job
 base_port=$((29603 + NODE_ID * 100))  # Different port range per node
 
-# Create an array of CUDA device IDs
 gpu_ids=(0 1 2 3 4 5 6 7)
 
 GPU_NUM=1
@@ -43,12 +41,9 @@ echo "START_FILE: $START_FILE"
 echo "Base port for this node: $base_port"
 echo "Processing TEXT-ONLY data"
 
-# Run 8 parallel preprocessing jobs on this node
 for i in {1..8}; do
-    # Calculate port for this job
     port=$((base_port + i))
     
-    # Get GPU ID using modulo to cycle through available GPUs
     gpu=${gpu_ids[((i-1))]}
     
     # Calculate which file this GPU should process

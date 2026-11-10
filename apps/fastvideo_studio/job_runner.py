@@ -711,8 +711,8 @@ class JobRunner:
         job.finished_at = None
         job._stop_event.clear()
         job._log_buf = JobLogBuffer()  # fresh log buffer
-        job.log_file_handler = None  # Reset file handler
-        job._process = None  # Reset subprocess handle
+        job.log_file_handler = None
+        job._process = None
 
         # Wrap _run_job in an additional safety layer to catch any exceptions
         # that might escape (though they shouldn't with our comprehensive handling)

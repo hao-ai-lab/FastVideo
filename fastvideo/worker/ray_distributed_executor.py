@@ -170,7 +170,6 @@ class RayDistributedExecutor(Executor):
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
 
-        # use the first N bundles that have GPU resources.
         bundle_indices: list[int] = []
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
