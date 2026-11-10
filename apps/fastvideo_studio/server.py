@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -661,7 +662,9 @@ def get_video(job_id: str) -> FileResponse:
     if not os.path.isfile(job.output_path):
         raise HTTPException(status_code=404, detail="Output file not found on disk")
 
-    return FileResponse(job.output_path)
+    # WebP is in Python's common MIME types, but not always its strict table.
+    media_type = mimetypes.guess_type(job.output_path, strict=False)[0]
+    return FileResponse(job.output_path, media_type=media_type)
 
 
 @app.get("/api/jobs/{job_id}/download_log")

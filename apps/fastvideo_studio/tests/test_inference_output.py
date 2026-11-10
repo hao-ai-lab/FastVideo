@@ -2,6 +2,7 @@
 """Studio records and serves the artifact actually saved by the generator."""
 
 import io
+import mimetypes
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -14,6 +15,13 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo_studio import server
 from fastvideo_studio.database import Database
 from fastvideo_studio.job_runner import JobRunner, JobStatus
+
+
+@pytest.fixture(autouse=True)
+def builtin_mime_types_only(monkeypatch):
+    mime_types = mimetypes.MimeTypes(filenames=())
+    monkeypatch.setattr(mimetypes, "guess_type", mime_types.guess_type)
+    monkeypatch.setattr("starlette.responses.guess_type", mime_types.guess_type)
 
 
 @pytest.fixture

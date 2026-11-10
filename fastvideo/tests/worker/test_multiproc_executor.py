@@ -182,7 +182,6 @@ class _SpawnOutputWorker:
 def _run_output_worker(pipe, device):
     # This top-level target is importable by a spawned interpreter. Pass only
     # the device name into it: passing an MPS tensor would fail before the test.
-    torch.multiprocessing.set_sharing_strategy("file_system")
     proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
     proc.rank = 0
     proc.pipe = pipe
@@ -255,6 +254,8 @@ def _execute_forward_over_pipe(output_batch):
     proc.rank = 0
     proc.pipe = worker_pipe
     proc.worker = _OutputWorker(output_batch)
+    # This thread shares pytest's compiler pools; it must not shut them down.
+    proc.shutdown = proc.worker.shutdown
     thread = Thread(target=proc.worker_busy_loop, daemon=True)
     thread.start()
     try:
@@ -276,6 +277,18 @@ def _execute_forward_over_pipe(output_batch):
     finally:
         parent_pipe.close()
         worker_pipe.close()
+
+
+def test_pipe_response_helper_preserves_parent_compile_workers(monkeypatch):
+    cleanup_calls = []
+    monkeypatch.setattr("fastvideo.worker.multiproc_executor._shutdown_torch_compile_workers",
+                        lambda: cleanup_calls.append(True))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+
+    response = _execute_forward_over_pipe(ForwardBatch(data_type="video", output=torch.ones(1)))
+
+    assert _RPC_ERROR_KEY not in response
+    assert cleanup_calls == []
 
 
 @pytest.mark.parametrize("device, tensor_field", [
