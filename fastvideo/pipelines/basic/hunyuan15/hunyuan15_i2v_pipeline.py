@@ -13,7 +13,6 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, Denois
                                         LatentPreparationStage, TextEncodingStage, TimestepPreparationStage,
                                         Hy15ImageEncodingStage)
 
-
 logger = init_logger(__name__)
 
 

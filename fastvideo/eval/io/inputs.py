@@ -262,8 +262,6 @@ def samples_from_manifest(
     return samples
 
 
-
-
 def _expand(spec: PathSpec, exts: tuple[str, ...]) -> list[Path]:
     """Resolve a path-style input into a sorted list of file paths.
 

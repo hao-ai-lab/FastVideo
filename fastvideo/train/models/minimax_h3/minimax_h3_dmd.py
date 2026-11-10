@@ -199,7 +199,6 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
     def num_train_timesteps(self) -> int:
         return _DMD_TIMESTEP_SCALE
 
-
     def _modality_shapes(self) -> tuple[tuple[int, int, int, int, int], tuple[int, int, int, int]]:
         """Return the ``[1, T, C, H, W]`` video and ``[1, 2, 32, Ta]`` audio shapes."""
         data = self.training_config.data
@@ -359,7 +358,6 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
                 max_noise_amount=warp_max,
             ),
         )
-
 
     def set_requires_negative_conditioning(self, requires: bool) -> None:
         """Fail fast: H3 cannot encode negative prompts at training time."""
@@ -724,7 +722,6 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         pred_noise_fp64 = pred_noise.to(torch.float64)
         sigma_fp64 = sigma.to(device=noisy.device, dtype=torch.float64)
         return (noisy_fp64 - sigma_fp64 * pred_noise_fp64).to(original_dtype)
-
 
     def _load_vis_vae(self) -> Any:
         """Lazily load the H3 video VAE for visualization decodes.

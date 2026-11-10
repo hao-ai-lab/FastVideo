@@ -236,7 +236,6 @@ class ValidationCallback(Callback):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
-
     def _adopt_training_denoising_ladder(
         self,
         method: TrainingMethod,
@@ -318,7 +317,6 @@ class ValidationCallback(Callback):
             return
 
         self._run_validation(method, iteration)
-
 
     def _run_validation(
         self,
@@ -839,7 +837,6 @@ class ValidationCallback(Callback):
                 step,
             )
 
-
     def _metric_device(self) -> str:
         device = self.metrics_config.device
         if device == "cuda" and torch.cuda.is_available():
@@ -1170,7 +1167,6 @@ class ValidationCallback(Callback):
             return -1
         return int(self.metrics_config.mouse_pitch_sign)
 
-
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
             self._sampling_param = (SamplingParam.from_pretrained(self._pipeline_model_path()))
@@ -1329,7 +1325,6 @@ class ValidationCallback(Callback):
         self._pipeline_key = key
         return self._pipeline
 
-
     def _prepare_validation_batch(
         self,
         sampling_param: SamplingParam,
@@ -1449,7 +1444,6 @@ class ValidationCallback(Callback):
                 name,
                 tensor,
             )
-
 
     def _student_sampling_pipeline_config(
         self,
@@ -1654,7 +1648,6 @@ class ValidationCallback(Callback):
             frames,
             action=action,
         )
-
 
     def state_dict(self) -> dict[str, Any]:
         state: dict[str, Any] = {}

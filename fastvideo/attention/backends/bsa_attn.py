@@ -44,7 +44,6 @@ logger = init_logger(__name__)
 BSA_TILE_SIZE = (4, 4, 4)
 
 
-
 @functools.lru_cache(maxsize=10)
 def get_tile_partition_indices(
     dit_seq_shape: tuple[int, int, int],
@@ -75,8 +74,6 @@ def get_reverse_tile_partition_indices(
 ) -> torch.LongTensor:
     """Inverse mapping: tile-contiguous order back to raster order."""
     return torch.argsort(get_tile_partition_indices(dit_seq_shape, tile_size, device))
-
-
 
 
 def _prune_queries(
@@ -528,8 +525,6 @@ def _reconstruct_pruned(
                     full_output[b, h, n, pruned_indices] = sparse_output[b, h, n, src_indices]
 
     return full_output
-
-
 
 
 class BSAAttentionBackend(AttentionBackend):

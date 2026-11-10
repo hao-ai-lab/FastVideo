@@ -69,7 +69,6 @@ class Worker:
         self.rank = rank
         self.distributed_init_method = distributed_init_method
 
-
     def init_device(self) -> None:
         """Initialize the device for the worker."""
 

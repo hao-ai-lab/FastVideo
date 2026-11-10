@@ -73,7 +73,6 @@ class MiniMaxH3PDDMixin(_PDDMixinHost):
         """Only this role widens its heads; the shared pipeline config stays single-head."""
         return {"pdd_steps": self.pdd_steps}
 
-
     def pdd_fine_grid(self, device: torch.device) -> torch.Tensor:
         return pdd_fine_grid(self.pdd_steps, max_t=PDD_GRID_MAX_T, device=device)
 
@@ -98,7 +97,6 @@ class MiniMaxH3PDDMixin(_PDDMixinHost):
         if base.numel() > 1 and bool((base != base[0]).any()):
             raise ValueError("MiniMaxH3PDDModel packs one document per batch; every sample must share a base time")
         return base * _DMD_TIMESTEP_SCALE
-
 
     def predict_pdd_heads(
         self,

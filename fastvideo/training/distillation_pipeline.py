@@ -998,7 +998,6 @@ class DistillationPipeline(TrainingPipeline):
 
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
-
         logger.info("Using validation seed: %s", self.seed)
 
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',

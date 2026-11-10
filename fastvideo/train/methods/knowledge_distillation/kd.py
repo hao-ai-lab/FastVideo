@@ -61,7 +61,6 @@ from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
 logger = logging.getLogger(__name__)
 
-
 _COMPLETE_SENTINEL = "COMPLETE"
 _METADATA_FILE = "metadata.json"
 
@@ -153,8 +152,6 @@ class _KDPathCache:
             dist.barrier()
 
 
-
-
 class _KDPathDataset(Dataset):
     """Reads per-sample ``.pt`` files from a completed KD cache.
 
@@ -179,8 +176,6 @@ class _KDPathDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         path = self._samples_dir / f"{idx:08d}.pt"
         return torch.load(path, weights_only=True, map_location="cpu")
-
-
 
 
 class _KDDataLoaderWrapper:
@@ -248,8 +243,6 @@ def _kd_collate(samples: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
     """Stack a list of per-sample dicts into a batched dict."""
     keys = samples[0].keys()
     return {k: torch.stack([s[k] for s in samples]) for k in keys}
-
-
 
 
 class KDMethod(TrainingMethod):
@@ -335,7 +328,6 @@ class KDMethod(TrainingMethod):
         # --- Student optimizer / scheduler (same as FineTuneMethod) ---
         self._init_optimizers_and_schedulers()
 
-
     @property
     def _optimizer_dict(self) -> dict[str, Any]:
         return {"student": self._student_optimizer}
@@ -351,7 +343,6 @@ class KDMethod(TrainingMethod):
     def get_lr_schedulers(self, iteration: int) -> list[Any]:
         del iteration
         return [self._student_lr_scheduler]
-
 
     def on_train_start(self) -> None:
         super().on_train_start()  # sets CUDA RNG, calls student.on_train_start()
@@ -439,7 +430,6 @@ class KDMethod(TrainingMethod):
             {t: self._t_to_traj_idx[t]
              for t in self._t_list[:-1]},
         )
-
 
     def _generate_paths(
         self,
@@ -602,7 +592,6 @@ class KDMethod(TrainingMethod):
         idx = torch.argmin((timesteps - t).abs())
         return sigmas[idx].expand(numel).reshape(numel, 1, 1, 1)
 
-
     def single_train_step(
         self,
         batch: dict[str, Any],
@@ -711,7 +700,6 @@ class KDMethod(TrainingMethod):
             grad_accum_rounds=grad_accum_rounds,
         )
 
-
     def _init_optimizers_and_schedulers(self) -> None:
         tc = self.training_config
         student_lr = float(tc.optimizer.learning_rate)
@@ -730,8 +718,6 @@ class KDMethod(TrainingMethod):
             betas=tc.optimizer.betas,
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
-
-
 
 
 class KDCausalMethod(KDMethod):

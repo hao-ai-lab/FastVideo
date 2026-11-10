@@ -235,8 +235,6 @@ def _activation1d(x, alpha, beta, up_filter, down_filter, ratio: int = ACTIVATIO
     return _low_pass(x, down_filter, ratio)
 
 
-
-
 class MLXMiniMaxH3AudioVAE:
     """DAC-style posterior encoder plus BigVGAN waveform decoder."""
 

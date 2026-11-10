@@ -71,7 +71,6 @@ class CosmosModel(WanModel):
             transformer_override_safetensor=(transformer_override_safetensor),
         )
 
-
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],

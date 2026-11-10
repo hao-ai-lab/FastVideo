@@ -35,7 +35,6 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-
 @triton.jit
 def compress_kernel(
     X,
@@ -105,8 +104,6 @@ def get_block_map(
     sparse_map = torch.zeros_like(pooled_score, dtype=torch.int8)
     sparse_map.scatter_(-1, lut, 1)
     return sparse_map, lut, topk
-
-
 
 
 class SLAAttentionBackend(AttentionBackend):

@@ -60,7 +60,6 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
         )
         self.validation_pipeline = validation_pipeline
 
-
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Skip: Cosmos25WanVAEWrapper normalises latents during encoding.
 
@@ -124,7 +123,6 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
             "fps": 24,
         }
         return training_batch
-
 
 
 if __name__ == "__main__":

@@ -77,7 +77,6 @@ class TrainingMethod(torch.nn.Module, ABC):
             if mods:
                 self.role_modules[role] = torch.nn.ModuleDict(mods)
 
-
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
 

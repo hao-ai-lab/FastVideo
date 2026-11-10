@@ -33,7 +33,6 @@ class SDPABackend(AttentionBackend):
         return SDPAImpl
 
 
-
 @dataclass
 class SDPAMetadata(AttentionMetadata):
     current_timestep: int

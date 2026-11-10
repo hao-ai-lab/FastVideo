@@ -16,7 +16,6 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, Denois
                                         Hy15ImageEncodingStage, SRDenoisingStage)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 
-
 logger = init_logger(__name__)
 
 

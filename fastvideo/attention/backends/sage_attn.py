@@ -27,7 +27,6 @@ class SageAttentionBackend(AttentionBackend):
         return SageAttentionImpl
 
 
-
 class SageAttentionImpl(AttentionImpl):
 
     def __init__(

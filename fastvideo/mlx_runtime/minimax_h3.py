@@ -937,8 +937,6 @@ class MiniMaxH3SchedulerState:
         return timestep * sample + (1.0 - timestep) * noise
 
 
-
-
 def _as_mx_indices(indices):
     """NumPy/python index arrays are not accepted by MLX indexing; convert."""
     import mlx.core as mx
@@ -1726,8 +1724,6 @@ class MLXMiniMaxH3DiT:
         return forward_target_rows(self, video_target_rows, audio_target_rows, **kwargs)
 
     __call__ = forward
-
-
 
 
 def _load_array(array, dtype):

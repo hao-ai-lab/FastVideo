@@ -104,7 +104,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
         # mask_lat_size = mask_lat_size.transpose(1, 2)
         # mask_lat_size = mask_lat_size.to(latent_condition.device)
 
-
         features["first_frame_latent"] = latent_condition
 
         if "action_path" in valid_data and valid_data["action_path"]:

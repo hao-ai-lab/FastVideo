@@ -35,7 +35,6 @@ class SageAttention3Backend(AttentionBackend):
         raise NotImplementedError
 
 
-
 class SageAttention3Impl(AttentionImpl):
 
     def __init__(

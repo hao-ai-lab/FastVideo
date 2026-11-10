@@ -58,7 +58,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         )
         self._init_optimizers_and_schedulers()
 
-
     @property
     def _optimizer_dict(self) -> dict[str, Any]:
         return {"student": self._student_optimizer}
@@ -83,7 +82,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         states = super().checkpoint_state()
         states["roles.ema.transformer"] = _FullModelState(self.ema_model.transformer)
         return states
-
 
     def single_train_step(
         self,
@@ -166,7 +164,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         metrics: dict[str, LogScalar] = {}
         return loss_map, outputs, metrics
 
-
     def backward(
         self,
         loss_map: dict[str, torch.Tensor],
@@ -185,7 +182,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         super().optimizers_schedulers_step(iteration)
         if iteration >= self._ema_start_step:
             self._update_ema()
-
 
     def _predict_flow(
         self,

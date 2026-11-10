@@ -83,8 +83,6 @@ def make_inference_args(
     return args
 
 
-
-
 def load_module_from_path(
     *,
     model_path: str,

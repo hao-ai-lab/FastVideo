@@ -65,7 +65,6 @@ class HunyuanModel(WanModel):
             lora=lora,
         )
 
-
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
