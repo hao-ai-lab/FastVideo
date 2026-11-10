@@ -6,16 +6,15 @@ Report suspected vulnerabilities privately. Do not open a public issue, and do
 not post details in Discussions or Slack.
 
 Email the maintainers at wlsaidhi@gmail.com with the subject
-`FastVideo security report`. If this repository has GitHub private
-vulnerability reporting enabled, you can use the Security tab and choose
-"Report a vulnerability" instead.
+`FastVideo security report`.
 
 Include as much of this as you can:
 
 - The affected component, with the file, CLI command or server endpoint.
 - Steps to reproduce, using the smallest example you can give.
-- The FastVideo version or commit you tested. `python collect_env.py` prints
-  the FastVideo, Python, PyTorch and CUDA versions.
+- The FastVideo version or commit you tested. For a source checkout, run
+  `git rev-parse HEAD` for the commit. Include `python collect_env.py` output for
+  the Python, PyTorch and CUDA versions.
 - Any proof of concept, logs or screenshots.
 
 ## What we do with a report

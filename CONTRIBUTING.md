@@ -2,8 +2,8 @@
 
 Thanks for helping. FastVideo takes fixes, model ports, performance work, tests
 and docs. This page covers the common path. The longer guides live in
-`docs/contributing/`, and each directory has an `AGENTS.md` with local
-conventions.
+`docs/contributing/`, and the in-scope `AGENTS.md` next to the code lists that
+area's conventions.
 
 ## What you need
 
@@ -44,18 +44,21 @@ pytest fastvideo/tests/ -v         # package tests
 ```
 
 Do not call yapf, ruff, mypy or codespell directly. Pre-commit chains them with
-the project config and respects the excludes. SSIM, golden-gate and performance
-tests need a GPU and model weights; `docs/contributing/testing.md` explains how
-to pick the narrowest one.
+the project config and respects the excludes. SSIM and golden-gate tests need a
+GPU and model weights; `docs/contributing/testing.md` explains how to pick the
+narrowest one.
 
 ## Open a pull request
 
-- Title with a bracketed tag: `[feat]`, `[bugfix]`, `[perf]`, `[refactor]`,
-  `[docs]`, `[ci]`, `[new-model]`, `[misc]` or `[skill]`.
+- Title with a bracketed tag such as `[feat]`, `[bugfix]`, `[perf]`,
+  `[refactor]`, `[docs]`, `[ci]`, `[infra]` or `[new-model]`. The full accepted
+  set is in `docs/contributing/pull_requests.md`.
 - One concern per PR. Describe the problem, the change, how you verified it and
   the risk.
-- After a maintainer approves, comment `/merge` to enter the merge queue. The
-  path-aware merge gate runs only the lanes your diff needs.
+- After a maintainer approves, a contributor with write access comments
+  `/merge` to enter the merge queue; external contributors ask a maintainer to
+  run it or add the `ready` label. The path-aware merge gate runs only the lanes
+  your diff needs.
 - The full workflow, CI tiers and `/test` commands are in
   `docs/contributing/pull_requests.md`.
 
