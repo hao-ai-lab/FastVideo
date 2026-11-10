@@ -897,3 +897,13 @@ def test_video_routes_cover_async_sync_list_content_and_delete(tmp_path: Path) -
     finally:
         asyncio.run(VIDEO_STORE.clear())
         state.clear_state()
+
+
+def test_serving_health_uses_executor_liveness_contract() -> None:
+    generator = _WaveGenerator()
+    generator.executor = SimpleNamespace(healthy=True)
+    engine = OpenAIServingEngine(generator)
+    assert engine.healthy is True
+    generator.executor.healthy = False
+    assert engine.healthy is False
+    assert engine.unhealthy_reason == "one or more generation workers are not alive"

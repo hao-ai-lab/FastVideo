@@ -66,10 +66,7 @@ class OpenAIServingEngine:
         if self._closed or self._unhealthy_reason is not None:
             return False
         executor = getattr(self._generator, "executor", None)
-        workers = getattr(executor, "workers", None)
-        if workers is None:
-            return True
-        return bool(workers) and all(worker.proc.is_alive() for worker in workers)
+        return executor is None or executor.healthy
 
     @property
     def unhealthy_reason(self) -> str | None:

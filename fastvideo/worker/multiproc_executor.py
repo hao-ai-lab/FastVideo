@@ -392,6 +392,11 @@ class MultiprocExecutor(Executor):
         _raise_for_rpc_errors(method, result)
         return result
 
+    @property
+    def healthy(self) -> bool:
+        """Check process liveness even while a worker is executing a forward pass."""
+        return bool(self.workers) and all(worker.proc.is_alive() for worker in self.workers)
+
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
         if hasattr(self, 'shutting_down') and self.shutting_down:
