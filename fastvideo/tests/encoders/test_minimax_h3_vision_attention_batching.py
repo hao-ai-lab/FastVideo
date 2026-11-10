@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native PyTorch varlen vision attention against the original SDPA loop.
 
-CPU tests substitute a semantic reference for the CUDA-only native kernel;
-these establish packing and gradient plumbing, not GPU parity or performance.
+CPU tests exercise the real SDPA fallback and substitute a semantic reference
+for native varlen packing; they do not establish GPU parity or performance.
 Real CUDA forward/backward tests skip only when required hardware is absent.
 """
 import copy
@@ -87,16 +87,17 @@ def _semantic_varlen(query, key, value, cu_q, cu_k, max_q, max_k, *, scale, wind
     return torch.cat(outputs, dim=0)
 
 
-@pytest.mark.parametrize("dtype,lengths", [(torch.float32, [8]), (torch.bfloat16, [4, 6, 4])])
-def test_cpu_semantic_packing_preserves_rope_dtype_and_original_order(dtype, lengths):
+def test_cpu_semantic_packing_preserves_rope_dtype_and_original_order():
+    dtype, lengths = torch.bfloat16, [4, 6, 4]
     attention = _attention(dtype)
     hidden, positions = _inputs(lengths, dtype)
     hidden = torch.stack((hidden, hidden), dim=-1)[..., 0]
     assert not hidden.is_contiguous()
     with torch.no_grad():
         expected = _legacy_attention(attention, hidden, lengths, positions)
-        with patch.object(vision, "varlen_attn", side_effect=_semantic_varlen) as calls:
-            actual = attention(hidden, lengths, positions)
+        with patch.object(torch.backends.cuda, "can_use_flash_attention", return_value=True):
+            with patch.object(vision, "varlen_attn", side_effect=_semantic_varlen) as calls:
+                actual = attention(hidden, lengths, positions)
     assert calls.call_count == 1
     assert calls.call_args.args[0].shape == (sum(lengths), 4, 8)
     assert calls.call_args.args[0].dtype == dtype
@@ -105,6 +106,41 @@ def test_cpu_semantic_packing_preserves_rope_dtype_and_original_order(dtype, len
         expected_offsets.append(expected_offsets[-1] + length)
     assert calls.call_args.args[3].tolist() == expected_offsets
     torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_cpu_fallback_matches_original_without_native_varlen(dtype):
+    attention = _attention(dtype)
+    lengths = [4, 6, 4]
+    hidden, positions = _inputs(lengths, dtype)
+    with torch.no_grad():
+        expected = _legacy_attention(attention, hidden, lengths, positions)
+        with patch.object(vision, "varlen_attn", side_effect=AssertionError("CPU used native varlen")):
+            with patch.object(vision.F, "scaled_dot_product_attention", wraps=_SDPA) as calls:
+                actual = attention(hidden, lengths, positions)
+    assert calls.call_count == len(lengths)
+    assert all(call.args[0].shape[0] == 1 for call in calls.call_args_list)
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_varlen_eligibility_reuses_pytorch_with_view_only_probe(supported):
+    query, key, value = torch.randn(11, 3, 4, 72, dtype=torch.bfloat16).unbind(1)
+    with patch.object(torch.backends.cuda, "can_use_flash_attention", return_value=supported) as check:
+        assert vision._can_use_vision_varlen(query, key, value) is supported
+    params = check.call_args.args[0]
+    for original, probed in zip((query, key, value), (params.query, params.key, params.value), strict=True):
+        assert probed.shape == (1, 4, 11, 72)
+        assert probed.untyped_storage().data_ptr() == original.untyped_storage().data_ptr()
+        assert probed.stride(-1) == original.stride(-1)
+    assert params.attn_mask is None and params.dropout == 0.0 and not params.is_causal
+    assert not params.enable_gqa
+
+
+def test_varlen_rejects_head_alignment_that_dense_sdpa_can_pad():
+    query = torch.randn(11, 4, 70, dtype=torch.bfloat16)
+    with patch.object(torch.backends.cuda, "can_use_flash_attention", return_value=True):
+        assert not vision._can_use_vision_varlen(query, query, query)
 
 
 def test_tiny_model_deepstack_and_mixed_videos_build_metadata_once():
@@ -117,8 +153,9 @@ def test_tiny_model_deepstack_and_mixed_videos_build_metadata_once():
                           lambda self, hidden, lengths, positions, *args: _legacy_attention(self, hidden, lengths, positions)):
             expected, expected_deepstack = model(pixels, grid)
         with patch.object(vision, "_vision_attention_metadata", wraps=vision._vision_attention_metadata) as metadata:
-            with patch.object(vision, "varlen_attn", side_effect=_semantic_varlen) as calls:
-                actual, actual_deepstack = model(pixels, grid)
+            with patch.object(vision, "_can_use_vision_varlen", return_value=True):
+                with patch.object(vision, "varlen_attn", side_effect=_semantic_varlen) as calls:
+                    actual, actual_deepstack = model(pixels, grid)
     assert metadata.call_count == 1
     assert calls.call_count == model.config.vision_depth
     offsets = [call.args[3] for call in calls.call_args_list]
@@ -134,7 +171,8 @@ def test_native_kernel_oom_propagates_without_sdpa_fallback():
     error = torch.OutOfMemoryError("execution OOM")
     attention = _attention()
     hidden, positions = _inputs([4, 6, 4])
-    with patch.object(vision, "varlen_attn", side_effect=error) as calls:
+    with patch.object(vision, "_can_use_vision_varlen", return_value=True), \
+            patch.object(vision, "varlen_attn", side_effect=error) as calls:
         with patch.object(vision.F, "scaled_dot_product_attention", side_effect=AssertionError("fell back to SDPA")):
             with pytest.raises(type(error), match=str(error)):
                 attention(hidden, [4, 6, 4], positions)
@@ -166,13 +204,28 @@ def test_model_rejects_grid_token_mismatch_before_position_processing():
 
 
 def _cuda_attention(dtype):
-    if torch.version.hip is not None or torch.cuda.get_device_capability()[0] < 8:
-        pytest.skip("Native CUDA varlen requires NVIDIA Ampere or newer")
+    if torch.version.hip is not None:
+        pytest.skip("Native varlen path is enabled for NVIDIA CUDA")
     if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
         pytest.skip("CUDA BF16 support required")
+    probe = torch.empty(1, 16, 1, 72, device="cuda", dtype=dtype)
+    params = torch.backends.cuda.SDPAParams(probe, probe, probe, None, 0.0, False, False)
+    if not torch.backends.cuda.can_use_flash_attention(params):
+        pytest.skip("PyTorch Flash attention is unavailable for this device/build/settings")
     attention = vision.MiniMaxH3Qwen3VLVisionAttention(MiniMaxH3Qwen3VLConfig()).to("cuda", dtype=dtype).eval()
     assert (attention.num_heads, attention.head_dim) == (16, 72)
     return attention
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for FP32 compatibility")
+def test_cuda_fp32_fallback_matches_original():
+    attention = vision.MiniMaxH3Qwen3VLVisionAttention(MiniMaxH3Qwen3VLConfig()).to("cuda", dtype=torch.float32).eval()
+    lengths = [16, 40, 24]
+    hidden, positions = _inputs(lengths, torch.float32, "cuda", hidden_size=1152, head_dim=72)
+    with torch.no_grad(), patch.object(vision, "varlen_attn", side_effect=AssertionError("FP32 used native varlen")):
+        expected = _legacy_attention(attention, hidden, lengths, positions)
+        actual = attention(hidden, lengths, positions)
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for native PyTorch varlen parity")
@@ -200,7 +253,9 @@ def test_cuda_native_varlen_backward_with_production_heads():
     hidden.requires_grad_(True)
     reference_hidden = hidden.detach().clone().requires_grad_(True)
     expected = _legacy_attention(reference, reference_hidden, lengths, positions)
-    actual = attention(hidden, lengths, positions)
+    with patch.object(vision, "varlen_attn", wraps=vision.varlen_attn) as calls:
+        actual = attention(hidden, lengths, positions)
+    assert calls.call_count == 1
     weights = torch.randn_like(actual)
     (actual * weights).sum().backward()
     (expected * weights).sum().backward()

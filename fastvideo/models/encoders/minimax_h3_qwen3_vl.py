@@ -2,6 +2,7 @@
 """Native Qwen3-VL conditioner used by MiniMax H3."""
 
 from collections.abc import Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -428,6 +429,16 @@ def _vision_attention_metadata(
         torch.tensor(offsets, dtype=torch.int32, device=device), max(sequence_lengths))
 
 
+def _can_use_vision_varlen(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> bool:
+    """Reuse PyTorch's Flash eligibility checks with the native varlen dtype/alignment constraints."""
+    if torch.version.hip is not None or query.dtype not in (torch.float16, torch.bfloat16) or query.shape[-1] % 8:
+        return False
+    params = torch.backends.cuda.SDPAParams(
+        *(tensor.transpose(0, 1).unsqueeze(0) for tensor in (query, key, value)), None, 0.0, False, False)
+    with torch.cuda.device(query.device) if query.is_cuda else nullcontext():
+        return torch.backends.cuda.can_use_flash_attention(params)
+
+
 class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
@@ -456,12 +467,27 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         query = (query.float() * cos + _rotate_half(query.float()) * sin).to(query_dtype)
         key = (key.float() * cos + _rotate_half(key.float()) * sin).to(key_dtype)
 
-        hidden_states = varlen_attn(
-            query, key, value,
-            attention_metadata.cu_seqlens, attention_metadata.cu_seqlens,
-            attention_metadata.max_seqlen, attention_metadata.max_seqlen,
-            scale=self.scaling, window_size=(-1, -1),
-        ).reshape(sequence_length, -1)
+        if _can_use_vision_varlen(query, key, value):
+            hidden_states = varlen_attn(
+                query, key, value,
+                attention_metadata.cu_seqlens, attention_metadata.cu_seqlens,
+                attention_metadata.max_seqlen, attention_metadata.max_seqlen,
+                scale=self.scaling, window_size=(-1, -1),
+            ).reshape(sequence_length, -1)
+        else:
+            outputs = []
+            offset = 0
+            for length in sequence_lengths:
+                end = offset + length
+                output = F.scaled_dot_product_attention(
+                    query[offset:end].transpose(0, 1).unsqueeze(0),
+                    key[offset:end].transpose(0, 1).unsqueeze(0),
+                    value[offset:end].transpose(0, 1).unsqueeze(0),
+                    dropout_p=0.0, is_causal=False, scale=self.scaling,
+                )
+                outputs.append(output.transpose(1, 2))
+                offset = end
+            hidden_states = torch.cat(outputs, dim=1).reshape(sequence_length, -1)
         return self.proj(hidden_states)
 
 

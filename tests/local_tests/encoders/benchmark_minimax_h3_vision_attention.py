@@ -13,7 +13,8 @@ Packed metadata is built outside timing, matching its reuse across vision blocks
 Each mode uses identical weights and inputs; timings exclude setup and warmup.
 An untimed call records attention calls without retaining input tensors.
 Native varlen requires a compatible CUDA FP16/BF16 runtime. CPU/FP32 smoke checks
-run only the original baseline and explicitly skip the varlen comparison.
+run only the original baseline. If the candidate selects its compatibility
+fallback, this benchmark reports a skipped varlen comparison.
 """
 
 from __future__ import annotations
@@ -167,9 +168,14 @@ def main() -> None:
             with patch.object(vision.F, "scaled_dot_product_attention", new=recorded_sdpa):
                 with patch.object(vision, "varlen_attn", new=recorded_varlen):
                     setup_output = run()
+            del recorded_sdpa, recorded_varlen
+            if mode == "varlen" and varlen_calls == 0 and sdpa_batch_sizes:
+                results.append({"mode": mode, "status": "skipped",
+                                "reason": "PyTorch Flash eligibility selected the per-frame SDPA fallback"})
+                del setup_output, model, metadata
+                continue
             if mode == "varlen" and (varlen_calls != 1 or sdpa_batch_sizes):
                 raise RuntimeError("Varlen comparison must execute exactly one native varlen call and no SDPA loop")
-            del recorded_sdpa, recorded_varlen
             if reference is None:
                 reference = setup_output
             del setup_output
