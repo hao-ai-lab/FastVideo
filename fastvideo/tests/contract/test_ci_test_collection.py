@@ -69,11 +69,8 @@ SLURM_LANES = [
 # being dark, so a fixed entry is removed instead of left stale.
 # State as found on 2026-11-10.
 DARK_TESTS = {
-    # Collected by the unit lane, but every test is gpu-marked and that lane runs -m "not gpu"
     "fastvideo/tests/attention/test_vsa_h3_heads_first_tile.py": "gpu-only file; the unit lane runs -m not gpu",
-    # Audio
     "fastvideo/tests/audio/test_ltx2_bwe.py": "no lane: audio encoder test",
-    # Multi-GPU collectives
     "fastvideo/tests/distributed/test_sp_hunyuanvideo.py": "no lane: multi-GPU torchrun test",
     "fastvideo/tests/distributed/test_sp_lingbot_video.py": "no lane: multi-GPU torchrun test",
     "fastvideo/tests/distributed/test_sp_ltx2.py": "no lane: multi-GPU torchrun test",
@@ -81,24 +78,20 @@ DARK_TESTS = {
     "fastvideo/tests/distributed/test_ulysses_a2a_parity.py": "no lane: multi-GPU torchrun test",
     "fastvideo/tests/distributed/test_ulysses_fault_injection.py": "no lane: multi-GPU torchrun test",
     "fastvideo/tests/distributed/test_ulysses_h3_policy.py": "no lane: multi-GPU torchrun test",
-    # Runtime hooks
     "fastvideo/tests/hooks/test_activation_trace.py": "no lane: hook-system test",
     "fastvideo/tests/hooks/test_hooks_api.py": "no lane: hook-system test",
     "fastvideo/tests/hooks/test_layerwise_offload.py": "no lane: hook-system test",
     "fastvideo/tests/hooks/test_pinned_memory.py": "no lane: hook-system test",
-    # Inference smoke and benchmarks
     "fastvideo/tests/inference/bsa/test_bsa_inference.py": "no lane: run manually",
     "fastvideo/tests/inference/lora/test_merge_lora_math.py": "no lane: run manually",
     "fastvideo/tests/inference/test_basic_fasth3_profile.py": "no lane: run manually",
     "fastvideo/tests/inference/test_benchmark_fasth3_spark_nvfp4.py": "no lane: run manually",
-    # Tensor-parallel layers
     "fastvideo/tests/layers/test_linear_mlp_quant_gating.py": "no lane: FSDP or torchrun dispatch test",
     "fastvideo/tests/layers/test_lora_merge_precision.py": "no lane: FSDP or torchrun dispatch test",
     "fastvideo/tests/layers/test_mxfp8_optional_quack.py": "no lane: FSDP or torchrun dispatch test",
     "fastvideo/tests/layers/test_mxfp8_scaled_mm_scale_dtype.py": "no lane: FSDP or torchrun dispatch test",
     "fastvideo/tests/layers/test_nvfp4_mm_backend.py": "no lane: FSDP or torchrun dispatch test",
     "fastvideo/tests/layers/test_rmsnorm_forward_dispatch.py": "no lane: FSDP or torchrun dispatch test",
-    # Apple MLX (the macOS smoke workflow names its files explicitly)
     "fastvideo/tests/mlx/test_import_laziness.py": "not in the macOS MLX smoke selection",
     "fastvideo/tests/mlx/test_mlx_diffusers_compile_dispatch.py": "not in the macOS MLX smoke selection",
     "fastvideo/tests/mlx/test_mlx_minimax_h3_8step_schedule.py": "not in the macOS MLX smoke selection",
@@ -115,19 +108,16 @@ DARK_TESTS = {
     "fastvideo/tests/mlx/test_mlx_wan22_real_weights_parity.py": "not in the macOS MLX smoke selection",
     "fastvideo/tests/mlx/test_mlx_wan_vae_denormalization.py": "not in the macOS MLX smoke selection",
     "fastvideo/tests/mlx/test_quant_backends.py": "not in the macOS MLX smoke selection",
-    # Nightly cadence
     "fastvideo/tests/nightly/test_e2e_dmd_t2v_crush_smol.py": "by design: nightly cadence, not per-PR",
     "fastvideo/tests/nightly/test_e2e_i2v_overfit_single_sample.py": "by design: nightly cadence, not per-PR",
     "fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py": "by design: nightly cadence, not per-PR",
     "fastvideo/tests/nightly/test_e2e_ltx2_overfit_new_stack.py": "by design: nightly cadence, not per-PR",
     "fastvideo/tests/nightly/test_e2e_overfit_single_sample.py": "by design: nightly cadence, not per-PR",
-    # Legacy training and distillation
     "fastvideo/tests/training/checkpoint/test_checkpointing_utils.py": "no lane: run manually",
     "fastvideo/tests/training/distill/test_anyflow_onpolicy.py": "no lane: run manually",
     "fastvideo/tests/training/distill/test_anyflow_pretrain.py": "no lane: run manually",
     "fastvideo/tests/training/distill/test_anyflow_smoke.py": "no lane: run manually",
     "fastvideo/tests/training/distill/test_wan_i2v_distillation.py": "no lane: run manually",
-    # Package-root tests
     "fastvideo/tests/test_logger.py": "no lane: run manually",
     "fastvideo/tests/test_partial_hf_download.py": "no lane: run manually",
 }
@@ -179,7 +169,12 @@ def _gpu_only(path: Path) -> bool:
     return bool(tests) and all("gpu" in marks or module_gpu for marks in tests)
 
 
-def _pytest_invocations() -> list[tuple[set[str], set[str], set[str], bool]]:
+def _ssim_test_files() -> set[str]:
+    """Files the SSIM lane globs at the ssim root; ``ci_runner.py`` is not recursive."""
+    return {path.relative_to(REPO_ROOT).as_posix() for path in sorted((TESTS_ROOT / "ssim").glob("test_*.py"))}
+
+
+def _pytest_invocations(sources: list[Path] | None = None) -> list[tuple[set[str], set[str], set[str], bool]]:
     """Resolve what each CI ``pytest`` invocation collects.
 
     Returns one ``(files, directories, ignored, not_gpu)`` tuple per invocation.
@@ -187,11 +182,9 @@ def _pytest_invocations() -> list[tuple[set[str], set[str], set[str], bool]]:
     is substituted into the command, and ``--ignore`` subtrees are recorded so
     they do not count as coverage for that invocation. ``not_gpu`` records
     ``-m "not gpu"`` so a gpu-only file does not count as covered.
-    ``ssim/ci_runner.py`` discovers ``test_*.py`` under ``ssim/`` itself, so that
-    directory counts as collected.
     """
     invocations: list[tuple[set[str], set[str], set[str], bool]] = []
-    for source in CI_SOURCES:
+    for source in CI_SOURCES if sources is None else sources:
         if not source.exists():
             continue
         # Shell and YAML continuations keep one pytest command on one line.
@@ -237,7 +230,7 @@ def _pytest_invocations() -> list[tuple[set[str], set[str], set[str], bool]]:
                     files.add(path)
             invocations.append((files, directories, ignored, not_gpu))
         if "ci_runner.py" in text:
-            invocations.append((set(), {"fastvideo/tests/ssim"}, set(), False))
+            invocations.append((_ssim_test_files(), set(), set(), False))
     return invocations
 
 
@@ -284,6 +277,39 @@ def test_dark_test_allowlist_stays_accurate():
         elif not _is_dark(path, invocations):
             stale.append(f"{path} (collected now)")
     assert not stale, f"Allowlist entries no longer dark; delete them from {__file__}: {stale}"
+
+
+def test_parser_handles_the_command_shapes_ci_uses(tmp_path):
+    def dark(fixture: str, path: str) -> bool:
+        source = tmp_path / "ci.sh"
+        source.write_text(fixture)
+        return _is_dark(path, _pytest_invocations([source]))
+
+    continuation = "exec pytest \\\n  fastvideo/tests/encoders -q\n"
+    assert not dark(continuation, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    gpu_only = 'exec pytest fastvideo/tests/attention -m "not gpu" -q\n'
+    assert dark(gpu_only, "fastvideo/tests/attention/test_vsa_h3_heads_first_tile.py")
+    assert not dark(gpu_only, "fastvideo/tests/attention/test_selector_role_override.py")
+
+    for ignore in ("--ignore", "--ignore="):
+        separator = " " if ignore == "--ignore" else ""
+        assert dark(f"exec pytest fastvideo/tests/layers {ignore}{separator}"
+                    f"fastvideo/tests/layers/test_nvfp4_mm_backend.py -q\n",
+                    "fastvideo/tests/layers/test_nvfp4_mm_backend.py")
+
+    mirrored = 'export root="./fastvideo/tests/encoders"\nexec pytest "$root" -q\n'
+    assert not dark(mirrored, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    prefixed = "a=fastvideo/tests/encoders\nab=fastvideo/tests/vaes\nexec pytest $ab -q\n"
+    assert not dark(prefixed, "fastvideo/tests/vaes/test_wan_vae.py")
+
+    phantom = "PERF_PYTEST_RC=$pytest_rc python ./fastvideo/tests/encoders/summary.py\n"
+    assert dark(phantom, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    non_recursive = "exec python fastvideo/tests/ssim/ci_runner.py\n"
+    assert not dark(non_recursive, "fastvideo/tests/ssim/test_causal_similarity.py")
+    assert dark(non_recursive, "fastvideo/tests/ssim/nested/test_parity.py")
 
 
 def test_local_tests_stays_out_of_ci():
