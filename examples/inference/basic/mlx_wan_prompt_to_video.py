@@ -484,17 +484,6 @@ def _postprocess_video(*, video_path: Path, fps: int, rife: dict | None = None,
     print(f"[post] {', '.join(labels)} written to {video_path}")
 
 
-def _rife_interpolate_video(*, video_path: Path, target_frames: int, factor: int,
-                            sharpen: float, fps: int) -> None:
-    """Read the reduced-frame mp4, RIFE-interpolate up to ``target_frames`` on
-    Apple Silicon, optionally light-sharpen, and rewrite the file in place."""
-    _postprocess_video(
-        video_path=video_path,
-        fps=fps,
-        rife={"factor": factor, "target_frames": target_frames, "sharpen": sharpen},
-    )
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prompt-to-video FastMetal-QAD generation using the Apple Silicon MLX runtime")

@@ -16,11 +16,6 @@ from fastvideo import VideoGenerator as FastVideoGenerator
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 
-# Custom exception for interruption
-class GenerationInterruptedException(Exception):
-    pass
-
-
 # Custom exception for interruption that ComfyUI will recognize
 class GenerationCancelledException(Exception):
 

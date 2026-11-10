@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.distributed as dist

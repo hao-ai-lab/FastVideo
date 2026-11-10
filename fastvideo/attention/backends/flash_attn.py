@@ -248,22 +248,6 @@ class FlashAttnMetadata(AttentionMetadata):
     attn_mask: torch.Tensor | None = None
 
 
-class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
-
-    def __init__(self):
-        pass
-
-    def prepare(self):
-        pass
-
-    def build(  # type: ignore
-            self,
-            current_timestep: int,
-            attn_mask: torch.Tensor,
-    ) -> FlashAttnMetadata:
-        return FlashAttnMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
-
-
 class FlashAttentionImpl(AttentionImpl):
 
     def __init__(

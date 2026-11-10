@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py
 
-import math
-from typing import Any, Optional, Tuple, Union, List, Callable, Iterable
+from typing import Optional, Tuple, Iterable
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, Qwen2_5_VLConfig
-from fastvideo.distributed import get_tp_rank, get_tp_world_size
-from fastvideo.layers.activation import get_act_fn, SiluAndMul
+from fastvideo.distributed import get_tp_world_size
+from fastvideo.layers.activation import SiluAndMul
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear
 from fastvideo.layers.quantization import QuantizationConfig

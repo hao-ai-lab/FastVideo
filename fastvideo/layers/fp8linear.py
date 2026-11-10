@@ -121,8 +121,3 @@ class _LinearFWD8BWD16Fn(torch.autograd.Function):
 
         # None for the extra forward arg (granularity)
         return grad_x, grad_w, grad_b, None
-
-
-def fp8_linear_forward(self, x: torch.Tensor) -> torch.Tensor:
-    # pass config **positionally**; autograd.Function.apply ignores kwargs
-    return _LinearFWD8BWD16Fn.apply(x, self.weight, self.bias, "tensor"), None

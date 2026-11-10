@@ -72,7 +72,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import torch
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 
 # MagiHuman base arch — keys must be valid `MagiHumanArchConfig` fields.
