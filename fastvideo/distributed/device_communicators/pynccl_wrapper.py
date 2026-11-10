@@ -164,7 +164,6 @@ class NCCLLibrary:
         # is a pointer
         Function("ncclReduceScatter", ncclResult_t,
                  [buffer_type, buffer_type, ctypes.c_size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t, cudaStream_t]),
-
         Function("ncclSend", ncclResult_t,
                  [buffer_type, ctypes.c_size_t, ncclDataType_t, ctypes.c_int, ncclComm_t, cudaStream_t]),
 
