@@ -13,9 +13,13 @@ is wired into a lane or allowlisted here with a reason.
 
 Pure text analysis: no fastvideo imports, no GPU, no torch. A lane that
 selects tests through a variable, a glob or a generated list is not
-resolved, so its files look dark; wire them by name or add an entry.
+resolved, so its files look dark; wire them by name or add an entry. A file
+whose tests are all gpu-marked is dark under a lane that runs with
+``-m "not gpu"``.
 """
+import ast
 import re
+import shlex
 from pathlib import Path
 
 import yaml
@@ -65,6 +69,8 @@ SLURM_LANES = [
 # being dark, so a fixed entry is removed instead of left stale.
 # State as found on 2026-11-10.
 DARK_TESTS = {
+    # Collected by the unit lane, but every test is gpu-marked and that lane runs -m "not gpu"
+    "fastvideo/tests/attention/test_vsa_h3_heads_first_tile.py": "gpu-only file; the unit lane runs -m not gpu",
     # Audio
     "fastvideo/tests/audio/test_ltx2_bwe.py": "no lane: audio encoder test",
     # Multi-GPU collectives
@@ -127,7 +133,10 @@ DARK_TESTS = {
 }
 
 _PATH_RE = re.compile(r"(?:\./)?(?:fastvideo|apps)/[A-Za-z0-9_./-]+")
-_ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=(\.?/?(?:fastvideo|apps)/[A-Za-z0-9_./-]+)\s*$")
+_ASSIGNMENT_RE = re.compile(
+    r"""^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=["']?(\.?/?(?:fastvideo|apps)/[A-Za-z0-9_./-]+)["']?\s*$""")
+# A real pytest command word, not a variable such as ``$pytest_rc``.
+_PYTEST_COMMAND_RE = re.compile(r"(^|[\s;|&])pytest(\s|$)")
 
 
 def _ci_text() -> str:
@@ -138,17 +147,50 @@ def _normalise(path: str) -> str:
     return path[2:] if path.startswith("./") else path
 
 
-def _pytest_invocations() -> list[tuple[set[str], set[str], set[str]]]:
+def _shell_tokens(line: str) -> list[str]:
+    """Split a command line, keeping a quoted argument such as ``-m "not gpu"`` in one token."""
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
+
+
+def _marker_names(node: ast.AST) -> set[str]:
+    return set(re.findall(r"mark\.(\w+)", ast.unparse(node)))
+
+
+def _gpu_only(path: Path) -> bool:
+    """True when every test in ``path`` is marked gpu, so ``-m "not gpu"`` drops the whole file."""
+    try:
+        tree = ast.parse(path.read_text(errors="replace"))
+    except (OSError, SyntaxError):
+        return False
+    module_gpu = any(
+        isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "pytestmark"
+                                             for target in node.targets) and "gpu" in _marker_names(node.value)
+        for node in tree.body)
+    tests = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+            marks: set[str] = set()
+            for decorator in node.decorator_list:
+                marks |= _marker_names(decorator)
+            tests.append(marks)
+    return bool(tests) and all("gpu" in marks or module_gpu for marks in tests)
+
+
+def _pytest_invocations() -> list[tuple[set[str], set[str], set[str], bool]]:
     """Resolve what each CI ``pytest`` invocation collects.
 
-    Returns one ``(files, directories, ignored)`` tuple per invocation. A shell
-    variable assigned a repository path (``golden_root=./fastvideo/tests/...``)
-    is substituted into the command, and ``--ignore=`` subtrees are recorded so
-    they do not count as coverage for that invocation. ``ssim/ci_runner.py``
-    discovers ``test_*.py`` under ``ssim/`` itself, so that directory counts as
-    collected.
+    Returns one ``(files, directories, ignored, not_gpu)`` tuple per invocation.
+    A shell variable assigned a repository path (``golden_root=./fastvideo/tests/...``)
+    is substituted into the command, and ``--ignore`` subtrees are recorded so
+    they do not count as coverage for that invocation. ``not_gpu`` records
+    ``-m "not gpu"`` so a gpu-only file does not count as covered.
+    ``ssim/ci_runner.py`` discovers ``test_*.py`` under ``ssim/`` itself, so that
+    directory counts as collected.
     """
-    invocations: list[tuple[set[str], set[str], set[str]]] = []
+    invocations: list[tuple[set[str], set[str], set[str], bool]] = []
     for source in CI_SOURCES:
         if not source.exists():
             continue
@@ -160,21 +202,28 @@ def _pytest_invocations() -> list[tuple[set[str], set[str], set[str]]]:
             if match is not None:
                 variables[match.group(1)] = match.group(2)
         for line in text.splitlines():
-            if "pytest" not in line and "ci_runner.py" not in line:
+            if line.lstrip().startswith("#") or not _PYTEST_COMMAND_RE.search(line):
                 continue
             expanded = line
             for name, value in variables.items():
-                expanded = expanded.replace("${" + name + "}", value).replace("$" + name, value)
-            tokens = [token.strip("'\"()") for token in expanded.split()]
-            ignored = {
-                _normalise(token.split("=", 1)[1].rstrip("/"))
-                for token in tokens
-                if token.startswith("--ignore=")
-            }
+                expanded = re.sub(r"\$\{?" + re.escape(name) + r"\}?(?![A-Za-z0-9_])", lambda _match, v=value: v,
+                                  expanded)
+            tokens = [token.strip("'\"()") for token in _shell_tokens(expanded)]
             files: set[str] = set()
             directories: set[str] = set()
-            for token in tokens:
+            ignored: set[str] = set()
+            not_gpu = False
+            for index, token in enumerate(tokens):
                 token = token.strip("'\"),")
+                if token == "--ignore" and index + 1 < len(tokens):
+                    ignored.add(_normalise(tokens[index + 1].strip("'\"),").rstrip("/")))
+                    continue
+                if token.startswith("--ignore="):
+                    ignored.add(_normalise(token.split("=", 1)[1].rstrip("/")))
+                    continue
+                if token == "-m" and index + 1 < len(tokens):
+                    not_gpu = tokens[index + 1].strip("'\"") == "not gpu"
+                    continue
                 if token.startswith("-"):
                     continue
                 match = _PATH_RE.match(token)
@@ -186,18 +235,25 @@ def _pytest_invocations() -> list[tuple[set[str], set[str], set[str]]]:
                     directories.add(path)
                 elif path.endswith(".py") and absolute.is_file():
                     files.add(path)
-            invocations.append((files, directories, ignored))
+            invocations.append((files, directories, ignored, not_gpu))
         if "ci_runner.py" in text:
-            invocations.append((set(), {"fastvideo/tests/ssim"}, set()))
+            invocations.append((set(), {"fastvideo/tests/ssim"}, set(), False))
     return invocations
 
 
-def _is_dark(path: str, invocations: list[tuple[set[str], set[str], set[str]]]) -> bool:
-    for files, directories, ignored in invocations:
+def _is_dark(path: str, invocations: list[tuple[set[str], set[str], set[str], bool]]) -> bool:
+    gpu_only: bool | None = None
+    for files, directories, ignored, not_gpu in invocations:
         if any(path == prefix or path.startswith(prefix + "/") for prefix in ignored):
             continue
-        if path in files or any(path == directory or path.startswith(directory + "/") for directory in directories):
-            return False
+        if path not in files and not any(path == directory or path.startswith(directory + "/")
+                                         for directory in directories):
+            continue
+        if not_gpu:
+            gpu_only = _gpu_only(REPO_ROOT / path) if gpu_only is None else gpu_only
+            if gpu_only:
+                continue
+        return False
     return True
 
 
