@@ -47,7 +47,6 @@ def gather_state_dict_on_cpu_rank0(
         if hasattr(param, "_local_tensor"):
             # DTensor case
             if param.is_cpu:
-                # Gather directly on CPU
                 param = param.full_tensor()
             else:
                 if device is not None:
@@ -155,24 +154,20 @@ def save_checkpoint(transformer,
 
     cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
     if rank == 0:
-        # Save model weights (consolidated)
         transformer_save_dir = os.path.join(save_dir, "transformer")
         os.makedirs(transformer_save_dir, exist_ok=True)
         weight_path = os.path.join(transformer_save_dir, "diffusion_pytorch_model.safetensors")
         logger.info("rank: %s, saving consolidated checkpoint to %s", rank, weight_path, local_main_process_only=False)
 
-        # Convert training format to diffusers format and save
         diffusers_state_dict = custom_to_hf_state_dict(cpu_state, transformer.reverse_param_names_mapping)
         save_file(diffusers_state_dict, weight_path)
 
         logger.info("rank: %s, consolidated checkpoint saved to %s", rank, weight_path, local_main_process_only=False)
 
-        # Save model config
         config_dict = transformer.hf_config
         if "dtype" in config_dict:
             del config_dict["dtype"]  # TODO
         config_path = os.path.join(transformer_save_dir, "config.json")
-        # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
@@ -224,12 +219,10 @@ def save_distillation_checkpoint(
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
 
-    # Create directories for models
     inference_save_dir = os.path.join(save_dir, "generator_inference_transformer")
 
     # Only save distributed checkpoint if not only saving generator weight
     if not only_save_generator_weight:
-        # Save generator distributed checkpoint
         generator_states = {
             "model": ModelWrapper(generator_transformer),
         }
@@ -255,7 +248,6 @@ def save_distillation_checkpoint(
                     end_time - begin_time,
                     local_main_process_only=False)
 
-        # Save generator_2 distributed checkpoint (MoE support)
         if generator_transformer_2 is not None:
             generator_2_states = {
                 "model": ModelWrapper(generator_transformer_2),
@@ -282,7 +274,6 @@ def save_distillation_checkpoint(
                         end_time - begin_time,
                         local_main_process_only=False)
 
-        # Save critic distributed checkpoint
         critic_states = {
             "model": ModelWrapper(fake_score_transformer),
         }
@@ -308,7 +299,6 @@ def save_distillation_checkpoint(
                     end_time - begin_time,
                     local_main_process_only=False)
 
-        # Save critic_2 distributed checkpoint (MoE support)
         if fake_score_transformer_2 is not None:
             critic_2_states = {
                 "model": ModelWrapper(fake_score_transformer_2),
@@ -335,7 +325,6 @@ def save_distillation_checkpoint(
                         end_time - begin_time,
                         local_main_process_only=False)
 
-        # Save real_score_transformer_2 distributed checkpoint (MoE support)
         if real_score_transformer_2 is not None:
             real_score_2_states = {
                 "model": ModelWrapper(real_score_transformer_2),
@@ -360,7 +349,6 @@ def save_distillation_checkpoint(
                         end_time - begin_time,
                         local_main_process_only=False)
 
-        # Save shared random state separately
         shared_states = {
             "random_state": RandomStateWrapper(noise_generator),
         }
@@ -381,7 +369,6 @@ def save_distillation_checkpoint(
         if generator_ema is not None and getattr(generator_ema, "mode", None) == "rank0_full":
             _save_rank0_full_ema_safetensors(generator_ema, generator_transformer, rank, save_dir, "generator_ema")
         elif generator_ema is not None and getattr(generator_ema, "mode", None) == "local_shard":
-            # Save per-rank shard
             ema_dir_shard = os.path.join(save_dir, "ema_local_shard")
             os.makedirs(ema_dir_shard, exist_ok=True)
             ema_shard_path = os.path.join(ema_dir_shard, f"generator_ema_rank{rank}.pt")
@@ -403,7 +390,6 @@ def save_distillation_checkpoint(
             _save_rank0_full_ema_safetensors(generator_ema_2, generator_transformer_2, rank, save_dir,
                                              "generator_ema_2")
         elif generator_ema_2 is not None and getattr(generator_ema_2, "mode", None) == "local_shard":
-            # Save per-rank shard for EMA_2
             ema_dir_shard_2 = os.path.join(save_dir, "ema_local_shard")
             os.makedirs(ema_dir_shard_2, exist_ok=True)
             ema2_shard_path = os.path.join(ema_dir_shard_2, f"generator_ema_2_rank{rank}.pt")
@@ -419,11 +405,9 @@ def save_distillation_checkpoint(
     except Exception as e:
         logger.warning("rank: %s, failed saving EMA_2 separately: %s", rank, str(e))
 
-    # Save generator model weights (consolidated) for inference
     cpu_state = gather_state_dict_on_cpu_rank0(generator_transformer, device=None)
 
     if rank == 0:
-        # Save generator model weights (consolidated) for inference
         os.makedirs(inference_save_dir, exist_ok=True)
         weight_path = os.path.join(inference_save_dir, "diffusion_pytorch_model.safetensors")
         logger.info("rank: %s, saving consolidated generator inference checkpoint to %s",
@@ -431,7 +415,6 @@ def save_distillation_checkpoint(
                     weight_path,
                     local_main_process_only=False)
 
-        # Convert training format to diffusers format and save
         diffusers_state_dict = custom_to_hf_state_dict(cpu_state, generator_transformer.reverse_param_names_mapping)
         save_file(diffusers_state_dict, weight_path)
 
@@ -440,17 +423,14 @@ def save_distillation_checkpoint(
                     weight_path,
                     local_main_process_only=False)
 
-        # Save model config
         config_dict = generator_transformer.hf_config
         if "dtype" in config_dict:
             del config_dict["dtype"]  # TODO
         config_path = os.path.join(inference_save_dir, "config.json")
-        # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
         logger.info("--> distillation checkpoint saved at step %s to %s", step, weight_path)
 
-    # Save generator_2 model weights (consolidated) for inference (MoE support)
     if generator_transformer_2 is not None:
         inference_save_dir_2 = os.path.join(save_dir, "generator_2_inference_transformer")
         cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2, device=None)
@@ -463,7 +443,6 @@ def save_distillation_checkpoint(
                         weight_path_2,
                         local_main_process_only=False)
 
-            # Convert training format to diffusers format and save
             diffusers_state_dict_2 = custom_to_hf_state_dict(cpu_state_2,
                                                              generator_transformer_2.reverse_param_names_mapping)
             save_file(diffusers_state_dict_2, weight_path_2)
@@ -473,7 +452,6 @@ def save_distillation_checkpoint(
                         weight_path_2,
                         local_main_process_only=False)
 
-            # Save model config
             config_dict_2 = generator_transformer_2.hf_config
             if "dtype" in config_dict_2:
                 del config_dict_2["dtype"]  # TODO
@@ -498,7 +476,6 @@ def load_checkpoint(transformer,
         logger.warning("Checkpoint path %s does not exist", checkpoint_path)
         return 0
 
-    # Extract step number from checkpoint path
     step = int(os.path.basename(os.path.normpath(checkpoint_path)).split('-')[-1])
 
     if rank == 0:
@@ -581,13 +558,11 @@ def load_distillation_checkpoint(
         logger.warning("Distillation checkpoint path %s does not exist", checkpoint_path)
         return 0
 
-    # Extract step number from checkpoint path
     step = int(os.path.basename(checkpoint_path).split('-')[-1])
 
     if rank == 0:
         logger.info("Loading distillation checkpoint from step %s", step)
 
-    # Load generator distributed checkpoint
     generator_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "generator")
     if not os.path.exists(generator_dcp_dir):
         logger.warning("Generator distributed checkpoint directory %s does not exist", generator_dcp_dir)
@@ -620,7 +595,6 @@ def load_distillation_checkpoint(
                 end_time - begin_time,
                 local_main_process_only=False)
 
-    # Load EMA separately
     if generator_ema is not None:
         try:
             if getattr(generator_ema, "mode", None) == "local_shard":
@@ -637,7 +611,6 @@ def load_distillation_checkpoint(
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA: %s", rank, str(e))
 
-    # Load EMA_2 from its shard (symmetric with generator_ema above)
     if generator_ema_2 is not None:
         try:
             if getattr(generator_ema_2, "mode", None) == "local_shard":
@@ -653,7 +626,6 @@ def load_distillation_checkpoint(
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA_2: %s", rank, str(e))
 
-    # Load generator_2 distributed checkpoint (MoE support)
     if generator_transformer_2 is not None:
         generator_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "generator_2")
         if os.path.exists(generator_2_dcp_dir):
@@ -686,7 +658,6 @@ def load_distillation_checkpoint(
         else:
             logger.info("rank: %s, generator_2 checkpoint not found, skipping", rank)
 
-    # Load critic distributed checkpoint
     critic_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "critic")
     if not os.path.exists(critic_dcp_dir):
         logger.warning("Critic distributed checkpoint directory %s does not exist", critic_dcp_dir)
@@ -719,7 +690,6 @@ def load_distillation_checkpoint(
                 end_time - begin_time,
                 local_main_process_only=False)
 
-    # Load critic_2 distributed checkpoint (MoE support)
     if fake_score_transformer_2 is not None:
         critic_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "critic_2")
         if os.path.exists(critic_2_dcp_dir):
@@ -752,7 +722,6 @@ def load_distillation_checkpoint(
         else:
             logger.info("rank: %s, critic_2 checkpoint not found, skipping", rank)
 
-    # Load real_score_2 distributed checkpoint (MoE support)
     if real_score_transformer_2 is not None:
         real_score_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "real_score_2")
         if os.path.exists(real_score_2_dcp_dir):
@@ -779,7 +748,6 @@ def load_distillation_checkpoint(
         else:
             logger.info("rank: %s, real_score_2 checkpoint not found, skipping", rank)
 
-    # Load shared random state
     shared_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "shared")
     if not os.path.exists(shared_dcp_dir):
         logger.warning("Shared random state directory %s does not exist", shared_dcp_dir)
@@ -906,8 +874,6 @@ def clip_grad_norm_(
     """
     grads = [p.grad for p in parameters if p.grad is not None]
 
-    # TODO(aryan): Wait for next Pytorch release to use `torch.nn.utils.get_total_norm`
-    # total_norm = torch.nn.utils.get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
 
     # If total_norm is a DTensor, the placements must be `torch.distributed._tensor.ops.math_ops._NormPartial`.
@@ -1404,7 +1370,6 @@ def get_cosine_schedule_with_min_lr(optimizer: Optimizer,
         # Cosine decay from 1.0 to min_lr_ratio over num_cycles periods
         # Use the same formula as standard cosine but ensure minimum is min_lr_ratio instead of 0
         cosine_value = 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress))
-        # Ensure the value doesn't go below min_lr_ratio
         return max(min_lr_ratio, cosine_value)
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
@@ -1741,7 +1706,6 @@ class EMA_FSDP:
                 for name, p in self.module.named_parameters():
                     if not p.requires_grad:
                         continue
-                    # Save local shard
                     p_local = EMA_FSDP._to_local_tensor(p.detach())
                     if p_local.numel() == 0:
                         # Nothing to swap on this rank for this param
@@ -1752,7 +1716,6 @@ class EMA_FSDP:
                         if ema_cpu.numel() != p_local.numel():
                             # Shard shape mismatch (e.g., empty shard here), skip
                             continue
-                        # Copy EMA shard into local param shard
                         p_local.copy_(ema_cpu.to(dtype=p_local.dtype, device=p_local.device))
             return self.module
 

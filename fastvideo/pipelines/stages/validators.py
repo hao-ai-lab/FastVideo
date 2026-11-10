@@ -363,7 +363,6 @@ class VerificationResult:
         failures = []
         all_passed = True
 
-        # Apply all validators and collect detailed failure info
         for validator in validators:
             try:
                 passed = validator(value)
@@ -394,7 +393,6 @@ class VerificationResult:
         expected = None
         error_msg = None
 
-        # Handle common validator patterns
         if hasattr(validator, '__closure__') and validator.__closure__:
             # This is likely a closure (like our helper functions)
             if 'dims' in validator_name or 'with_dims' in str(validator):
@@ -405,7 +403,6 @@ class VerificationResult:
             elif 'divisible' in str(validator):
                 expected = f"integer divisible by {validator.__closure__[0].cell_contents}"
 
-        # Handle specific validator types and check for NaN values
         if validator_name == 'is_tensor':
             expected = "torch.Tensor without NaN values"
             if isinstance(value, torch.Tensor) and torch.isnan(value).any().item():

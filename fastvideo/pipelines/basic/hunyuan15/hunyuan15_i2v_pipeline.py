@@ -13,7 +13,6 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, Denois
                                         LatentPreparationStage, TextEncodingStage, TimestepPreparationStage,
                                         Hy15ImageEncodingStage)
 
-# TODO(will): move PRECISION_TO_TYPE to better place
 
 logger = init_logger(__name__)
 

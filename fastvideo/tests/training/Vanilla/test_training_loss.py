@@ -10,7 +10,6 @@ from pathlib import Path
 import torch
 import json
 from huggingface_hub import snapshot_download
-# Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 from fastvideo.training.runner import main
@@ -27,10 +26,8 @@ NUM_GPUS_PER_NODE = "2"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
-    # Create and populate args
     parser = build_parser()
 
-    # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
         "--pipeline_class", "WanTrainingPipeline",
         "--pipeline_module", "fastvideo.training.wan_training_pipeline",
@@ -50,7 +47,6 @@ def run_worker():
         "--not_apply_cfg_solver", "--dit_precision", "fp32", "--max_grad_norm", "1.0"
     ])
     
-    # Call the main training function
     main(args)
 
 
@@ -65,10 +61,8 @@ def test_distributed_training():
                           repo_type="dataset",
                           local_dir_use_symlinks=False)
 
-    # Get the current file path
     current_file = Path(__file__).resolve()
 
-    # Run torchrun command
     cmd = [
         "torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, "--master_port",
         os.environ["MASTER_PORT"],

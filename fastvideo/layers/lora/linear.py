@@ -217,7 +217,6 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
 
-        # Store rank and alpha directly
         rank = A.shape[0]  # rank is the first dimension of A
         self.lora_rank = rank
         self.lora_alpha = lora_alpha if lora_alpha is not None else rank
@@ -288,7 +287,6 @@ class BaseLayerWithLoRA(nn.Module):
         return (weight.to(accumulate_dtype) + (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
 
     @torch.no_grad()
-    # @torch.compile(dynamic=True)
     def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
         if self.disable_lora or self.side_branch:
             return

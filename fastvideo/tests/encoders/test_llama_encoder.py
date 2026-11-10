@@ -43,19 +43,15 @@ def test_llama_encoder():
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # Initialize the two model implementations
     logger.info("Loading models from %s", args.model_path)
     hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
     print(hf_config)
 
-    # Load HuggingFace implementation
     model1 = LlamaModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
     loader = TextEncoderLoader()
     device = torch.device("cuda:0")
     model2 = loader.load(TEXT_ENCODER_PATH, args)
 
-    # Convert to float16 and move to device
-    # model2 = model2.to(torch.float16)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -63,11 +59,9 @@ def test_llama_encoder():
     params1 = dict(model1.named_parameters())
     params2 = dict(model2.named_parameters())
 
-    # Check number of parameters
     logger.info("Model1 has %d parameters", len(params1))
     logger.info("Model2 has %d parameters", len(params2))
 
-    # check if embed_tokens are the same
     device = model1.embed_tokens.weight.device
     assert torch.allclose(
         model1.embed_tokens.weight,
@@ -82,7 +76,6 @@ def test_llama_encoder():
             p1 = params1[name1]
             p2 = params2[name2]
             if "gate_up" in name2:
-                # print("skipping gate_up")
                 continue
             p1 = p1.to_local().to(device) if isinstance(p1, DTensor) else p1.to(device)
             p2 = p2.to_local().to(device) if isinstance(p2, DTensor) else p2.to(device)
@@ -122,15 +115,10 @@ def test_llama_encoder():
             tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
                                return_tensors="pt").to(device)
 
-            # Get outputs from our implementation
-            # filter out padding input_ids
-            # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
-            # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
             outputs1 = model1(input_ids=tokens.input_ids, output_hidden_states=True)
             print("--------------------------------")
             logger.info("Testing model2")
 
-            # Get outputs from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(input_ids=tokens.input_ids,
                                   attention_mask=tokens.attention_mask,

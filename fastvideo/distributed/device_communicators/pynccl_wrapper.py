@@ -22,7 +22,6 @@
 # changing the environment variable `FASTVIDEO_NCCL_SO_PATH`, or the `so_file`
 # variable in the code.
 
-#TODO(will): support FASTVIDEO_NCCL_SO_PATH
 
 import ctypes
 import platform

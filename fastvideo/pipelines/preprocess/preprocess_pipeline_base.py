@@ -43,7 +43,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
         self.preprocess_video_and_text(fastvideo_args, args)
@@ -84,7 +83,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             field_filled = False
 
             if field.endswith('_bytes'):
-                # Handle binary tensor data - convert numpy array or tensor to bytes
                 tensor_name = field.replace('_bytes', '')
                 tensor_data = getattr(preprocess_batch, tensor_name, None)
                 if tensor_data is not None:
@@ -105,7 +103,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     record[field] = b''  # Empty bytes for missing data
 
             elif field.endswith('_shape'):
-                # Handle tensor shape info
                 tensor_name = field.replace('_shape', '')
                 tensor_data = getattr(preprocess_batch, tensor_name, None)
                 if tensor_data is not None and hasattr(tensor_data, 'shape'):
@@ -115,7 +112,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     record[field] = []
 
             elif field.endswith('_dtype'):
-                # Handle tensor dtype info
                 tensor_name = field.replace('_dtype', '')
                 tensor_data = getattr(preprocess_batch, tensor_name, None)
                 if tensor_data is not None and hasattr(tensor_data, 'dtype'):
@@ -125,7 +121,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     record[field] = 'unknown'
 
             elif field in ['width', 'height', 'num_frames']:
-                # Handle integer metadata fields
                 value = getattr(preprocess_batch, field, None)
                 if value is not None:
                     try:
@@ -139,8 +134,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     record[field] = 0
 
             elif field in ['duration_sec', 'fps']:
-                # Handle float metadata fields
-                # Map schema field names to batch attribute names
                 attr_name = 'duration' if field == 'duration_sec' else field
                 value = getattr(preprocess_batch, attr_name, None)
                 if value is not None:
@@ -163,7 +156,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 elif field == 'file_name':
                     attr_name = 'path'
                 elif field == 'id':
-                    # Generate ID from path if available
                     path_value = getattr(preprocess_batch, 'path', None)
                     if path_value:
                         import os
@@ -193,7 +185,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             if not field_filled:
                 unfilled_fields.append(field)
 
-        # Handle strict mode
         if strict and unfilled_fields:
             raise ValueError(f"Required fields were not filled: {unfilled_fields}")
 
@@ -234,12 +225,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
     def preprocess_video_and_text(self, fastvideo_args: FastVideoArgs, args):
         os.makedirs(args.output_dir, exist_ok=True)
-        # Create directory for combined data
         combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(combined_parquet_dir, exist_ok=True)
         local_rank = int(os.getenv("RANK", 0))
 
-        # Get how many samples have already been processed
         start_idx = 0
         for root, _, files in os.walk(combined_parquet_dir):
             for file in files:
@@ -257,7 +246,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         )
 
         num_processed_samples = 0
-        # Add progress bar for video preprocessing
         pbar = tqdm(train_dataloader, desc="Processing videos", unit="batch", disable=local_rank != 0)
 
         for batch_idx, data in enumerate(pbar):
@@ -292,7 +280,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     latents = self.get_module("vae").encode(valid_data["pixel_values"].to(
                         get_local_torch_device())).mean
 
-                # Get extra features if needed
                 extra_features = self.get_extra_features(valid_data, fastvideo_args)
 
                 batch_captions = valid_data["text"]
@@ -309,13 +296,11 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                         0], result_batch.prompt_attention_mask[0]
                     assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
 
-                    # Get sequence lengths from attention masks (number of 1s)
                     seq_lens = prompt_attention_mask.sum(dim=1)
 
                     non_padded_embeds = []
                     non_padded_masks = []
 
-                    # Process each item in the batch
                     for i in range(prompt_embeds.size(0)):
                         seq_len = seq_lens[i].item()
                         # Slice the embeddings and masks to keep only non-padding parts
@@ -329,21 +314,16 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     bs = len(valid_indices)
                     prompt_embeds = [torch.zeros(0) for _ in range(bs)]
 
-            # Prepare batch data for Parquet dataset
             batch_data = []
 
-            # Add progress bar for saving outputs
             save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
             for idx, video_path in save_pbar:
-                # Get the corresponding latent and info using video name
                 latent = latents[idx].cpu()
                 video_name = os.path.basename(video_path).split(".")[0]
 
-                # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
                 text_embedding = prompt_embeds[idx].cpu().float().numpy()
 
-                # Get extra features for this sample if needed
                 sample_extra_features = {}
                 if extra_features:
                     for key, value in extra_features.items():
@@ -352,7 +332,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                         else:
                             sample_extra_features[key] = value[idx]
 
-                # Create record for Parquet dataset
                 record = self.create_record(video_name=video_name,
                                             vae_latent=vae_latent,
                                             text_embedding=text_embedding,

@@ -230,7 +230,6 @@ class LoRAPipeline(ComposedPipelineBase):
     # Sequential load (the 32 GB and other cards that cannot hold the text encoder and the DiT at once) omits
     # the transformer from the first load. The adapter is applied when that module arrives.
     _constructor_adapter_pending: bool = False
-    # Set once inference LoRA state exists, so ``add_module`` wraps a transformer that arrives later.
     _tracks_late_transformers: bool = False
     # Adapters loaded while the transformer was not in memory; their coverage is checked when it loads.
     _coverage_deferred: set[str]
@@ -250,11 +249,9 @@ class LoRAPipeline(ComposedPipelineBase):
         self.cur_adapter_path = ""
         self.cur_adapter_strength = 1.0
         self._coverage_deferred = set()
-        # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
             if (transformer_name in self.modules and self.modules[transformer_name] is not None):
                 self.trainable_transformer_modules[transformer_name] = (self.modules[transformer_name])
-            # check for transformer_2 in case of Wan2.2 MoE or fake_score_transformer_2
             if transformer_name.endswith("_2"):
                 raise ValueError(
                     f"trainable_transformer_name override in pipelines should not include _2 suffix: {transformer_name}"
@@ -631,7 +628,6 @@ class LoRAPipeline(ComposedPipelineBase):
 
         if not self._setting_constructor_adapter and _has_nvfp4_weights_without_bf16(
                 self, self.trainable_transformer_modules):
-            # TODO(David): Restore the BF16 weights and requantize them after an NVFP4 LoRA adapter change.
             raise RuntimeError(
                 "Runtime LoRA adapter changes are unsupported after NVFP4 quantization removed the BF16 weights. "
                 "Create a new VideoGenerator with the desired LoRA adapter.")
@@ -663,10 +659,8 @@ class LoRAPipeline(ComposedPipelineBase):
                 param_names_mapping_fn = get_param_names_mapping(param_names_mapping)
                 lora_param_names_mapping_fn = get_param_names_mapping(lora_param_names_mapping)
 
-                # Extract alpha values and weights in a single pass
                 to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
                 for name, weight in lora_state_dict.items():
-                    # Extract weights (lora_A, lora_B, and lora_alpha)
                     normalized = normalize_lora_key(name)
                     if normalized is None:
                         continue
@@ -679,7 +673,6 @@ class LoRAPipeline(ComposedPipelineBase):
                         layer_name = name.replace(".lora_alpha", "")
                         layer_name, _, _ = lora_param_names_mapping_fn(layer_name)
                         target_name, _, _ = param_names_mapping_fn(layer_name)
-                        # Store alpha alongside weights with same target_name base
                         alpha_key = target_name + ".lora_alpha"
                         self.lora_adapters[lora_nickname][alpha_key] = (weight.item() if weight.numel() == 1 else float(
                             weight.mean()))
@@ -742,7 +735,6 @@ class LoRAPipeline(ComposedPipelineBase):
                         lora_alpha_name = name + ".lora_alpha"
                         if (lora_A_name in self.lora_adapters[lora_nickname]
                                 and lora_B_name in self.lora_adapters[lora_nickname]):
-                            # Get alpha value for this layer (defaults to None if not present)
                             lora_A = self.lora_adapters[lora_nickname][lora_A_name]
                             lora_B = self.lora_adapters[lora_nickname][lora_B_name]
                             # Simple lookup - alpha stored with same naming scheme as lora_A/lora_B
@@ -812,7 +804,6 @@ class LoRAPipeline(ComposedPipelineBase):
         BF16 weight cannot be unmerged and remerged.
         """
         if _has_nvfp4_weights_without_bf16(self, self.trainable_transformer_modules):
-            # TODO(David): Merge from the packed FP4 weight instead of rejecting.
             raise RuntimeError(
                 "LoRA merge is unsupported after NVFP4 weight quantization removed the BF16 weights because the "
                 "FP4 weights would not reflect the merged LoRA adapter.")
@@ -862,7 +853,6 @@ class LoRAPipeline(ComposedPipelineBase):
         NVFP4 is rejected: its FP4 buffers cannot be rebuilt from a purged BF16 weight.
         """
         if _has_quantized_nvfp4_weights(self, self.trainable_transformer_modules):
-            # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
             raise RuntimeError(
                 "LoRA unmerge is unsupported after NVFP4 weight quantization because the quantized weights would "
                 "not reflect the unmerged LoRA adapter.")

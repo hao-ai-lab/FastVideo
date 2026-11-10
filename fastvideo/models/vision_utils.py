@@ -175,13 +175,11 @@ def _load_gif(gif_path: str) -> tuple[list[PIL.Image.Image], float | None]:
     original_fps = None
 
     with PIL.Image.open(gif_path) as gif:
-        # Extract FPS from GIF metadata
         if hasattr(gif, 'info') and 'duration' in gif.info:
             duration_ms = gif.info['duration']
             if duration_ms > 0:
                 original_fps = 1000.0 / duration_ms
 
-        # Extract all frames
         try:
             while True:
                 pil_images.append(gif.copy())
@@ -206,7 +204,6 @@ def _load_video_with_ffmpeg(video_path: str) -> tuple[list[PIL.Image.Image], flo
     Raises:
         AttributeError: If ffmpeg is not installed
     """
-    # Verify ffmpeg is available
     try:
         imageio.plugins.ffmpeg.get_exe()
     except AttributeError as e:
@@ -227,7 +224,6 @@ def _load_video_with_ffmpeg(video_path: str) -> tuple[list[PIL.Image.Image], flo
             if isinstance(source_size, dict):
                 original_fps = source_size.get('fps')
 
-        # Extract all frames
         for frame in reader:
             pil_images.append(PIL.Image.fromarray(frame))
 
@@ -291,7 +287,6 @@ def load_video(
         else:
             pil_images, original_fps = _load_video_with_ffmpeg(video_path)
     finally:
-        # Clean up temporary file if it was created
         if was_tempfile_created and os.path.exists(video_path):
             os.remove(video_path)
 
@@ -435,7 +430,6 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     Returns:
         Preprocessed PIL image ready for CLIP encoder
     """
-    # Convert PIL to tensor and normalize to [-1, 1] range
     image_tensor = TF.to_tensor(image).sub_(0.5).div_(0.5).to(device)
 
     # Resize to CLIP's expected input size (224x224) using bicubic interpolation

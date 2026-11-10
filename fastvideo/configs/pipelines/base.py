@@ -201,11 +201,9 @@ class PipelineConfig:
             help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
 
-        # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
 
-        # Add DiT configuration arguments
         from fastvideo.configs.models.dits.base import DiTConfig
         DiTConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}dit-config")
 
@@ -324,7 +322,6 @@ class PipelineConfig:
                     model_dicts.append(model_dict)
                 output_dict[key] = model_dicts
             elif isinstance(value, tuple) and all(callable(f) for f in value):
-                # Skip dumping functions
                 del_keys.append(key)
 
         for key in del_keys:

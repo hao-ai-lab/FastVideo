@@ -134,7 +134,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
         trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
-        # Move to device
         device = get_local_torch_device()
         training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=torch.bfloat16)
@@ -159,8 +158,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                      max_timestep, [batch_size, num_frame],
                                      device=self.device,
                                      dtype=torch.long)
-            # logger.info(f"individual timestep: {timestep}")
-            # make the noise level the same within every block
             timestep = timestep.reshape(timestep.shape[0], -1, num_frame_per_block)
             timestep[:, :, 1:] = timestep[:, :, 0:1]
             timestep = timestep.reshape(timestep.shape[0], -1)
@@ -192,13 +189,11 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                                    dim=1,
                                                    index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
         logger.info("relevant_traj_latents: %s", relevant_traj_latents.shape)
-        # assert relevant_traj_latents.shape[0] == 1
 
         indexes = self._get_timestep(  # [B, num_frames]
             0, len(self.dmd_denoising_steps), B, num_frames, 3, uniform_timestep=False)
         logger.info("indexes: %s", indexes.shape)
         logger.info("indexes: %s", indexes)
-        # noisy_input = relevant_traj_latents[indexes]
         noisy_input = torch.gather(relevant_traj_latents,
                                    dim=1,
                                    index=indexes.reshape(B, 1, num_frames, 1, 1,
@@ -207,7 +202,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         timestep = self.dmd_denoising_steps[indexes]
         logger.info("selected timestep for rank %s: %s", self.global_rank, timestep, local_main_process_only=False)
 
-        # Prepare inputs for transformer
         latent_vis_dict["noisy_input"] = noisy_input.permute(0, 2, 1, 3, 4).detach().clone().cpu()
         latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3, 4).detach().clone().cpu()
 
@@ -257,7 +251,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
             mask = t != 0
 
-            # Compute loss
             loss = F.mse_loss(noise_pred[mask], target_latent[mask], reduction="mean")
             loss = loss / args.gradient_accumulation_steps
 
@@ -302,7 +295,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             video_artifact = self.tracker.video(video, fps=16, format="mp4")  # change to 16 for Wan2.1
             if video_artifact is not None:
                 tracker_loss_dict[latent_key] = video_artifact
-            # Clean up references
             del video, pixel_latent, latent
 
         if self.global_rank == 0 and tracker_loss_dict:

@@ -27,9 +27,7 @@ if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
 
-# ------------------------------------------------------------------
 # TrainingArgs builders (only place that creates FastVideoArgs)
-# ------------------------------------------------------------------
 
 
 def _make_training_args(
@@ -85,9 +83,6 @@ def make_inference_args(
     return args
 
 
-# ------------------------------------------------------------------
-# Module loading
-# ------------------------------------------------------------------
 
 
 def load_module_from_path(

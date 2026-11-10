@@ -43,9 +43,6 @@ logger = init_logger(__name__)
 
 BSA_TILE_SIZE = (4, 4, 4)
 
-# ---------------------------------------------------------------------------
-# Cached index helpers (same pattern as VSA)
-# ---------------------------------------------------------------------------
 
 
 @functools.lru_cache(maxsize=10)
@@ -80,9 +77,6 @@ def get_reverse_tile_partition_indices(
     return torch.argsort(get_tile_partition_indices(dit_seq_shape, tile_size, device))
 
 
-# ---------------------------------------------------------------------------
-# BSA core operations
-# ---------------------------------------------------------------------------
 
 
 def _prune_queries(
@@ -286,7 +280,6 @@ def _compute_sparse_attention_flash(
             # Per-head path: process each head individually
             for h in range(H):
                 head_mask = kv_mask[b, h]  # [N, N]
-                # Process single head: squeeze head dim, run FA, put back
                 _flash_attn_single_head(
                     sparse_q[b, h],
                     k_blocks[b, h],
@@ -537,9 +530,6 @@ def _reconstruct_pruned(
     return full_output
 
 
-# ---------------------------------------------------------------------------
-# FastVideo backend classes
-# ---------------------------------------------------------------------------
 
 
 class BSAAttentionBackend(AttentionBackend):

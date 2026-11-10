@@ -184,7 +184,6 @@ class Cosmos25AdaLayerNormZero(nn.Module):
         Returns:
             normalized_hidden_states: Modulated normalized hidden states
         """
-        # Apply layer norm and modulation
         hidden_states = self.norm(hidden_states)
         hidden_states = hidden_states * (1 + scale) + shift
         return hidden_states
@@ -239,7 +238,6 @@ class Cosmos25SelfAttention(nn.Module):
             hidden_states: (B, S, D) where S = T*H*W
             rope_emb: Tuple of (cos, sin) for RoPE
         """
-        # Get QKV
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(hidden_states)
         value, _ = self.to_v(hidden_states)
@@ -249,11 +247,9 @@ class Cosmos25SelfAttention(nn.Module):
         key = key.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
         value = value.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
 
-        # Apply QK normalization
         query = self.norm_q(query)
         key = self.norm_k(key)
 
-        # Apply RoPE if provided (query/key are now in (B, H, S, D_h) format)
         if rope_emb is not None:
             cos, sin = rope_emb
             query = apply_rotary_emb(query, (cos, sin), use_real=True, use_real_unbind_dim=-2)
@@ -326,7 +322,6 @@ class Cosmos25CrossAttention(nn.Module):
             hidden_states: (B, S, D)
             encoder_hidden_states: (B, N, D_text)
         """
-        # Get QKV
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(encoder_hidden_states)
         value, _ = self.to_v(encoder_hidden_states)
@@ -336,7 +331,6 @@ class Cosmos25CrossAttention(nn.Module):
         key = key.unflatten(-1, (self.num_heads, self.head_dim))
         value = value.unflatten(-1, (self.num_heads, self.head_dim))
 
-        # Apply QK normalization
         query = self.norm_q(query)
         key = self.norm_k(key)
 
@@ -439,13 +433,11 @@ class Cosmos25TransformerBlock(nn.Module):
             rope_emb: Tuple of (cos, sin) for RoPE
             extra_pos_emb: Optional learnable positional embeddings
         """
-        # Add extra positional embeddings if provided
         if extra_pos_emb is not None:
             hidden_states = hidden_states + extra_pos_emb
 
         B, T, H, W, D = hidden_states.shape
 
-        # Step 1: Compute ALL modulation parameters once (matches official model)
         if self.use_adaln_lora and adaln_lora is not None:
             shift_self_attn, scale_self_attn, gate_self_attn = (self.adaln_modulation_self_attn(embedded_timestep) +
                                                                 adaln_lora).chunk(3, dim=-1)
@@ -473,7 +465,6 @@ class Cosmos25TransformerBlock(nn.Module):
         scale_mlp = scale_mlp.unsqueeze(2).unsqueeze(2).type_as(hidden_states)
         gate_mlp = gate_mlp.unsqueeze(2).unsqueeze(2).type_as(hidden_states)
 
-        # Step 2: Self-attention block
         norm_hidden_states = self.norm1(hidden_states, shift_self_attn, scale_self_attn)
         # Flatten for attention: (B, T, H, W, D) -> (B, THW, D)
         norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)
@@ -484,7 +475,6 @@ class Cosmos25TransformerBlock(nn.Module):
         attn_output = attn_output.unflatten(1, (T, H, W))  # (B, T, H, W, D)
         hidden_states = hidden_states + gate_self_attn * attn_output
 
-        # Step 3: Cross-attention block
         norm_hidden_states = self.norm2(hidden_states, shift_cross_attn, scale_cross_attn)
         norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)
 
@@ -497,7 +487,6 @@ class Cosmos25TransformerBlock(nn.Module):
         attn_output = attn_output.unflatten(1, (T, H, W))
         hidden_states = hidden_states + gate_cross_attn * attn_output
 
-        # Step 4: MLP block
         norm_hidden_states = self.norm3(hidden_states, shift_mlp, scale_mlp)
         norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)
 
@@ -557,14 +546,12 @@ class Cosmos25RotaryPosEmbed(nn.Module):
         # T, H, W are already patch dimensions after patch_embed
         # No need to divide by patch_size
 
-        # Generate frequency scales with NTK
         h_theta = 10000.0 * self.h_ntk_factor
         w_theta = 10000.0 * self.w_ntk_factor
         t_theta = 10000.0 * self.t_ntk_factor
 
         seq = torch.arange(max(self.max_size), device=device, dtype=torch.float32)
 
-        # Use self.dim_h/w/t which were set during initialization
         dim_h_range = torch.arange(0, self.dim_h, 2, device=device,
                                    dtype=torch.float32)[:(self.dim_h // 2)] / self.dim_h
         dim_w_range = torch.arange(0, self.dim_w, 2, device=device,
@@ -576,12 +563,10 @@ class Cosmos25RotaryPosEmbed(nn.Module):
         w_spatial_freqs = 1.0 / (w_theta**dim_w_range)
         temporal_freqs = 1.0 / (t_theta**dim_t_range)
 
-        # Generate positional embeddings
         half_emb_h = torch.outer(seq[:H], h_spatial_freqs)
         half_emb_w = torch.outer(seq[:W], w_spatial_freqs)
 
         if self.enable_fps_modulation and fps is not None:
-            # Apply FPS scaling
             half_emb_t = torch.outer(seq[:T] / fps * self.base_fps, temporal_freqs)
         else:
             half_emb_t = torch.outer(seq[:T], temporal_freqs)
@@ -638,7 +623,6 @@ class Cosmos25LearnablePositionalEmbed(nn.Module):
 
         emb = emb_t + emb_h + emb_w
 
-        # Normalize
         norm = torch.linalg.vector_norm(emb, dim=-1, keepdim=True, dtype=torch.float32)
         norm = torch.add(self.eps, norm, alpha=np.sqrt(norm.numel() / emb.numel()))
         return (emb / norm).type_as(hidden_states)
@@ -687,18 +671,15 @@ class Cosmos25FinalLayer(nn.Module):
             embedded_timestep: (B, T, D) or (B, D)
             adaln_lora: (B, T, 3D) or None
         """
-        # Generate modulation parameters
         embedded_timestep = self.activation(embedded_timestep)
         embedded_timestep = self.linear_1(embedded_timestep)
         embedded_timestep = self.linear_2(embedded_timestep)
 
         if self.use_adaln_lora and adaln_lora is not None:
-            # Use first 2*hidden_size elements for shift/scale
             embedded_timestep = embedded_timestep + adaln_lora[..., :2 * self.hidden_size]
 
         shift, scale = embedded_timestep.chunk(2, dim=-1)
 
-        # Apply normalization and modulation
         hidden_states = self.norm(hidden_states)
 
         # Reshape for broadcasting if needed
@@ -888,14 +869,12 @@ class Cosmos25Transformer3DModel(BaseDiT):
         else:
             raise ValueError(f"Unsupported timestep shape: {timestep.shape}")
 
-        # Now timestep is always (B, T), pass directly to time_embed
         embedded_timestep, adaln_lora = self.time_embed(hidden_states, timestep)
 
         # 7. Apply cross-attention projection (if used)
         if self.use_crossattn_projection:
             encoder_hidden_states = self.crossattn_proj(encoder_hidden_states.to(self.crossattn_proj[0].weight.dtype))
 
-        # Prepare attention mask
         if attention_mask is not None:
             attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, N)
 

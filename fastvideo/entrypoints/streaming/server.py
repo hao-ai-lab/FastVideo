@@ -385,8 +385,6 @@ async def _run_segment(
         ))
 
     start = time.perf_counter()
-    # TODO: pool.run() runs to completion even if the client disconnects
-    # mid-segment. Real cancellation needs the generate_async API.
     try:
         result = await state.pool.run(session.id, request)
     except Exception as exc:

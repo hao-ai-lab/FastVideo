@@ -170,7 +170,6 @@ def create_app(
             }},
         )
 
-    # Import and mount routers
     from fastvideo.entrypoints.openai.common_api import router as common_router
     from fastvideo.entrypoints.openai.image_api import router as image_router
     from fastvideo.entrypoints.openai.playground import router as playground_router
@@ -209,7 +208,6 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     port = args.port
     output_dir = args.output_dir
 
-    # Build FastVideoArgs from the remaining CLI args
     excluded = {"host", "port", "output_dir", "subparser", "config", "dispatch_function"}
     cli_kwargs = {k: v for k, v in vars(args).items() if k not in excluded and v is not None}
     fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)

@@ -86,7 +86,6 @@ def test_hyworld_transformer():
 
     torch.manual_seed(42)
 
-    # Create inputs for the model
     batch_size = 1
     seq_len = 30
     seq_len_2 = 70
@@ -103,7 +102,6 @@ def test_hyworld_transformer():
 
     # Text embeddings [B, L, D] (including global token)
     encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 3584, device=device, dtype=precision)
-    # Create attention mask for encoder_hidden_states
     encoder_attention_mask = torch.ones(batch_size, seq_len + 1, device=device, dtype=torch.bool)
     encoder_hidden_states[:, 15:] = 0
     encoder_attention_mask[:, 15:] = False

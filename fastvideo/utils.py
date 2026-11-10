@@ -46,8 +46,6 @@ logger = init_logger(__name__)
 
 T = TypeVar("T")
 
-# TODO(will): used to convert fastvideo_args.precision to torch.dtype. Find a
-# cleaner way to do this.
 PRECISION_TO_TYPE = {
     "fp32": torch.float32,
     "fp16": torch.float16,
@@ -184,7 +182,6 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
     _DEFER_CONFIG_SUBCOMMANDS = frozenset({"generate", "serve"})
 
     def __init__(self, *args, **kwargs) -> None:
-        # Set the default 'formatter_class' to SortedHelpFormatter
         if 'formatter_class' not in kwargs:
             kwargs['formatter_class'] = SortedHelpFormatter
         super().__init__(*args, **kwargs)
@@ -204,7 +201,6 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         if '--config' in args and not self._should_defer_config_loading(args):
             args = self._pull_args_from_config(args)
 
-        # Convert underscores to dashes and vice versa in argument names
         processed_args = []
         for arg in args:
             if arg.startswith('--'):
@@ -236,12 +232,10 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         while i < len(args):
             arg = args[i]
             if arg.startswith('--'):
-                # Handle --key=value format
                 if '=' in arg:
                     key = arg.split('=')[0][2:].replace('-', '_')
                     namespace._provided.add(key)
                     i += 1
-                # Handle --key value format
                 else:
                     key = arg[2:].replace('-', '_')
                     namespace._provided.add(key)
@@ -419,7 +413,6 @@ def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
 
             try:
                 attr = getattr(self, attr_name)
-                # get the func of callable method
                 if callable(attr):
                     attr_func = attr.__func__
             except AttributeError:
@@ -731,18 +724,15 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
             filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
             model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
 
-        # Load the selected manifest.
         with open(model_index_path) as f:
             config: dict[str, Any] = json.load(f)
 
-        # Verify it has the required fields
         if "_class_name" not in config:
             raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
         if "_diffusers_version" not in config:
             raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
-        # Add the pipeline name for downstream use
         config["pipeline_name"] = config["_class_name"]
 
         logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path, config["_class_name"])
@@ -840,18 +830,12 @@ def shallow_asdict(obj) -> dict[str, Any]:
     return {f.name: getattr(obj, f.name) for f in fields(obj)}
 
 
-# TODO: validate that this is fine
 def kill_itself_when_parent_died() -> None:
-    # if sys.platform == "linux":
-    # sigkill this process when parent worker manager dies
     PR_SET_PDEATHSIG = 1
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
         libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
-    # elif platform.system() == "Darwin":
-    #     libc = ctypes.CDLL("libc.dylib")
-    #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
     else:
         logger.warning("kill_itself_when_parent_died is only supported in linux.")
 
@@ -957,7 +941,6 @@ def dict_to_3d_list(
             "If mask_strategy is None, you must provide t_max, l_max, and h_max")
         return [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
 
-    # Parse all keys into integer tuples
     indices = [tuple(map(int, key.split("_"))) for key in mask_strategy]
 
     # Decide on dimensions
@@ -983,7 +966,6 @@ def dict_to_3d_list(
         t, l, h = map(int, key.split("_"))  # noqa: E741
         if 0 <= t < max_timesteps_idx and 0 <= l < max_layer_idx and 0 <= h < max_head_idx:
             result[t][l][h] = value
-        # else: silently ignore any key that doesn't fit
 
     return result
 
@@ -1043,13 +1025,11 @@ def best_output_size(w, h, dw, dh, expected_area):
     ow = (expected_area * ratio)**0.5
     oh = expected_area / ow
 
-    # process width first
     ow1 = int(ow // dw * dw)
     oh1 = int(expected_area / ow1 // dh * dh)
     assert ow1 % dw == 0 and oh1 % dh == 0 and ow1 * oh1 <= expected_area
     ratio1 = ow1 / oh1
 
-    # process height first
     oh2 = int(oh // dh * dh)
     ow2 = int(expected_area / oh2 // dw * dw)
     assert oh2 % dh == 0 and ow2 % dw == 0 and ow2 * oh2 <= expected_area
@@ -1077,7 +1057,6 @@ def pixels_to_uint8(pixels: torch.Tensor) -> torch.Tensor:
 
 
 def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor], output_path: str, fps: int):
-    # Process outputs
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
     frames = []
     for x in videos:
@@ -1156,7 +1135,6 @@ def _append_to_memory_trace(message: str, log_file_path: str | os.PathLike[str] 
         pass
 
 
-# TODO(xingyu): add adopted message for this
 def get_ip() -> str:
     host_ip = envs.FASTVIDEO_HOST_IP.get()
     if host_ip:

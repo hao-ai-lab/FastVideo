@@ -236,9 +236,6 @@ class ValidationCallback(Callback):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
-    # ----------------------------------------------------------
-    # Callback hooks
-    # ----------------------------------------------------------
 
     def _adopt_training_denoising_ladder(
         self,
@@ -322,9 +319,6 @@ class ValidationCallback(Callback):
 
         self._run_validation(method, iteration)
 
-    # ----------------------------------------------------------
-    # Core validation logic
-    # ----------------------------------------------------------
 
     def _run_validation(
         self,
@@ -845,9 +839,6 @@ class ValidationCallback(Callback):
                 step,
             )
 
-    # ----------------------------------------------------------
-    # Metric evaluation
-    # ----------------------------------------------------------
 
     def _metric_device(self) -> str:
         device = self.metrics_config.device
@@ -1179,9 +1170,6 @@ class ValidationCallback(Callback):
             return -1
         return int(self.metrics_config.mouse_pitch_sign)
 
-    # ----------------------------------------------------------
-    # Pipeline management
-    # ----------------------------------------------------------
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
@@ -1341,9 +1329,6 @@ class ValidationCallback(Callback):
         self._pipeline_key = key
         return self._pipeline
 
-    # ----------------------------------------------------------
-    # Batch preparation
-    # ----------------------------------------------------------
 
     def _prepare_validation_batch(
         self,
@@ -1465,9 +1450,6 @@ class ValidationCallback(Callback):
                 tensor,
             )
 
-    # ----------------------------------------------------------
-    # Validation loop
-    # ----------------------------------------------------------
 
     def _student_sampling_pipeline_config(
         self,
@@ -1673,9 +1655,6 @@ class ValidationCallback(Callback):
             action=action,
         )
 
-    # ----------------------------------------------------------
-    # State management
-    # ----------------------------------------------------------
 
     def state_dict(self) -> dict[str, Any]:
         state: dict[str, Any] = {}

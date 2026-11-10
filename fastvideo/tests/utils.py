@@ -116,7 +116,6 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     frames1 = _read_visual_frames(video1_path)
     frames2 = _read_visual_frames(video2_path)
 
-    # Ensure same number of frames
     min_frames = min(frames1.shape[0], frames2.shape[0])
     frames1 = frames1[:min_frames]
     frames2 = frames2[:min_frames]
@@ -130,7 +129,6 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
 
     ssim_values = []
 
-    # Process each frame individually
     for i in range(min_frames):
         img1 = frames1[i:i + 1]
         img2 = frames2[i:i + 1]

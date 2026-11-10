@@ -16,7 +16,6 @@ def main():
         pin_cpu_memory=True,
     )
 
-    # Load default sampling parameters (negative_prompt, resolution, steps, etc.)
     sampling_param = SamplingParam.from_pretrained(model_path)
 
     prompt = (

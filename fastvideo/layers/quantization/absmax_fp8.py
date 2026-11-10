@@ -83,7 +83,6 @@ class AbsMaxFP8MergedParameter(nn.Parameter):
             # MergedColumnParallelLinear case
             tp_size = get_tp_world_size()
             if tp_size > 1:
-                # TODO: support this case
                 raise NotImplementedError(
                     "AbsMaxFP8MergedParameter with integer share_id is not supported in tensor parallelism greater than 1 yet."
                 )

@@ -15,7 +15,6 @@ from .resolution_utils import (
     get_resolution_from_image, )
 
 __all__ = [
-    # Model (used by model registry)
     "HYWorldTransformer3DModel",
     "HYWorldDoubleStreamBlock",
     # Inference utilities (used by examples)

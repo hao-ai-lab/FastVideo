@@ -6,7 +6,6 @@ from typing import Any
 import torch
 
 
-# TODO(PY): move it elsewhere
 def auto_attributes(init_func):
     """
     Decorator that automatically adds all initialization arguments as object attributes.
@@ -22,30 +21,25 @@ def auto_attributes(init_func):
     """
 
     def wrapper(self, *args, **kwargs):
-        # Get the function signature
         import inspect
         signature = inspect.signature(init_func)
         parameters = signature.parameters
 
-        # Get parameter names (excluding 'self')
         param_names = list(parameters.keys())[1:]
 
         # Bind arguments to parameters
         bound_args = signature.bind(self, *args, **kwargs)
         bound_args.apply_defaults()
 
-        # Create config object if it doesn't exist
         if not hasattr(self, 'config'):
             self.config = type('Config', (), {})()
 
-        # Set attributes on self and self.config
         for name in param_names:
             if name in bound_args.arguments:
                 value = bound_args.arguments[name]
                 setattr(self, name, value)
                 setattr(self.config, name, value)
 
-        # Call the original __init__ function
         return init_func(self, *args, **kwargs)
 
     return wrapper

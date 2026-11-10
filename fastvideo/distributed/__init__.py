@@ -37,6 +37,5 @@ __all__ = [
     "get_tp_rank",
     "get_tp_world_size",
 
-    # Get torch device
     "get_local_torch_device",
 ]

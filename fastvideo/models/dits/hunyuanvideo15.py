@@ -24,7 +24,6 @@ from fastvideo.distributed.communication_op import (sequence_model_parallel_all_
 from fastvideo.configs.models.dits import HunyuanVideo15Config
 from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
-# TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed, TimestepEmbedder, unpatchify)
@@ -293,9 +292,7 @@ class MMDoubleStreamBlock(nn.Module):
             txt_mlp_gate,
         ) = torch.chunk(txt_mod_outputs, 6, dim=-1)
 
-        # Prepare image for attention using fused operation
         img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale)
-        # Get QKV for image
         img_qkv, _ = self.img_attn_qkv(img_attn_input)
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
 
@@ -303,43 +300,34 @@ class MMDoubleStreamBlock(nn.Module):
         img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
 
-        # Apply QK-Norm if needed
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
-        # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
 
-        # Get QKV for text
         txt_qkv, _ = self.txt_attn_qkv(txt_attn_input)
         batch_size, text_seq_len = txt_qkv.shape[0], txt_qkv.shape[1]
 
         # Split QKV
         txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.num_attention_heads, -1)
         txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :, 2]
-        # Apply QK-Norm if needed
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
 
         img_attn_out, _ = self.img_attn_proj(img_attn.reshape(batch_size, image_seq_len, -1))
-        # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(img, img_attn_out, img_attn_gate, img_mlp_shift,
                                                                       img_mlp_scale)
 
-        # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
-        # Process text attention output
         txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
 
-        # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(txt, txt_attn_out, txt_attn_gate, txt_mlp_shift,
                                                                       txt_mlp_scale)
 
-        # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
         txt = self.txt_mlp_residual(txt_residual, txt_mlp_out, txt_mlp_gate)
 
@@ -351,7 +339,6 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
     A Transformer model for video-like data used in [HunyuanVideo1.5](https://huggingface.co/tencent/HunyuanVideo1.5).
     """
 
-    # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideo15Config()._fsdp_shard_conditions
     _compile_conditions = HunyuanVideo15Config()._compile_conditions
     _supported_attention_backends = HunyuanVideo15Config()._supported_attention_backends
@@ -517,13 +504,6 @@ class SingleTokenRefiner(nn.Module):
     ) -> None:
         super().__init__()
 
-        # Input projection
-        # self.input_embedder = ReplicatedLinear(
-        #     in_channels,
-        #     hidden_size,
-        #     bias=True,
-        #     params_dtype=dtype,
-        #     prefix=f"{prefix}.input_embedder")
         self.input_embedder = nn.Linear(in_channels, hidden_size, bias=True)
 
         # Timestep embedding
@@ -549,7 +529,6 @@ class SingleTokenRefiner(nn.Module):
         ])
 
     def forward(self, x, t, mask=None):
-        # Get timestep embeddings
         timestep_aware_representations = self.t_embedder(t)
 
         original_dtype = x.dtype
@@ -563,7 +542,6 @@ class SingleTokenRefiner(nn.Module):
         c = timestep_aware_representations + context_aware_representations
         # Project input
         x = self.input_embedder(x)
-        # Process through refiner blocks
         for block in self.refiner_blocks:
             x = block(x, c, mask=mask)
         return x
@@ -617,13 +595,11 @@ class IndividualTokenRefinerBlock(nn.Module):
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
-            # TODO: remove hardcode
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
         )
 
     def forward(self, x, c, mask=None):
 
-        # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
         # Self-attention
         norm_x = self.norm1(x)
@@ -640,7 +616,6 @@ class IndividualTokenRefinerBlock(nn.Module):
                 current_timestep=0,
                 attn_mask=mask,
             )
-            # Run distributed attention
             with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
                 attn_output = self.attn(q, k, v)  # [B, L, H, D]
         attn_output = attn_output.reshape(batch_size, seq_len, -1)

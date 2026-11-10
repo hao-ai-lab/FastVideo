@@ -135,7 +135,6 @@ class HYWorldUpsample(nn.Module):
                 # First chunk: only spatial upsample
                 h = rearrange(h, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
                 h = h[:, :h.shape[1] // 2]
-                # Compute the shortcut part
                 shortcut = rearrange(x, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
                 shortcut = shortcut.repeat_interleave(repeats=self.repeats // 2, dim=1)
             elif feat_cache is None and x.shape[2] > 1:
@@ -199,7 +198,6 @@ class HYWorldDownsample(nn.Module):
         """
         r1 = 2 if self.add_temporal_downsample else 1
 
-        # Apply conv with caching
         if feat_cache is not None and feat_idx is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -219,7 +217,6 @@ class HYWorldDownsample(nn.Module):
                 # Single frame: only spatial downsample
                 h = rearrange(h, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2)
                 h = torch.cat([h, h], dim=1)
-                # Compute the shortcut part
                 shortcut = rearrange(x, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2)
                 B, C, T, H, W = shortcut.shape
                 shortcut = shortcut.view(B, h.shape[1], self.group_size // 2, T, H, W).mean(dim=2)
@@ -281,7 +278,6 @@ class HYWorldResnetBlock(nn.Module):
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.nonlinearity(hidden_states)
 
-        # apply the feature cacheing mechanism
         if feat_cache is not None and feat_idx is not None:
             # Retrieve the current layer index.
             idx = feat_idx[0]
@@ -299,10 +295,8 @@ class HYWorldResnetBlock(nn.Module):
                     dim=2,
                 )
 
-            # Apply the convolution layer using `hidden_states`and the *previous* cached state.
             hidden_states = self.conv1(hidden_states, feat_cache[idx])
 
-            # Update the cache for this layer with the newly prepared context ('cache_x').
             feat_cache[idx] = cache_x
 
             # Increment the global layer index.
@@ -812,7 +806,6 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
                 upsample_match_channel=config.upsample_match_channel,
             )
 
-        # TODO: Add spatial tiling.
         self.use_tiling = False
 
         # The minimal tile height and width for spatial tiling to be used
@@ -914,7 +907,6 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
 
         self.clear_cache()
 
-        # Process one frame at a time with caching
         for i in range(num_frame):
             self._conv_idx = [0]
             if i == 0:

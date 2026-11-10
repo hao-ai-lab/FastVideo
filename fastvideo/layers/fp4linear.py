@@ -36,7 +36,6 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
     def forward(ctx, x, weight, bias, backend="cutlass", block_size=16, use_128x4_sf_layout=True):
         flashinfer_mod = _require_flashinfer()
 
-        # assert activation dtype
         if x.dtype not in (torch.float16, torch.bfloat16):
             x = x.to(dtype=torch.bfloat16)
 

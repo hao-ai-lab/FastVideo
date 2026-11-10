@@ -85,10 +85,6 @@ CAMERA_MAP_GTA = {
 
 
 def setup_model_environment(model_path: str) -> None:
-    # if "fullattn" in model_path.lower():
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-    # else:
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
@@ -444,7 +440,6 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             # If already initialized, clean up first
             if state.get("initialized"):
                 try:
-                    # Clear accumulated frames without saving
                     generator.accumulated_frames = []
                     generator.executor.execute_streaming_clear()
                 except Exception as e:
@@ -496,30 +491,22 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             if not state.get("initialized"):
                 return state, state.get("seed", 0), "Block: 0 / 50", None, gr.update(), gr.update()
 
-            # total_start_time = time.time()
             config = VARIANT_CONFIG.get(model_name)
             generator = generators.get(config["model_path"])
             mode = state["mode"]
             frames_per_block = state["frames_per_block"]
 
-            # Parse inputs to tensors
             action = get_action_tensors(mode, keyboard_key, mouse_key)
             keyboard_cond, mouse_cond = expand_action_to_frames(action, frames_per_block)
 
-            # run step async
-            # inference_start_time = time.time()
             frames, block_future = await generator.step_async(keyboard_cond, mouse_cond)
-            # inference_time = time.time() - inference_start_time
 
             # wait for block file to be written
             block_path = await asyncio.to_thread(block_future.result) if block_future else None
             state["block_idx"] = generator.block_idx
             block_str = f"Block: {state['block_idx']} / {state['max_blocks']}"
 
-            # total_time = time.time() - total_start_time
 
-            # Timing breakdown
-            # timing_html = create_timing_display(inference_time, total_time, [], frames_per_block)
 
             return state, state.get("seed", 0), block_str, block_path, gr.update(), gr.update()
 
@@ -573,7 +560,6 @@ def main():
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
 
-    # Load the selected model
     config = VARIANT_CONFIG[args.model]
     model_path = config["model_path"]
 

@@ -220,11 +220,9 @@ def main() -> None:
                 writer.append_data(frame)
         print(f"  Wrote reference clip to {ref_path}")
 
-    # Clean up
     del text_encoder, tokenizer, vae
     torch.cuda.empty_cache()
 
-    # Write parquet (replicated num_copies times; see the comment above num_copies)
     replicated = []
     for copy_idx in range(max(1, num_copies)):
         for r in records:
@@ -241,7 +239,6 @@ def main() -> None:
     print(f"\nWrote {len(replicated)} records "
           f"({len(records)} unique x {max(1, num_copies)} copies) to {output_path}")
 
-    # Write validation prompts for the validation callback
     val_prompts = {
         "data": [{
             "caption": (item["cap"][0] if isinstance(item["cap"], list) else item["cap"]),

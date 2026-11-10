@@ -540,7 +540,6 @@ def main(step: str = "all", ladder: str = "base"):
                 print("RESULT", json.dumps(result))
 
 
-# --- Headline benchmark (480p 5 s, 768p 10 s) on 1 / 4 / 8 GPUs from a FastVideo HF repo. ---
 # MODAL_PROFILE=aryan5v modal run --detach app.py::headline --repo FastVideo/<repo> --profile h3_dit_ffn --gpus 1,4,8
 HERE = pathlib.Path(__file__).resolve().parent
 headline_image = (image.add_local_file(HERE / "bench_headline.py", "/root/bench_headline.py")

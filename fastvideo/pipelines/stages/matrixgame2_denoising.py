@@ -221,7 +221,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
                 latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
 
-                # Update KV caches with clean context
                 self._update_context_cache(
                     current_latents=current_latents,
                     batch=batch,
@@ -362,7 +361,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
 
         for i, t_cur in enumerate(timesteps):
-            # Stop if interrupted
             if getattr(self, "interrupt", False):
                 break
             if ctx.boundary_timestep is not None and t_cur < ctx.boundary_timestep:
@@ -380,7 +378,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             # t_expand needs to be [batch * frames] to match flattened pred_noise/noise_latents
             t_expand = t_cur.repeat(latent_model_input.shape[0] * current_num_frames)
 
-            # Build attention metadata if VSA is available
             if vsa_available and self.attn_backend == VideoSparseAttentionBackend:
                 self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
                 if self.attn_metadata_builder_cls is not None:
@@ -450,7 +447,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             if i < len(timesteps) - 1:
                 next_timestep = timesteps[i + 1] * torch.ones([1], dtype=torch.long, device=pred_video_btchw.device)
 
-                # Use custom noise generator if provided (for streaming), else generate
                 if noise_generator is not None:
                     noise = noise_generator(pred_video_btchw.shape, pred_video_btchw.dtype, i)
                 else:
@@ -582,7 +578,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
-        # Initialize caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0], dtype=target_dtype, device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
@@ -603,7 +598,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             dtype=target_dtype,
             device=latents.device)
 
-        # Calculate block sizes
         if t % self.num_frame_per_block != 0:
             raise ValueError("num_frames must be divisible by num_frame_per_block for causal denoising")
         num_blocks = t // self.num_frame_per_block
@@ -622,7 +616,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             ) for _ in range(num_denoising_steps - 1)
         ]
 
-        # Create and store context
         self._streaming_ctx = BlockProcessingContext(
             batch=batch,
             block_idx=0,
@@ -667,7 +660,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
 
-        # Update batch with new actions for this block
         if keyboard_action is not None or mouse_action is not None:
             vae_ratio = 4
             start_frame = 0 if start_index == 0 else 1 + vae_ratio * (start_index - 1)
@@ -681,7 +673,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
-        # Create noise generator that uses pre-allocated noise pool
         def streaming_noise_generator(shape: tuple, dtype: torch.dtype, step_idx: int) -> torch.Tensor:
             if ctx.noise_pool is not None and step_idx < len(ctx.noise_pool):
                 return ctx.noise_pool[step_idx][:, :shape[1], :, :, :].to(latents.device)
@@ -706,7 +697,6 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
 
-        # Update KV caches with clean context
         self._update_context_cache(
             current_latents=current_latents,
             batch=batch,

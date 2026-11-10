@@ -111,9 +111,6 @@ class SRDenoisingStage(PipelineStage):
                 pipeline.add_module("upsampler", self.upsampler)
             fastvideo_args.model_loaded["upsampler"] = True
 
-        # Setup precision and autocast settings
-        # TODO(will): make the precision configurable for inference
-        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
@@ -146,7 +143,6 @@ class SRDenoisingStage(PipelineStage):
             },
         )
 
-        # Get latents and embeddings
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
 
@@ -174,10 +170,8 @@ class SRDenoisingStage(PipelineStage):
         latent_model_input = latents.to(target_dtype)
         assert latent_model_input.shape[0] == 1, "only support batch size 1"
 
-        # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
@@ -198,7 +192,6 @@ class SRDenoisingStage(PipelineStage):
 
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                # Prepare inputs for transformer
                 guidance_expand = (torch.tensor(
                     [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
                     dtype=torch.float32,
@@ -212,7 +205,6 @@ class SRDenoisingStage(PipelineStage):
 
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
-                            # TODO(will): clean this up
                             attn_metadata = self.attn_metadata_builder.build(  # type: ignore
                                 current_timestep=i,  # type: ignore
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
@@ -228,7 +220,6 @@ class SRDenoisingStage(PipelineStage):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
-                            # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
                             moba_params.update({
                                 "current_timestep": i,
@@ -242,18 +233,12 @@ class SRDenoisingStage(PipelineStage):
                             attn_metadata = None
                     else:
                         attn_metadata = None
-                    # TODO(will): finalize the interface. vLLM uses this to
-                    # support torch dynamo compilation. They pass in
-                    # attn_metadata, vllm_config, and num_tokens. We can pass in
-                    # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
                     ):
-                        # Run transformer
                         noise_pred = self.transformer(latent_model_input,
                                                       prompt_embeds,
                                                       t_expand,
@@ -262,15 +247,12 @@ class SRDenoisingStage(PipelineStage):
                                                       **pos_cond_kwargs,
                                                       **image_kwargs)
 
-                    # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                # Update progress bar
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
                                                (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
                     progress_bar.update()
 
-        # Update batch with final latents
         batch.latents = latents
 
         # deallocate transformer if on mps

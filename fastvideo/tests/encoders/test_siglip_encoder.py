@@ -41,19 +41,15 @@ def test_siglip_encoder():
 
     logger.info("Loading SigLIP models from %s/%s", MODEL_ID, IMAGE_ENCODER_SUBFOLDER)
 
-    # Load HuggingFace implementation
     hf_model = HFSiglipVisionModel.from_pretrained(MODEL_ID, subfolder=IMAGE_ENCODER_SUBFOLDER).to(
         torch.float16).to(device).eval()
 
-    # Load the config from Hugging Face and extract vision_config
     config_path = hf_hub_download(repo_id=MODEL_ID, filename=f"{IMAGE_ENCODER_SUBFOLDER}/config.json")
     with open(config_path) as f:
         full_config = json.load(f)
 
-    # Get vision config from the full config
     vision_config_dict = full_config.get("vision_config", full_config)
 
-    # Create FastVideo config with vision-specific settings
     arch_config = SiglipVisionArchConfig(
         hidden_size=vision_config_dict.get("hidden_size", 1152),
         image_size=vision_config_dict.get("image_size", 384),
@@ -65,11 +61,9 @@ def test_siglip_encoder():
 
     config = SiglipVisionConfig(arch_config=arch_config)
 
-    # Create FastVideo model
     from fastvideo.models.encoders.siglip import SiglipVisionModel
     fv_model = SiglipVisionModel(config).to(torch.float16).to(device)
 
-    # Load weights from safetensors via Hugging Face
     weights_path = hf_hub_download(repo_id=MODEL_ID, filename=f"{IMAGE_ENCODER_SUBFOLDER}/model.safetensors")
     state_dict = load_file(weights_path)
     # Filter to only vision_model weights (keep the vision_model. prefix)
@@ -110,16 +104,13 @@ def test_siglip_encoder():
     batch_size = 2
     image_size = fv_model.config.arch_config.image_size
 
-    # Create random pixel values
     pixel_values = torch.randn(batch_size, 3, image_size, image_size).to(device).to(torch.float16)
 
     logger.info("Testing SigLIP encoder with random pixel values of shape %s", pixel_values.shape)
 
     with torch.no_grad():
-        # Get embeddings from HuggingFace implementation
         hf_outputs = hf_model(pixel_values=pixel_values)
 
-        # Get embeddings from FastVideo implementation
         with set_forward_context(current_timestep=0, attn_metadata=None):
             fv_outputs = fv_model(pixel_values=pixel_values)
 

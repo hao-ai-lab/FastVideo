@@ -95,7 +95,6 @@ class TestSessionManager:
         s = mgr.create()
         mgr.close(s.id)
         assert len(mgr) == 0
-        # Now can create again.
         mgr.create()
 
     def test_reap_timed_out_flags_idle_sessions(self):

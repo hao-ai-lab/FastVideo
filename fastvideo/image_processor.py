@@ -43,7 +43,6 @@ class ImageProcessor:
             torch.Tensor: Normalized tensor of shape (1, 3, height, width) or (1, 1, height, width) for grayscale,
                          with values in range [-1, 1].
         """
-        # Handle different input types
         if isinstance(image, PIL.Image.Image):
             return self._preprocess_pil(image, height, width)
         elif isinstance(image, np.ndarray):
@@ -111,7 +110,6 @@ class ImageProcessor:
         pil_image = pil_image.resize((width, height), resample=PIL.Image.Resampling.LANCZOS)
         image_np = np.array(pil_image, dtype=np.float32) / 255.0
 
-        # Ensure 3D shape
         if image_np.ndim == 2:
             image_np = np.expand_dims(image_np, axis=-1)
 
@@ -168,7 +166,6 @@ class ImageProcessor:
         Returns:
             torch.Tensor: Shape (1, C, H, W) or (1, 1, H, W) with values in [-1, 1]
         """
-        # Convert to tensor
         if image_np.ndim == 2:  # (H, W) - grayscale
             tensor = torch.from_numpy(image_np).unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
         elif image_np.ndim == 3:  # (H, W, C)
@@ -176,7 +173,6 @@ class ImageProcessor:
         else:
             raise ValueError(f"Expected 2D or 3D array, got {image_np.ndim}D")
 
-        # Normalize to [-1, 1]
         tensor = 2.0 * tensor - 1.0
 
         return tensor

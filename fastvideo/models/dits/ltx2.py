@@ -1324,7 +1324,6 @@ class LTXDistributedAttention(DistributedAttention):
             # Transpose back to [2*B, T, H/SP, D]
             qkv[:batch_size * 2] = qk_part.transpose(1, 2)
 
-        # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
@@ -1348,7 +1347,6 @@ class LTXDistributedAttention(DistributedAttention):
             output = output[:, :split_idx]
             replicated_output = sequence_model_parallel_all_gather(replicated_output.contiguous(), dim=2)
 
-        # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
@@ -1409,7 +1407,6 @@ class LTXLocalAttention(LocalAttention):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        # Apply LTX-2 style RoPE
         if ltx_freqs_cis is not None:
             # Use separate K RoPE if provided (for cross-attention), otherwise use same as Q
             k_freqs = ltx_k_freqs_cis if ltx_k_freqs_cis is not None else ltx_freqs_cis
@@ -2167,7 +2164,6 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 # Audio-to-video cross-attention: Q from video (sharded), K/V from audio
                 # For SP, gather audio context from all ranks before cross-attention
                 if self.use_distributed_attention:
-                    # Gather audio context from all SP ranks
                     ax_context = sequence_model_parallel_all_gather(ax_scaled, dim=1)
                     # Video Q: video tokens divide evenly (adjusted upstream), so simple slicing works
                     video_q_pe = None
@@ -2207,10 +2203,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 # For SP, gather both modalities and run cross-attention on full sequences
                 # (audio is short, so no need to keep it sharded for cross-attention)
                 if self.use_distributed_attention:
-                    # Gather both modalities to full sequences
                     ax_full = sequence_model_parallel_all_gather(ax_scaled, dim=1)
                     vx_context = sequence_model_parallel_all_gather(vx_scaled, dim=1)
-                    # Use full positional embeddings directly
                     audio_q_pe = audio.cross_positional_embeddings
                     video_k_pe = video.cross_positional_embeddings
                     # Trim gathered tensors to original lengths (may have padding from sharding)
@@ -2220,7 +2214,6 @@ class BasicAVTransformerBlock(torch.nn.Module):
                     if video_k_pe is not None:
                         original_video_len = video_k_pe[0].shape[2]
                         vx_context = vx_context[:, :original_video_len, :]
-                    # Run cross-attention on full audio
                     v2a_out_full = self.video_to_audio_attn(
                         ax_full,
                         context=vx_context,
@@ -2732,12 +2725,10 @@ class LTX2Transformer3DModel(BaseDiT):
 
         arch = config.arch_config
 
-        # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
         use_vsa_backend = effective_attention_backend(config) == AttentionBackendEnum.VIDEO_SPARSE_ATTN
         use_distributed_attention = sp_world_size > 1 or use_vsa_backend
 
-        # Validate that attention heads are divisible by SP world size
         if sp_world_size > 1:
             assert arch.num_attention_heads % sp_world_size == 0, (
                 f"The number of video attention heads ({arch.num_attention_heads}) "
@@ -2824,10 +2815,8 @@ class LTX2Transformer3DModel(BaseDiT):
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
             encoder_hidden_states = encoder_hidden_states[0]
-        # Get SP parameters
         sp_world_size = get_sp_world_size()
 
-        # Get fps for position computation
         fps = None
         try:
             forward_ctx = get_forward_context()
@@ -2850,7 +2839,6 @@ class LTX2Transformer3DModel(BaseDiT):
         if video_sigma is None:
             video_sigma = timestep[:, 0] if timestep.ndim > 1 else timestep
 
-        # Shard video latents and timestep across SP ranks
         video_original_seq_len = latents.shape[1]
         video_padded_seq_len = video_original_seq_len
         video_timestep = timestep
@@ -2905,7 +2893,6 @@ class LTX2Transformer3DModel(BaseDiT):
             keyframes_mask=keyframes_mask,
         )
 
-        # Process audio modality if provided
         audio_modality = None
         audio_shape = None
         audio_original_seq_len = 0
@@ -2916,12 +2903,10 @@ class LTX2Transformer3DModel(BaseDiT):
             if audio_sigma is None:
                 audio_sigma = (audio_timestep[:, 0] if audio_timestep.ndim > 1 else audio_timestep)
 
-            # Shard audio latents and timestep across SP ranks
             audio_original_seq_len = audio_latents.shape[1]
             sharded_audio_timestep = audio_timestep
             if sp_world_size > 1:
                 audio_latents, audio_original_seq_len = sequence_model_parallel_shard(audio_latents, dim=1)
-                # Shard audio timestep along sequence dimension
                 sharded_audio_timestep, _ = sequence_model_parallel_shard(audio_timestep, dim=1)
 
             # Compute audio RoPE positions for the FULL sequence (before sharding)
@@ -2939,7 +2924,6 @@ class LTX2Transformer3DModel(BaseDiT):
                 sigma=audio_sigma,
             )
 
-        # Run transformer with original sequence lengths
         video_out, audio_out = self.model(
             video=video_modality,
             audio=audio_modality,
@@ -2964,11 +2948,9 @@ class LTX2Transformer3DModel(BaseDiT):
                 audio_modality.timesteps,
             )
 
-        # Gather and unpad video output
         if sp_world_size > 1 and video_out is not None:
             video_out = sequence_model_parallel_all_gather_with_unpad(video_out, video_original_seq_len, dim=1)
 
-        # Gather and unpad audio output
         if sp_world_size > 1 and audio_out is not None:
             audio_out = sequence_model_parallel_all_gather_with_unpad(audio_out, audio_original_seq_len, dim=1)
 

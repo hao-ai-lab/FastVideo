@@ -76,7 +76,6 @@ def rotation_matrix_to_angles(R: torch.Tensor) -> Tuple[torch.Tensor, torch.Tens
     y = fwd[1]
     z = fwd[2]
 
-    # compute yaw and pitch
     yaw_rad = torch.atan2(x, z)
     yaw_deg = yaw_rad * (180.0 / math.pi)
     pitch_rad = torch.atan2(y, torch.sqrt(x**2 + z**2))
@@ -121,17 +120,14 @@ def is_inside_fov_3d_hv(
     # Calculate the horizontal angle (yaw/azimuth), assuming the Z-axis is forward.
     azimuth = torch.atan2(x, z) * (180 / math.pi)
 
-    # Calculate the vertical angle (pitch/elevation).
     elevation = torch.atan2(y, torch.sqrt(x**2 + z**2)) * (180 / math.pi)
 
-    # Calculate the angular difference from the center view direction (handling angle wrapping).
     diff_azimuth = azimuth - center_yaw
     diff_azimuth = torch.remainder(diff_azimuth + 180, 360) - 180
 
     diff_elevation = elevation - center_pitch
     diff_elevation = torch.remainder(diff_elevation + 180, 360) - 180
 
-    # Check if within FOV
     in_fov_h = diff_azimuth.abs() < fov_half_h
     in_fov_v = diff_elevation.abs() < fov_half_v
 
@@ -178,7 +174,6 @@ def calculate_fov_overlap_similarity(
     fov_half_h = torch.tensor(fov_h_deg / 2.0, device=device)
     fov_half_v = torch.tensor(fov_v_deg / 2.0, device=device)
 
-    # move to P_w_curr (N, 3)
     points_world = points_local + P_w_curr[None, :]
 
     in_fov_curr = is_inside_fov_3d_hv(
@@ -190,7 +185,6 @@ def calculate_fov_overlap_similarity(
         fov_half_v,
     )
 
-    # compute based on angle
     in_fov_hist = is_inside_fov_3d_hv(
         points_world,
         P_w_hist[None, :],
@@ -200,7 +194,6 @@ def calculate_fov_overlap_similarity(
         fov_half_v,
     )
 
-    # compute based on distance
     dist = torch.norm(points_world - P_w_hist.reshape(1, -1), dim=1) < 8.0
     in_fov_hist = in_fov_hist.bool() & dist.reshape(1, -1).bool()
 
@@ -292,7 +285,6 @@ def select_aligned_memory_frames(
     candidate_distances.sort(key=lambda x: x[1])
 
     for start_idx, _ in candidate_distances:
-        # check the memory frame number
         if len(memory_frames_indices) >= memory_frames:
             break
 

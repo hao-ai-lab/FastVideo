@@ -192,9 +192,7 @@ class ThirdPersonFlowGenerator:
         return [self.generate_flow(kb[i], mo[i]) for i in range(n)]
 
 
-# ---------------------------------------------------------------------------
 # Linear-features form (used by the calibration fitter).
-# ---------------------------------------------------------------------------
 
 # Number of free params we fit. Order is fixed and shared with the fitter.
 PARAM_NAMES = (

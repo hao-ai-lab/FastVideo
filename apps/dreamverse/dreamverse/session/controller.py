@@ -279,7 +279,6 @@ class SessionController:
             # Acquire a GPU slot.
             gpu_id, slot = await self.gpu_pool.acquire(client_id, websocket)
 
-            # Start session timeout.
             timeout_task = asyncio.create_task(session_timeout())
 
             # Join the engine on this GPU.

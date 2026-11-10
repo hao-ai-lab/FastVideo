@@ -316,8 +316,6 @@ class VideoGenerator:
         Returns:
             The created video generator
         """
-        # Initialize distributed environment if needed
-        # initialize_distributed_and_parallelism(fastvideo_args)
 
         executor_class = Executor.get_class(fastvideo_args, allow_external_launcher=True)
         return cls(
@@ -614,14 +612,12 @@ class VideoGenerator:
 
         validate_request_batch_extra(kwargs, model_path=fastvideo_args.model_path)
 
-        # Handle batch processing from text file
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
 
         if self.executor.uses_spmd_execution:
             prompt = self.executor.broadcast_from_output_rank(prompt if self.executor.is_output_rank else None)
 
-        # Add action control inputs to kwargs if provided
         if mouse_cond is not None:
             kwargs['mouse_cond'] = mouse_cond
         if keyboard_cond is not None:
@@ -666,7 +662,6 @@ class VideoGenerator:
             for i, batch_prompt in enumerate(prompts):
                 logger.info("Processing prompt %d/%d: %s...", i + 1, len(prompts), batch_prompt[:100])
                 try:
-                    # Generate video for this prompt using the same logic below
                     output_path = self._run_on_output_rank(
                         partial(self._prepare_output_path,
                                 sampling_param.output_path,
@@ -683,7 +678,6 @@ class VideoGenerator:
                         **kwargs,
                     )
 
-                    # Add prompt info to result
                     result["prompt_index"] = i
                     result["prompt"] = batch_prompt
 
@@ -774,7 +768,6 @@ class VideoGenerator:
             target_ext = ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
-            # Remove characters invalid on common filesystems, strip spaces/dots
             sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
             sanitized = sanitized.strip().strip('.')
             sanitized = re.sub(r'\s+', ' ', sanitized)
@@ -851,7 +844,6 @@ class VideoGenerator:
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
 
-        # Validate inputs
         if not isinstance(prompt, str):
             raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
         prompt = prompt.strip()
@@ -859,21 +851,17 @@ class VideoGenerator:
         output_path = kwargs["output_path"]
         prompt_embeds = kwargs.get("prompt_embeds")
         sampling_param.prompt = prompt
-        # Process negative prompt
         if sampling_param.negative_prompt is not None:
             sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
 
-        # Validate dimensions
         if (sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0):
             raise ValueError(f"Height, width, and num_frames must be positive integers, got "
                              f"height={sampling_param.height}, width={sampling_param.width}, "
                              f"num_frames={sampling_param.num_frames}")
 
-        # Calculate sizes
         target_height = align_to(sampling_param.height, 16)
         target_width = align_to(sampling_param.width, 16)
 
-        # Calculate latent sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
@@ -897,7 +885,6 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
-        # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             eta=0.0,
@@ -924,7 +911,6 @@ class VideoGenerator:
             batch.return_trajectory_decoded = False
             batch.return_continuation_state = False
 
-        # Run inference
         start_time = time.perf_counter()
 
         # Execute forward pass in a new thread for non-blocking tensor
@@ -1476,14 +1462,11 @@ class VideoGenerator:
                 num_channels = cls._write_pcm_wav(wav_path, audio, sample_rate)
                 layout = "stereo" if num_channels == 2 else "mono"
 
-                # Open input video and audio
                 input_video = av.open(video_path)
                 input_audio = av.open(wav_path)
 
-                # Create output with both streams
                 output = av.open(out_path, mode="w")
 
-                # Add video stream (copy codec from input)
                 in_video_stream = input_video.streams.video[0]
                 out_video_stream = output.add_stream(
                     codec_name=in_video_stream.codec_context.name,
@@ -1493,7 +1476,6 @@ class VideoGenerator:
                 out_video_stream.height = in_video_stream.height
                 out_video_stream.pix_fmt = in_video_stream.pix_fmt
 
-                # Add audio stream (AAC)
                 out_audio_stream = output.add_stream("aac", rate=sample_rate)
                 out_audio_stream.layout = layout
 

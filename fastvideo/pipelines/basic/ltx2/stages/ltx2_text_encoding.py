@@ -45,10 +45,8 @@ class LTX2TextEncodingStage(TextEncodingStage):
         # SP enabled: only rank 0 encodes, then broadcasts
         if sp_rank == 0:
             logger.info("[LTX2TextEncodingStage] SP rank 0: running text encoding")
-            # Run encoding on rank 0
             result_batch = super().forward(batch, fastvideo_args)
 
-            # Build broadcast dict from batch
             broadcast_dict = self._build_broadcast_dict(result_batch)
 
             # Broadcast to other ranks

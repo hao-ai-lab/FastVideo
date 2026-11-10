@@ -12,7 +12,6 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
                                         LatentPreparationStage, TextEncodingStage, TimestepPreparationStage)
 
-# TODO(will): move PRECISION_TO_TYPE to better place
 
 logger = init_logger(__name__)
 

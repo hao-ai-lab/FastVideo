@@ -20,7 +20,6 @@ class ValidationDataset(IterableDataset):
         super().__init__()
 
         self.filename = pathlib.Path(filename)
-        # get directory of filename
         self.dir = os.path.abspath(self.filename.parent)
 
         if not self.filename.exists():
@@ -40,17 +39,14 @@ class ValidationDataset(IterableDataset):
                 f"Unsupported file format {self.filename.suffix} for validation dataset. Supported formats are: {_SUPPORTED_FILE_FORMATS}"
             )
 
-        # Get distributed training info
         self.global_rank = get_world_rank()
         self.world_size = get_world_size()
         self.sp_world_size = get_sp_world_size()
         self.num_sp_groups = self.world_size // self.sp_world_size
 
-        # Convert to list to get total samples
         self.all_samples = list(data)
         self.original_total_samples = len(self.all_samples)
 
-        # Extend samples to be a multiple of DP degree (num_sp_groups)
         remainder = self.original_total_samples % self.num_sp_groups
         if remainder != 0:
             samples_to_add = self.num_sp_groups - remainder
@@ -64,17 +60,13 @@ class ValidationDataset(IterableDataset):
 
         self.total_samples = len(self.all_samples)
 
-        # Calculate which SP group this rank belongs to
         self.sp_group_id = self.global_rank // self.sp_world_size
 
-        # Now all SP groups will have equal number of samples
         self.samples_per_sp_group = self.total_samples // self.num_sp_groups
 
-        # Calculate start and end indices for this SP group
         self.start_idx = self.sp_group_id * self.samples_per_sp_group
         self.end_idx = self.start_idx + self.samples_per_sp_group
 
-        # Get samples for this SP group
         self.sp_group_samples = self.all_samples[self.start_idx:self.end_idx]
 
         logger.info(
@@ -102,8 +94,6 @@ class ValidationDataset(IterableDataset):
             # However, since the model specifications use "prompt", we create an alias here.
             sample["prompt"] = sample["caption"]
 
-            # Load image or video if the path is provided
-            # TODO(aryan): need to handle custom columns here for control conditions
             sample["image"] = None
             sample["video"] = None
 

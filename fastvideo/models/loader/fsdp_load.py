@@ -233,7 +233,6 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
                     qat_train_skipped)
 
 
-# TODO(PY): move this to utils elsewhere
 @contextlib.contextmanager
 def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
     """
@@ -317,8 +316,6 @@ def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_infe
     if isinstance(quant_config, NVFP4QATTrainConfig):
         return
 
-    # TODO: (David) Currently reject every FSDP inference quantization config except NVFP4QATTrainConfig.
-    # Support FSDP inference with precomputed quantized weights.
     raise NotImplementedError(
         "FSDP inference supports unquantized transformers and NVFP4QATTrainConfig only; "
         f"got {type(quant_config).__name__}.")
@@ -959,13 +956,11 @@ def shard_model(
                 # Count all parameters
                 param_count = sum(p.numel() for p in m.parameters(recurse=True))
 
-                # Skip small modules
                 if param_count < min_params:
                     logger.info("Skipping module %s (%.2fM params < %.2fM threshold)", n, param_count / 1e6,
                                 min_params / 1e6)
                     continue
 
-                # Shard this module
                 logger.info("Sharding module %s (%.2fM params)", n, param_count / 1e6)
                 module_kwargs = fsdp_kwargs
                 local_ignored_params = ignored_params_by_module[id(m)]
@@ -974,7 +969,6 @@ def shard_model(
                 fully_shard(m, **module_kwargs)
                 num_layers_sharded += 1
     else:
-        # Shard all modules matching conditions
         for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 if id(m) in fp32_group_ids:
@@ -1005,7 +999,6 @@ def shard_model(
             fully_shard(module, **fp32_kwargs)
         logger.info("Sharded FP32 compute modules: %s", [name for name, _ in fp32_groups])
 
-    # Finally shard the entire model to account for any stragglers
     root_kwargs = fsdp_kwargs
     if ignored_params:
         root_kwargs = {**fsdp_kwargs, "ignored_params": ignored_params}
@@ -1018,7 +1011,6 @@ def _drop_state_dict_parameter(model: nn.Module, param_name: str) -> None:
     module.register_parameter(attr_name, None)
 
 
-# TODO(PY): device mesh for cfg parallel
 def load_model_from_full_model_state_dict(
     model: FSDPModule | torch.nn.Module,
     full_sd_iterator: Generator[tuple[str, torch.Tensor], None, None],

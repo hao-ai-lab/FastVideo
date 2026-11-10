@@ -750,7 +750,6 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         noise: torch.Tensor,
         timesteps: torch.IntTensor,
     ) -> torch.Tensor:
-        # Make sure sigmas and timesteps have the same device and dtype as original_samples
         sigmas = self.sigmas.to(device=original_samples.device, dtype=original_samples.dtype)
         if original_samples.device.type == "mps" and torch.is_floating_point(timesteps):
             # mps does not support float64

@@ -70,16 +70,13 @@ class PyHcclCommunicator:
             device = torch.device(f"npu:{device}")
         elif isinstance(device, str):
             device = torch.device(device)
-        # now `device` is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
 
         if self.rank == 0:
-            # get the unique id from HCCL
             with torch.npu.device(device):
                 self.unique_id = self.hccl.hcclGetUniqueId()
         else:
-            # construct an empty unique id
             self.unique_id = hcclUniqueId()
 
         if not isinstance(group, StatelessProcessGroup):

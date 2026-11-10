@@ -10,7 +10,6 @@ def get_token_bin_counts_and_mask(
     vocab_size: int,
     num_seqs: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    # Compute the bin counts for the tokens.
     # vocab_size + 1 for padding.
     bin_counts = torch.zeros((num_seqs, vocab_size + 1), dtype=torch.long, device=tokens.device)
     bin_counts.scatter_add_(1, tokens, torch.ones_like(tokens))

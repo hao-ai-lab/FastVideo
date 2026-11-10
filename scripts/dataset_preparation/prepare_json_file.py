@@ -14,7 +14,6 @@ from fastvideo.eval.io.video import probe_video_fps
 
 def get_video_info(video_path):
     """Get video information."""
-    # Read video tensor (T, C, H, W)
     video_tensor = read_video_tchw(str(video_path))
 
     num_frames = video_tensor.shape[0]
@@ -23,7 +22,6 @@ def get_video_info(video_path):
     fps = probe_video_fps(video_path) or 0
     duration = num_frames / fps if fps > 0 else 0
 
-    # Extract name
     _, _, videos_dir, video_name = str(video_path).split("/")
 
     return {
@@ -43,7 +41,6 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
     """Prepare dataset information from a folder containing videos and prompt.txt."""
     folder_path = Path(folder_path)
 
-    # Read prompt file
     prompt_file = folder_path / "prompt.txt"
     if not prompt_file.exists():
         raise FileNotFoundError(f"prompt.txt not found in {folder_path}")
@@ -51,7 +48,6 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
     with open(prompt_file) as f:
         prompts = [line.strip() for line in f.readlines() if line.strip()]
 
-    # Read videos file
     videos_file = folder_path / "videos.txt"
     if not videos_file.exists():
         raise FileNotFoundError(f"videos.txt not found in {folder_path}")
@@ -62,14 +58,12 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
     if len(prompts) != len(video_paths):
         raise ValueError(f"Number of prompts ({len(prompts)}) does not match number of videos ({len(video_paths)})")
 
-    # Prepare arguments for multiprocessing
     process_args = [folder_path / video_path for video_path in video_paths]
 
     # Determine number of workers
     if num_workers is None:
         num_workers = max(1, cpu_count() - 1)  # Leave one CPU free
 
-    # Process videos in parallel
     start_time = time.time()
     with Pool(num_workers) as pool:
         results = list(
@@ -84,7 +78,6 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
         result["cap"] = [prompt]
         dataset_info.append(result)
 
-    # Calculate total processing time
     total_time = time.time() - start_time
     total_videos = len(dataset_info)
     avg_time_per_video = total_time / total_videos if total_videos > 0 else 0
@@ -94,12 +87,10 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
     print(f"Total time: {total_time:.2f} seconds")
     print(f"Average time per video: {avg_time_per_video:.2f} seconds")
 
-    # Save to JSON file
     output_file = folder_path / output_name
     with open(output_file, 'w') as f:
         json.dump(dataset_info, f, indent=2)
 
-    # Create merge.txt
     merge_file = folder_path / "merge.txt"
     with open(merge_file, 'w') as f:
         f.write(f"{folder_path}/videos,{output_file}\n")

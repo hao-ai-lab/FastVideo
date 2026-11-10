@@ -109,7 +109,6 @@ def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
-    # Create action conditions for Matrix-Game 2.0
     actions = create_action_presets(BASE_PARAMS["num_frames"],
                                     keyboard_dim=BASE_PARAMS["keyboard_dim"],
                                     seed=BASE_PARAMS["seed"])

@@ -134,7 +134,6 @@ class DistributedAttention(nn.Module):
                 - o (torch.Tensor): Output tensor after attention for the main sequence
                 - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
         """
-        # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
         # Stack QKV
         qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
@@ -186,7 +185,6 @@ class DistributedAttention(nn.Module):
         if freqs_cis is not None:
             cos, sin = freqs_cis
             qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2], cos, sin, is_neox_style=False)
-        # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
@@ -208,9 +206,7 @@ class DistributedAttention(nn.Module):
             split_idx = original_seq_len
             replicated_output = output[:, split_idx:]
             output = output[:, :split_idx]
-            # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(replicated_output.contiguous(), dim=2)
-        # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
@@ -255,9 +251,7 @@ class DistributedAttention_VSA(DistributedAttention):
                 - o (torch.Tensor): Output tensor after attention for the main sequence
                 - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
         """
-        # Check text tokens are not supported for VSA now
         assert replicated_q is None and replicated_k is None and replicated_v is None, "Replicated QKV is not supported for VSA now"
-        # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
         forward_context: ForwardContext = get_forward_context()
@@ -300,7 +294,6 @@ class DistributedAttention_VSA(DistributedAttention):
         # Redistribute back if using sequence parallelism
         replicated_output = None
 
-        # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
@@ -367,7 +360,6 @@ class LocalAttention(nn.Module):
         Returns:
             torch.Tensor: Output tensor after local attention
         """
-        # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
         forward_context: ForwardContext = get_forward_context()

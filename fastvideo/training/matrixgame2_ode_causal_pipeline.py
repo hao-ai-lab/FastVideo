@@ -145,7 +145,6 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
         trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
-        # Move to device
         device = get_local_torch_device()
         training_batch.image_embeds = clip_feature.to(device, dtype=torch.bfloat16)
         training_batch.image_latents = first_frame_latent.to(device, dtype=torch.bfloat16)
@@ -178,8 +177,6 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
                                      max_timestep, [batch_size, num_frame],
                                      device=self.device,
                                      dtype=torch.long)
-            # logger.info(f"individual timestep: {timestep}")
-            # make the noise level the same within every block
             timestep = timestep.reshape(timestep.shape[0], -1, num_frame_per_block)
             timestep[:, :, 1:] = timestep[:, :, 0:1]
             timestep = timestep.reshape(timestep.shape[0], -1)
@@ -242,7 +239,6 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
                                            dim=1)
         timestep = self.dmd_denoising_steps[indexes]
 
-        # Prepare inputs for transformer
         latent_vis_dict["noisy_input"] = noisy_input.permute(0, 2, 1, 3, 4).detach().clone().cpu()
         latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3, 4).detach().clone().cpu()
 
@@ -300,7 +296,6 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
             mask = t != 0
 
-            # Compute loss
             loss = F.mse_loss(noise_pred[mask], target_latent[mask], reduction="mean")
             loss = loss / args.gradient_accumulation_steps
 
@@ -387,7 +382,6 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
             video_artifact = self.tracker.video(video, fps=16, format="mp4")  # change to 16 for Wan2.1
             if video_artifact is not None:
                 tracker_loss_dict[latent_key] = video_artifact
-            # Clean up references
             del video, pixel_latent, latent
 
         if self.global_rank == 0 and tracker_loss_dict:

@@ -14,11 +14,7 @@
 
 # DISCLAIMER: check https://huggingface.co/papers/2302.04867 and https://github.com/wl-zhao/UniPC for more info
 # The codebase is modified based on https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_dpmsolver_multistep.py
-# ==============================================================================
-#
 # Modified from diffusers==0.35.0.dev0
-#
-# ==============================================================================
 
 import math
 from typing import List, Optional, Tuple, Union
@@ -94,22 +90,18 @@ def rescale_zero_terminal_snr(betas):
     Returns:
         `torch.Tensor`: rescaled betas with zero terminal SNR
     """
-    # Convert betas to alphas_bar_sqrt
     alphas = 1.0 - betas
     alphas_cumprod = torch.cumprod(alphas, dim=0)
     alphas_bar_sqrt = alphas_cumprod.sqrt()
 
-    # Store old values.
     alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
     alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
 
     # Shift so the last timestep is zero.
     alphas_bar_sqrt -= alphas_bar_sqrt_T
 
-    # Scale so the first timestep is back to the old value.
     alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
 
-    # Convert alphas_bar_sqrt to betas
     alphas_bar = alphas_bar_sqrt**2  # Revert sqrt
     alphas = alphas_bar[1:] / alphas_bar[:-1]  # Revert cumprod
     alphas = torch.cat([alphas_bar[0:1], alphas])
@@ -474,13 +466,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._sigma_to_t
     def _sigma_to_t(self, sigma, log_sigmas):
-        # get log sigma
         log_sigma = np.log(np.maximum(sigma, 1e-10))
 
-        # get distribution
         dists = log_sigma - log_sigmas[:, np.newaxis]
 
-        # get sigmas range
         low_idx = np.cumsum((dists >= 0), axis=0).argmax(axis=0).clip(max=log_sigmas.shape[0] - 2)
         high_idx = low_idx + 1
 
@@ -512,7 +501,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """Constructs the noise schedule of Karras et al. (2022)."""
 
         # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -532,7 +520,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """Constructs an exponential noise schedule."""
 
         # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -552,7 +539,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
 
         # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None

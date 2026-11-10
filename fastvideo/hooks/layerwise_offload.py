@@ -81,7 +81,6 @@ class LayerwiseOffloadState:
     @torch.compiler.disable
     def wait_and_replace_params(self):
         torch.cuda.current_stream().wait_stream(self.async_copy_stream)
-        # now gpu_named_parameters are ready
         for name, param in _offload_tensors(self.module_ref, self.cpu_named_parameters):
             if not self._will_offload(name):
                 continue
@@ -163,7 +162,6 @@ class LayerwiseOffloadHook(ForwardHook):
     @contextmanager
     def mutate_params_scope(self):
         try:
-            # load params to GPU and keep them there
             self.state.wait_and_replace_params()  # pyright: ignore
             yield
         finally:

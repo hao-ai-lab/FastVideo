@@ -20,7 +20,6 @@ class LatentDataset(Dataset):
         self.json_path = json_path
         self.cfg_rate = cfg_rate
         self.seed = seed
-        # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
         self.datase_dir_path = os.path.dirname(json_path)
         self.video_dir = os.path.join(self.datase_dir_path, "video")
@@ -29,8 +28,6 @@ class LatentDataset(Dataset):
         self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path, "prompt_attention_mask")
         with open(self.json_path) as f:
             self.data_anno = json.load(f)
-        # json.load(f) already keeps the order
-        # self.data_anno = sorted(self.data_anno, key=lambda x: x['latent_path'])
         self.num_latent_t = num_latent_t
 
         self.uncond_prompt_embed = torch.zeros(256, 4096).to(torch.float32)
@@ -42,7 +39,6 @@ class LatentDataset(Dataset):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
-        # load
         latent = torch.load(
             os.path.join(self.latent_dir, latent_file),
             map_location="cpu",
@@ -75,7 +71,6 @@ def latent_collate_function(batch):
     # text_attn_mask: b 1 l
     # needs to check if the latent/prompt' size and apply padding & attn mask
     latents, prompt_embeds, prompt_attention_masks = zip(*batch, strict=True)
-    # calculate max shape
     max_t = max([latent.shape[1] for latent in latents])
     max_h = max([latent.shape[2] for latent in latents])
     max_w = max([latent.shape[3] for latent in latents])
@@ -96,7 +91,6 @@ def latent_collate_function(batch):
     ]
     # attn mask
     latent_attn_mask = torch.ones(len(latent_list), max_t, max_h, max_w)
-    # set to 0 if padding
     for i, latent in enumerate(latent_list):
         latent_attn_mask[i, latent.shape[1]:, :, :] = 0
         latent_attn_mask[i, :, latent.shape[2]:, :] = 0

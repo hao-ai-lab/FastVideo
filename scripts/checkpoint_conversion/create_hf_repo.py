@@ -87,7 +87,6 @@ def main():
         print(f"Removing existing weight file: {ew}")
         os.remove(ew)
 
-    # Copy new weights
     for src in source_weights:
         filename = os.path.basename(src)
         dst = os.path.join(target_component_dir, filename)
@@ -108,7 +107,6 @@ def main():
         print(f"Uploading to Hugging Face Hub: {target_repo_id}...")
 
         try:
-            # Ensure the repo exists
             create_repo(target_repo_id, exist_ok=True)
 
             upload_folder(repo_id=target_repo_id, folder_path=args.local_dir, commit_message=args.hub_commit_message)

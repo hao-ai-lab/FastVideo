@@ -44,7 +44,6 @@ class LTX2TrainingPipeline(TrainingPipeline):
     _rope_fps: float = _DEFAULT_ROPE_FPS
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # TODO (David): Change to port LTX2 scheduler into self.modules["scheduler"]
         if "scheduler" in self.modules:
             del self.modules["scheduler"]
 

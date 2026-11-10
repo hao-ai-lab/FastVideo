@@ -55,7 +55,6 @@ def causal_rope_apply(x: torch.Tensor, grid_sizes: tuple[int, int, int], freqs: 
     # split freqs
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
 
-    # loop over samples
     output = []
     f, h, w = grid_sizes
 
@@ -73,11 +72,9 @@ def causal_rope_apply(x: torch.Tensor, grid_sizes: tuple[int, int, int], freqs: 
             dim=-1,
         ).reshape(seq_len, 1, -1)
 
-        # apply rotary embedding
         x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
         x_i = torch.cat([x_i, x[i, seq_len:]])
 
-        # append to collection
         output.append(x_i)
     return torch.stack(output).type_as(x)
 
@@ -178,7 +175,6 @@ class CausalMatrixGame2SelfAttention(nn.Module):
         if cache_start is None:
             cache_start = current_start
 
-        # Calculate start_frame for causal mode
         if kv_cache is not None:
             frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
             start_frame = current_start // frame_seqlen
@@ -249,7 +245,6 @@ class CausalMatrixGame2SelfAttention(nn.Module):
                 block_mask=block_mask,
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            # Calculate frame_seqlen correctly from grid_sizes (single frame token count)
             if grid_sizes is not None:
                 frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
             else:
@@ -260,7 +255,6 @@ class CausalMatrixGame2SelfAttention(nn.Module):
             current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
 
-            # Compute max_attention_size dynamically based on actual frame_seqlen
             max_attention_size = (15 * frame_seqlen if self.local_attn_size == -1 else self.local_attn_size *
                                   frame_seqlen)
 
@@ -465,7 +459,6 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # hidden_states = hidden_states.float()
 
         e = self.scale_shift_table + temb
         assert e.shape == (bs, num_frames, 6, self.hidden_dim)
@@ -869,7 +862,6 @@ class CausalMatrixGame2WanModel(BaseDiT):
         start_frame: int = 0,
         **kwargs,
     ) -> torch.Tensor:
-        # Extract num_frame_per_block from kwargs
         effective_num_frame_per_block = kwargs.pop("num_frame_per_block", self.num_frame_per_block)
 
         if mouse_cond is not None or keyboard_cond is not None:
@@ -1212,7 +1204,6 @@ class CausalMatrixGame2WanModel(BaseDiT):
             num_frame_per_block=self.num_frame_per_block,
         )
 
-        # Initialize kv_cache, kv_cache_mouse, kv_cache_keyboard, crossattn_cache if not provided
         kv_cache = kwargs.pop("kv_cache", [None] * len(self.blocks))
         kv_cache_mouse = kwargs.pop("kv_cache_mouse", [None] * len(self.blocks))
         kv_cache_keyboard = kwargs.pop("kv_cache_keyboard", [None] * len(self.blocks))

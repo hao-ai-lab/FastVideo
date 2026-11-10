@@ -148,7 +148,6 @@ class MultiprocExecutor(Executor):
 
         set_multiproc_executor_envs()
 
-        # Check if master_port is provided in fastvideo_args
         master_port = get_open_port(self.fastvideo_args.master_port)
         distributed_init_method = get_distributed_init_method(get_loopback_ip(), master_port)
         logger.info("Use master port: %s", master_port)
@@ -188,7 +187,6 @@ class MultiprocExecutor(Executor):
                 # Close death_writers first to signal workers to exit
                 self._ensure_worker_termination([uw.proc for uw in unready_workers])
 
-        # Register shutdown on exit
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -202,7 +200,6 @@ class MultiprocExecutor(Executor):
         logging_info = None
         logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING.get() else None
 
-        # Get extra dict (contains audio, peak_memory_mb, etc.)
         extra = responses[0].get("extra", {})
 
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
@@ -399,7 +396,6 @@ class MultiprocExecutor(Executor):
 
         logger.info("Shutting down MultiprocExecutor...")
 
-        # Check if workers were initialized (they might not be if initialization failed)
         if not hasattr(self, 'workers') or not self.workers:
             logger.info("No workers to shut down.")
             return
@@ -450,7 +446,6 @@ class MultiprocExecutor(Executor):
                     if worker.proc.is_alive():
                         worker.proc.kill()
 
-        # Clean up pipes
         for worker in self.workers:
             with contextlib.suppress(Exception):
                 worker.pipe.close()
@@ -560,10 +555,8 @@ class WorkerMultiprocProc:
         wrapper.init_worker(all_kwargs)
         self.worker = wrapper
 
-        # Initialize device
         self.worker.init_device()
 
-        # Set process title and log prefix
         self.setup_proc_title_and_log_prefix()
 
     @staticmethod
@@ -591,7 +584,6 @@ class WorkerMultiprocProc:
             "streaming_output_queue": streaming_output_queue,
             "log_queue": log_queue,
         }
-        # Run EngineCore busy loop in background process.
         proc = context.Process(target=WorkerMultiprocProc.worker_main,
                                kwargs=process_kwargs,
                                name=f"FVWorkerProc-{rank}",
@@ -707,7 +699,6 @@ class WorkerMultiprocProc:
         finally:
             if ready_pipe is not None:
                 ready_pipe.close()
-            # Clean up once worker exits busy loop
             if worker is not None:
                 worker.shutdown()
 
@@ -755,7 +746,6 @@ class WorkerMultiprocProc:
                     raise e from None
 
                 finally:
-                    # Close connection.
                     pipe.close()
 
         # If any workers failed, raise exception with details

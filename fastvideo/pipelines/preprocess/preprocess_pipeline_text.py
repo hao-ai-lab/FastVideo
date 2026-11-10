@@ -89,16 +89,13 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                 logger.info("===== prompt_embeds: %s", prompt_embeds.shape)
                 logger.info("===== prompt_attention_masks: %s", prompt_attention_masks.shape)
 
-                # Prepare batch data for Parquet dataset
                 batch_data = []
 
-                # Add progress bar for saving outputs
                 save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
 
                 for idx, text_path in save_pbar:
                     text_name = os.path.basename(text_path).split(".")[0]
 
-                    # Convert tensors to numpy arrays
                     text_embedding = prompt_embeds[idx].cpu().numpy()
 
                     # Create record for Parquet dataset (text-only schema)
@@ -143,7 +140,6 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
 
         self.local_rank = int(os.getenv("RANK", 0))
         os.makedirs(args.output_dir, exist_ok=True)
-        # Create directory for combined data
         self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
@@ -159,13 +155,11 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         self.preprocess_loader_iter = iter(self.preprocess_dataloader)
 
         self.num_processed_samples = 0
-        # Add progress bar for text preprocessing
         self.pbar = tqdm(self.preprocess_loader_iter,
                          desc="Processing text",
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        # Initialize class variables for data sharing
         self.text_data: dict[str, Any] = {}  # Store text metadata and paths
 
         self.preprocess_text_only(fastvideo_args, args)

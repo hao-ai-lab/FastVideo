@@ -100,7 +100,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     "path": [data["path"][i] for i in valid_indices],
                 }
 
-                # Add fps and duration if available in data
                 if "fps" in data:
                     valid_data["fps"] = [data["fps"][i] for i in valid_indices]
                 if "duration" in data:
@@ -183,19 +182,15 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                                           f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
                                                           args.train_fps)
 
-                # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []
 
-                # Add progress bar for saving outputs
                 save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
 
                 for idx, video_path in save_pbar:
                     video_name = os.path.basename(video_path).split(".")[0]
 
-                    # Convert tensors to numpy arrays
                     text_embedding = prompt_embeds[idx].cpu().numpy()
 
-                    # Get extra features for this sample
                     sample_extra_features = {}
                     if extra_features:
                         for key, value in extra_features.items():
@@ -250,7 +245,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
         self.local_rank = int(os.getenv("RANK", 0))
         os.makedirs(args.output_dir, exist_ok=True)
-        # Create directory for combined data
         self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
@@ -266,13 +260,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         self.preprocess_loader_iter = iter(self.preprocess_dataloader)
 
         self.num_processed_samples = 0
-        # Add progress bar for video preprocessing
         self.pbar = tqdm(self.preprocess_loader_iter,
                          desc="Processing videos",
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
         self.preprocess_text_and_trajectory(fastvideo_args, args)

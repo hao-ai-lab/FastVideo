@@ -17,7 +17,6 @@ logger = init_logger(__name__)
 
 
 class BatchIterator:
-    # TODO: Implement state_dict and load_state_dict to support resume.
     def __init__(self, files, batch_size, text_padding_length, keys, worker_num_samples, read_batch_size):
         self.files = files
         self.batch_size = batch_size
@@ -77,19 +76,16 @@ class LatentsParquetIterStyleDataset(IterableDataset):
         self.text_padding_length = text_padding_length
         self.seed = seed
         self.read_batch_size = read_batch_size
-        # Get distributed training info
         self.global_rank = get_world_rank()
         self.world_size = get_world_size()
         self.sp_world_size = get_sp_world_size()
         self.num_sp_groups = self.world_size // self.sp_world_size
         num_workers = 1 if num_workers == 0 else num_workers
-        # Get sharding info
         shard_parquet_files, shard_total_samples, shard_parquet_lengths = shard_parquet_files_across_sp_groups_and_workers(
             self.path, self.num_sp_groups, num_workers, seed)
 
         if drop_last:
             self.worker_num_samples = min(shard_total_samples) // batch_size * batch_size
-            # Assign files to current rank's SP group
             ith_sp_group = self.global_rank // self.sp_world_size
             self.sp_group_parquet_files = shard_parquet_files[ith_sp_group::self.num_sp_groups]
             self.sp_group_parquet_lengths = shard_parquet_lengths[ith_sp_group::self.num_sp_groups]
@@ -142,7 +138,6 @@ def shard_parquet_files_across_sp_groups_and_workers(
         - List of total samples per shard
         - List of dictionaries mapping file paths to their lengths
     """
-    # Check if sharding plan already exists
     sharding_info_dir = os.path.join(path, f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
 
     # Only rank 0 handles cache checking and file scanning
@@ -185,7 +180,6 @@ def shard_parquet_files_across_sp_groups_and_workers(
             if not parquet_files:
                 raise ValueError("No parquet files found in %s", path)
 
-            # Calculate file lengths efficiently using a single pass
             logger.info("Calculating file lengths...")
             lengths = []
             for file in tqdm.tqdm(parquet_files, desc="Reading parquet files"):
@@ -199,7 +193,6 @@ def shard_parquet_files_across_sp_groups_and_workers(
             sorted_files = [parquet_files[i] for i in sorted_indices]
             sorted_lengths = [lengths[i] for i in sorted_indices]
 
-            # Create shards
             num_shards = num_sp_groups * num_workers
             shard_parquet_files = [[] for _ in range(num_shards)]
             shard_total_samples = [0] * num_shards
@@ -218,7 +211,6 @@ def shard_parquet_files_across_sp_groups_and_workers(
                 rng = random.Random(seed)
                 rng.shuffle(shard)
 
-            # Save the sharding plan
             os.makedirs(sharding_info_dir, exist_ok=True)
             with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"), "wb") as f:
                 pickle.dump(shard_parquet_files, f)

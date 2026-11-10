@@ -281,7 +281,6 @@ class LTX2DenoisingStage(PipelineStage):
                                "falling back to no-CFG for this stage.")
                 use_cfg = False
 
-        # Ensure text conditioning is on the same device as latents.
         if prompt_embeds.device != latents.device:
             prompt_embeds = prompt_embeds.to(latents.device)
         if prompt_mask is not None and prompt_mask.device != latents.device:
@@ -551,7 +550,6 @@ class LTX2DenoisingStage(PipelineStage):
         vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
-            # Stop if interrupted
             if getattr(self, "interrupt", False):
                 break
             sigma = sigmas[step_index]

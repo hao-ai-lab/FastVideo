@@ -84,7 +84,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
-        # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
         self.get_module("vae").to(get_local_torch_device())
 
@@ -92,9 +91,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         """Get CLIP features from the first frame of each video."""
         first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
-        # latent_height = height // self.get_module(
-        #     "vae").spatial_compression_ratio
-        # latent_width = width // self.get_module("vae").spatial_compression_ratio
 
         processed_images = []
         # Frame has values between -1 and 1
@@ -104,7 +100,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
             processed_img = self.get_module("image_processor")(images=frame_pil, return_tensors="pt")
             processed_images.append(processed_img)
 
-        # Get CLIP features
         pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(get_local_torch_device())
         with torch.no_grad():
             image_inputs = {'pixel_values': pixel_values}
@@ -114,7 +109,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
         features["clip_feature"] = clip_features
         features["pil_image"] = first_frame
-        # Get CLIP features from the first frame of each video.
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)
@@ -224,7 +218,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     pixel_values = pixel_values.repeat(1, 1, args.num_frames, 1, 1)
                     valid_data["pixel_values"] = pixel_values
 
-                # Get extra features if needed
                 extra_features = self.get_extra_features(valid_data, fastvideo_args)
 
                 clip_features = extra_features['clip_feature']
@@ -274,7 +267,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
                     trajectory_decoded.append(result_batch.trajectory_decoded)
 
-                # Prepare extra features
                 extra_features = {
                     "trajectory_latents": trajectory_latents,
                     "trajectory_timesteps": trajectory_timesteps
@@ -287,10 +279,8 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                                                           f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
                                                           args.train_fps)
 
-                # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []
 
-                # Add progress bar for saving outputs
                 save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
 
                 for idx, video_path in save_pbar:
@@ -302,7 +292,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     keyboard_cond_np = keyboard_cond[idx] if keyboard_cond is not None else None
                     mouse_cond_np = mouse_cond[idx] if mouse_cond is not None else None
 
-                    # Get trajectory features for this sample
                     traj_latents = extra_features["trajectory_latents"][idx]
                     traj_timesteps = extra_features["trajectory_timesteps"][idx]
                     if isinstance(traj_latents, torch.Tensor):
@@ -310,7 +299,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     if isinstance(traj_timesteps, torch.Tensor):
                         traj_timesteps = traj_timesteps.cpu().float().numpy()
 
-                    # Create record for Parquet dataset
                     record: dict[str, Any] = matrixgame2_ode_record_creator(video_name=video_name,
                                                                             clip_feature=clip_feature_np,
                                                                             first_frame_latent=first_frame_latent_np,
@@ -354,7 +342,6 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
         self.local_rank = int(os.getenv("RANK", 0))
         os.makedirs(args.output_dir, exist_ok=True)
-        # Create directory for combined data
         self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
@@ -370,13 +357,11 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         self.preprocess_loader_iter = iter(self.preprocess_dataloader)
 
         self.num_processed_samples = 0
-        # Add progress bar for video preprocessing
         self.pbar = tqdm(self.preprocess_loader_iter,
                          desc="Processing videos",
                          unit="batch",
                          disable=self.local_rank != 0)
 
-        # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
         self.preprocess_action_and_trajectory(fastvideo_args, args)

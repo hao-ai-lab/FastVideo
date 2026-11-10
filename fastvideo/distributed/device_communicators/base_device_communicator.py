@@ -246,12 +246,10 @@ class DeviceCommunicatorBase:
         world_size = self.world_size
         assert -input_.dim() <= dim < input_.dim(), (f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
         if dim < 0:
-            # Convert negative dim to positive.
             dim += input_.dim()
 
         # Allocate output tensor.
         gather_list = [torch.empty_like(input_) for _ in range(world_size)] if self.rank_in_group == dst else None
-        # Gather.
         torch.distributed.gather(input_, gather_list, dst=self.ranks[dst], group=self.device_group)
         output_tensor = torch.cat(gather_list, dim=dim) if self.rank_in_group == dst else None
         return output_tensor

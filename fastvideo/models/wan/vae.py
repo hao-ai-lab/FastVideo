@@ -188,7 +188,6 @@ class WanCausalConv3d(nn.Conv3d):
             padding=padding,
         )
         self.padding: tuple[int, int, int]
-        # Set up causal padding
         self._padding: tuple[int, ...] = (self.padding[2], self.padding[2], self.padding[1], self.padding[1],
                                           2 * self.padding[0], 0)
         self.padding = (0, 0, 0)
@@ -412,7 +411,6 @@ class WanResidualBlock(nn.Module):
         self.conv_shortcut = WanCausalConv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
 
     def forward(self, x):
-        # Apply shortcut connection
         h = self.conv_shortcut(x)
 
         # First normalization and activation
@@ -458,7 +456,6 @@ class WanResidualBlock(nn.Module):
         else:
             x = self.conv2(x)
 
-        # Add residual connection
         return x + h
 
 
@@ -486,13 +483,11 @@ class WanAttentionBlock(nn.Module):
         x = x.permute(0, 2, 1, 3, 4).reshape(batch_size * time, channels, height, width)
         x = self.norm(x)
 
-        # compute query, key, value
         qkv = self.to_qkv(x)
         qkv = qkv.reshape(batch_size * time, 1, channels * 3, -1)
         qkv = qkv.permute(0, 1, 3, 2).contiguous()
         q, k, v = qkv.chunk(3, dim=-1)
 
-        # apply attention
         x = F.scaled_dot_product_attention(q, k, v)
 
         x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
@@ -521,7 +516,6 @@ class WanMidBlock(nn.Module):
         super().__init__()
         self.dim = dim
 
-        # Create the components
         resnets = [WanResidualBlock(dim, dim, dropout, non_linearity)]
         attentions = []
         for _ in range(num_layers):
@@ -536,7 +530,6 @@ class WanMidBlock(nn.Module):
         # First residual block
         x = self.resnets[0](x)
 
-        # Process through attention and residual blocks
         for attn, resnet in zip(self.attentions, self.resnets[1:], strict=True):
             if attn is not None:
                 x = attn(x)
@@ -566,7 +559,6 @@ class WanResidualDownBlock(nn.Module):
             in_dim = out_dim
         self.resnets = nn.ModuleList(resnets)
 
-        # Add the final downsample block
         if down_flag:
             mode = "downsample3d" if temperal_downsample else "downsample2d"
             self.downsampler = WanResample(out_dim, mode=mode)
@@ -625,7 +617,6 @@ class WanEncoder3d(nn.Module):
         dims = [dim * u for u in [1] + dim_mult]
         scale = 1.0
 
-        # init block
         self.conv_in = WanCausalConv3d(in_channels, dims[0], 3, padding=1)
 
         # downsample blocks
@@ -748,7 +739,6 @@ class WanResidualUpBlock(nn.Module):
         else:
             self.avg_shortcut = None
 
-        # create residual blocks
         resnets = []
         current_dim = in_dim
         for _ in range(num_res_blocks + 1):
@@ -757,7 +747,6 @@ class WanResidualUpBlock(nn.Module):
 
         self.resnets = nn.ModuleList(resnets)
 
-        # Add upsampling layer if needed
         if up_flag:
             upsample_mode = "upsample3d" if temperal_upsample else "upsample2d"
             self.upsampler = WanResample(out_dim, mode=upsample_mode, upsample_out_dim=out_dim)
@@ -817,9 +806,7 @@ class WanUpBlock(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
 
-        # Create layers list
         resnets = []
-        # Add residual blocks and attention if needed
         current_dim = in_dim
         for _ in range(num_res_blocks + 1):
             resnets.append(WanResidualBlock(current_dim, out_dim, dropout, non_linearity))
@@ -827,7 +814,6 @@ class WanUpBlock(nn.Module):
 
         self.resnets = nn.ModuleList(resnets)
 
-        # Add upsampling layer if needed
         self.upsamplers = None
         if upsample_mode is not None:
             self.upsamplers = nn.ModuleList([WanResample(out_dim, mode=upsample_mode)])
@@ -896,7 +882,6 @@ class WanDecoder3d(nn.Module):
         # dimensions
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
 
-        # init block
         self.conv_in = WanCausalConv3d(z_dim, dims[0], 3, padding=1)
 
         # middle blocks
@@ -919,7 +904,6 @@ class WanDecoder3d(nn.Module):
             elif up_flag:
                 upsample_mode = "upsample2d"
 
-            # Create and add the upsampling block
             if is_residual:
                 up_block = WanResidualUpBlock(
                     in_dim=in_dim,

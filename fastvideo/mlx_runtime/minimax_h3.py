@@ -95,9 +95,7 @@ def linear(x, weight, bias=None):
     return _shared_linear(x, weight, bias, use_affine_dq_gemm=True)
 
 
-# ---------------------------------------------------------------------------
 # Constants (mirrors fastvideo/pipelines/basic/minimax_h3/packing.py)
-# ---------------------------------------------------------------------------
 
 MINIMAX_H3_VIDEO_TAG = 0
 MINIMAX_H3_TEXT_TAG = 1
@@ -165,9 +163,7 @@ def _is_ignored_dense_key(key: str, *, include_vsa: bool = False) -> bool:
     return any(part in key for part in _IGNORED_DENSE_KEY_PARTS)
 
 
-# ---------------------------------------------------------------------------
 # Geometry (numpy, float64 — the reference RoPE coordinate arithmetic)
-# ---------------------------------------------------------------------------
 
 
 def align_num_frames(num_frames: int) -> int:
@@ -618,9 +614,7 @@ def build_row_timesteps(
     return unique.astype(np.float32), inverse.astype(np.int64)
 
 
-# ---------------------------------------------------------------------------
 # Scheduler (rectified flow, clean-time convention, data-ward velocity)
-# ---------------------------------------------------------------------------
 
 
 def _unique_consecutive(values: np.ndarray) -> np.ndarray:
@@ -943,9 +937,6 @@ class MiniMaxH3SchedulerState:
         return timestep * sample + (1.0 - timestep) * noise
 
 
-# ---------------------------------------------------------------------------
-# DiT
-# ---------------------------------------------------------------------------
 
 
 def _as_mx_indices(indices):
@@ -1737,9 +1728,6 @@ class MLXMiniMaxH3DiT:
     __call__ = forward
 
 
-# ---------------------------------------------------------------------------
-# Checkpoint loading (diffusers-layout safetensors) and pre-quantized save/load
-# ---------------------------------------------------------------------------
 
 
 def _load_array(array, dtype):

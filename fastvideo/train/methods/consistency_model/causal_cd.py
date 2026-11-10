@@ -58,7 +58,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         )
         self._init_optimizers_and_schedulers()
 
-    # ------------------------------------------------------------------
 
     @property
     def _optimizer_dict(self) -> dict[str, Any]:
@@ -85,7 +84,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         states["roles.ema.transformer"] = _FullModelState(self.ema_model.transformer)
         return states
 
-    # ------------------------------------------------------------------
 
     def single_train_step(
         self,
@@ -168,7 +166,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         metrics: dict[str, LogScalar] = {}
         return loss_map, outputs, metrics
 
-    # ------------------------------------------------------------------
 
     def backward(
         self,
@@ -189,9 +186,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         if iteration >= self._ema_start_step:
             self._update_ema()
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _predict_flow(
         self,

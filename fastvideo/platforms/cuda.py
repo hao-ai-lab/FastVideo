@@ -168,8 +168,6 @@ class CudaPlatformBase(Platform):
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
-        # TODO(will): maybe come up with a more general interface for local attention
-        # if distributed is False, we always try to use Flash attn
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
         logger.info("Selected backend: %s", selected_backend)

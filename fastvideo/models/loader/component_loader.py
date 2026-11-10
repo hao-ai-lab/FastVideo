@@ -181,8 +181,6 @@ class TextEncoderLoader(ComponentLoader):
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
-        # model_name_or_path = (self._maybe_download_from_modelscope(
-        #     model_name_or_path, revision) or model_name_or_path)
 
         is_local = os.path.isdir(model_name_or_path)
         assert is_local, "Model path must be a local directory"
@@ -231,7 +229,6 @@ class TextEncoderLoader(ComponentLoader):
 
         if self.counter_before_loading_weights == 0.0:
             self.counter_before_loading_weights = time.perf_counter()
-        # Apply the prefix.
         return ((source.prefix + name, tensor) for (name, tensor) in weights_iterator)
 
     def _get_all_weights(
@@ -257,12 +254,6 @@ class TextEncoderLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, and inference args."""
-        # model_config: PretrainedConfig = get_hf_config(
-        #     model=model_path,
-        #     trust_remote_code=fastvideo_args.trust_remote_code,
-        #     revision=fastvideo_args.revision,
-        #     model_override_args=None,
-        # )
         model_config = get_diffusers_config(model=model_path)
         model_config.pop("_name_or_path", None)
         model_config.pop("transformers_version", None)
@@ -362,7 +353,6 @@ class TextEncoderLoader(ComponentLoader):
         encoder_precision = encoder_precisions[idx]
 
         target_device = get_local_torch_device()
-        # TODO(will): add support for other dtypes
         return self.load_model(
             model_path,
             encoder_config,
@@ -557,12 +547,6 @@ class ImageEncoderLoader(TextEncoderLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, and inference args."""
-        # model_config: PretrainedConfig = get_hf_config(
-        #     model=model_path,
-        #     trust_remote_code=fastvideo_args.trust_remote_code,
-        #     revision=fastvideo_args.revision,
-        #     model_override_args=None,
-        # )
         with open(os.path.join(model_path, "config.json")) as f:
             model_config = json.load(f)
         model_config.pop("_name_or_path", None)
@@ -610,7 +594,6 @@ class ImageEncoderLoader(TextEncoderLoader):
             target_device = (torch.device("mps") if current_platform.is_mps() else torch.device("cpu"))
         else:
             target_device = get_local_torch_device()
-        # TODO(will): add support for other dtypes
         return self.load_model(
             model_path,
             encoder_config,
@@ -768,8 +751,6 @@ class TokenizerLoader(ComponentLoader):
             tokenizer = AutoTokenizer.from_pretrained(
                 resolved_model_path,  # "<path to model>/tokenizer"
                 # in v0, this was same string as encoder_name "ClipTextModel"
-                # TODO(will): pass these tokenizer kwargs from inference args? Maybe
-                # other method of config?
                 local_files_only=os.path.isdir(resolved_model_path),
             )
         except (OSError, ValueError):
@@ -1301,7 +1282,6 @@ class TransformerLoader(ComponentLoader):
 
         default_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
 
-        # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name, default_dtype)
         assert fastvideo_args.hsdp_shard_dim is not None
         # Cosmos2.5 checkpoints can include extra entries not present in the
@@ -1356,7 +1336,6 @@ class TransformerLoader(ComponentLoader):
                 pin_cpu_memory=fastvideo_args.pin_cpu_memory,
                 fsdp_inference=fastvideo_args.use_fsdp_inference,
                 device_mesh=device_mesh,
-                # TODO(will): make these configurable
                 default_dtype=default_dtype,
                 param_dtype=torch.bfloat16,
                 reduce_dtype=torch.float32,
@@ -1396,7 +1375,6 @@ class TransformerLoader(ComponentLoader):
             model = model.to(get_local_torch_device())
 
         if fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload:
-            # Check if model has nn.ModuleList for layerwise offload compatibility
             has_module_list = any(isinstance(m, nn.ModuleList) for m in model.children())
             if has_module_list:
                 enable_layerwise_offload(model)
@@ -1664,7 +1642,6 @@ class PipelineComponentLoader:
         )
 
         module_name = module_name.rsplit("/", 1)[-1]
-        # Get the appropriate loader for this module type
         loader = ComponentLoader.for_module_type(module_name, transformers_or_diffusers)
 
         # Resolve this component's attention backend ONCE, here, from the

@@ -64,7 +64,6 @@ def get_resolution_from_image(image_path, target_resolution="480p"):
     Returns:
         tuple[int, int]: (height, width) matching HY-WorldPlay's bucket selection
     """
-    # Handle URL inputs
     if isinstance(image_path, str) and image_path.startswith(('http://', 'https://')):
         response = requests.get(image_path)
         response.raise_for_status()

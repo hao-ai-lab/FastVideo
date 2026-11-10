@@ -969,10 +969,8 @@ class FastVideoArgs:
                             type=str,
                             help="Path to safetensors file for initial weight loading")
 
-        # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
-        # Add preprocessing configuration arguments
         PreprocessConfig.add_cli_args(parser)
 
         return parser
@@ -980,10 +978,8 @@ class FastVideoArgs:
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
         provided_args = clean_cli_args(args)
-        # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
-        # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs: dict[str, Any] = {}
         for attr in attrs:
             if attr == 'pipeline_config':
@@ -993,11 +989,9 @@ class FastVideoArgs:
                 preprocess_config = PreprocessConfig.from_kwargs(provided_args)
                 kwargs['preprocess_config'] = preprocess_config
             elif attr == 'mode':
-                # Convert string to ExecutionMode enum
                 mode_value = getattr(args, attr, FastVideoArgs.mode.value)
                 kwargs['mode'] = ExecutionMode.from_string(mode_value) if isinstance(mode_value, str) else mode_value
             elif attr == 'torch_compile_kwargs':
-                # Parse JSON string for torch.compile kwargs
                 torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
                 if torch_compile_kwargs_str:
                     try:
@@ -1008,17 +1002,13 @@ class FastVideoArgs:
                 else:
                     kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
-                # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type', FastVideoArgs.workload_type.value)
                 kwargs['workload_type'] = WorkloadType.from_string(workload_type_value) if isinstance(
                     workload_type_value, str) else workload_type_value
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                # Get the field to check if it has a default_factory
                 field = dataclasses.fields(cls)[next(i for i, f in enumerate(dataclasses.fields(cls))
                                                      if f.name == attr)]
                 if field.default_factory is not dataclasses.MISSING:
-                    # Use the default_factory to create the default value
                     default_value = field.default_factory()
                 else:
                     default_value = getattr(cls, attr, None)
@@ -1029,11 +1019,9 @@ class FastVideoArgs:
 
     @classmethod
     def from_kwargs(cls, **kwargs: Any) -> "FastVideoArgs":
-        # Convert mode string to enum if necessary
         if 'mode' in kwargs and isinstance(kwargs['mode'], str):
             kwargs['mode'] = ExecutionMode.from_string(kwargs['mode'])
 
-        # Convert workload_type string to enum if necessary
         if 'workload_type' in kwargs and isinstance(kwargs['workload_type'], str):
             kwargs['workload_type'] = WorkloadType.from_string(kwargs['workload_type'])
 
@@ -1052,11 +1040,9 @@ class FastVideoArgs:
         if self.dist_timeout is not None and self.dist_timeout <= 0:
             raise ValueError(f"dist_timeout must be greater than zero seconds, got {self.dist_timeout}")
 
-        # Validate mode and inference_mode consistency
         assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
         assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
 
-        # Validate workload type
         assert isinstance(self.workload_type,
                           WorkloadType), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
         assert self.workload_type in WorkloadType.choices(), f"Invalid workload type: {self.workload_type}"
@@ -1120,7 +1106,6 @@ class FastVideoArgs:
 
         self.pipeline_config.check_pipeline_config()
 
-        # Add preprocessing config validation if needed
         if self.mode == ExecutionMode.PREPROCESS:
             if self.preprocess_config is None:
                 raise ValueError("preprocess_config is not set in FastVideoArgs when mode is PREPROCESS")
@@ -1255,7 +1240,6 @@ def get_current_fastvideo_args() -> FastVideoArgs:
         # in ci, usually when we test custom ops/modules directly,
         # we don't set the fastvideo config. In that case, we set a default
         # config.
-        # TODO(will): may need to handle this for CI.
         raise ValueError("Current fastvideo args is not set.")
     return _current_fastvideo_args
 
@@ -1434,27 +1418,21 @@ class TrainingArgs(FastVideoArgs):
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
-        # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
         logger.info(provided_args)
-        # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs: dict[str, Any] = {}
         for attr in attrs:
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
             elif attr == 'mode':
-                # Convert string to ExecutionMode enum
                 mode_value = getattr(args, attr, ExecutionMode.FINETUNING.value)
                 kwargs[attr] = ExecutionMode.from_string(mode_value) if isinstance(mode_value, str) else mode_value
             elif attr == 'workload_type':
-                # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type', WorkloadType.T2V.value)
                 kwargs[attr] = WorkloadType.from_string(workload_type_value) if isinstance(workload_type_value,
                                                                                            str) else workload_type_value
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                # Get the field to check its default value
                 field = dataclasses.fields(cls)[next(i for i, f in enumerate(dataclasses.fields(cls))
                                                      if f.name == attr)]
 
@@ -1462,7 +1440,6 @@ class TrainingArgs(FastVideoArgs):
                 if hasattr(args, attr):
                     value = getattr(args, attr)
                 else:
-                    # Use the field's default value
                     if field.default_factory is not dataclasses.MISSING:
                         value = field.default_factory()
                     elif field.default is not dataclasses.MISSING:

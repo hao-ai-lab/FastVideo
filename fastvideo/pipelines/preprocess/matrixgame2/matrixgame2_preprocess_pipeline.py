@@ -31,7 +31,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
-        # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
         self.get_module("vae").to(get_local_torch_device())
 
@@ -39,9 +38,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
         """Get CLIP features from the first frame of each video."""
         first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
-        # latent_height = height // self.get_module(
-        #     "vae").spatial_compression_ratio
-        # latent_width = width // self.get_module("vae").spatial_compression_ratio
 
         processed_images = []
         # Frame has values between -1 and 1
@@ -51,7 +47,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
             processed_img = self.get_module("image_processor")(images=frame_pil, return_tensors="pt")
             processed_images.append(processed_img)
 
-        # Get CLIP features
         pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(get_local_torch_device())
         with torch.no_grad():
             image_inputs = {'pixel_values': pixel_values}
@@ -60,7 +55,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
             clip_features = clip_features.last_hidden_state
 
         features["clip_feature"] = clip_features
-        # Get CLIP features from the first frame of each video.
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)
@@ -110,7 +104,6 @@ class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
         # mask_lat_size = mask_lat_size.transpose(1, 2)
         # mask_lat_size = mask_lat_size.to(latent_condition.device)
 
-        # image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
 
         features["first_frame_latent"] = latent_condition
 

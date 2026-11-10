@@ -259,9 +259,6 @@ class TestContinuationStatePersistence:
             assert snap["state"]["payload"]["source_prompt"] == "a cat"
 
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
 
 
 @contextlib.contextmanager
@@ -296,7 +293,6 @@ def _drain_until(ws, target_type: str) -> dict[str, Any]:
             parsed = json.loads(msg["text"])
             if parsed.get("type") == target_type:
                 return parsed
-        # skip binary / other
 
 
 def _as_json(msg: dict[str, Any]) -> dict[str, Any] | None:

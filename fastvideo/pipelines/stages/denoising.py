@@ -105,7 +105,6 @@ class DenoisingStage(PipelineStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
             {
@@ -114,9 +113,6 @@ class DenoisingStage(PipelineStage):
             },
         )
 
-        # Setup precision and autocast settings
-        # TODO(will): make the precision configurable for inference
-        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
         # Flux2-only denoising compensations.
         #
@@ -149,15 +145,12 @@ class DenoisingStage(PipelineStage):
         scheduler_fp32 = getattr(fastvideo_args.pipeline_config, "scheduler_step_in_fp32", False)
         local_device = get_local_torch_device()
 
-        # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
-        # TODO(will): remove this once we add input/output validation for stages
         if timesteps is None:
             raise ValueError("Timesteps must be provided")
         num_inference_steps = batch.num_inference_steps
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
 
-        # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
             assert not torch.isnan(image_embeds[0]).any(), "image_embeds contains nan"
@@ -211,7 +204,6 @@ class DenoisingStage(PipelineStage):
 
         animate_kwargs, animate_uncond_kwargs = self._animate_conditioning_kwargs(batch)
 
-        # Get latents and embeddings
         latents = batch.latents
         cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
         if cast_embeds:
@@ -238,7 +230,6 @@ class DenoisingStage(PipelineStage):
         latents = state.latents
         model_kwargs, model_kwargs_uncond = self.prepare_model_kwargs(batch, fastvideo_args)
 
-        # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
 
@@ -301,10 +292,8 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_reused_delta = 0
         _cfg_gate_invalidations = 0
 
-        # Run denoising loop
         with profiler_region("inference_denoising"), self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
@@ -358,7 +347,6 @@ class DenoisingStage(PipelineStage):
 
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
-                            # TODO(will): clean this up
                             attn_metadata = self.attn_metadata_builder.build(  # type: ignore
                                 current_timestep=i,  # type: ignore
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
@@ -374,7 +362,6 @@ class DenoisingStage(PipelineStage):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
-                            # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
                             moba_params.update({
                                 "current_timestep": i,
@@ -388,18 +375,12 @@ class DenoisingStage(PipelineStage):
                             attn_metadata = None
                     else:
                         attn_metadata = None
-                    # TODO(will): finalize the interface. vLLM uses this to
-                    # support torch dynamo compilation. They pass in
-                    # attn_metadata, vllm_config, and num_tokens. We can pass in
-                    # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
                     ):
-                        # Run transformer
                         noise_pred = current_model(
                             latent_model_input,
                             prompt_embeds,
@@ -471,7 +452,6 @@ class DenoisingStage(PipelineStage):
                                 noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
                                                                                            noise_pred_uncond)
 
-                        # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
                             # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                             noise_pred = self.rescale_noise_cfg(
@@ -487,12 +467,10 @@ class DenoisingStage(PipelineStage):
                         latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
                 latents = self.finish_step(latents, state)
 
-                # save trajectory latents if needed
                 if batch.return_trajectory_latents:
                     trajectory_timesteps.append(t)
                     trajectory_latents.append(latents)
 
-                # Update progress bar
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
                                                (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
                     progress_bar.update()
@@ -525,7 +503,6 @@ class DenoisingStage(PipelineStage):
             batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
             batch.trajectory_latents = trajectory_tensor.cpu()
 
-        # Update batch with final latents
         batch.latents = latents
 
         if fastvideo_args.dit_layerwise_offload:
@@ -911,8 +888,6 @@ class CosmosDenoisingStage(DenoisingStage):
                     else:
                         final_x0 = cond_x0
 
-                # Convert x0 to velocity for
-                # FlowMatchEulerDiscreteScheduler.
                 velocity = (latents - final_x0) / sigma.clamp(min=1e-6)
 
                 latents = self.scheduler.step(
@@ -1055,7 +1030,6 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
 
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
-                # Stop if interrupted
                 if getattr(self, "interrupt", False):
                     break
                 t_val = float(t)

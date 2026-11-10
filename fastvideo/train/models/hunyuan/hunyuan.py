@@ -65,9 +65,6 @@ class HunyuanModel(WanModel):
             lora=lora,
         )
 
-    # ------------------------------------------------------------------
-    # Overrides
-    # ------------------------------------------------------------------
 
     def prepare_batch(
         self,
@@ -197,7 +194,6 @@ class HunyuanModel(WanModel):
 
         model_path = maybe_download_model(tc.model_path)
 
-        # Use configured precisions for each encoder.
         precisions = tc.pipeline_config.text_encoder_precisions
         llama_dtype = PRECISION_TO_TYPE[precisions[0]]
         clip_dtype = PRECISION_TO_TYPE[precisions[1]]
