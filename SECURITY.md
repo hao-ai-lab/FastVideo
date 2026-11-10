@@ -28,10 +28,7 @@ issue.
 
 ## Supported versions
 
-FastVideo is pre-1.0 and moves quickly. We fix security issues on `main` and
-ship them in the next release; we do not backport fixes to earlier tags. If you
-report against an older version, we may ask you to reproduce on the latest
-release.
+We apply security fixes on `main`, and they ship in the next release.
 
 ## Scope
 
