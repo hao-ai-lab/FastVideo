@@ -55,10 +55,6 @@ narrowest one.
   set is in `docs/contributing/pull_requests.md`.
 - One concern per PR. Describe the problem, the change, how you verified it and
   the risk.
-- After a maintainer approves, a contributor with write access comments
-  `/merge` to enter the merge queue; external contributors ask a maintainer to
-  run it or add the `ready` label. The path-aware merge gate runs only the lanes
-  your diff needs.
 - The full workflow, CI tiers and `/test` commands are in
   `docs/contributing/pull_requests.md`.
 
