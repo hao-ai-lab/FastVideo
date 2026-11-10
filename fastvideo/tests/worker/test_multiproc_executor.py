@@ -196,16 +196,30 @@ def _run_output_worker(pipe, device):
         pipe.close()
 
 
-@pytest.mark.parametrize("device", ["cpu", "mps"])
+@pytest.mark.parametrize("device", ["cpu", "mps", "cuda"])
 def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
     if device == "mps" and not torch.backends.mps.is_available():
         pytest.skip("Requires an Apple GPU with MPS")
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("Requires an NVIDIA GPU with CUDA")
+
+    expected_device = "cuda" if device == "cuda" else "cpu"
+
+    def assert_tensor(actual, expected):
+        received_device = actual.device.type
+        requires_grad = actual.requires_grad
+        actual_cpu = actual.cpu()
+        del actual
+        assert received_device == expected_device
+        assert not requires_grad
+        torch.testing.assert_close(actual_cpu, expected, rtol=0, atol=0)
 
     context = mp.get_context("spawn")
     parent_pipe, child_pipe = context.Pipe()
     process = context.Process(target=_run_output_worker, args=(child_pipe, device))
     process.start()
     child_pipe.close()
+    response = output = metadata = metric = None
     try:
         for call in (1, 2):
             parent_pipe.send({
@@ -217,19 +231,19 @@ def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
             assert _RPC_ERROR_KEY not in response, response.get("error")
             output = response["output_batch"]
             expected = (torch.arange(6, dtype=torch.float32).reshape(2, 3) + call) * 2
-            assert output.device.type == "cpu"
-            assert not output.requires_grad
-            torch.testing.assert_close(output, expected, rtol=0, atol=0)
+            assert_tensor(output, expected)
             metadata = response["extra"]["metadata"]
             assert isinstance(metadata, _TensorMetadata)
             assert metadata.label == "test"
-            torch.testing.assert_close(metadata.features[0], expected, rtol=0, atol=0)
-            torch.testing.assert_close(response["extra"]["audio"][0].samples, expected, rtol=0, atol=0)
+            assert_tensor(metadata.features[0], expected)
+            assert_tensor(response["extra"]["audio"][0].samples, expected)
             assert response["extra"]["audio"][0].sample_rate == 24000
             metric = response["logging_info"].get_stage_info("decode")["metric"]["values"][0]
-            torch.testing.assert_close(metric, expected, rtol=0, atol=0)
-            torch.testing.assert_close(response["trajectory_latents"], expected.half(), rtol=0, atol=0)
-            torch.testing.assert_close(response["trajectory_timesteps"][0], torch.arange(2, dtype=torch.int32))
+            assert_tensor(metric, expected)
+            assert_tensor(response["trajectory_latents"], expected.half())
+            assert_tensor(response["trajectory_timesteps"][0], torch.arange(2, dtype=torch.int32))
+            # Blocking CPU copies finish before imported CUDA storage is released; the producer must outlive it.
+            response = output = metadata = metric = None
 
         parent_pipe.send({"method": "shutdown"})
         assert parent_pipe.poll(30), "Spawned worker did not shut down"
@@ -237,6 +251,7 @@ def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
         process.join(timeout=10)
         assert process.exitcode == 0
     finally:
+        response = output = metadata = metric = None
         parent_pipe.close()
         if process.is_alive():
             process.terminate()
