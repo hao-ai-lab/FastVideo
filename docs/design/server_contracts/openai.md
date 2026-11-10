@@ -12,6 +12,16 @@ per-request sampling state, and some adapters merge weights at load time, so a
 single loaded pipeline is never entered concurrently by image and video
 requests. HTTP handling and job polling remain asynchronous.
 
+`GET /v1/model_info` includes `video_output_capabilities` for MiniMax-H3
+(including FastH3 and Omni) and Pika H3 Flex. Version 1 reports the 24 fps
+frame grid, integer duration choices from 5 to 15 seconds, and recommended
+480p/768p width/height pairs by aspect ratio. Other families return `null`.
+These values describe model geometry, independently of the serve file's
+default request. `recommended_frame_sizes` is not an exhaustive canvas list,
+and `hardware_capacity_verified: false` means the response does not establish
+that every resolution, duration and reference combination fits the device.
+Sampling schedules, attention and memory policies are unchanged by discovery.
+
 ## Endpoints
 
 | Method | Path | Description |

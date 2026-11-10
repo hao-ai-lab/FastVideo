@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from fastvideo.entrypoints.openai.state import get_served_model_name, get_server_args, get_serving_engine
 from fastvideo.logger import init_logger
+from fastvideo.entrypoints.openai.generation_capabilities import video_output_capabilities
 
 router = APIRouter(prefix="/v1")
 logger = init_logger(__name__)
@@ -64,6 +65,8 @@ async def model_info():
         args.model_path,
         "served_model_name":
         get_served_model_name(),
+        "video_output_capabilities":
+        video_output_capabilities(args),
         "lora": (lora_runtime.info() if lora_runtime is not None else {
             "name": args.lora_nickname,
             "path": args.lora_path,
