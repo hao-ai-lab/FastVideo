@@ -72,7 +72,7 @@ test("the welcome page introduces the project and opens the cookbook", async ({ 
   );
   await expect(trending.locator("img")).toHaveAttribute("src", "https://trendshift.io/api/badge/repositories/14509");
   await expect(page.locator(".home-news time")).toHaveCount(2);
-  await expect(page.locator(".home-news")).toContainText("Kandinsky 6");
+  await expect(page.locator(".home-news")).toContainText("PAN 2");
   await expect(page.getByRole("heading", { name: "Projects and research", exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "DanceGRPO", exact: true })).toBeVisible();
   await expect(page.getByText("Use the navigation menu on the left to explore different sections:")).toHaveCount(0);
