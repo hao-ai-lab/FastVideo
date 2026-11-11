@@ -337,20 +337,41 @@ class Trainer:
                 iteration=step,
             )
 
-            if checkpoint_manager is not None:
+            if checkpoint_manager is not None and step != max_steps:
+                # The final resumable checkpoint is saved by ``save_final``
+                # after validation so the terminal checkpoint captures the
+                # post-validation callback RNG state instead of being
+                # deduped against a pre-validation interval save at the
+                # same step.
                 checkpoint_manager.maybe_save(step)
-                checkpoint_manager.maybe_save_inference(step,
-                                                        validation_scheduled=self.callbacks.will_run_validation(step))
 
-            self.callbacks.on_validation_begin(
-                method,
-                iteration=step,
-            )
-            self._run_method_validation(method, step)
-            self.callbacks.on_validation_end(
-                method,
-                iteration=step,
-            )
+            try:
+                if checkpoint_manager is not None:
+                    # The model-only inference save restores the RNG and
+                    # stays on the normal per-step path, including the final
+                    # step.
+                    checkpoint_manager.maybe_save_inference(
+                        step,
+                        validation_scheduled=self.callbacks.will_run_validation(step),
+                    )
+                self.callbacks.on_validation_begin(
+                    method,
+                    iteration=step,
+                )
+                self._run_method_validation(method, step)
+                self.callbacks.on_validation_end(
+                    method,
+                    iteration=step,
+                )
+            except BaseException:
+                # The final-step interval save was deferred to ``save_final``
+                # after the inference save and validation; if either aborts,
+                # still persist the terminal state so a crash (or Ctrl-C) at
+                # the last step does not discard the final unsaved interval.
+                if checkpoint_manager is not None and step == max_steps:
+                    checkpoint_manager.save_final(step)
+                raise
+
             last_step = step
 
             if self._consume_method_requests(method, checkpoint_manager, step):
@@ -358,13 +379,14 @@ class Trainer:
         else:
             last_step = max_steps
 
-        self.callbacks.on_train_end(
-            method,
-            iteration=last_step,
-        )
-
-        if checkpoint_manager is not None:
-            checkpoint_manager.save_final(last_step)
+        try:
+            self.callbacks.on_train_end(
+                method,
+                iteration=last_step,
+            )
+        finally:
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_final(last_step)
 
         self.performance_monitor.close()
         self.tracker.finish()
