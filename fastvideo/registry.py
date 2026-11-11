@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -44,6 +45,7 @@ from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
 from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
+from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -1227,6 +1229,22 @@ def _register_configs() -> None:
         pipeline_cls_name="MiniMaxH3ModularPipeline",
     )
 
+    # PAN2: one pipeline runs text-to-video, and image-to-video when the request carries a first frame.
+    def _is_pan2(name: str) -> bool:
+        name = name.lower()
+        return "pan2modularpipeline" in name or re.search(r"(^|[/_-])pan-?2([/_.-]|$)", name) is not None
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=PAN2PipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["IFM/PAN2"],
+        model_detectors=[_is_pan2],
+        model_family="pan2",
+        default_preset="pan2_t2v",
+        pipeline_cls_name="PAN2ModularPipeline",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -1404,6 +1422,8 @@ def _register_presets() -> None:
         ALL_PRESETS as OPEN_H3_REGENERATE_2K_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
+    from fastvideo.pipelines.basic.pan2.presets import (
+        ALL_PRESETS as PAN2_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1438,6 +1458,7 @@ def _register_presets() -> None:
         PIKA_H3_FLEX_PRESETS,
         OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,
+        PAN2_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         WAN_PRESETS,

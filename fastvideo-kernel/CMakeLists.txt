@@ -303,6 +303,12 @@ endif()
 # there, and tk's base_types.cuh brace-initializes signed-char vector members
 # from char (narrowing error). Skip TK until upstream is aarch64-clean.
 if(ENABLE_TK_KERNELS AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    if(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "ON")
+        message(FATAL_ERROR
+            "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_TK=ON was requested, but the "
+            "ThunderKittens headers do not compile on ${CMAKE_SYSTEM_PROCESSOR}. "
+            "Use FASTVIDEO_KERNEL_BUILD_TK=AUTO or OFF to build with Triton fallbacks.")
+    endif()
     message(STATUS "ThunderKittens kernels: forced OFF on ${CMAKE_SYSTEM_PROCESSOR} (tk headers are not aarch64-clean)")
     set(ENABLE_TK_KERNELS OFF)
 endif()

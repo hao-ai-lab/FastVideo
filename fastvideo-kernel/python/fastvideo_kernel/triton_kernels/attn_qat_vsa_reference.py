@@ -32,6 +32,7 @@ from __future__ import annotations
 import math
 
 import torch
+import torch.nn.functional as F
 
 QUANT_GROUP = 16
 BLOCK = 128
@@ -99,30 +100,73 @@ def key_valid_mask(kv_valid: torch.Tensor | None, n_blocks: int, device: torch.d
     return (col % HALF)[None, :] < limit
 
 
-def tile128_mask_to_fp4_blocks(tile_mask: torch.Tensor,
-                               tile_valid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``attn_qat_infer.api.vsa_tile_mask_to_fp4_blocks(mask, 128, tile_valid)`` without the CUDA extensions.
+def tile_mask_to_fp4_blocks(tile_mask: torch.Tensor,
+                           tile_tokens: int,
+                           tile_valid: torch.Tensor | None = None) -> tuple[
+                               torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Pure-PyTorch ``attn_qat_infer.api.vsa_tile_mask_to_fp4_blocks`` for tile 64 or 128.
 
-    ``attn_qat_infer`` imports its sm_12x extensions at module load, so data
-    center GPUs cannot call it; this is the same computation for 128-token
-    tiles (one tile per kernel block, so no quadrant masks and no padding
-    block): descending lists and per-64-key-half valid counts. The fidelity
-    check script asserts equality with the real function on sm_12x.
+    The inference API imports sm_12x extensions at module load, so data center
+    GPUs cannot call it.  The kernel works on 128x128 blocks.  With 64-token VSA
+    tiles two query tiles and two key tiles are paired into one block; a block
+    is listed when any of its four 64x64 quadrants is selected and ``q2k_quad``
+    carries the selected quadrants (bit ``2 * query_half + key_half``).  With
+    128-token tiles the mapping is 1:1 and no quadrant mask is needed.
+
+    Returns ``(q2k_idx [B, H, M, N], q2k_num [B, H, M], kv_valid [2N],
+    q2k_quad [B, H, M, N] | None)``; queries cover ``M * 128`` padded rows.
     """
-    n_tiles = tile_mask.shape[-1]
-    half_valid = (tile_valid.to(torch.int32)[:, None] -
-                  torch.tensor([0, HALF], device=tile_mask.device, dtype=torch.int32)[None, :]).clamp(0, HALF)
-    block_mask = tile_mask & (tile_valid > 0)[None, None, None, :]
-    valid = half_valid.reshape(-1)
-    n_blocks = n_tiles
+    if tile_tokens % HALF or (tile_tokens > HALF and tile_tokens % BLOCK):
+        raise ValueError(f"tile_tokens={tile_tokens} must be {HALF} or a multiple of {BLOCK}")
+    batch, heads, n_tiles, _ = tile_mask.shape
+    device = tile_mask.device
+    halves_per_tile = tile_tokens // HALF
+    half_mask = tile_mask
+    if halves_per_tile > 1:
+        half_mask = half_mask.repeat_interleave(halves_per_tile, dim=2).repeat_interleave(halves_per_tile, dim=3)
+    n_halves = n_tiles * halves_per_tile
+    if tile_valid is None:
+        half_valid = torch.full((n_halves, ), HALF, device=device, dtype=torch.int32)
+    else:
+        offsets = torch.arange(halves_per_tile, device=device, dtype=torch.int32) * HALF
+        half_valid = (tile_valid.to(torch.int32)[:, None] - offsets[None, :]).clamp(0, HALF).reshape(-1)
+    if n_halves % 2:
+        # Pad to whole 128-blocks: the extra key half is empty, the extra query
+        # half (discarded output) attends block 0 only.
+        half_mask = F.pad(half_mask, (0, 1, 0, 1), value=False)
+        half_mask[:, :, -1, 0] = True
+        half_valid = F.pad(half_valid, (0, 1), value=0)
+        n_halves += 1
+    half_mask = half_mask & (half_valid > 0)[None, None, None, :]
+    n_blocks = n_halves // 2
+    quads = half_mask.view(batch, heads, n_blocks, 2, n_blocks, 2)
+    weights = torch.tensor([[1, 2], [4, 8]], device=device, dtype=torch.uint8)  # [row_half, col_half]
+    quad = (quads.to(torch.uint8) * weights[None, None, None, :, None, :]).sum(dim=(3, 5), dtype=torch.uint8)
+    block_mask = quad != 0
+    # Descending compaction without a sort: position = running count from the right.
     rev = block_mask.flip(-1)
     pos = rev.cumsum(-1, dtype=torch.int32) - 1
     q2k_num = (pos[..., -1] + 1).contiguous()
-    cols = torch.arange(n_blocks - 1, -1, -1, device=tile_mask.device, dtype=torch.int32).expand_as(pos)
+    cols = torch.arange(n_blocks - 1, -1, -1, device=device, dtype=torch.int32).expand_as(pos)
     slot = torch.where(rev, pos, torch.full_like(pos, n_blocks)).long()
-    q2k_idx = torch.zeros((*tile_mask.shape[:2], n_blocks, n_blocks + 1), device=tile_mask.device, dtype=torch.int32)
+    q2k_idx = torch.zeros((batch, heads, n_blocks, n_blocks + 1), device=device, dtype=torch.int32)
     q2k_idx.scatter_(-1, slot, cols)
-    return q2k_idx[..., :n_blocks].contiguous(), q2k_num, valid.contiguous()
+    q2k_idx = q2k_idx[..., :n_blocks].contiguous()
+    q2k_quad = None
+    if halves_per_tile == 1:
+        q2k_quad = torch.zeros((batch, heads, n_blocks, n_blocks + 1), device=device, dtype=torch.uint8)
+        q2k_quad.scatter_(-1, slot, quad.flip(-1))
+        q2k_quad = q2k_quad[..., :n_blocks].contiguous()
+    return q2k_idx, q2k_num, half_valid.contiguous(), q2k_quad
+
+
+def tile128_mask_to_fp4_blocks(tile_mask: torch.Tensor,
+                               tile_valid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Backward-compatible 128-token-tile wrapper."""
+    idx, num, valid, quad = tile_mask_to_fp4_blocks(tile_mask, BLOCK, tile_valid)
+    if quad is not None:
+        raise AssertionError("128-token tiles must not produce a quadrant mask")
+    return idx, num, valid
 
 
 def invert_block_lists(q2k_idx: torch.Tensor, q2k_num: torch.Tensor,
@@ -162,6 +206,7 @@ def fp4_vsa_attention_reference(q: torch.Tensor,
                                 q2k_idx: torch.Tensor,
                                 q2k_num: torch.Tensor,
                                 kv_valid: torch.Tensor | None = None,
+                                q2k_quad: torch.Tensor | None = None,
                                 *,
                                 two_level_p: bool = False,
                                 smooth_k: bool = False,
@@ -199,17 +244,31 @@ def fp4_vsa_attention_reference(q: torch.Tensor,
                 row_sum = torch.zeros(BLOCK, device=q.device)
                 acc = torch.zeros(BLOCK, dim, device=q.device)
                 visited: list[tuple[int, torch.Tensor, torch.Tensor]] = []
-                for position, n in enumerate(visit_order(q2k_idx, q2k_num, b, h, m)):
+                count = int(q2k_num[b, h, m])
+                entries = list(range(count))[::-1]
+                for position, entry in enumerate(entries):
+                    n = int(q2k_idx[b, h, m, entry])
                     cols = slice(n * BLOCK, (n + 1) * BLOCK)
                     scores = q_hat[b, h, rows] @ k_hat[b, h, cols].T
                     scores = scores.masked_fill(~valid[n][None, :], -math.inf)
+                    if q2k_quad is not None:
+                        quad = int(q2k_quad[b, h, m, entry])
+                        half = torch.arange(BLOCK, device=q.device) // HALF
+                        qvalid = ((quad >> (half[:, None] * 2 + half[None, :])) & 1).bool()
+                        scores = scores.masked_fill(~qvalid, -math.inf)
                     group_max = scores.unflatten(-1, (-1, QUANT_GROUP)).amax(dim=-1)
                     if position == 0 and first_block_max_floor is not None:
                         group_max = group_max.clamp(min=first_block_max_floor)
                     new_max = torch.maximum(row_max, group_max.amax(dim=-1))
-                    m_scaled = new_max * scale_log2 + offset
-                    p_tilde = torch.exp2(scores * scale_log2 - m_scaled[:, None])
-                    alpha = torch.exp2((row_max - new_max) * scale_log2)
+                    # A listed block can have no selected keys for this query
+                    # half; both maxima are -inf and the usual exp2 terms are
+                    # NaN, so emit zeros and keep the running state unchanged.
+                    empty = torch.isinf(new_max) & (new_max < 0)
+                    m_scaled = torch.where(empty, torch.zeros_like(new_max), new_max * scale_log2 + offset)
+                    p_tilde = torch.where(empty[:, None], torch.zeros_like(scores),
+                                          torch.exp2(scores * scale_log2 - m_scaled[:, None]))
+                    alpha = torch.where(empty, torch.zeros_like(new_max),
+                                        torch.exp2((row_max - new_max) * scale_log2))
                     alpha = torch.where(torch.isinf(row_max), torch.zeros_like(alpha), alpha)
                     row_sum = row_sum * alpha + p_tilde.sum(dim=-1)
                     if quantize:
@@ -226,7 +285,9 @@ def fp4_vsa_attention_reference(q: torch.Tensor,
                 out[b, h, rows] = acc * inv[:, None]
                 if weights is not None:
                     for n, p_hat, block_max in visited:
-                        decay = torch.exp2((block_max - row_max) * scale_log2) * inv
+                        finite = torch.isfinite(block_max) & torch.isfinite(row_max)
+                        decay = torch.where(finite, torch.exp2((block_max - row_max) * scale_log2) * inv,
+                                            torch.zeros_like(inv))
                         weights[b, h, rows, n * BLOCK:(n + 1) * BLOCK] = p_hat * decay[:, None]
     if weights is not None:
         return out, weights

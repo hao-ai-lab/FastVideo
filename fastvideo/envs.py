@@ -276,6 +276,12 @@ FASTVIDEO_HOST_IP = EnvStr(
     category="distributed",
     doc="IP address of this node when the node has several network interfaces. Set it on each node for multi-node "
     "inference.")
+FASTVIDEO_PG_TIMEOUT_MIN = EnvInt(
+    0,
+    category="distributed",
+    doc="Timeout in minutes for the training process groups' collectives (0 keeps PyTorch's 10-minute default). "
+    "Raise it for large models whose rank-0 load and scatter, checkpoint saves or long evaluations outlast the "
+    "default.")
 FASTVIDEO_LOOPBACK_IP = EnvStr("",
                                category="distributed",
                                doc="Loopback IP address to use instead of the detected one.")
@@ -378,6 +384,25 @@ FASTVIDEO_NVFP4_FA4 = EnvBool(
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_NVFP4_FA4_QK_TRANSFORM = EnvChoice(
+    "none",
+    choices=("none", "smooth_k", "hadamard", "smooth_k+hadamard"),
+    category="attention",
+    doc="Exact Q/K preconditioning applied right before NVFP4 quantization on the FlashAttention-4 NVFP4 path: "
+    "smooth_k subtracts each head's token-mean of K, hadamard rotates Q and K by the head-dim Hadamard matrix. "
+    "Must match the qk_transform the model was QAD-trained with. An explicit nvfp4_qk_transform attention "
+    "implementation argument takes precedence.")
+FASTVIDEO_NVFP4_FA4_FUSED_QK_QUANT = EnvBool(
+    True,
+    category="attention",
+    doc="With FASTVIDEO_NVFP4_FA4_QK_TRANSFORM other than none, apply the transform and the NVFP4 quantization in one "
+    "fused Triton kernel per tensor (same FP4 codes and scale factors as the unfused path). Set it to 0 to use the "
+    "unfused PyTorch transform and flashinfer quantization.")
+FASTVIDEO_NVFP4_FA4_BF16_BLOCKS = EnvStr(
+    "",
+    category="attention",
+    doc="Comma-separated MiniMax-H3 transformer_blocks indices whose attention stays in BF16 while "
+    "FASTVIDEO_NVFP4_FA4 quantizes the rest, for example 45,49.")
 FASTVIDEO_FA4_PV_MODE = EnvChoice(
     "bf16",
     choices=("bf16", "fp8"),
@@ -652,6 +677,12 @@ FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
     "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
     "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
+FASTVIDEO_WAN22_VAE_DECODE_DIR = EnvPath("",
+                                         category="performance",
+                                         doc="Directory of the Wan2.2 VAE decoder kernels "
+                                         "(fastvideo-kernel/wan22_vae_decode) that AutoencoderKLWan loads, and builds "
+                                         "on first use, when its config sets decode_kernel. Empty takes the copy in "
+                                         "this checkout.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -968,6 +999,10 @@ FASTVIDEO_TEST_SD35_MODEL_DIR = EnvStr("stabilityai/stable-diffusion-3.5-medium"
                                        category="test",
                                        doc="Model for the Stable Diffusion 3.5 SSIM test.",
                                        deprecated_names=("SD35_MODEL_DIR", ))
+FASTVIDEO_TEST_PAN2_MODEL_DIR = EnvPath(None,
+                                        category="test",
+                                        doc="PAN2 checkpoint root (with vae/) for the Wan2.2 VAE decode-kernel GPU "
+                                        "tests; unset skips them.")
 FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",

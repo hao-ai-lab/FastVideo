@@ -1,7 +1,8 @@
 # OpenAI-compatible Open-H3-Regenerate-2K server (one GPU with about 150 GB free, e.g. B200 / GB200).
 # POST /v1/videos/sync (or /v1/videos) with a 768P H3 draft as video_reference; the response is the 2560x1440 MP4.
 # Local draft paths are accepted only inside server.media_roots; http(s) URLs must resolve to public addresses unless
-# server.allow_private_media_urls is set. data: URLs are always refused. See docs/inference/open_h3_regenerate_2k.md.
+# server.allow_private_media_urls is set. Base64 data:video/... URLs are decoded, up to
+# server.media_reference_max_bytes. See docs/inference/open_h3_regenerate_2k.md.
 generator:
   model_path: Efficient-Large-Model/Open-H3-Regenerate-2K
   engine:

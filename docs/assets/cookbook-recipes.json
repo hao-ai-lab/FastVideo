@@ -382,6 +382,32 @@
       "related": ["kandinsky6-vsr", "kandinsky6-ti2va-piflow"]
     },
     {
+      "id": "pan2-ti2v",
+      "family": "pan2",
+      "stage": "inference",
+      "task": "Text or image to video",
+      "label": "PAN 2",
+      "summary": "Generate a 13-second, 704 × 1248 video at 24 fps from text, or set IMAGE_PATH in the maintained example to condition on a first frame.",
+      "model": "IFM/PAN2",
+      "source": "examples/inference/basic/basic_pan2.py",
+      "serving": {
+        "source": "examples/serving/openai_pan2.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "task": "Text to video",
+        "limitations": [
+          "This server walkthrough sends a text prompt only. The server API also accepts an image reference (image_reference or input_reference) and then runs image-to-video from that first frame, but the checked-in clients do not upload one."
+        ]
+      },
+      "command": "python examples/inference/basic/basic_pan2.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video under video_samples_pan2/",
+      "limitations": [
+        "The example keeps the 29B DiT resident in bf16 and offloads only the text encoder. GPU memory requirements have not been established for this recipe; set PAN2_NUM_GPUS to shard video tokens with sequence parallelism, which does not shard the DiT weights."
+      ]
+    },
+    {
       "id": "flux2-klein-t2i",
       "family": "flux",
       "stage": "inference",
@@ -766,7 +792,7 @@
       "stage": "inference",
       "task": "Text to video (with audio)",
       "label": "Pika H3 Flex",
-      "summary": "Pika's post-trained MiniMax-H3: synchronized video and stereo audio from text in six forwards, at 480p or 768p, 5-15 s, with optional NVFP4 decoder and text encoder on Blackwell.",
+      "summary": "Pika's post-trained MiniMax-H3: synchronized video and stereo audio from text in six forwards, at 480p or 768p, 5-15 s, in BF16 or as FastVideo's NVFP4 QAD release on Blackwell, with optional FP4 attention.",
       "model": "Pika-Labs/Pika-H3-Flex",
       "source": "examples/inference/basic/basic_pika_h3_flex.py",
       "command": "FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN FASTVIDEO_FA4=1 python examples/inference/basic/basic_pika_h3_flex.py --task t2va --offload resident --prompt 'A paper boat drifts down a rainy city street at night; rain patters on the water.'",
@@ -783,6 +809,14 @@
       "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_t2va.mp4",
       "modes": ["T2VA"],
       "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
         {
           "key": "resolution",
           "label": "Resolution",
@@ -855,6 +889,7 @@
         }
       ],
       "limitations": [
+        "NVFP4 QAD release (--weights), one GB200, 768p 16:9, 5 s, warm: 16.8 s with BF16 attention and 15.2 s with FP4 attention; at 768p, 15 s, FP4 attention is 16% faster than BF16 attention (85.3 s vs 101.8 s).",
         "Measured on one GB200 at 768p 16:9, 5 s, warm: official pika-h3-pro CLI 59.7 s; FastVideo BF16 26.2 s; with the NVFP4 quality-36L decoder 18.0 s; with the fast-8L decoder 17.4 s. The 36L decoder measured 40.5 dB PSNR against the BF16 decoder.",
         "Peak resident memory was about 129 GiB for the all-BF16 run and 104.6 GiB with the NVFP4 text encoder (25.49 s) at 768p / 5 s on GB200; the official CLI's sampling peak was 71.7 GiB, a different measurement. The NVFP4 text encoder's first request in a fresh process pays a one-time cost of about 183 s.",
         "--offload resident keeps every component on the GPU (104.6-108.5 GiB peak with the NVFP4 text encoder, about 129 GiB all-BF16, on GB200). --offload lazy loads components on demand for smaller devices; on GB200 it took 48.06 s for the same T2VA request.",
@@ -887,6 +922,14 @@
       "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_<task>.mp4",
       "modes": ["I2VA", "L2VA", "FL2VA"],
       "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
         {
           "key": "task",
           "label": "Task",
@@ -1002,6 +1045,14 @@
       "expected_artifact": "MP4 with synchronized stereo audio at outputs/pika_h3_flex/pika_h3_flex_ref2va.mp4",
       "modes": ["Ref2VA"],
       "knobs": [
+        {
+          "key": "weights",
+          "label": "Weights",
+          "hint": "NVFP4 QAD needs Blackwell",
+          "flag": "--weights",
+          "options": [{"value": "bf16", "label": "BF16 (Pika release)"}, {"value": "nvfp4-qad", "label": "NVFP4 QAD"}, {"value": "nvfp4-qad-fp4-attention", "label": "NVFP4 QAD + FP4 attention"}],
+          "default": "bf16"
+        },
         {
           "key": "resolution",
           "label": "Resolution",

@@ -9,6 +9,10 @@
     "icon": "boxes"
   },
   {
+    "label": "News",
+    "href": "/news"
+  },
+  {
     "label": "Get started",
     "icon": "rocket",
     "items": [
@@ -126,6 +130,10 @@
           }
         ],
         "display": "group"
+      },
+      {
+        "label": "PAN 2 text/image to video",
+        "href": "/inference/pan2"
       },
       {
         "label": "Examples",
@@ -250,6 +258,25 @@
         ]
       },
       {
+        "label": "PAN 2",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "PAN 2",
+            "href": "/cookbook/pan/pan2"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/pan"
+          },
+          {
+            "label": "Model reference",
+            "href": "/inference/pan2"
+          }
+        ]
+      },
+      {
         "label": "FLUX",
         "href": "/cookbook/flux"
       },
@@ -309,6 +336,14 @@
       {
         "label": "Attn-QAT Training",
         "href": "/training/attn_qat"
+      },
+      {
+        "label": "FastH3 NVFP4 QAD",
+        "href": "/training/minimax_h3_fp4_qad"
+      },
+      {
+        "label": "Pika H3 Flex NVFP4 QAD",
+        "href": "/training/pika_h3_flex_qad"
       },
       {
         "label": "HunyuanVideo 1.5 T2V",

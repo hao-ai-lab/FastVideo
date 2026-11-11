@@ -22,8 +22,9 @@ jobs:
   trigger:
     if: >-
       inputs.pr_number > 0
-      || (github.event.action == 'labeled' && github.event.label.name == 'ready')
-      || github.event.action == 'synchronize'
+      || (github.event.pull_request.base.ref == github.event.repository.default_branch
+          && ((github.event.action == 'labeled' && github.event.label.name == 'ready')
+              || github.event.action == 'synchronize'))
     runs-on: ubuntu-latest
     # Job-level concurrency: only this guarded job acquires the group, so an
     # unrelated `labeled` event (which skips the job) cannot cancel an in-flight

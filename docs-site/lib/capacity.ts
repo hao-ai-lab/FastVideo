@@ -1,117 +1,8 @@
 import { useEffect, useState } from "react";
 // @ts-expect-error The shared ES module has no TypeScript declarations.
-import { assessCapacity } from "../../docs/js/cookbook-memory.mjs";
-import weightsData from "../../docs/assets/cookbook-weights.json";
-
-export type MemoryStatus = "fits" | "tight" | "exceeds" | "unsupported" | "unknown";
-
-/** The subset of an `assessCapacity` result the UI shows. */
-export interface MemoryAssessment {
-  status: MemoryStatus;
-  reason?: string;
-  requiredGiB?: number;
-  capacityGiB?: number;
-  basis?: string;
-  parts?: Record<string, number>;
-}
-
-export interface WeightsModel {
-  parts: Record<string, number>;
-  alternates?: Record<string, number>;
-  sources?: string[];
-}
-
-const WEIGHTS = weightsData as { models: Record<string, WeightsModel> };
-
-/** Measured checkpoint sizes for recipes that have no full capacity model yet. */
-export function weightsFor(modelId: string | undefined): WeightsModel | undefined {
-  return modelId ? WEIGHTS.models[modelId] : undefined;
-}
-
-/**
- * Compare resident checkpoint weights with one device. This answers whether the
- * weights load, not whether a request peaks below the device limit: activations,
- * VSA workspace, and decode buffers are not modeled.
- */
-export function assessWeightsRecipe({
-  weights,
-  config,
-  hardware,
-  budgetGb,
-}: {
-  weights: WeightsModel;
-  config: Record<string, unknown>;
-  hardware: { memory_gb?: number; usable_budget_gb?: number; memory_unit?: string; memory_type?: string };
-  budgetGb?: number;
-}): MemoryAssessment | undefined {
-  if (hardware.memory_type !== "dedicated" && hardware.memory_type !== "unified") {
-    return {
-      status: "unknown",
-      reason:
-        "A weights fit check requires dedicated GPU memory or unified memory. Host-only system RAM is not GPU capacity.",
-    };
-  }
-  const generator = (config.generator ?? {}) as {
-    engine?: { offload?: Record<string, boolean> };
-    pipeline?: {
-      components?: Record<string, string | null>;
-      experimental?: Record<string, unknown>;
-    };
-  };
-  const parts = { ...weights.parts };
-  const components = generator.pipeline?.components ?? {};
-  const experimental = generator.pipeline?.experimental ?? {};
-  if (experimental.video_decode_backend === "taeh3") {
-    return {
-      status: "unknown",
-      reason: "TAEH3 decoder weights are not modeled. This backend does not load the bundled H3 video VAE.",
-    };
-  }
-  if (experimental.h3_vae_nvfp4_decoder) {
-    return {
-      status: "unknown",
-      reason:
-        "NVFP4 decoder residency is not modeled: the VAE retains its encoder and packs decoder weights after loading. Decoder file size is not the resident VAE size.",
-    };
-  }
-  if (components.text_encoder_weights && weights.alternates?.text_encoder_quantized !== undefined) {
-    parts.text_encoder = weights.alternates.text_encoder_quantized;
-  }
-  const quant = (config.generator as { engine?: { quantization?: { transformer_quant?: string | null } } })?.engine
-    ?.quantization?.transformer_quant;
-  if (quant) {
-    return {
-      status: "unknown",
-      reason:
-        "Transformer quantization residency is not modeled for this checkpoint and layer profile. Published export sizes do not describe on-the-fly quantization of this configuration.",
-    };
-  }
-  const offload = generator.engine?.offload ?? {};
-  if (offload.text_encoder) delete parts.text_encoder;
-  const resident = Object.values(parts).reduce((sum, value) => sum + value, 0);
-  const capacityGb = budgetGb ?? hardware.usable_budget_gb ?? hardware.memory_gb;
-  if (!capacityGb) return undefined;
-  const capacityGiB = hardware.memory_unit === "GiB" ? capacityGb : (capacityGb * 1e9) / GIB;
-  const label: Record<string, string> = {
-    transformer: "transformer",
-    text_encoder: "text encoder",
-    vae: "VAE",
-    audio_vae: "audio VAE",
-  };
-  const split = Object.entries(parts)
-    .map(([role, value]) => `${label[role] ?? role} ${value.toFixed(1)} GiB`)
-    .join(", ");
-  const status: MemoryStatus = resident > capacityGiB ? "exceeds" : resident > capacityGiB * 0.85 ? "tight" : "fits";
-  const offloaded = offload.text_encoder ? " The text encoder is offloaded." : "";
-  return {
-    status,
-    basis: "weights",
-    requiredGiB: resident,
-    capacityGiB,
-    parts,
-    reason: `Weights only: ${split}.${offloaded} Activations, VSA workspace, and decode buffers are not modeled.`,
-  };
-}
+import { loadCapacityIndex, loadCapacityModel } from "../../docs/js/cookbook-capacity.mjs";
+export { assessRecipe, assessWeightsRecipe, weightsFor } from "./memory-assessment";
+export type { MemoryAssessment } from "./memory-assessment";
 
 interface CapacityModel {
   id: string;
@@ -122,105 +13,41 @@ interface CapacityModel {
 }
 
 interface CapacityState {
-  status: "loading" | "ready" | "unavailable";
+  status: "loading" | "ready" | "unavailable" | "error";
   model?: CapacityModel;
+  error?: string;
 }
 
 const CAPACITY_INDEX = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/assets/cookbook-config/capacity/index.json`;
-const GIB = 1024 ** 3;
-
-let indexPromise: Promise<{ models: { id: string; catalog_url: string }[] }> | null = null;
-
-function loadIndex() {
-  indexPromise ??= fetch(CAPACITY_INDEX)
-    .then((response) => {
-      if (!response.ok) throw new Error(`Capacity index: HTTP ${response.status}`);
-      return response.json() as Promise<{ models: { id: string; catalog_url: string }[] }>;
-    })
-    .catch((error) => {
-      indexPromise = null;
-      throw error;
-    });
-  return indexPromise;
-}
 
 /**
  * Load the capacity model for one cookbook entry. Most recipes do not have one;
  * the hook stays `unavailable` and the UI says so instead of guessing.
  */
-export function useCapacityModel(modelId: string | undefined): CapacityState {
+export function useCapacityModel(modelId: string | undefined): CapacityState & { retry: () => void } {
   const [state, setState] = useState<CapacityState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!modelId) {
       setState({ status: "unavailable" });
       return;
     }
-    let live = true;
+    const controller = new AbortController();
     setState({ status: "loading" });
-    loadIndex()
-      .then(async (index) => {
-        const entry = index.models.find((model) => model.id === modelId);
-        if (!entry) throw new Error("No capacity model ships for this checkpoint.");
-        const url = new URL(entry.catalog_url, new URL(CAPACITY_INDEX, window.location.origin));
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Capacity model: HTTP ${response.status}`);
-        const model = (await response.json()) as CapacityModel;
-        if (live) setState({ status: "ready", model });
+    loadCapacityIndex(new URL(CAPACITY_INDEX, window.location.origin).href, { signal: controller.signal })
+      .then(async (index: { models: { id: string }[] }) => {
+        if (!index.models.some((model) => model.id === modelId)) {
+          if (!controller.signal.aborted) setState({ status: "unavailable" });
+          return;
+        }
+        const model = (await loadCapacityModel(index, modelId, { signal: controller.signal })) as CapacityModel;
+        if (!controller.signal.aborted) setState({ status: "ready", model });
       })
-      .catch(() => {
-        if (live) setState({ status: "unavailable" });
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setState({ status: "error", error: error instanceof Error ? error.message : "Unable to load memory data." });
       });
-    return () => {
-      live = false;
-    };
-  }, [modelId]);
-  return state;
-}
-
-/**
- * Run the analytical estimate for the edited configuration. Returns `undefined`
- * when no capacity model covers the checkpoint, so the caller can say so.
- */
-export function assessRecipe({
-  model,
-  example,
-  hardware,
-  config,
-  budgetGb,
-  hostGb,
-}: {
-  model: CapacityModel;
-  example: { workload?: string; env?: Record<string, string> };
-  hardware?: {
-    memory_gb?: number;
-    memory_unit?: string;
-    memory_type?: string;
-    usable_budget_gb?: number;
-    host_ram_gb?: number;
-    id?: string;
-  };
-  config?: Record<string, unknown>;
-  budgetGb?: number;
-  hostGb?: number;
-}): MemoryAssessment | undefined {
-  if (!config || !hardware?.memory_gb) return undefined;
-  try {
-    const result = assessCapacity({
-      model,
-      example,
-      hardware,
-      config,
-      memoryBudgetGiB: budgetGb ? (hardware.memory_unit === "GiB" ? budgetGb : (budgetGb * 1e9) / GIB) : undefined,
-      hostMemoryGb: hostGb,
-    }) as MemoryAssessment;
-    return {
-      status: (result.status ?? "unknown") as MemoryStatus,
-      reason: result.reason,
-      requiredGiB: result.requiredGiB,
-      capacityGiB: result.capacityGiB,
-      basis: result.basis,
-    };
-  } catch {
-    return undefined;
-  }
+    return () => controller.abort();
+  }, [modelId, attempt]);
+  return { ...state, retry: () => setAttempt((value) => value + 1) };
 }
