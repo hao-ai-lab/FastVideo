@@ -131,7 +131,6 @@ assert not hasattr(torch, 'npu')
 assert 'torch_npu' not in sys.modules
 '''
     with envs.override_external('TORCH_DEVICE_BACKEND_AUTOLOAD', '0'), \
-            envs.override_external('CUDA_VISIBLE_DEVICES', ''), \
             envs.override_external('ASCEND_RT_VISIBLE_DEVICES', ''):
         result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
