@@ -119,6 +119,7 @@ struct CollectiveEpilogueFwd{
         auto smem_thr_copy_O = smem_tiled_copy_O.get_thread_slice(thread_idx);
         constexpr int numel = decltype(size(tOrO))::value;
         cutlass::NumericArrayConverter<Element, float, numel> convert_op;
+        // tOrO must have contiguous storage for the flat-array conversion below.
         auto frag = convert_op(*reinterpret_cast<const cutlass::Array<float, numel> *>(tOrO.data()));
         auto tOrO_out = make_tensor(make_rmem_ptr<Element>(&frag), tOrO.layout());
         Tensor taccOrO = smem_thr_copy_O.retile_S(tOrO_out);        // ((Atom,AtomNum), MMA_M, MMA_N)
