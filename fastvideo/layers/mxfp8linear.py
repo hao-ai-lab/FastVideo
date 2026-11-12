@@ -39,13 +39,16 @@ def _quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor
 
 
 def quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prequantize a weight with Quack and return hardware-blocked scales."""
-    if to_mx is None or to_blocked is None:
-        raise ImportError("MXFP8 weight quantization requires Quack's to_mx/to_blocked helpers "
-                          "(quack.mx_utils in older releases, quack.blockscaled.quantize in newer "
-                          "ones). Install a compatible quack to use the MXFP8 weight path; the "
-                          "Triton activation and SwiGLU quantizers do not need it.")
+    """Prequantize a weight and return hardware-blocked scales.
+
+    Prefers Quack's ``to_mx``/``to_blocked`` helpers when they are installed (they
+    match the reference bytes exactly), and otherwise falls back to the Triton
+    quantizer, which writes the same E4M3 values and E8M0 blocked scales. The
+    SM12x Spark image has no Quack, so the fallback is what runs there.
+    """
     _validate_mxfp8_matrix(matrix)
+    if to_mx is None or to_blocked is None:
+        return quantize_mxfp8_blockwise(matrix)
     return _quantize_mxfp8_weight_blockwise(matrix)
 
 
@@ -76,8 +79,9 @@ def _store_mxfp8_blocks(
     scale = tl.maximum(scale_bits.to(tl.float32, bitcast=True), 1.1754943508222875e-38)
 
     scaled_matrix = tl.maximum(tl.minimum(matrix / scale[:, None], 448.0), -448.0)
+    # int64 element offsets: M * K can exceed 2**31 at H3 2K (133435 x 28672 = 3.83e9).
     tl.store(
-        quantized_ptr + row * column_count + columns,
+        quantized_ptr + row.to(tl.int64) * column_count + columns,
         tl.reshape(scaled_matrix.to(tl.float8e4nv), (BLOCKS_PER_PROGRAM * 32, )),
         mask=valid_elements,
     )
@@ -109,7 +113,7 @@ def _quantize_mxfp8_kernel(
     element_offsets = tl.arange(0, BLOCKS_PER_PROGRAM * 32)
     columns = first_block * 32 + element_offsets
     matrix = tl.load(
-        matrix_ptr + row * column_count + columns,
+        matrix_ptr + row.to(tl.int64) * column_count + columns,
         mask=(row < row_count) & (columns < column_count),
         other=0.0,
     ).to(tl.float32)
@@ -142,7 +146,8 @@ def _swiglu_quantize_mxfp8_kernel(
     element_offsets = tl.arange(0, BLOCKS_PER_PROGRAM * 32)
     columns = first_block * 32 + element_offsets
     valid_elements = (row < row_count) & (columns < column_count)
-    packed_row_offset = row * (2 * column_count)
+    # int64: the packed preactivation is M x 2*ffn; at H3 2K this is 3.83e9 elements.
+    packed_row_offset = row.to(tl.int64) * (2 * column_count)
     values = tl.load(
         preactivation_ptr + packed_row_offset + columns,
         mask=valid_elements,

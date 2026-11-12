@@ -476,6 +476,12 @@ FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
     doc="MiniMax-H3 inference-only Triton kernels that reproduce the eager output bit for bit: all, 1, or a "
     "comma-separated subset of rope,modulate,swiglu. An op whose FASTVIDEO_MINIMAX_H3_FUSIONS fusion is on keeps "
     "the fusion. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_H3_MXFP8 = EnvBool(
+    False,
+    category="performance",
+    doc="Quantize the MiniMax-H3 feed-forward (fc_in/fc_out) linears to MXFP8 (block-scaled E4M3, E8M0 per 32 "
+    "along K) on Blackwell. Approximate tier: ~1.6x faster FFN GEMMs. When no transformer_quant is set it pins "
+    "transformer_quant=MXFP8; an explicit transformer_quant wins.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
