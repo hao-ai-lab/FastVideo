@@ -20,6 +20,13 @@ except ImportError:
 
 MXFP8_BLOCK_SIZE = 32
 _BLOCKS_PER_PROGRAM = 16
+# The SwiGLU quantizer reads two 28672-wide bf16 streams and writes one fp8 stream, so it is
+# pure LPDDR5x traffic. One row x 16 blocks (512 columns) per program left it at ~77 GB/s
+# (~28% of the GB10 bandwidth) because every thread moved only a few bytes; 256 blocks
+# (8192 columns) x 16 warps moves 16 KB+ per program and reaches ~225 GB/s (126.7 -> 42.4 ms
+# per call at M=133435, bit-identical output -- scripts_mk2k/bench_quant_sweep.py).
+_SWIGLU_BLOCKS_PER_PROGRAM = 256
+_SWIGLU_NUM_WARPS = 16
 
 
 def _validate_mxfp8_matrix(matrix: torch.Tensor) -> None:
@@ -215,7 +222,7 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
     row_count = preactivation.shape[0]
     column_count = preactivation.shape[1] // 2
     quantized, blocked_scales, scale_column_count = _allocate_mxfp8_outputs(preactivation, column_count)
-    grid = (triton.cdiv(row_count, 128) * 128, triton.cdiv(scale_column_count, _BLOCKS_PER_PROGRAM))
+    grid = (triton.cdiv(row_count, 128) * 128, triton.cdiv(scale_column_count, _SWIGLU_BLOCKS_PER_PROGRAM))
     _swiglu_quantize_mxfp8_kernel[grid](
         preactivation,
         quantized,
@@ -223,8 +230,8 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
         row_count,
         column_count,
         scale_column_count,
-        BLOCKS_PER_PROGRAM=_BLOCKS_PER_PROGRAM,
-        num_warps=8,
+        BLOCKS_PER_PROGRAM=_SWIGLU_BLOCKS_PER_PROGRAM,
+        num_warps=_SWIGLU_NUM_WARPS,
     )
     return quantized, blocked_scales
 
