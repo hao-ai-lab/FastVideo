@@ -845,6 +845,12 @@ FASTVIDEO_H3_VAE_ENCODE_TILE = EnvStr(None,
                                       "(e.g. '768,768,128,128'). Unset keeps the reference tiling "
                                       "(tile_sample_min_height/width, overlap 64). Fewer, larger tiles cut the "
                                       "launch/copy overhead on sm_121 but change the blended encode slightly.")
+FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
+                                         category="performance",
+                                         doc="Keep the MiniMax-H3 video VAE materialized on the accelerator "
+                                         "across requests instead of releasing it after the video-decoding "
+                                         "stage. Saves the ~76 s host-to-device reload the Spark pays before "
+                                         "every draft encode, at the cost of ~9.7 GiB held during the refine.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "

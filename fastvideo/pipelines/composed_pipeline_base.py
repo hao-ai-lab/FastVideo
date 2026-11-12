@@ -713,6 +713,18 @@ class ComposedPipelineBase(ABC):
             self._lazy_release_hooks_installed = True
             return
         schedule = self._build_lazy_release_schedule()
+        # GB10 opt-in: keep the MiniMax-H3 video VAE on the accelerator across requests.
+        # It is last held by the video-decoding stage, so the default schedule frees
+        # 9.7 GiB after every request and the next request pays a ~76 s host-to-device
+        # reload before the draft encode (measured on the Spark). Residency costs that
+        # 9.7 GiB during the refine instead; the load itself is byte-identical.
+        if envs.FASTVIDEO_H3_KEEP_VAE_RESIDENT.get():
+            resident = sorted({name for names in schedule.values() for name in names if name == "vae"})
+            if resident:
+                schedule = {index: [name for name in names if name != "vae"] for index, names in schedule.items()}
+                schedule = {index: names for index, names in schedule.items() if names}
+                logger.info("FASTVIDEO_H3_KEEP_VAE_RESIDENT: the MiniMax-H3 video VAE stays materialized "
+                            "across requests instead of being released after its last stage")
         for index, stage in enumerate(self._stages):
             stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
 
