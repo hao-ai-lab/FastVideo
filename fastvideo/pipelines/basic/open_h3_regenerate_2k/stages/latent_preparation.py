@@ -25,6 +25,10 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
     MINIMAX_H3_LAYOUT_KEY,
     MiniMaxH3LatentPreparationStage,
 )
+from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_latent_cache import (
+    DraftLatentCache,
+    draft_latent_cache_key,
+)
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_video import load_draft_pixels
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.sampling import mix_initial_state, refine_sigmas
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -53,6 +57,7 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         self.start_sigma = start_sigma
         self.draft_latent_path = draft_latent_path
         self._silence: tuple[tuple[str, int], torch.Tensor] | None = None
+        self._draft_cache = DraftLatentCache()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = super().verify_input(batch, fastvideo_args)
@@ -79,6 +84,27 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         finally:
             if fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
+
+    def _encode_draft_cached(self, video_path: str, device: torch.device,
+                             fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        """``_encode_draft`` behind an exact content-keyed cache (draft_latent_cache).
+
+        The encode is a pure function of the draft file, tiling, fixed posterior
+        seed and model bundle, so an identical presentation reuses the encoder's
+        own output bit-for-bit instead of re-encoding (~82 s on the Spark).
+        """
+        cache = self._draft_cache
+        if not cache.enabled:
+            return self._encode_draft(video_path, device, fastvideo_args)
+        key = draft_latent_cache_key(video_path, self.draft_size, envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get(),
+                                     getattr(fastvideo_args, "model_path", None), MINIMAX_H3_KEYFRAME_ENCODE_SEED)
+        cached = cache.get(key)
+        if cached is not None:
+            logger.info("Open-H3 draft-latent cache hit (%s); skipping the VAE encode", key)
+            return cached.to(device=device, dtype=torch.float32)
+        draft = self._encode_draft(video_path, device, fastvideo_args)
+        cache.put(key, draft)
+        return draft
 
     def _draft_latent_source(self, video_path: str | None) -> str | None:
         """The saved draft latent for this request: the configured one, or a ``.pt`` passed as the draft video."""
@@ -130,8 +156,10 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         _, channels, num_latent_frames, latent_height, latent_width = batch.raw_latent_shape
 
         latent_source = self._draft_latent_source(batch.video_path)
-        draft = (self._encode_draft(batch.video_path, device, fastvideo_args)
-                 if latent_source is None else self._load_draft_latent(latent_source, device))
+        if latent_source is None:
+            draft = self._encode_draft_cached(batch.video_path, device, fastvideo_args)
+        else:
+            draft = self._load_draft_latent(latent_source, device)
         upscaler = self.load_upscaler()
         upscaled = upscale_latent(upscaler, draft, (batch.height, batch.width))
         if tuple(upscaled.shape) != (channels, num_latent_frames, latent_height, latent_width):
