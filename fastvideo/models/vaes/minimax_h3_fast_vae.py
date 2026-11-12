@@ -37,6 +37,10 @@ PATCH_T = 4
 FRAMES_TO_TRIM = 3
 SPATIAL_COMPRESSION = 16
 NUM_LAYERS = 24
+# The released fast checkpoint (fast_h3_vae_noncausal_24l.safetensors) stores exactly NVlabs' KEEP_24 layers,
+# reindexed 0..23. A smaller KEEP[n] subset is a subset of those 24, so it is expressed in checkpoint coordinates and
+# the block weights are re-stacked (see ``FastH3VaeDecoder.__init__``).
+CHECKPOINT_LAYERS = KEEP[NUM_LAYERS]
 LATENT_CHANNELS = 24
 
 
@@ -52,9 +56,16 @@ class FastH3VaeDecoder(nn.Module):
             raise FileNotFoundError(f"The fast H3 VAE decoder needs the base model's {config_path} for its latent "
                                     "statistics; set FASTVIDEO_H3_FAST_VAE_BASE_MODEL.")
         config = json.loads(config_path.read_text())
+        num_layers = int(envs.FASTVIDEO_H3_FAST_VAE_LAYERS.get())
+        if num_layers not in KEEP:
+            raise ValueError(f"FASTVIDEO_H3_FAST_VAE_LAYERS must be one of {sorted(KEEP)}, got {num_layers}.")
+        keep_layers = KEEP[num_layers]
+        missing = [idx for idx in keep_layers if idx not in CHECKPOINT_LAYERS]
+        if missing:
+            raise ValueError(f"The fast decoder checkpoint does not contain original layers {missing}.")
         model = NonCausalViTDecoder(config["latents_mean"],
                                     config["latents_std"],
-                                    KEEP[NUM_LAYERS],
+                                    keep_layers,
                                     time_norm=BLOCK,
                                     heads=config["decoder_num_attention_heads"],
                                     dim_head=config["decoder_attention_head_dim"],
@@ -62,7 +73,26 @@ class FastH3VaeDecoder(nn.Module):
                                     rope_dim_ratio=config["decoder_rope_dim_ratio"],
                                     eps=config["decoder_norm_eps"],
                                     latent_channels=config["latent_channels"])
-        model.load_state_dict(load_file(str(weights_path), device="cpu"), strict=True)
+        state = load_file(str(weights_path), device="cpu")
+        if num_layers != NUM_LAYERS:
+            # Reindex the checkpoint's KEEP_24 blocks into the selected subset, keeping the new order; drop the
+            # checkpoint blocks the selected subset does not use.
+            positions = [CHECKPOINT_LAYERS.index(idx) for idx in keep_layers]
+            remap = {pos: new for new, pos in enumerate(positions)}
+            remapped = {}
+            for key, value in state.items():
+                if key.startswith("blocks."):
+                    _, index, rest = key.split(".", 2)
+                    new_index = remap.get(int(index))
+                    if new_index is None:
+                        continue
+                    remapped[f"blocks.{new_index}.{rest}"] = value
+                else:
+                    remapped[key] = value
+            state = remapped
+            logger.info("MiniMax-H3 fast decoder: %d of %d checkpoint layers (original indices %s)",
+                        num_layers, NUM_LAYERS, keep_layers)
+        model.load_state_dict(state, strict=True)
         self.model = model.to(device).eval().requires_grad_(False)
         self.latent_channels = int(config["latent_channels"])
         self.spatial_compression_ratio = SPATIAL_COMPRESSION
@@ -130,10 +160,11 @@ def fast_vae_decoder(fastvideo_args: Any, device: torch.device) -> FastH3VaeDeco
     if not weights:
         return None
     base_model = envs.FASTVIDEO_H3_FAST_VAE_BASE_MODEL.get() or str(Path(fastvideo_args.model_path) / "base_model")
-    key = (str(weights), str(base_model))
+    num_layers = int(envs.FASTVIDEO_H3_FAST_VAE_LAYERS.get())
+    key = (str(weights), str(base_model), num_layers)
     decoder = _DECODERS.get(key)
     if decoder is None:
-        logger.info("MiniMax-H3 video decode: fast 24-layer decoder %s (latent statistics from %s)", weights,
+        logger.info("MiniMax-H3 video decode: fast %d-layer decoder %s (latent statistics from %s)", num_layers, weights,
                     base_model)
         decoder = FastH3VaeDecoder(weights, base_model, device=device)
         _DECODERS[key] = decoder

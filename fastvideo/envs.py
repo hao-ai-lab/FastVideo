@@ -516,6 +516,14 @@ FASTVIDEO_H3_FAST_VAE_FP8 = EnvBool(
     doc="Run the FASTVIDEO_H3_FAST_VAE_DECODER attention/FFN linears in per-tensor FP8 E4M3 (torch._scaled_mm). "
     "Approximate tier: on sm_121 the decoder's bf16 GEMMs run at ~82-101 TFLOPS and the same shapes at 154-199 "
     "TFLOPS in FP8. The conv/embedder/proj_out stay bf16.")
+FASTVIDEO_H3_FAST_VAE_LAYERS = EnvInt(
+    24,
+    category="performance",
+    doc="Number of transformer layers of the FASTVIDEO_H3_FAST_VAE_DECODER fast H3 decoder. The released "
+    "fast_h3_vae_noncausal_24l checkpoint holds the 24 layers NVlabs kept from the 36-layer released decoder; this "
+    "selects one of NVlabs' greedy-pruned subsets (24, 16, 12, 8 or 6) by remapping the checkpoint's block indices. "
+    "Approximate tier: fewer layers is faster and further from the released VAE decoder; 24 is the released fast "
+    "decoder.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",
