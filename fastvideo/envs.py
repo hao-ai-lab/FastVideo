@@ -883,6 +883,14 @@ FASTVIDEO_H3_VAE_COMPILE_ENCODER = EnvBool(False,
                                            "serves every tile; cuts the ~66k kernel launches that make the fp32 "
                                            "draft encode launch-bound on sm_121. Values change only at fp32 "
                                            "rounding level.")
+FASTVIDEO_H3_KEEP_DIT_RESIDENT = EnvBool(
+    False,
+    category="performance",
+    doc="Keep the MiniMax-H3 transformer materialized across requests instead of releasing it after the "
+    "denoising stage. On the Spark the next request otherwise pays ~47 s to reload, re-merge the LoRA "
+    "adapter, and re-pack the MXFP8 weights every time. Exact tier: the weights are unchanged. Costs the "
+    "transformer's ~45 GiB during the other stages, so it only fits when the text encoder is not also "
+    "resident (the product path supplies prompt embeddings).")
 FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
                                          category="performance",
                                          doc="Keep the MiniMax-H3 video VAE materialized on the accelerator "

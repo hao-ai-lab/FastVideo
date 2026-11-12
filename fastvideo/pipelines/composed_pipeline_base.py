@@ -718,13 +718,21 @@ class ComposedPipelineBase(ABC):
         # 9.7 GiB after every request and the next request pays a ~76 s host-to-device
         # reload before the draft encode (measured on the Spark). Residency costs that
         # 9.7 GiB during the refine instead; the load itself is byte-identical.
+        keep_resident: set[str] = set()
         if envs.FASTVIDEO_H3_KEEP_VAE_RESIDENT.get():
-            resident = sorted({name for names in schedule.values() for name in names if name == "vae"})
-            if resident:
-                schedule = {index: [name for name in names if name != "vae"] for index, names in schedule.items()}
+            keep_resident.add("vae")
+        if envs.FASTVIDEO_H3_KEEP_DIT_RESIDENT.get():
+            keep_resident.add("transformer")
+        if keep_resident:
+            held = sorted({name for names in schedule.values() for name in names if name in keep_resident})
+            if held:
+                schedule = {
+                    index: [name for name in names if name not in keep_resident]
+                    for index, names in schedule.items()
+                }
                 schedule = {index: names for index, names in schedule.items() if names}
-                logger.info("FASTVIDEO_H3_KEEP_VAE_RESIDENT: the MiniMax-H3 video VAE stays materialized "
-                            "across requests instead of being released after its last stage")
+                logger.info("FASTVIDEO_H3_KEEP_RESIDENT: %s stay materialized across requests instead of "
+                            "being released after their last stage", held)
         for index, stage in enumerate(self._stages):
             stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
 
