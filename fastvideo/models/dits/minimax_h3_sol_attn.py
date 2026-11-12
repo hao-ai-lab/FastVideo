@@ -5,8 +5,10 @@ This wires the reference `sol_attn` backend (the training-free sparse attention
 NVlabs used for a 2.8x refine speedup) into MiniMax H3 self-attention.  It is
 opt-in and off by default:
 
-    FASTVIDEO_H3_SOL_ATTN=sol_engine       refine step 0 dense, steps 1-2 tau 1.0
-    FASTVIDEO_H3_SOL_ATTN=sol_engine_fast  every refine step tau 1.75
+    FASTVIDEO_H3_SOL_ATTN=sol_engine            step 0 dense, steps 1-2 tau 1.0
+    FASTVIDEO_H3_SOL_ATTN=sol_engine_fast       every step tau 1.75
+    FASTVIDEO_H3_SOL_ATTN=sol_engine_tau0       step 0 tau 0.0, steps 1-2 tau 1.0
+    FASTVIDEO_H3_SOL_ATTN=sol_engine_fast_tau0  step 0 tau 0.0, steps 1-2 tau 1.75
 
 ``thresh_type="exact"``, and the leading ``[text | condition | audio]`` rows are
 kept exact as attention sinks (NVlabs' ``sink_tokens``).  The dense steps and
@@ -23,18 +25,19 @@ import os
 
 import torch
 
-# Presets mirror NVlabs' open_h3/sol_engine_fwd.py SPARSE table: `dense_steps`
-# counts the leading refine steps that stay dense (0-based), `tau` is the
-# threshold multiplier for the sparse steps.
-_PRESETS: dict[str, dict[str, float | int]] = {
-    "sol_engine": {
-        "dense_steps": 1,
-        "tau": 1.0,
-    },
-    "sol_engine_fast": {
-        "dense_steps": 0,
-        "tau": 1.75,
-    },
+# Per-step tau schedule for each preset.  ``None`` marks a dense step; a float is
+# the Sol-Attn threshold multiplier ``mean + tau*std`` on the proxy scores used on
+# that refine step.  The schedule is general in the sequence length and in the
+# number of refine steps (a missing entry falls back to the last defined value),
+# so the IC two-row-group path is not special-cased.
+_PRESETS: dict[str, tuple[float | None, ...]] = {
+    "sol_engine": (None, 1.0, 1.0),
+    "sol_engine_fast": (1.75, 1.75, 1.75),
+    # Mild variant: the first refine step is sparse at tau=0.0.  Measured on real
+    # q/k/v (S=133652, leading 452 sink rows) tau=0.0 is 1.6x cuDNN and keeps every
+    # block within 0.013-0.043 rel L2 of dense (vs 0.041-0.127 at tau=1.0).
+    "sol_engine_tau0": (0.0, 1.0, 1.0),
+    "sol_engine_fast_tau0": (0.0, 1.75, 1.75),
 }
 
 _sink_tokens = 0
@@ -71,22 +74,33 @@ def get_sink_tokens() -> int:
     return _sink_tokens
 
 
+def _tau_for_step(step: int | None) -> float | None:
+    """Scheduled tau for refine ``step`` (``None`` = dense), or ``None`` if disabled."""
+    name = mode()
+    if name is None:
+        return None
+    schedule = _PRESETS[name]
+    if step is None:
+        step = 0
+    idx = max(0, int(step))
+    if idx >= len(schedule):
+        idx = len(schedule) - 1
+    return schedule[idx]
+
+
 def sparse_step(step: int) -> bool:
     """Whether refine step ``step`` (0-based) should use sparse attention."""
-    name = mode()
-    if name is None:
-        return False
-    return int(step) >= int(_PRESETS[name]["dense_steps"])
+    return _tau_for_step(step) is not None
 
 
-def tau() -> float:
-    name = mode()
-    if name is None:
-        return 0.0
-    return float(_PRESETS[name]["tau"])
+def tau(step: int | None = None) -> float:
+    """Sol-Attn tau for refine ``step``; only meaningful on a sparse step."""
+    value = _tau_for_step(step)
+    return 0.0 if value is None else float(value)
 
 
-def sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+def sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                  step: int | None = None) -> torch.Tensor:
     """Run Sol-Attn on contiguous ``[B, S, H, 128]`` bf16 Q/K/V.
 
     The callers pass the post-QK-norm/RoPE tensors; they are already contiguous
@@ -94,11 +108,12 @@ def sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -
     """
     from sol_attn import sol_attn
 
+    tau_val = tau(step)
     global _logged
     if not _logged:
         _logged = True
         print(f"[sol-attn] first sparse call: B={query.shape[0]} S={query.shape[1]} H={query.shape[2]} "
-              f"sink={get_sink_tokens()} tau={tau()} preset={mode()}", flush=True)
+              f"sink={get_sink_tokens()} step={step} tau={tau_val} preset={mode()}", flush=True)
     if not (query.is_contiguous() and key.is_contiguous() and value.is_contiguous()):
         query = query.contiguous()
         key = key.contiguous()
@@ -108,7 +123,7 @@ def sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -
         key,
         value,
         thresh_type="exact",
-        tau=tau(),
+        tau=tau_val,
         sink_tokens=get_sink_tokens(),
         sink_start=0,
     )

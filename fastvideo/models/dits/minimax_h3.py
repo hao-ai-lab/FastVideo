@@ -391,13 +391,14 @@ class MiniMaxH3Attention(nn.Module):
         attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        _sol_step = int(get_forward_context().current_timestep)
         sol_sparse = (
             rotary_emb is not None
             and _sol_attn_mode() is not None
             and not torch.is_grad_enabled()
             and not torch.compiler.is_compiling()
             and _sol_sink_tokens() < (original_seq_len or 0)
-            and _sol_sparse_step(get_forward_context().current_timestep)
+            and _sol_sparse_step(_sol_step)
         )
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
@@ -471,7 +472,7 @@ class MiniMaxH3Attention(nn.Module):
 
         if sol_sparse:
             with STAGES.span("attention"):
-                hidden_states = _sol_attention(query, key, value)
+                hidden_states = _sol_attention(query, key, value, _sol_step)
             hidden_states = hidden_states.flatten(2, 3).type_as(query)
             with STAGES.span("out_proj"):
                 hidden_states, _ = self.to_out(hidden_states)
