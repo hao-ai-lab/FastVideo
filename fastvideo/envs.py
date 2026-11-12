@@ -510,6 +510,12 @@ FASTVIDEO_H3_FAST_VAE_COMPILE = EnvBool(
     category="performance",
     doc="torch.compile the FASTVIDEO_H3_FAST_VAE_DECODER decoder. At 2K on GB10 this cuts the warm decode from ~60 s "
     "to ~37 s and the peak from ~95 GiB to ~36 GiB; the first call of each latent shape pays the compile.")
+FASTVIDEO_H3_FAST_VAE_FP8 = EnvBool(
+    False,
+    category="performance",
+    doc="Run the FASTVIDEO_H3_FAST_VAE_DECODER attention/FFN linears in per-tensor FP8 E4M3 (torch._scaled_mm). "
+    "Approximate tier: on sm_121 the decoder's bf16 GEMMs run at ~82-101 TFLOPS and the same shapes at 154-199 "
+    "TFLOPS in FP8. The conv/embedder/proj_out stay bf16.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",

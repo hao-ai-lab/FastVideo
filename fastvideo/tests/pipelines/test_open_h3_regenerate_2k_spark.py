@@ -71,3 +71,25 @@ def test_fast_vae_rejects_wrong_channel_count():
     decoder = _tiny_fast_decoder()
     with pytest.raises(ValueError, match="24 channels"):
         decoder.decoded_pixel_shape((1, 5, 16, 2, 3))
+
+
+def test_fast_vae_fp8_conversion_replaces_only_block_linears():
+    from fastvideo.models.vaes.fast_vae_fp8 import FP8Linear, convert_linears_to_fp8
+
+    model = NonCausalViTDecoder([0.0] * 24, [1.0] * 24, list(range(2)), time_norm=5, heads=2, dim_head=8)
+    replaced = convert_linears_to_fp8(model, skip_names=("x_embedder", "proj_out"))
+    # Each transformer block has four linears: to_qkv, to_out, w1, w2.
+    assert replaced == 8
+    block = model.blocks[0]
+    assert isinstance(block.attn.to_qkv, FP8Linear)
+    assert isinstance(block.attn.to_out, FP8Linear)
+    assert isinstance(block.ff.w1, FP8Linear)
+    assert isinstance(block.ff.w2, FP8Linear)
+    assert not isinstance(model.x_embedder, FP8Linear)
+    assert not isinstance(model.proj_out, FP8Linear)
+    # The weight is kept as a frozen E4M3 buffer plus its float32 scale, and the bias is preserved in bf16.
+    linear = block.ff.w2
+    assert linear.weight_fp8.dtype == torch.float8_e4m3fn
+    assert linear.weight_scale.dtype == torch.float32
+    assert isinstance(linear.bias, torch.Tensor)
+    assert isinstance(block.attn.to_qkv.bias, torch.Tensor)
