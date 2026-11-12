@@ -31,7 +31,6 @@ def test_failed_load_cannot_destroy_another_jobs_parallel_state(runner, monkeypa
     entered = threading.Event()
     release = threading.Event()
     bad_entered = threading.Event()
-    # Exercise the actual global-state destroy/get path without initializing CUDA.
     monkeypatch.setattr(parallel_state, '_TP', SimpleNamespace(rank_in_group=0, destroy=lambda: None))
     for key in ('_SP', '_DP', '_NODE'):
         monkeypatch.setattr(parallel_state, key, None)
