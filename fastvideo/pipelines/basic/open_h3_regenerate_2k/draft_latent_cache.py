@@ -12,8 +12,8 @@ no reason.
 This module stores the *normalized native latent* returned by
 ``_encode_draft`` keyed by a digest of the input file and encode settings.
 Entries are cloned on the way in and out (callers may mutate what they get
-back).  ``FASTVIDEO_H3_DRAFT_LATENT_CACHE`` names a directory that persists
-entries across processes; the in-process LRU always applies.  The cached tensor
+back).  Off by default. ``FASTVIDEO_H3_DRAFT_LATENT_CACHE=memory`` keeps an in-process LRU; a
+directory also persists entries across processes.  The cached tensor
 is the encoder's own output, so this is an exact-tier optimization.  The
 product path (a native latent supplied by the draft server) never reaches this
 cache.
@@ -35,6 +35,7 @@ logger = init_logger(__name__)
 
 FORMAT = 1
 _DISABLED = {"0", "off", "false", "no", "none", "disable", "disabled"}
+_MEMORY_ONLY = "memory"
 
 
 def _setting() -> str | None:
@@ -45,13 +46,14 @@ def _setting() -> str | None:
 
 
 def _disabled() -> bool:
+    """Off unless opted in: unset, empty, or an off-word disables the cache."""
     value = _setting()
-    return value is not None and value.lower() in _DISABLED
+    return value is None or value.lower() in _DISABLED
 
 
 def _cache_root() -> Path | None:
     value = _setting()
-    if value is None or value.lower() in _DISABLED:
+    if value is None or value.lower() in _DISABLED or value.lower() == _MEMORY_ONLY:
         return None
     return Path(value).expanduser()
 
@@ -81,10 +83,7 @@ def _file_digest(path: str) -> str:
     return digest
 
 
-def draft_latent_cache_key(video_path: str | None,
-                           draft_size: object,
-                           tile_spec: object,
-                           model_path: object,
+def draft_latent_cache_key(video_path: str | None, draft_size: object, tile_spec: object, model_path: object,
                            seed: int) -> str | None:
     """Stable digest of everything ``_encode_draft`` consumes."""
     if not video_path or not os.path.isfile(video_path):
@@ -131,7 +130,7 @@ class DraftLatentCache:
         if not path.is_file():
             return None
         try:
-            payload = torch.load(path, map_location="cpu", weights_only=False)
+            payload = torch.load(path, map_location="cpu", weights_only=True)
         except Exception:
             logger.warning("Ignoring unreadable MiniMax-H3 draft-latent cache entry %s", path)
             return None

@@ -75,12 +75,23 @@ def test_off_disables_the_cache() -> None:
 def test_forward_hit_never_touches_the_conditioner() -> None:
     # conditioner=None makes any access a hard failure, so this asserts the hit path
     # returns before the text encoder is ever materialized.
-    stage = MiniMaxH3ConditioningStage(conditioner=None, tokenizer=None, processor=None, ref2va=False)
-    batch = _batch("p")
-    key = prompt_embeds_cache_key(batch, False, "m", get_local_torch_device())
-    embeds = torch.randn(1, 4, 3)
-    tags = torch.arange(4)
-    stage._prompt_embeds_cache.put(key, embeds, tags)
-    out = stage.forward(batch, SimpleNamespace(model_path="m"))
+    with envs.FASTVIDEO_H3_PROMPT_EMBEDS_CACHE.override("memory"):
+        stage = MiniMaxH3ConditioningStage(conditioner=None, tokenizer=None, processor=None, ref2va=False)
+        batch = _batch("p")
+        key = prompt_embeds_cache_key(batch, False, "m", get_local_torch_device())
+        embeds = torch.randn(1, 4, 3)
+        tags = torch.arange(4)
+        stage._prompt_embeds_cache.put(key, embeds, tags)
+        out = stage.forward(batch, SimpleNamespace(model_path="m"))
     assert torch.equal(out.prompt_embeds[0].cpu(), embeds)
     assert torch.equal(out.extra["minimax_h3_text_token_tags"], tags)
+
+
+def test_cache_is_off_unless_opted_in() -> None:
+    with envs.FASTVIDEO_H3_PROMPT_EMBEDS_CACHE.override(None):
+        assert not PromptEmbedsCache().enabled
+    with envs.FASTVIDEO_H3_PROMPT_EMBEDS_CACHE.override("memory"):
+        cache = PromptEmbedsCache()
+        assert cache.enabled
+        cache.put("a", torch.ones(2), torch.zeros(2, dtype=torch.long))
+        assert torch.equal(cache.get("a")[0], torch.ones(2))

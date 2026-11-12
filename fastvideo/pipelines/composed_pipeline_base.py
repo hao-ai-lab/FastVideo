@@ -731,8 +731,9 @@ class ComposedPipelineBase(ABC):
                     for index, names in schedule.items()
                 }
                 schedule = {index: names for index, names in schedule.items() if names}
-                logger.info("FASTVIDEO_H3_KEEP_RESIDENT: %s stay materialized across requests instead of "
-                            "being released after their last stage", held)
+                logger.info(
+                    "FASTVIDEO_H3_KEEP_RESIDENT: %s stay materialized across requests instead of "
+                    "being released after their last stage", held)
         for index, stage in enumerate(self._stages):
             stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
 

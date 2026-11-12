@@ -325,11 +325,11 @@ class MiniMaxH3ConditioningStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
-        cache = self._prompt_embeds_cache
+        # Stages built without __init__ (tests, subclasses) have no cache; treat that as off.
+        cache = getattr(self, "_prompt_embeds_cache", None)
         cache_key: str | None = None
-        if cache.enabled:
-            cache_key = prompt_embeds_cache_key(batch, self.ref2va,
-                                                getattr(fastvideo_args, "model_path", None), device)
+        if cache is not None and cache.enabled:
+            cache_key = prompt_embeds_cache_key(batch, self.ref2va, getattr(fastvideo_args, "model_path", None), device)
             cached = cache.get(cache_key)
             if cached is not None:
                 cached_embeds, cached_tags = cached
@@ -358,7 +358,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags
-        cache.put(cache_key, prompt_embeds, text_token_tags)
+        if cache is not None:
+            cache.put(cache_key, prompt_embeds, text_token_tags)
         return batch
 
 

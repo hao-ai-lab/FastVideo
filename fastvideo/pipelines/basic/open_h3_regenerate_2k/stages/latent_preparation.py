@@ -96,7 +96,9 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         cache = self._draft_cache
         if not cache.enabled:
             return self._encode_draft(video_path, device, fastvideo_args)
-        key = draft_latent_cache_key(video_path, self.draft_size, envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get(),
+        # The compiled encoder differs from the eager one at fp32 rounding level, so it is part of the key.
+        encode_settings = (envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get(), envs.FASTVIDEO_H3_VAE_COMPILE_ENCODER.get())
+        key = draft_latent_cache_key(video_path, self.draft_size, encode_settings,
                                      getattr(fastvideo_args, "model_path", None), MINIMAX_H3_KEYFRAME_ENCODE_SEED)
         cached = cache.get(key)
         if cached is not None:

@@ -232,8 +232,8 @@ def _release_merged_adapter_factors(pipeline: Any, lora_nickname: str) -> None:
         pipeline.lora_adapter_paths.pop(lora_nickname, None)
         pipeline.cur_adapter_name = ""
         pipeline.cur_adapter_path = ""
-        logger.info("Rank %d: released merged LoRA factors on %d layers to save unified device memory",
-                    dist.get_rank(), released)
+        logger.info("Rank %d: released merged LoRA factors on %d layers to save unified device memory", dist.get_rank(),
+                    released)
         torch.cuda.empty_cache()
 
 
@@ -702,8 +702,8 @@ class LoRAPipeline(ComposedPipelineBase):
                 # in the same physical memory the DiT already occupies (a 12 GB merged adapter is what pushes
                 # the 2K refine over the cap), so load it straight onto the device there.
                 device = getattr(self, "device", None)
-                raw_state_dict = (load_file(lora_local_path, device=str(device)) if _on_unified_memory(device) else
-                                  load_file(lora_local_path))
+                raw_state_dict = (load_file(lora_local_path, device=str(device))
+                                  if _on_unified_memory(device) else load_file(lora_local_path))
                 lora_state_dict = self.convert_adapter_state_dict(raw_state_dict, lora_path)
 
                 # Map the hf layer names to our custom layer names

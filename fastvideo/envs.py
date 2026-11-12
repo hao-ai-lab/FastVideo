@@ -903,15 +903,15 @@ FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
     doc="Directory for an exact cross-request cache of the MiniMax-H3 Qwen3-VL conditioning output, keyed by the "
     "prompt presentation. A hit attaches the cached prompt_embeds/text_token_tags and never materializes the "
     "text encoder, so an identical request skips the ~31 s encoder reload+encode the Spark pays on unified "
-    "memory. Exact tier: the cached tensor is the encoder's own output, byte-identical. Empty keeps an in-process "
-    "LRU only (the default); '0' or 'off' disables the cache entirely.")
+    "memory. Exact tier: the cached tensor is the encoder's own output, byte-identical. Off by default (it changes "
+    "behavior for every MiniMax-H3 pipeline); 'memory' keeps an in-process LRU, a directory also persists entries.")
 FASTVIDEO_H3_DRAFT_LATENT_CACHE = EnvStr(
     "",
     category="performance",
     doc="Directory for an exact cross-request cache of the Open-H3-Regenerate-2K draft-latent encode, keyed by the "
     "draft file content, tiling, fixed posterior seed and model bundle. A hit returns the H3 VAE's own normalized "
     "latent and skips the ~82 s fp32 draft encode the Spark pays per request on the official 768p draft path. "
-    "Exact tier. Empty keeps an in-process LRU only (the default); '0' or 'off' disables the cache entirely. The "
+    "Exact tier. Off by default; 'memory' keeps an in-process LRU, a directory also persists entries. The "
     "native-latent product path never reaches this cache.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",

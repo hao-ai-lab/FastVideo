@@ -77,3 +77,10 @@ def test_cached_encode_skips_the_second_encode(tmp_path) -> None:
         second = stage._encode_draft_cached(str(video), torch.device("cpu"), args)
     assert calls["n"] == 1
     assert torch.equal(first, second)
+
+
+def test_draft_cache_is_off_unless_opted_in() -> None:
+    with envs.FASTVIDEO_H3_DRAFT_LATENT_CACHE.override(None):
+        assert not DraftLatentCache().enabled
+    with envs.FASTVIDEO_H3_DRAFT_LATENT_CACHE.override("memory"):
+        assert DraftLatentCache().enabled
