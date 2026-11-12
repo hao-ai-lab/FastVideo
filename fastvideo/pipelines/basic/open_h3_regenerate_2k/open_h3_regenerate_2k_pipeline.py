@@ -70,6 +70,15 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         refuse_adaln_cache()
+        # Exact-tier defaults for the released 2K refine. `mk` selects the MotionKernel H3
+        # fusions (one fused QKV + QK-norm + partial-RoPE prologue that writes the stacked
+        # attention buffer, plus modulate / gated-residual / SwiGLU); the bit-exact Triton
+        # kernels stay on as the fallback for any op whose fusion is disabled. Measured on
+        # GB10 at the 2K refine shape (S=133652): step 0 385.4 -> 365.7 s (1.05x) and the
+        # final refine latent rel L2 9.2e-4 vs the dense eager path (bf16 reordering).
+        # Explicit user env values still win.
+        os.environ.setdefault("FASTVIDEO_MINIMAX_H3_FUSIONS", "mk")
+        os.environ.setdefault("FASTVIDEO_MINIMAX_H3_EXACT_KERNELS", "all")
         revision = getattr(self.fastvideo_args, "revision", None)
         config = self.fastvideo_args.pipeline_config
         self.model_path = maybe_download_model(model_path,
