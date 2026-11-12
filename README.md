@@ -31,7 +31,7 @@ FastVideo has the following features:
   - Data preprocessing pipeline for video, image, and text data
   - Distribution Matching Distillation (DMD2) stepwise distillation.
   - Sparse attention with [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achieve >50x denoising speedup
+  - [Sparse distillation](https://haoailab.com/blogs/fastvideo_post_training/) to achieve >50x denoising speedup
   - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing.
   - Causal distillation through Self-Forcing
   - See this [page](https://haoailab.com/FastVideo/training/overview/) for the supported training workflows, and the [support matrix](https://haoailab.com/FastVideo/inference/support_matrix/) for supported models.
@@ -65,7 +65,7 @@ To have a coding agent do the install, give it the [agent install prompt](https:
 
 ## Sparse Distillation
 
-Sparse distillation reaches >50× denoising speedup. See the [distillation guide](https://haoailab.com/FastVideo/distillation/dmd/) and the [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/); the training recipes live under [`examples/distill/`](examples/distill/) with the [FastVideo Synthetic datasets](https://huggingface.co/FastVideo).
+Sparse distillation reaches >50× denoising speedup. See the [distillation guide](https://haoailab.com/FastVideo/distillation/dmd/) and the [blog](https://haoailab.com/blogs/fastvideo_post_training/); the training recipes live under [`examples/distill/`](examples/distill/) with the [FastVideo Synthetic datasets](https://huggingface.co/FastVideo).
 
 ## Dreamverse — Realtime Video Generation & Editing
 
