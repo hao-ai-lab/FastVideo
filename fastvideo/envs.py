@@ -516,6 +516,13 @@ FASTVIDEO_H3_FAST_VAE_FP8 = EnvBool(
     doc="Run the FASTVIDEO_H3_FAST_VAE_DECODER attention/FFN linears in per-tensor FP8 E4M3 (torch._scaled_mm). "
     "Approximate tier: on sm_121 the decoder's bf16 GEMMs run at ~82-101 TFLOPS and the same shapes at 154-199 "
     "TFLOPS in FP8. The conv/embedder/proj_out stay bf16.")
+FASTVIDEO_H3_FAST_VAE_FP8_STATIC = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_FAST_VAE_FP8, store activations directly in E4M3 at scale 1 instead of computing a "
+    "per-call per-tensor absmax and passing scale_a=amax/448 to torch._scaled_mm. E4M3 is a floating-point format, "
+    "so per-tensor scaling only affects range (±448) and denormals; the static path removes the full absmax "
+    "reduction pass over every activation (~4 s of a 33 s warm 2K decode on GB10). Approximate tier.")
 FASTVIDEO_H3_FAST_VAE_LAYERS = EnvInt(
     24,
     category="performance",

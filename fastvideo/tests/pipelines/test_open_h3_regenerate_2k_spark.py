@@ -93,3 +93,19 @@ def test_fast_vae_fp8_conversion_replaces_only_block_linears():
     assert linear.weight_scale.dtype == torch.float32
     assert isinstance(linear.bias, torch.Tensor)
     assert isinstance(block.attn.to_qkv.bias, torch.Tensor)
+
+
+def test_fast_vae_fp8_static_activation_flag_propagates():
+    from fastvideo.models.vaes.fast_vae_fp8 import FP8Linear, convert_linears_to_fp8
+
+    model = NonCausalViTDecoder([0.0] * 24, [1.0] * 24, list(range(2)), time_norm=5, heads=2, dim_head=8)
+    replaced = convert_linears_to_fp8(model, skip_names=("x_embedder", "proj_out"), static_activation=True)
+    assert replaced == 8
+    linear = model.blocks[0].ff.w2
+    assert isinstance(linear, FP8Linear) and linear.static_activation
+    # The static path passes scale_a=1 to torch._scaled_mm, so the absmax reduction is gone.
+    assert float(linear.unit_scale.item()) == 1.0
+
+    dynamic = NonCausalViTDecoder([0.0] * 24, [1.0] * 24, list(range(2)), time_norm=5, heads=2, dim_head=8)
+    convert_linears_to_fp8(dynamic, skip_names=("x_embedder", "proj_out"))
+    assert not dynamic.blocks[0].ff.w2.static_activation

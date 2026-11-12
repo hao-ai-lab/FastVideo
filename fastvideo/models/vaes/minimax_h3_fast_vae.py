@@ -107,8 +107,11 @@ class FastH3VaeDecoder(nn.Module):
             # Approximate tier: the block attention/FFN linears run as per-tensor FP8 E4M3. The conv/embedder and
             # the final proj_out stay in their original precision.
             from fastvideo.models.vaes.fast_vae_fp8 import convert_linears_to_fp8
-            replaced = convert_linears_to_fp8(self.model, skip_names=("x_embedder", "proj_out"))
-            logger.info("MiniMax-H3 fast decoder: %d linears in per-tensor FP8", replaced)
+            static = envs.FASTVIDEO_H3_FAST_VAE_FP8_STATIC.get()
+            replaced = convert_linears_to_fp8(self.model, skip_names=("x_embedder", "proj_out"),
+                                              static_activation=static)
+            logger.info("MiniMax-H3 fast decoder: %d linears in per-tensor FP8 (static_activation=%s)",
+                        replaced, static)
         if envs.FASTVIDEO_H3_FAST_VAE_COMPILE.get():
             # Eager peaks at ~95 GiB at 2K on GB10; compiled fuses the casts, norms and window partition glue and
             # runs at ~36 GiB, ~37 s instead of ~60 s. The first call of a new latent shape pays the compile.
