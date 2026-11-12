@@ -133,6 +133,9 @@ class MXFP8Config(QuantizationConfig):
 
 def convert_model_to_mxfp8(model: torch.nn.Module) -> int:
     """Prequantize every MXFP8-tagged weight and return the converted count."""
+    import fastvideo.envs as envs
+
+    release_bf16 = envs.FASTVIDEO_H3_MXFP8_RELEASE_BF16.get()
     converted_count = 0
     with torch.no_grad():
         for module in model.modules():
@@ -143,6 +146,11 @@ def convert_model_to_mxfp8(model: torch.nn.Module) -> int:
                 raise RuntimeError("MXFP8 inference requires an NVIDIA Blackwell GPU with compute capability 10.0+.")
             quant_method.process_weights_after_loading(module)
             converted_count += 1
+            if release_bf16 and module.weight is not None and module.weight.numel():
+                # Exact-tier memory win: the quantized buffers are the only tensors used by
+                # ``MXFP8QuantizeMethod.apply`` from here on, so hand the BF16 storage back.
+                # Keep a zero-element Parameter (not None) so ``.weight.dtype`` reads stay valid.
+                module.weight.data = torch.empty(0, dtype=module.weight.dtype, device=module.weight.device)
 
     if converted_count:
         logger.info("Prequantized %d MiniMax-H3 feed-forward linear weights to MXFP8", converted_count)

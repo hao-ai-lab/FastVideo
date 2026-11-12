@@ -510,6 +510,13 @@ FASTVIDEO_H3_FAST_VAE_COMPILE = EnvBool(
     category="performance",
     doc="torch.compile the FASTVIDEO_H3_FAST_VAE_DECODER decoder. At 2K on GB10 this cuts the warm decode from ~60 s "
     "to ~37 s and the peak from ~95 GiB to ~36 GiB; the first call of each latent shape pays the compile.")
+FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_MXFP8, release the BF16 source weight after the MXFP8 copy is built. Exact tier: "
+    "inference never reads the BF16 weight again, this returns the whole quantized set (~20-38 GiB) to the "
+    "allocator, and the quantized values are bit-identical. Set to 0 to keep the BF16 weights, e.g. when an "
+    "adapter must be unmerged and re-merged after packing.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
