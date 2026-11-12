@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -63,6 +64,14 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         """Normalized native latent [C, T, h, w] of the draft, with the VAE posterior sampled under a fixed seed."""
         pixels = load_draft_pixels(video_path, self.draft_size)
         pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        # Encoder spatial tile override (GB10): the reference encodes the draft at
+        # 256x256 tiles / 64 overlap, which on sm_121 is dominated by launch and
+        # copy overhead rather than FLOPs. `FASTVIDEO_H3_VAE_ENCODE_TILE="H,W,OH,OW"`
+        # (e.g. "768,768,128,128") makes the encoder do fewer, larger passes.
+        tile_spec = envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get()
+        if tile_spec:
+            tile_height, tile_width, overlap_height, overlap_width = (int(x) for x in tile_spec.split(","))
+            self.vae.enable_tiling(tile_height, tile_width, overlap_height, overlap_width)
         try:
             posterior = self.vae.encode_pixels(pixels).latent_dist
             sample = posterior.sample(generator=torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED))

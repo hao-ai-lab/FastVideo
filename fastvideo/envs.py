@@ -839,6 +839,12 @@ FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH = EnvInt(1,
                                             doc="Spatial tiles per MiniMax-H3 video VAE encoder call (reference and "
                                             "keyframe encodes); 1 encodes per tile. Batched tiles differ from "
                                             "per-tile encoding only in reduction order.")
+FASTVIDEO_H3_VAE_ENCODE_TILE = EnvStr(None,
+                                      category="performance",
+                                      doc="MiniMax-H3 video VAE encoder spatial tile override 'H,W,OH,OW' "
+                                      "(e.g. '768,768,128,128'). Unset keeps the reference tiling "
+                                      "(tile_sample_min_height/width, overlap 64). Fewer, larger tiles cut the "
+                                      "launch/copy overhead on sm_121 but change the blended encode slightly.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
