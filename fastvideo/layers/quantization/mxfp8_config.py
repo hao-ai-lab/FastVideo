@@ -61,15 +61,38 @@ class MXFP8QuantizeMethod(QuantizeMethodBase):
         layer: torch.nn.Module,
         hidden_states: torch.Tensor,
         bias: torch.Tensor | None = None,
+        pre_quantized: tuple[torch.Tensor, torch.Tensor, None] | None = None,
     ) -> torch.Tensor:
-        """Quantize one BF16 activation and apply the prequantized linear."""
+        """Quantize one BF16 activation and apply the prequantized linear.
+
+        ``pre_quantized`` lets several linears that share the same input (Q/K/V) reuse one
+        MXFP8 activation quantization instead of quantizing it once per projection.
+        """
         from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
 
         original_shape = hidden_states.shape
-        hidden_states_2d = hidden_states.reshape(-1, hidden_states.shape[-1])
-        activation_values, activation_scales = quantize_mxfp8_blockwise(hidden_states_2d)
+        if pre_quantized is not None:
+            activation_values, activation_scales, _ = pre_quantized
+            if activation_values.dim() > 2:
+                activation_values = activation_values.reshape(-1, activation_values.shape[-1])
+            if activation_scales.dim() > 2:
+                activation_scales = activation_scales.reshape(-1, activation_scales.shape[-1])
+        else:
+            hidden_states_2d = hidden_states.reshape(-1, hidden_states.shape[-1])
+            activation_values, activation_scales = quantize_mxfp8_blockwise(hidden_states_2d)
         output_2d = self.apply_quantized(layer, activation_values, activation_scales, bias)
         return output_2d.reshape(*original_shape[:-1], layer.output_size)
+
+    def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
+        """Pre-quantize an activation once for reuse across to_q/to_k/to_v."""
+        from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
+
+        x_2d = x.reshape(-1, x.shape[-1])
+        activation_values, activation_scales = quantize_mxfp8_blockwise(x_2d)
+        return activation_values, activation_scales, None
+
+    def wants_prequantized_input(self) -> bool:
+        return True
 
     def apply_quantized(
         self,

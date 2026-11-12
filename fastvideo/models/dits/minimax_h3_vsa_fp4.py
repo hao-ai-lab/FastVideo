@@ -187,10 +187,13 @@ def _layout_for(meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torc
 
 
 def _prequantized_input_key(method: Any, linear: Any) -> tuple[Any, ...] | None:
-    """Key for linears that can share one pre-quantized input: unit-scale NVFP4, or FP8 by granularity."""
+    """Key for linears that can share one pre-quantized input: MXFP8, unit-scale NVFP4, or FP8 by granularity."""
     from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 
+    if type(method) is MXFP8QuantizeMethod:
+        return ("mxfp8", )
     if type(method) is NVFP4QuantizeMethod:
         if method.wants_prequantized_input() and method.uses_unit_activation_scale(linear):
             return ("nvfp4", )
@@ -200,27 +203,39 @@ def _prequantized_input_key(method: Any, linear: Any) -> tuple[Any, ...] | None:
     return None
 
 
-def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
-    """Share compatible FP8 preparation or unit-scale NVFP4 activation quantization.
+def _lora_delta_pending(linear: Any) -> bool:
+    """Whether a LoRA wrapper's forward would add a runtime delta that a direct base-layer call skips."""
+    if getattr(linear, "base_layer", None) is None:
+        return False
+    return (not getattr(linear, "merged", False) and not getattr(linear, "disable_lora", False)
+            and getattr(linear, "lora_A", None) is not None)
 
-    Calibrated or dynamic NVFP4 activation scales retain independent preparation.
+
+def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
+    """Share compatible MXFP8 / FP8 preparation or unit-scale NVFP4 activation quantization.
+
+    H3 wraps its projections in ``BaseLayerWithLoRA``, which hides ``quant_method``; resolve
+    through ``base_layer`` so the merge-mode refine can share the QKV activation quantize, and
+    keep the wrapper path whenever a runtime LoRA delta is pending. Calibrated or dynamic NVFP4
+    activation scales retain independent preparation.
     """
-    methods = [getattr(linear, "quant_method", None) for linear in linears]
+    bases = [getattr(linear, "base_layer", linear) for linear in linears]
+    methods = [getattr(base, "quant_method", None) for base in bases]
     keys = [
-        _prequantized_input_key(m, linear) if m is not None else None
-        for m, linear in zip(methods, linears, strict=True)
+        _prequantized_input_key(m, base) if m is not None else None
+        for m, base in zip(methods, bases, strict=True)
     ]
     outputs: list[torch.Tensor | None] = [None] * len(linears)
     groups: dict[tuple[Any, ...], list[int]] = {}
     for index, key in enumerate(keys):
-        if key is None:
+        if key is None or _lora_delta_pending(linears[index]):
             outputs[index] = linears[index](x)[0]
         else:
             groups.setdefault(key, []).append(index)
     for indices in groups.values():
         pre = methods[indices[0]].quantize_input(x)
         for index in indices:
-            outputs[index] = methods[index].apply(linears[index], x, linears[index].bias, pre_quantized=pre)
+            outputs[index] = methods[index].apply(bases[index], x, bases[index].bias, pre_quantized=pre)
     return outputs  # type: ignore[return-value]
 
 
