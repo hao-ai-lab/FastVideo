@@ -65,11 +65,13 @@ describe('JobDetailsSidebar', () => {
 
   it('resets the log cursor when a failed job restarts through queued', async () => {
     const cursors: number[] = [];
+    let calls = 0;
     vi.mocked(getJobLogs).mockImplementation(
       async (_id: string, after = 0) => {
+        calls += 1;
         cursors.push(after);
         return {
-          lines: cursors.length === 1 ? ['old run line'] : [],
+          lines: calls === 1 ? ['old run line'] : [],
           total: 5,
           progress: 0,
           progress_msg: '',
