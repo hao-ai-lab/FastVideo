@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import torch
@@ -32,6 +33,40 @@ from fastvideo.platforms import current_platform
 from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback
 
 logger = init_logger(__name__)
+
+# Opt-in fast 24-layer H3 decoder instances, keyed by (weights, engine), kept resident
+# across requests (the Stage object itself is per-pipeline, but the decoder holds 6.5 GB).
+_FAST_VAE_DECODERS: dict[tuple[str, str], Any] = {}
+
+
+def _fast_vae_decoder(fastvideo_args: FastVideoArgs) -> Any | None:
+    """The opt-in NVlabs fast 24-layer video decoder, or ``None`` for the released VAE.
+
+    ``FASTVIDEO_H3_FAST_VAE_DECODER`` names the released
+    ``fast_h3_vae_noncausal_24l.safetensors``; ``FASTVIDEO_H3_FAST_VAE_ENGINE`` picks the
+    ``fast_vae`` engine (``ref`` is the plain SDPA decoder that runs on GB10/sm_121;
+    ``fast`` needs FlashAttention-4 + quack and is not available here). The base model
+    (whose ``vae/config.json`` supplies the latent statistics) defaults to
+    ``<model_path>/base_model`` or ``FASTVIDEO_H3_FAST_VAE_BASE_MODEL``.
+    """
+    weights = os.environ.get("FASTVIDEO_H3_FAST_VAE_DECODER", "").strip()
+    if not weights:
+        return None
+    engine = os.environ.get("FASTVIDEO_H3_FAST_VAE_ENGINE", "ref").strip() or "ref"
+    cache_key = (weights, engine)
+    decoder = _FAST_VAE_DECODERS.get(cache_key)
+    if decoder is None:
+        from fastvideo.models.vaes.minimax_h3_fast_vae import FastH3VaeDecoder
+        base_model = os.environ.get("FASTVIDEO_H3_FAST_VAE_BASE_MODEL", "").strip()
+        if not base_model:
+            base_model = os.path.join(str(fastvideo_args.model_path), "base_model")
+        logger.info("MiniMax-H3 video decode: fast 24-layer decoder %s (engine=%s, base=%s)", weights, engine,
+                    base_model)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        decoder = FastH3VaeDecoder(weights, base_model, engine=engine)
+        _FAST_VAE_DECODERS[cache_key] = decoder
+    return decoder
 
 
 def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
@@ -157,16 +192,22 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 raise RuntimeError(f"TAEH3 wrote {tuple(batch.output.shape)}, expected {expected}.")
             return batch
 
-        if self.vae is None:
-            raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        vae = _fast_vae_decoder(fastvideo_args)
+        if vae is not None:
+            if parallel:
+                raise RuntimeError("The fast 24-layer H3 VAE decoder does not support sequence-parallel decode yet.")
+        else:
+            if self.vae is None:
+                raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
+            pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+            vae = self.vae
         try:
             # An NVFP4 decoder swapped in on the CPU could not pack its linears there;
             # freeze them now that the VAE is on the device, on the first decode.
             from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import freeze_nvfp4_linears_on_device
-            if freeze_nvfp4_linears_on_device(self.vae):
-                pinned_offload.refresh_host_copies(self.vae, pin=fastvideo_args.pin_cpu_memory)
-            latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
+            if freeze_nvfp4_linears_on_device(vae):
+                pinned_offload.refresh_host_copies(vae, pin=fastvideo_args.pin_cpu_memory)
+            latents = vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
                 # No collectives on this path, so uniform participation is
                 # trivial: every rank returns here.
@@ -177,12 +218,12 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             if is_output_rank:
                 pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
                 ) and not parallel else torch.float32
-                output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
+                output = self._pixel_buffer(tuple(vae.decoded_pixel_shape(latents.shape)),
                                             fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             # fp16 for the release decoders; NVFP4 decoders were trained under bf16.
-            autocast_dtype = getattr(self.vae, "decode_autocast_dtype", torch.float16)
+            autocast_dtype = getattr(vae, "decode_autocast_dtype", torch.float16)
             with (
                     nvtx_range("minimax_h3.vae"),
                     torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=device.type == "cuda"),
@@ -191,9 +232,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     strategy = fastvideo_args.vae_parallel_decode_strategy or DEFAULT_DECODE_GATHER_STRATEGY
                     logger.info("MiniMax-H3 VAE decode: sequence-parallel chunks across %d ranks (%s)",
                                 sp_group.world_size, strategy)
-                    decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
+                    decode_to_pixels_parallel(vae, latents, output, sp_group, strategy=strategy)
                 else:
-                    self.vae.decode_to_pixels(latents, output)
+                    vae.decode_to_pixels(latents, output)
             if is_output_rank and output is not None and output.dtype == torch.float32:
                 # Quantize to uint8 here, before the frames cross the
                 # multiprocess-executor boundary. A 345-frame 1344x768 clip is
@@ -206,7 +247,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:
-            if fastvideo_args.vae_cpu_offload:
+            if vae is self.vae and fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
 
