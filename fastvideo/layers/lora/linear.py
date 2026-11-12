@@ -50,6 +50,23 @@ def _add_low_rank_inplace_fake(out: torch.Tensor, x: torch.Tensor, lora_a: torch
     return None
 
 
+def _unified_memory_weight(weight: torch.Tensor) -> bool:
+    """Whether ``weight`` lives in a unified CPU/GPU pool (DGX Spark, GB10).
+
+    On those parts a host copy is a second allocation from the *same* physical memory as the device
+    weights, so the per-layer unmerge snapshot is not the cheap insurance it is on a discrete GPU: the
+    six H3 projections per block total about 38 GiB at 2K and are what push the dense refine over the
+    112 GiB cgroup cap. Inference there applies one constructor-time adapter and never unmerges it.
+    """
+    if weight.device.type != "cuda":
+        return False
+    try:
+        from fastvideo.platforms import current_platform
+        return bool(current_platform.has_unified_memory(weight.device.index or 0))
+    except Exception:  # pragma: no cover - a platform probe must never break weight loading
+        return False
+
+
 def requires_side_branch(layer: nn.Module) -> bool:
     """Return whether an adapter must run beside ``layer`` instead of being merged into it.
 
@@ -83,8 +100,11 @@ class BaseLayerWithLoRA(nn.Module):
         self.side_branch: bool = (self.supports_side_branch and not training_mode and requires_side_branch(base_layer))
         # A frozen CPU snapshot is needed only to undo inference-time merging.
         # Training never merges adapters; retaining every H3 projection here
-        # otherwise adds several GiB of host memory per HSDP rank.
-        self.cpu_weight = (None if training_mode or self.side_branch else base_layer.weight.detach().to("cpu").clone())
+        # otherwise adds several GiB of host memory per HSDP rank. On unified
+        # memory that host copy is a second allocation in the same physical
+        # pool (see _unified_memory_weight), so skip it there and keep only the merge.
+        keep_snapshot = (not training_mode and not self.side_branch and not _unified_memory_weight(base_layer.weight))
+        self.cpu_weight = (base_layer.weight.detach().to("cpu").clone() if keep_snapshot else None)
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
