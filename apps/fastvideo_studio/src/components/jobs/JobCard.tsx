@@ -51,6 +51,7 @@ function computeElapsed(job: Job, currentTime: number): string | null {
 
 const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
   pending: 'secondary',
+  queued: 'secondary',
   running: 'warning',
   completed: 'success',
   ready: 'success',
@@ -79,7 +80,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   async function handleStart(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (isLoading || job.status === 'running' || job.status === 'completed')
+    if (isLoading || job.status === 'running' || job.status === 'queued' || job.status === 'completed')
       return;
     setIsLoading(true);
     try {
@@ -95,7 +96,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   async function handleStop(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (isLoading || job.status !== 'running') return;
+    if (isLoading || (job.status !== 'running' && job.status !== 'queued')) return;
     setIsLoading(true);
     try {
       await stopJob(job.id);
@@ -211,14 +212,14 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         </span>
       </button>
       <div className="flex flex-wrap items-center gap-1.5">
-        {job.status === 'running' ? (
+        {job.status === 'running' || job.status === 'queued' ? (
           <Button
             size="sm"
             onClick={handleStop}
             disabled={isLoading}
             className="border-transparent bg-amber-500 text-black shadow-md hover:bg-amber-400"
           >
-            Stop
+            {job.status === 'queued' ? 'Cancel' : 'Stop'}
           </Button>
         ) : job.status === 'failed' ? (
           <Button

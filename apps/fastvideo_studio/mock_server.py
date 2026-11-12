@@ -192,6 +192,8 @@ def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
         "seed": req.seed,
         "negative_prompt": req.negative_prompt or "",
         "num_gpus": req.num_gpus,
+        "attention_backend": req.attention_backend,
+        "vsa_tile_size": req.vsa_tile_size,
         "data_path": req.data_path or "",
         "progress": 0.0,
         "progress_msg": "",
@@ -386,6 +388,17 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 
 
 # --- Models -----------------------------------------------------------------
+
+
+@app.get("/api/inference-options")
+def inference_options(model_id: str = "", workload_type: str = "t2v") -> dict[str, Any]:
+    return {
+        "attention_backends": ["TORCH_SDPA", "FLASH_ATTN", "VIDEO_SPARSE_ATTN_H3"],
+        "defaults": {},
+        "source": None,
+        "auto_attention_backend": None,
+        "auto_vsa_tile_size": None
+    }
 
 
 @app.get("/api/models")

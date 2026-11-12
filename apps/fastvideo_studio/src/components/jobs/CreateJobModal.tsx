@@ -25,6 +25,8 @@ import {
   updateJob,
   getDatasets,
   getModels,
+  getInferenceOptions,
+  type InferenceOptions,
   uploadImage,
   uploadMedia,
   type CreateJobRequest,
@@ -85,6 +87,10 @@ export default function CreateJobModal({
 
   const [models, setModels] = React.useState<Model[]>([]);
   const [modelId, setModelId] = React.useState('');
+  const [attentionBackend, setAttentionBackend] = React.useState('');
+  const [vsaTileSize, setVsaTileSize] = React.useState<number | null>(null);
+  const [inferenceOptions, setInferenceOptions] = React.useState<InferenceOptions | null>(null);
+  const [optionsError, setOptionsError] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [imagePath, setImagePath] = React.useState('');
@@ -203,6 +209,39 @@ export default function CreateJobModal({
   // `$defaultOptions` change; we deliberately seed only on the open transition
   // so a late `initDefaultOptions()` settings refresh can't clobber the user's
   // in-progress edits or desync the (already validated) model selection.
+  React.useEffect(() => {
+    let active = true;
+    setInferenceOptions(null);
+    setOptionsError(null);
+    if (isOpen && isInference && modelId) {
+      getInferenceOptions(modelId, inferenceWorkload).then((value) => {
+        if (active) setInferenceOptions(value);
+      }).catch(() => {
+        if (active) setOptionsError('Inference options could not be loaded. Reopen the form to retry.');
+      });
+    }
+    return () => { active = false; };
+  }, [isOpen, isInference, modelId, inferenceWorkload]);
+
+  const autoTileSize = attentionBackend
+    ? (attentionBackend === inferenceOptions?.defaults.attention_backend
+      ? inferenceOptions.defaults.vsa_tile_size : null)
+    : inferenceOptions?.auto_vsa_tile_size;
+
+  function applyRecipeDefaults() {
+    const defaults = inferenceOptions?.defaults;
+    if (!defaults) return;
+    if (defaults.attention_backend !== undefined) setAttentionBackend(defaults.attention_backend ?? '');
+    if (defaults.vsa_tile_size !== undefined) setVsaTileSize(defaults.vsa_tile_size);
+    if (defaults.vsa_sparsity !== undefined) setVsaSparsity(defaults.vsa_sparsity);
+    if (defaults.num_inference_steps !== undefined) setNumInferenceSteps(defaults.num_inference_steps);
+    if (defaults.guidance_scale !== undefined) setGuidanceScale(defaults.guidance_scale);
+    if (defaults.num_frames !== undefined) setNumFrames(defaults.num_frames);
+    if (defaults.height !== undefined) setHeight(defaults.height);
+    if (defaults.width !== undefined) setWidth(defaults.width);
+    if (defaults.fps !== undefined) setFps(defaults.fps);
+  }
+
   const justOpenedRef = React.useRef(false);
   React.useEffect(() => {
     const justOpened = isOpen && !justOpenedRef.current;
@@ -232,6 +271,8 @@ export default function CreateJobModal({
       setFps(f.fps);
       setSeed(f.seed);
       setNumGpus(f.numGpus);
+      setAttentionBackend(f.attentionBackend);
+      setVsaTileSize(f.vsaTileSize);
       setDitCpuOffload(f.ditCpuOffload);
       setDitLayerwiseOffload(f.ditLayerwiseOffload);
       setTextEncoderCpuOffload(f.textEncoderCpuOffload);
@@ -259,6 +300,8 @@ export default function CreateJobModal({
     setFps(opts.fps);
     setSeed(opts.seed);
     setNumGpus(opts.numGpus);
+    setAttentionBackend('');
+    setVsaTileSize(null);
     setDitCpuOffload(opts.ditCpuOffload);
     setDitLayerwiseOffload(opts.ditLayerwiseOffload ?? false);
     setTextEncoderCpuOffload(opts.textEncoderCpuOffload);
@@ -574,6 +617,8 @@ export default function CreateJobModal({
               fps,
               seed,
               num_gpus: numGpus,
+              attention_backend: attentionBackend || null,
+              vsa_tile_size: vsaTileSize,
               dit_cpu_offload: ditCpuOffload,
               dit_layerwise_offload: ditLayerwiseOffload,
               text_encoder_cpu_offload: textEncoderCpuOffload,
@@ -1163,6 +1208,41 @@ export default function CreateJobModal({
                 </div>
               </details>
             </>
+          )}
+
+          {isInference && (
+            <div className="flex flex-col gap-2">
+              <FieldRow label="Attention Backend" htmlFor="modal-attention-backend">
+                <NativeSelect id="modal-attention-backend" value={attentionBackend}
+                  onChange={(e) => setAttentionBackend(e.target.value)} disabled={isSubmitting}>
+                  <option value="">Auto ({inferenceOptions?.auto_attention_backend ?? 'platform default'})</option>
+                  {attentionBackend && !inferenceOptions?.attention_backends.includes(attentionBackend) && (
+                    <option value={attentionBackend}>{attentionBackend}</option>
+                  )}
+                  {inferenceOptions?.attention_backends.map((backend) => (
+                    <option key={backend} value={backend}>{backend}</option>
+                  ))}
+                </NativeSelect>
+              </FieldRow>
+              <FieldRow label="VSA Tile Size" htmlFor="modal-vsa-tile-size">
+                <NativeSelect id="modal-vsa-tile-size" value={vsaTileSize ?? ''}
+                  onChange={(e) => setVsaTileSize(e.target.value ? Number(e.target.value) : null)} disabled={isSubmitting}>
+                  {vsaTileSize !== null && ![64, 128, 256].includes(vsaTileSize) && <option value={vsaTileSize ?? ''}>{vsaTileSize}</option>}
+                  <option value="">Auto ({autoTileSize ?? 'checkpoint default'})</option>
+                  {[64, 128, 256].map((size) => <option key={size} value={size}>{size}</option>)}
+                </NativeSelect>
+              </FieldRow>
+              {optionsError && <p role="alert" className="text-sm text-destructive">{optionsError}</p>}
+              {inferenceOptions?.source && workloadType === 't2v' && (
+                <div className="text-sm text-muted-foreground">
+                  <p>Recipe recommends {inferenceOptions.defaults.attention_backend ?? 'Auto'}.
+                    Applying defaults replaces sampling and attention settings. Hardware support is checked at runtime.</p>
+                  <Button type="button" variant="outline" onClick={applyRecipeDefaults} disabled={isSubmitting}>
+                    Apply recipe defaults
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
 
           {isInference && (

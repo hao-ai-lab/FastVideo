@@ -25,6 +25,8 @@ export interface JobLike {
 	guidance_rescale?: number;
 	fps?: number;
 	seed?: number;
+	attention_backend?: string | null;
+	vsa_tile_size?: number | null;
 	num_gpus?: number;
 	dit_cpu_offload?: boolean;
 	dit_layerwise_offload?: boolean;
@@ -57,6 +59,8 @@ export interface JobFormFields {
 	guidanceRescale: number;
 	fps: number;
 	seed: number;
+	attentionBackend: string;
+	vsaTileSize: number | null;
 	numGpus: number;
 	ditCpuOffload: boolean;
 	ditLayerwiseOffload: boolean;
@@ -104,6 +108,8 @@ export function jobToFormFields(job: JobLike): JobFormFields {
 		guidanceRescale: job.guidance_rescale ?? 0.0,
 		fps: job.fps ?? 24,
 		seed: job.seed ?? 1024,
+		attentionBackend: job.attention_backend ?? "",
+		vsaTileSize: job.vsa_tile_size ?? null,
 		numGpus: job.num_gpus ?? 1,
 		ditCpuOffload: job.dit_cpu_offload ?? false,
 		ditLayerwiseOffload: job.dit_layerwise_offload ?? false,

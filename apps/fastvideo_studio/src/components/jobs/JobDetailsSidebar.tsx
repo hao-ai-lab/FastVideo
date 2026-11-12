@@ -77,7 +77,9 @@ export default function JobDetailsSidebar({
     const isRestarting =
       previousJobId.current === job.id &&
       wasTerminal &&
-      (job.status === 'pending' || job.status === 'running');
+      (job.status === 'queued' ||
+        job.status === 'pending' ||
+        job.status === 'running');
 
     if (previousJobId.current !== job.id || isRestarting) {
       stateRef.current.text = '';
