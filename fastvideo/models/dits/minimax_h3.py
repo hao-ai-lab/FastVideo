@@ -38,6 +38,10 @@ from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
                                                        vsa_fp4_requested, vsa_tile_first_attention)
+from fastvideo.models.dits.minimax_h3_sol_attn import (get_sink_tokens as _sol_sink_tokens,
+                                                       mode as _sol_attn_mode,
+                                                       sol_attention as _sol_attention,
+                                                       sparse_step as _sol_sparse_step)
 from fastvideo.models.dits.minimax_h3_token_reduction import (MiniMaxH3TokenReduction, expand_token_pairs,
                                                               pool_token_pairs)
 from fastvideo.models.dits.minimax_h3_fusions import exact as exact_kernels
@@ -387,6 +391,14 @@ class MiniMaxH3Attention(nn.Module):
         attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        sol_sparse = (
+            rotary_emb is not None
+            and _sol_attn_mode() is not None
+            and not torch.is_grad_enabled()
+            and not torch.compiler.is_compiling()
+            and _sol_sink_tokens() < (original_seq_len or 0)
+            and _sol_sparse_step(get_forward_context().current_timestep)
+        )
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
             meta = get_forward_context().attn_metadata
@@ -434,6 +446,7 @@ class MiniMaxH3Attention(nn.Module):
             if (self.mk_qkv and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
                     and self.norm_q.eps == _MK_NORM_EPS
                     and self.norm_k.eps == _MK_NORM_EPS and type(self.distributed_attention) is DistributedAttention
+                    and not sol_sparse
                     and not (self.to_gate_compress is not None and self._gate_active())):
                 # One launch replaces the two Sol QK-norm/RoPE kernels and the
                 # ``torch.cat`` stack: the prologue writes a contiguous
@@ -455,6 +468,14 @@ class MiniMaxH3Attention(nn.Module):
             if rotary_emb is not None:
                 query = self._rotate(query, rotary_emb)
                 key = self._rotate(key, rotary_emb)
+
+        if sol_sparse:
+            with STAGES.span("attention"):
+                hidden_states = _sol_attention(query, key, value)
+            hidden_states = hidden_states.flatten(2, 3).type_as(query)
+            with STAGES.span("out_proj"):
+                hidden_states, _ = self.to_out(hidden_states)
+            return hidden_states
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
