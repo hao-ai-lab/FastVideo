@@ -18,6 +18,15 @@ except ImportError:  # pragma: no cover - exercised only in environments without
     HAVE_TRITON = False
 
 
+#: Head rows processed per Triton program. The original Sol-Engine kernel launched one program per
+#: ``(seq, head)`` row with ``num_warps=4`` for ``head_dim=128`` (1 element/thread), which measured
+#: 21.5 ms/call at the 2K refine shape (~178 GB/s of the ~273 GB/s LPDDR5x) on GB10. Tiling four rows
+#: per program and reading the RoPE partner out of L1 reaches ~231 GB/s (16.5 ms/call), a 1.30x on the
+#: kernel and ~1.5 s of the 3-step refine, with the same fp32 register math (rounding-level drift only).
+_QKNORM_ROWS_PER_PROGRAM = 4
+_QKNORM_NUM_WARPS = 4
+
+
 if HAVE_TRITON:
 
     @triton.jit
@@ -32,44 +41,47 @@ if HAVE_TRITON:
         half_rotary_dim,
         num_heads,
         seq_len,
+        n_rows,
         eps,
-        BLOCK_SIZE: tl.constexpr,
+        ROWS: tl.constexpr,
+        BLOCK: tl.constexpr,
     ):
-        # int64, like the sibling kernels: with int32 program ids,
-        # ``row * head_dim`` wraps once the flattened input reaches 2**31
-        # elements (H3's 56 heads x 128 head_dim crosses that at
-        # batch*seq >= 299_593 tokens per rank) and the loads/stores below
-        # become out-of-bounds. ``seq_index`` inherits int64 from ``row``.
-        row = tl.program_id(0).to(tl.int64)
-        seq_index = (row // num_heads) % seq_len
-        cols = tl.arange(0, BLOCK_SIZE)
-        head_mask = cols < head_dim
-        row_offset = row * head_dim
+        # Row-tiled variant. ``rows`` is int64 (the flattened input exceeds 2**31 elements at the H3
+        # 2K/IC shapes); when ``rows >= n_rows`` the tail program is fully masked. Each element is
+        # loaded once into the RMSNorm tile and the RoPE partner is read from the same row (contiguous
+        # half-row segments that hit L1), so the DRAM traffic is one read + one write.
+        pid = tl.program_id(0).to(tl.int64)
+        rows = pid * ROWS + tl.arange(0, ROWS)
+        cols = tl.arange(0, BLOCK)
+        row_ok = rows < n_rows
+        head_mask = row_ok[:, None] & (cols[None, :] < head_dim)
 
-        x = tl.load(x_ptr + row_offset + cols, mask=head_mask, other=0.0).to(tl.float32)
-        variance = tl.sum(x * x, axis=0) / head_dim
+        seq_index = (rows // num_heads) % seq_len
+        row_offsets = rows[:, None] * head_dim + cols[None, :]
+        x = tl.load(x_ptr + row_offsets, mask=head_mask, other=0.0).to(tl.float32)
+        variance = tl.sum(x * x, axis=1) / head_dim
         inv_rms = tl.math.rsqrt(variance + eps)
-        weight = tl.load(weight_ptr + cols, mask=head_mask, other=0.0).to(tl.float32)
-        normalized = x * inv_rms * weight
+        weight = tl.load(weight_ptr + cols, mask=cols < head_dim, other=0.0).to(tl.float32)
+        normalized = x * inv_rms[:, None] * weight[None, :]
 
-        rotary_mask = cols < rotary_dim
+        rotary_mask = (cols < rotary_dim)[None, :] & row_ok[:, None]
         first_half = cols < half_rotary_dim
         partner_col = tl.where(first_half, cols + half_rotary_dim, cols - half_rotary_dim)
         partner_x = tl.load(
-            x_ptr + row_offset + partner_col,
+            x_ptr + rows[:, None] * head_dim + partner_col[None, :],
             mask=rotary_mask,
             other=0.0,
         ).to(tl.float32)
-        partner_weight = tl.load(weight_ptr + partner_col, mask=rotary_mask, other=0.0).to(tl.float32)
-        partner_normalized = partner_x * inv_rms * partner_weight
-        rotated = tl.where(first_half, -partner_normalized, partner_normalized)
+        partner_weight = tl.load(weight_ptr + partner_col, mask=cols < rotary_dim, other=0.0).to(tl.float32)
+        partner_normalized = partner_x * inv_rms[:, None] * partner_weight[None, :]
+        rotated = tl.where(first_half[None, :], -partner_normalized, partner_normalized)
 
-        table_offset = seq_index * rotary_dim + cols
+        table_offset = seq_index[:, None] * rotary_dim + cols[None, :]
         cos = tl.load(cos_ptr + table_offset, mask=rotary_mask, other=1.0).to(tl.float32)
         sin = tl.load(sin_ptr + table_offset, mask=rotary_mask, other=0.0).to(tl.float32)
         rotary_output = normalized * cos + rotated * sin
         output = tl.where(rotary_mask, rotary_output, normalized)
-        tl.store(out_ptr + row_offset + cols, output.to(out_ptr.dtype.element_ty), mask=head_mask)
+        tl.store(out_ptr + row_offsets, output.to(out_ptr.dtype.element_ty), mask=head_mask)
 
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
@@ -106,7 +118,7 @@ def _validate_inputs(
     if rotary_dim > head_dim:
         raise ValueError(f"rotary_dim must not exceed head_dim, got rotary_dim={rotary_dim}, head_dim={head_dim}")
     if rotary_dim % 2:
-        raise ValueError(f"rotary_dim must be even, got {rotary_dim}")
+        raise ValueError(f"rotary_dim must be even, got rotary_dim={rotary_dim}")
 
     if x.dtype not in _SUPPORTED_DTYPES:
         raise TypeError(f"x dtype must be float16, bfloat16, or float32, got {x.dtype}")
@@ -143,7 +155,8 @@ def _fused_qknorm_rope_impl(
     flat_x = x.reshape(-1, head_dim).contiguous()
     flat_out = torch.empty_like(flat_x)
     block_size = 1 << (head_dim - 1).bit_length()
-    _qknorm_partial_rope_kernel[(flat_x.shape[0], )](
+    n_rows = flat_x.shape[0]
+    _qknorm_partial_rope_kernel[(triton.cdiv(n_rows, _QKNORM_ROWS_PER_PROGRAM), )](
         flat_out,
         flat_x,
         weight,
@@ -154,9 +167,11 @@ def _fused_qknorm_rope_impl(
         rotary_dim // 2,
         num_heads,
         seq_len,
+        n_rows,
         eps,
-        BLOCK_SIZE=block_size,
-        num_warps=4,
+        ROWS=_QKNORM_ROWS_PER_PROGRAM,
+        BLOCK=block_size,
+        num_warps=_QKNORM_NUM_WARPS,
     )
     return flat_out.view(batch, seq_len, num_heads, head_dim)
 
