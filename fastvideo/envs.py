@@ -897,6 +897,14 @@ FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
                                          "across requests instead of releasing it after the video-decoding "
                                          "stage. Saves the ~76 s host-to-device reload the Spark pays before "
                                          "every draft encode, at the cost of ~9.7 GiB held during the refine.")
+FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
+    "",
+    category="performance",
+    doc="Directory for an exact cross-request cache of the MiniMax-H3 Qwen3-VL conditioning output, keyed by the "
+    "prompt presentation. A hit attaches the cached prompt_embeds/text_token_tags and never materializes the "
+    "text encoder, so an identical request skips the ~31 s encoder reload+encode the Spark pays on unified "
+    "memory. Exact tier: the cached tensor is the encoder's own output, byte-identical. Empty keeps an in-process "
+    "LRU only (the default); '0' or 'off' disables the cache entirely.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
