@@ -65,6 +65,7 @@ def _fast_vae_decoder(fastvideo_args: FastVideoArgs) -> Any | None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         decoder = FastH3VaeDecoder(weights, base_model, engine=engine)
+        decoder.maybe_compile()
         _FAST_VAE_DECODERS[cache_key] = decoder
     return decoder
 

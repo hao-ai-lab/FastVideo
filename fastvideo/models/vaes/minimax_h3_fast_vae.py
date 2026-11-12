@@ -75,6 +75,24 @@ class FastH3VaeDecoder(nn.Module):
                              persistent=False)
 
     # -- released-VAE-compatible surface ------------------------------------------------
+    def maybe_compile(self) -> None:
+        """Optionally torch.compile the decoder (default on for the fast decoder).
+
+        The fast decoder runs whole-frame at 2K, so eager peaks at ~95 GiB on GB10;
+        ``torch.compile(mode="default")`` fuses the casts/norms/partition glue and drops
+        that to ~36 GiB while cutting the warm decode ~60 s -> ~37 s. The first call of a
+        new shape pays the compile (~25 s). Set ``FASTVIDEO_H3_FAST_VAE_COMPILE=0`` to
+        keep eager.
+        """
+        import os
+
+        if os.environ.get("FASTVIDEO_H3_FAST_VAE_COMPILE", "1").strip() == "0":
+            return
+        mode = os.environ.get("FASTVIDEO_H3_FAST_VAE_COMPILE_MODE", "default").strip() or "default"
+        compiled = torch.compile(self.model, mode=mode)
+        self.model = compiled
+        self._vae.model = compiled
+
     def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """(B, C, T, H, W) normalized -> (B, T, C, H, W); denormalization is internal."""
         return latents.transpose(1, 2).contiguous()
