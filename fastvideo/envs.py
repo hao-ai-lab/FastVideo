@@ -482,6 +482,11 @@ FASTVIDEO_H3_MXFP8 = EnvBool(
     doc="Quantize the MiniMax-H3 feed-forward (fc_in/fc_out) linears to MXFP8 (block-scaled E4M3, E8M0 per 32 "
     "along K) on Blackwell. Approximate tier: ~1.6x faster FFN GEMMs. When no transformer_quant is set it pins "
     "transformer_quant=MXFP8; an explicit transformer_quant wins.")
+FASTVIDEO_H3_MXFP8_ATTN = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_MXFP8, also MXFP8-quantize the MiniMax-H3 attention projections (to_q/to_k/to_v/to_out), "
+    "matching NVlabs' six big Linears. Approximate tier; only takes effect when transformer_quant=MXFP8.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "

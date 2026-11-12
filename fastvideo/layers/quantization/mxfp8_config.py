@@ -16,6 +16,7 @@ from fastvideo.models.utils import set_weight_attrs
 logger = init_logger(__name__)
 
 _MINIMAX_H3_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
+_MINIMAX_H3_ATTN_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out)$")
 
 
 class MXFP8QuantizeMethod(QuantizeMethodBase):
@@ -116,8 +117,17 @@ class MXFP8Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
         from fastvideo.layers.linear import LinearBase
 
-        if isinstance(layer, LinearBase) and _MINIMAX_H3_FF_PREFIX.search(prefix):
+        if not isinstance(layer, LinearBase):
+            return None
+        if _MINIMAX_H3_FF_PREFIX.search(prefix):
             return MXFP8QuantizeMethod()
+        if _MINIMAX_H3_ATTN_PREFIX.search(prefix):
+            # Opt-in extension to the attention projections (NVlabs' full "six big
+            # Linears"). Kept separate from the FFN set so the quality ladder can
+            # measure FFN-only and FFN+attention independently.
+            import fastvideo.envs as envs
+            if envs.FASTVIDEO_H3_MXFP8_ATTN.get():
+                return MXFP8QuantizeMethod()
         return None
 
 
