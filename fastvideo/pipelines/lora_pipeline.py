@@ -656,7 +656,11 @@ class LoRAPipeline(ComposedPipelineBase):
             try:
                 self.lora_adapters[lora_nickname] = {}
                 lora_local_path = maybe_download_lora(lora_path)
-                lora_state_dict = self.convert_adapter_state_dict(load_file(lora_local_path), lora_path)
+                # Load straight onto the inference device. On unified-memory GPUs (DGX Spark) a CPU
+                # staging dict is a full second copy of the adapter in the same physical memory the
+                # DiT already occupies; a 12 GB merged adapter is what pushes the 2K refine over the cap.
+                lora_state_dict = self.convert_adapter_state_dict(
+                    load_file(lora_local_path, device=str(self.device)), lora_path)
 
                 # Map the hf layer names to our custom layer names
                 param_names_mapping, lora_param_names_mapping = self._transformer_name_mappings()
