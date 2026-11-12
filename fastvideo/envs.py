@@ -531,6 +531,14 @@ FASTVIDEO_H3_FAST_VAE_LAYERS = EnvInt(
     "selects one of NVlabs' greedy-pruned subsets (24, 16, 12, 8 or 6) by remapping the checkpoint's block indices. "
     "Approximate tier: fewer layers is faster and further from the released VAE decoder; 24 is the released fast "
     "decoder.")
+FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK = EnvBool(
+    False,
+    category="performance",
+    doc="In the FASTVIDEO_H3_FAST_VAE_DECODER, drop the window/global attention key-only padding mask and use the "
+    "flash kernel plus an exact denominator correction. Invalid keys are all-zero, so each contributes exactly 1 to "
+    "the softmax denominator; the maskless output times exp(lse)/(exp(lse)-n_invalid) equals the masked output. On "
+    "sm_121 the bool mask forces the sm_80 memory-efficient kernel (2.3x slower than flash at the decoder's window "
+    "shape). Exact tier: same math at bf16 rounding. Requires FASTVIDEO_H3_FAST_VAE_COMPILE for the full gain.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",

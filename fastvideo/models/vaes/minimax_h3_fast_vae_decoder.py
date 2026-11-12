@@ -30,12 +30,32 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import fastvideo.envs as envs
+
 
 # ---- the released H3 VAE ViT decoder modules the fast decoder is made of (same parameter names, so the delivered
 # weights load strictly); dim 2048 = 32 heads x 64, SwiGLU FFN x4, RMSNorm eps 1e-5, 3-axis RoPE on 48 of 64 channels.
 def _apply_qk_norm(norm, x):
     """qk RMSNorm without affine, computed in fp32 and cast back (the released recipe)."""
     return norm(x.float()).to(x.dtype)
+
+
+def _attention_no_mask(q, k, v, ninvalid):
+    """Flash attention without a mask, corrected for zero-padded (invalid) keys.
+
+    ``q``/``k``/``v`` are the flash layout ``(B*, heads, L, dh)`` and ``ninvalid`` is the
+    per-batch count of all-zero keys (``k == 0``), which the padding inserted.  Such a key
+    has score exactly 0 for every query, so it contributes ``exp(0) = 1`` to the softmax
+    denominator and 0 to the numerator.  The maskless output over the padded keys is
+    ``N / (D + P)`` with ``D`` the denominator over the real keys and ``P = ninvalid``, while
+    flash's log-sum-exp is ``log(D + P)``; the true output ``N / D`` is therefore
+    ``out * exp(lse) / (exp(lse) - P)``.  This lets the (key-only) padding mask be dropped,
+    which is what lets SDPA select the flash kernel instead of the sm_80 memory-efficient one.
+    """
+    out, lse, *_ = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v, 0.0, False, False)
+    e = torch.exp(lse.float())
+    corr = (e / (e - ninvalid.to(torch.float32).view(-1, 1, 1))).to(out.dtype)
+    return out * corr.unsqueeze(-1)
 
 
 def _rotate_half(x):
@@ -124,6 +144,7 @@ class NonCausalViTDecoder(nn.Module):
         self.proj_out = nn.Linear(dim, OUT_CH * PATCH_T * PATCH * PATCH)
         self.pos_embed = RotaryEmbeddingND(int(dim_head * rope_dim_ratio), rope_theta)
         self.heads, self.dh = heads, dim_head
+        self.attn_no_mask = bool(envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.get())
         self.register_buffer("latents_mean", torch.as_tensor(latents_mean, dtype=torch.float32), persistent=False)
         self.register_buffer("latents_std", torch.as_tensor(latents_std, dtype=torch.float32), persistent=False)
 
@@ -206,10 +227,22 @@ class NonCausalViTDecoder(nn.Module):
         vgw = vgw[:, :, None, None].expand(B, nt, nh, nw, 2 * S, self.heads, self.dh).reshape(B * nW, 2 * S, self.heads, self.dh)
         gmask = gk_valid[:, :, None].expand(nt, 2, S).reshape(nt, 2 * S)
         gmask = gmask[:, None, None].expand(nt, nh, nw, 2 * S).reshape(nW, 2 * S)
-        Kc = torch.cat([kw, kgw], 1).transpose(1, 2)
-        Vc = torch.cat([vw, vgw], 1).transpose(1, 2)
-        kmask = torch.cat([vmask, gmask], 1).repeat(B, 1)[:, None, None, :]
-        ow = F.scaled_dot_product_attention(qw.transpose(1, 2), Kc, Vc, attn_mask=kmask).transpose(1, 2)
+        if self.attn_no_mask:
+            # The key-only padding mask is dropped and replaced by the exact denominator correction of
+            # ``_attention_no_mask``; the invalid global slots must be exact zeros (score 0), not the
+            # duplicated block the index gather produced.
+            gmask_full = gmask.repeat(B, 1)
+            kgw = kgw * gmask_full[:, :, None, None]
+            vgw = vgw * gmask_full[:, :, None, None]
+            Kc = torch.cat([kw, kgw], 1).transpose(1, 2).contiguous()
+            Vc = torch.cat([vw, vgw], 1).transpose(1, 2).contiguous()
+            ninvalid = ((~vmask).sum(1) + (~gmask).sum(1)).repeat(B).to(torch.float32)
+            ow = _attention_no_mask(qw.transpose(1, 2).contiguous(), Kc, Vc, ninvalid).transpose(1, 2)
+        else:
+            Kc = torch.cat([kw, kgw], 1).transpose(1, 2)
+            Vc = torch.cat([vw, vgw], 1).transpose(1, 2)
+            kmask = torch.cat([vmask, gmask], 1).repeat(B, 1)[:, None, None, :]
+            ow = F.scaled_dot_product_attention(qw.transpose(1, 2), Kc, Vc, attn_mask=kmask).transpose(1, 2)
         o = self._unpartition(ow, info, s, st).reshape(B, T, H, W, self.heads * self.dh)
         # ---- global tokens: attend to every token of their own native block + the block's global tokens
         Tp = nb * tb
@@ -221,9 +254,15 @@ class NonCausalViTDecoder(nn.Module):
         bmask = tvalid.view(nb, tb, 1).expand(nb, tb, H * W).reshape(nb, tb * H * W)
         Kg = torch.cat([kb, kg], 2).reshape(B * nb, tb * H * W + S, self.heads, self.dh).transpose(1, 2)
         Vg = torch.cat([vb, vg], 2).reshape(B * nb, tb * H * W + S, self.heads, self.dh).transpose(1, 2)
-        gm = torch.cat([bmask, torch.ones(nb, S, dtype=torch.bool, device=dev)], 1).repeat(B, 1)[:, None, None, :]
-        og = F.scaled_dot_product_attention(qg.reshape(B * nb, S, self.heads, self.dh).transpose(1, 2), Kg, Vg,
-                                            attn_mask=gm).transpose(1, 2).reshape(B, nb, S, -1)
+        qgh = qg.reshape(B * nb, S, self.heads, self.dh).transpose(1, 2)
+        if self.attn_no_mask:
+            # the invalid block tokens are already exact zeros (kb/vb padding), so the same correction applies
+            ninvalid_g = (~bmask).sum(1).repeat(B).to(torch.float32)
+            og = _attention_no_mask(qgh.contiguous(), Kg.contiguous(), Vg.contiguous(),
+                                    ninvalid_g).transpose(1, 2).reshape(B, nb, S, -1)
+        else:
+            gm = torch.cat([bmask, torch.ones(nb, S, dtype=torch.bool, device=dev)], 1).repeat(B, 1)[:, None, None, :]
+            og = F.scaled_dot_product_attention(qgh, Kg, Vg, attn_mask=gm).transpose(1, 2).reshape(B, nb, S, -1)
         x = x + blk.attn.to_out(o) * blk.scale1
         g = g + blk.attn.to_out(og) * blk.scale1
         x = x + blk.ff(blk.norm2(x.float()).to(x.dtype)) * blk.scale2
