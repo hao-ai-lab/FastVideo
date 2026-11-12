@@ -142,17 +142,17 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     setActiveJobId(isSelected ? null : job.id);
   }
 
-  async function handleDownloadVideo(e: React.MouseEvent) {
+  async function handleDownload(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (isLoading || !job.output_path) return;
     setIsLoading(true);
     try {
       const blob = await downloadJobVideo(job.id);
-      const ext = job.output_path.endsWith('.png') ? 'png' : 'mp4';
-      downloadBlob(blob, `job_${job.id}.${ext}`);
+      const filename = job.output_path.split(/[\\/]/).pop() || `job_${job.id}`;
+      downloadBlob(blob, filename);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download video');
+      alert(err instanceof Error ? err.message : 'Failed to download output');
     } finally {
       setIsLoading(false);
     }
@@ -245,11 +245,11 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleDownloadVideo}
+              onClick={handleDownload}
               disabled={isLoading}
-              title="Download video"
+              title="Download output"
             >
-              Download Video
+              Download
             </Button>
           )}
         {!(

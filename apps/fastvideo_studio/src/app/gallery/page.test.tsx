@@ -50,6 +50,7 @@ describe('GalleryPage', () => {
     const video = await screen.findByLabelText(
       'Generated video: a cat surfing a wave',
     );
+    expect(video).toHaveAttribute('src', 'http://test.local/api/jobs/job-1/video');
     expect(video).toHaveAttribute('controls');
 
     fireEvent.error(video);
@@ -58,6 +59,24 @@ describe('GalleryPage', () => {
       screen.getByText('The generated file could not be loaded.'),
     ).toBeInTheDocument();
   });
+
+  it.each(['png', 'jpg', 'jpeg', 'WEBP'])(
+    'previews %s output as an image through the API',
+    async (extension) => {
+      vi.mocked(getJobsList).mockResolvedValue([
+        makeJob({ output_path: `/server/out/portrait.${extension}` }),
+      ]);
+      renderGallery();
+
+      const image = await screen.findByRole('img', {
+        name: 'a cat surfing a wave',
+      });
+      expect(image).toHaveAttribute('src', 'http://test.local/api/jobs/job-1/video');
+      expect(
+        screen.queryByLabelText('Generated video: a cat surfing a wave'),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('shows the empty state when no completed videos exist', async () => {
     vi.mocked(getJobsList).mockResolvedValue([
