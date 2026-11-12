@@ -63,6 +63,64 @@ describe('JobDetailsSidebar', () => {
     expect(getJobLogs).toHaveBeenCalledWith('job-1', 0);
   });
 
+  it('resets the log cursor when a failed job restarts through queued', async () => {
+    const cursors: number[] = [];
+    vi.mocked(getJobLogs).mockImplementation(
+      async (_id: string, after = 0) => {
+        cursors.push(after);
+        return {
+          lines: cursors.length === 1 ? ['old run line'] : [],
+          total: 5,
+          progress: 0,
+          progress_msg: '',
+          phase: '',
+        };
+      },
+    );
+
+    const { rerender } = render(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'running' })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText('old run line')).toBeInTheDocument();
+
+    rerender(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'failed' })}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    rerender(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'queued' })}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    cursors.length = 0;
+    rerender(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'running' })}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(cursors).toEqual([0]);
+    expect(screen.queryByText('old run line')).not.toBeInTheDocument();
+  });
+
   it('keeps polling while the job is running', async () => {
     vi.useFakeTimers();
     try {
