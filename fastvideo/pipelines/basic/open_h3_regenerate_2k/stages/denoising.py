@@ -63,10 +63,9 @@ class Regenerate2KDenoisingStage(PipelineStage):
             raise ValueError("The MiniMax-H3 packed layout is missing before denoising.")
         # Sol-Attn keeps the leading [text | reference | condition | audio] rows exact as sinks.
         from fastvideo.models.dits.minimax_h3_sol_attn import set_sink_tokens as _set_sol_sink_tokens
-        _set_sol_sink_tokens(
-            layout.text_indices.numel() + layout.num_condition_video_rows +
-            sum(int(rows) for _kind, rows, _shape in getattr(layout, "reference_segments", ())) +
-            layout.audio_indices.numel())
+        _set_sol_sink_tokens(layout.text_indices.numel() + layout.num_condition_video_rows +
+                             sum(int(rows) for _kind, rows, _shape in getattr(layout, "reference_segments", ())) +
+                             layout.audio_indices.numel())
         device = get_local_torch_device()
         sigmas = refine_sigmas(batch.num_inference_steps, self.start_sigma)
         state = batch.latents.to(device)

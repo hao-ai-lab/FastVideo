@@ -487,6 +487,29 @@ FASTVIDEO_H3_MXFP8_ATTN = EnvBool(
     category="performance",
     doc="With FASTVIDEO_H3_MXFP8, also MXFP8-quantize the MiniMax-H3 attention projections (to_q/to_k/to_v/to_out), "
     "matching NVlabs' six big Linears. Approximate tier; only takes effect when transformer_quant=MXFP8.")
+FASTVIDEO_H3_SOL_ATTN = EnvChoice(
+    "off",
+    choices=("off", "sol_engine", "sol_engine_fast", "sol_engine_tau0", "sol_engine_fast_tau0"),
+    category="performance",
+    doc="Open-H3-Regenerate-2K refine attention through NVlabs' training-free Sol-Attn block-sparse kernel (needs the "
+    "optional sol_attn package). sol_engine: step 0 dense, steps 1-2 tau 1.0; sol_engine_fast: every step tau 1.75; "
+    "the _tau0 variants run step 0 sparse at tau 0.0. Approximate tier; off keeps dense attention.")
+FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
+    None,
+    category="performance",
+    doc="Path to NVlabs' fast 24-layer non-causal MiniMax-H3 video decoder (fast_h3_vae_noncausal_24l.safetensors "
+    "from Efficient-Large-Model/Open-H3-Regenerate-2K). Replaces the released VAE decoder in the MiniMax-H3 "
+    "video-decoding stage. Approximate tier; unset keeps the released decoder.")
+FASTVIDEO_H3_FAST_VAE_BASE_MODEL = EnvPath(
+    None,
+    category="performance",
+    doc="MiniMax-H3 base model directory whose vae/config.json supplies the latent statistics for "
+    "FASTVIDEO_H3_FAST_VAE_DECODER. Unset uses <model_path>/base_model.")
+FASTVIDEO_H3_FAST_VAE_COMPILE = EnvBool(
+    True,
+    category="performance",
+    doc="torch.compile the FASTVIDEO_H3_FAST_VAE_DECODER decoder. At 2K on GB10 this cuts the warm decode from ~60 s "
+    "to ~37 s and the peak from ~95 GiB to ~36 GiB; the first call of each latent shape pays the compile.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "

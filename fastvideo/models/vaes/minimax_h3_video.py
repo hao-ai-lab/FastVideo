@@ -874,7 +874,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         encode.  Called lazily on the first ``_encode_clip`` so the VAE weights are
         already on the accelerator.
         """
-        if self._compiled_encode_tile is not None:
+        if getattr(self, "_compiled_encode_tile", None) is not None:
             return
         if not envs.FASTVIDEO_H3_VAE_COMPILE_ENCODER.get():
             return
@@ -886,7 +886,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         )
 
     def _encode_tile(self, tile: torch.Tensor) -> torch.Tensor:
-        compiled = self._compiled_encode_tile
+        compiled = getattr(self, "_compiled_encode_tile", None)
         if compiled is None:
             return self._encode_tile_eager(tile)
         # The reduce-overhead graph writes into a CUDA-graph-pooled output buffer

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import torch
@@ -14,6 +13,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
+from fastvideo.models.vaes.minimax_h3_fast_vae import fast_vae_decoder
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_is_output_worker, h3_output_worker_rank
@@ -33,41 +33,6 @@ from fastvideo.platforms import current_platform
 from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback
 
 logger = init_logger(__name__)
-
-# Opt-in fast 24-layer H3 decoder instances, keyed by (weights, engine), kept resident
-# across requests (the Stage object itself is per-pipeline, but the decoder holds 6.5 GB).
-_FAST_VAE_DECODERS: dict[tuple[str, str], Any] = {}
-
-
-def _fast_vae_decoder(fastvideo_args: FastVideoArgs) -> Any | None:
-    """The opt-in NVlabs fast 24-layer video decoder, or ``None`` for the released VAE.
-
-    ``FASTVIDEO_H3_FAST_VAE_DECODER`` names the released
-    ``fast_h3_vae_noncausal_24l.safetensors``; ``FASTVIDEO_H3_FAST_VAE_ENGINE`` picks the
-    ``fast_vae`` engine (``ref`` is the plain SDPA decoder that runs on GB10/sm_121;
-    ``fast`` needs FlashAttention-4 + quack and is not available here). The base model
-    (whose ``vae/config.json`` supplies the latent statistics) defaults to
-    ``<model_path>/base_model`` or ``FASTVIDEO_H3_FAST_VAE_BASE_MODEL``.
-    """
-    weights = os.environ.get("FASTVIDEO_H3_FAST_VAE_DECODER", "").strip()
-    if not weights:
-        return None
-    engine = os.environ.get("FASTVIDEO_H3_FAST_VAE_ENGINE", "ref").strip() or "ref"
-    cache_key = (weights, engine)
-    decoder = _FAST_VAE_DECODERS.get(cache_key)
-    if decoder is None:
-        from fastvideo.models.vaes.minimax_h3_fast_vae import FastH3VaeDecoder
-        base_model = os.environ.get("FASTVIDEO_H3_FAST_VAE_BASE_MODEL", "").strip()
-        if not base_model:
-            base_model = os.path.join(str(fastvideo_args.model_path), "base_model")
-        logger.info("MiniMax-H3 video decode: fast 24-layer decoder %s (engine=%s, base=%s)", weights, engine,
-                    base_model)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        decoder = FastH3VaeDecoder(weights, base_model, engine=engine)
-        decoder.maybe_compile()
-        _FAST_VAE_DECODERS[cache_key] = decoder
-    return decoder
 
 
 def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
@@ -193,7 +158,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 raise RuntimeError(f"TAEH3 wrote {tuple(batch.output.shape)}, expected {expected}.")
             return batch
 
-        vae = _fast_vae_decoder(fastvideo_args)
+        vae = fast_vae_decoder(fastvideo_args, device)
         if vae is not None:
             if parallel:
                 raise RuntimeError("The fast 24-layer H3 VAE decoder does not support sequence-parallel decode yet.")
