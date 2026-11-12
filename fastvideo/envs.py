@@ -845,6 +845,14 @@ FASTVIDEO_H3_VAE_ENCODE_TILE = EnvStr(None,
                                       "(e.g. '768,768,128,128'). Unset keeps the reference tiling "
                                       "(tile_sample_min_height/width, overlap 64). Fewer, larger tiles cut the "
                                       "launch/copy overhead on sm_121 but change the blended encode slightly.")
+FASTVIDEO_H3_VAE_COMPILE_ENCODER = EnvBool(False,
+                                           category="performance",
+                                           doc="Run the MiniMax-H3 video VAE encoder tile (quant_conv(encoder(tile))) "
+                                           "through one fixed-shape torch.compile graph with mode='reduce-overhead' "
+                                           "(CUDA-graph replay). The encoder tile grid is static, so one graph "
+                                           "serves every tile; cuts the ~66k kernel launches that make the fp32 "
+                                           "draft encode launch-bound on sm_121. Values change only at fp32 "
+                                           "rounding level.")
 FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
                                          category="performance",
                                          doc="Keep the MiniMax-H3 video VAE materialized on the accelerator "
