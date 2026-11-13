@@ -252,18 +252,17 @@ def test_constructor_strict_helper_reports_an_unreachable_hub(
 def test_gated_hub_failure_asks_for_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from huggingface_hub.utils import RepositoryNotFoundError
+    from huggingface_hub.errors import GatedRepoError
 
-    class _GatedRepoError(RepositoryNotFoundError):
+    class _GatedRepoError(GatedRepoError):
 
         def __init__(self, message: str) -> None:
             Exception.__init__(self, message)
 
-    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
-        del model_path, owner, revision, strict
-        raise _GatedRepoError("401 Client Error: gated repo")
+    def fail(**kwargs) -> str:
+        raise _GatedRepoError(f"{kwargs['filename']} is in a gated repo")
 
-    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
 
     with pytest.raises(ValueError, match="HF_TOKEN"):
         _check("MiniMaxAI/MiniMax-H3")
@@ -302,11 +301,10 @@ def test_rejected_hub_credentials_ask_for_a_token(
             Exception.__init__(self, message)
             self.response = SimpleNamespace(status_code=status_code)
 
-    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
-        del model_path, owner, revision, strict
-        raise _UnauthorizedError(f"{status_code} Client Error: Invalid credentials in Authorization header")
+    def fail(**kwargs) -> str:
+        raise _UnauthorizedError(f"{kwargs['filename']}: {status_code} Client Error")
 
-    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
 
     with pytest.raises(ValueError, match="HF_TOKEN"):
         _check("org/repo")

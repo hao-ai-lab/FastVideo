@@ -300,3 +300,20 @@ def test_read_optional_model_json_strict_propagates_an_unreachable_hub(monkeypat
     assert utils.read_optional_model_json("org/repo", "scheduler/scheduler_config.json") is None
     with pytest.raises(LocalEntryNotFoundError):
         utils.read_optional_model_json("org/repo", "scheduler/scheduler_config.json", strict=True)
+
+
+def test_read_optional_model_json_propagates_a_gated_repo_error(monkeypatch) -> None:
+    from huggingface_hub.errors import GatedRepoError
+
+    class _GatedRepoError(GatedRepoError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+
+    def fake_hf_hub_download(**kwargs):
+        raise _GatedRepoError(f"{kwargs['filename']} is in a gated repo")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)
+
+    with pytest.raises(GatedRepoError):
+        utils.read_optional_model_json("org/repo", "scheduler/scheduler_config.json", strict=True)

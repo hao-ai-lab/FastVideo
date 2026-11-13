@@ -375,6 +375,11 @@ class TDMMethod(DMD2Method):
         ``pipeline.audio_scheduler_shift``. The validation callback catches a
         mismatch, but the H3 recipe validates only at the final step (and not
         at all when validation is disabled), so check when the method is built.
+
+        A gated or private repo surfaces as ``GatedRepoError`` (a
+        ``RepositoryNotFoundError``) on the Hub HEAD call, so that branch
+        carries the token guidance; the generic 401/403 branch covers auth
+        errors raised while fetching the file itself.
         """
         if self._model_family() != "minimax_h3":
             return
