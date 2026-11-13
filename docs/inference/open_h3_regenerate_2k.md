@@ -254,6 +254,31 @@ to 7 s (82 s on the first call of a process) with no visible metric change. Agai
 raises Laplacian variance 1.7-3.3x with a 1.3-1.5x flicker ratio for every draft model. FastH3 drafts are sharper than base
 drafts before the regen, so their absolute PSNR against the draft is about 2 dB lower.
 
+## Handing a draft over between servers
+
+A MiniMax-H3 server can keep the finished draft as a *draft bundle* (its normalized latent plus the prompt embeddings
+it was conditioned on), and an Open-H3-Regenerate-2K server takes that bundle as its draft. That skips the draft's
+decode and VAE re-encode, and, when both servers load the same text encoder files, the 2K server's text encoder too.
+The two servers can share a machine or sit on different machines.
+
+```bash
+# generator (any MiniMax-H3 server): keep the bundle
+curl -sS -X POST http://generator:8000/v1/videos -H 'Content-Type: application/json' \
+  -d '{"prompt": "...", "size": "832x480", "num_frames": 124, "return_draft_bundle": true}'
+curl -sS http://generator:8000/v1/videos/<id>/draft_bundle -o draft.h3draft.pt
+
+# 2K server: regenerate from the bundle (an http(s) URL, a path under server.media_roots, or a data: URL)
+curl -sS -X POST http://upscaler:8000/v1/videos/sync -H 'Content-Type: application/json' \
+  -d '{"prompt": "...", "draft_bundle": "data:application/x-fastvideo-h3-draft;base64,..."}' -o regen_2k.mp4
+```
+
+The bundle records a fingerprint of the generator's text encoder files. The 2K server reuses its embeddings according to
+`pipeline.experimental.draft_bundle_prompt_embeds`: `match` (default) only when the fingerprints agree, `always` for any
+bundle (a generator with a different text encoder, such as a FastH3 checkpoint with its own encoder weights, then
+conditions the 2K model with its embeddings), `never` to always re-encode. On a unified-memory machine,
+`FASTVIDEO_H3_KEEP_DIT_RESIDENT=1` keeps the 2K DiT loaded between bundle requests; a request that still needs the text
+encoder releases it first.
+
 ## Parity with the reference
 
 Measured on one GB200 (BF16, `TORCH_SDPA` with cuDNN attention) against the reference `standard_fwd` with the released

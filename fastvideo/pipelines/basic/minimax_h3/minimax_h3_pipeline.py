@@ -34,6 +34,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3LatentPreparationStage,
     MiniMaxH3VideoDecodingStage,
 )
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import text_encoder_fingerprint
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import (
     H3_DENOISE_MODULE_NAMES,
     H3_ENCODER_MODULE_NAMES,
@@ -759,9 +760,20 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 audio_scheduler=audio_scheduler,
             ),
         )
-        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae))
+        decoding = MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae)
+        decoding.text_encoder_fingerprint = self.text_encoder_fingerprint
+        self.add_stage("video_decoding_stage", decoding)
         self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
         self._denoise_stages_ready = True
+
+    def text_encoder_fingerprint(self) -> str | None:
+        """Fingerprint of the text encoder files this pipeline loads (see ``draft_bundle``); ``None`` if unknown."""
+        args = getattr(self, "fastvideo_args", None)
+        override = getattr(args, "override_text_encoder_safetensors", None)
+        if override is None and getattr(self, "model_path", None) is None:
+            return None
+        directory = override or self._component_load_target("text_encoder")[1]
+        return text_encoder_fingerprint(directory, getattr(args, "override_text_encoder_quant", None))
 
     def _add_stages(self, fastvideo_args: FastVideoArgs, *, ref2va: bool) -> None:
         self._ref2va = ref2va

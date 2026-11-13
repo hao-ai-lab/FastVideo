@@ -37,6 +37,7 @@ from fastvideo.entrypoints.openai.protocol import (
 from fastvideo.entrypoints.openai.utils import image_suffix, save_base64_image_to_path
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vision_utils import load_image
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_MEDIA_TYPE, BUNDLE_PATH_EXTRA_KEY, BUNDLE_SUFFIX
 from fastvideo.registry import get_preset_selection
 
 
@@ -47,6 +48,9 @@ class RequestAdaptationError(ValueError):
 OPEN_H3_REGENERATE_2K_FAMILY = "open_h3_regenerate_2k"
 OPEN_H3_REGENERATE_2K_SIZE = (2560, 1440)
 OPEN_H3_REGENERATE_2K_NUM_FRAMES = 124
+# Batch-extra keys the server sets itself. They stay in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS so the in-process batch
+# API can route them, but HTTP `extra_params` must not set them: the value is a server filesystem path.
+_SERVER_OWNED_EXTRA_PARAMS = frozenset({BUNDLE_PATH_EXTRA_KEY})
 
 _MEDIA_SUFFIXES = {
     "video": frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}),
@@ -175,6 +179,59 @@ async def _materialize_media(source: str,
     return _local_media(source, policy), False
 
 
+async def _materialize_draft_bundle(source: str,
+                                    target_base: str,
+                                    *,
+                                    max_bytes: int | None = None,
+                                    policy: MediaPolicy | None = None) -> tuple[str, bool]:
+    """Return a local MiniMax-H3 draft bundle file and whether this request created it.
+
+    Accepts an http(s) URL (same media policy as other references), a ``data:application/x-fastvideo-h3-draft``
+    base64 URL, or a local ``.pt`` path under ``server.media_roots``. The file is read later with
+    ``torch.load(weights_only=True)``.
+    """
+    policy = get_media_policy() if policy is None else policy
+    source = source.strip()
+    if not source:
+        raise RequestAdaptationError("draft_bundle must not be empty.")
+    target = f"{target_base}{BUNDLE_SUFFIX}"
+    if source[:8].lower().startswith(("http://", "https://")):
+        try:
+            await _download_media(source, target, max_bytes=max_bytes, policy=policy)
+        except RequestAdaptationError:
+            raise
+        except Exception as error:
+            raise RequestAdaptationError(f"Unable to fetch draft_bundle: {error}") from error
+        return target, True
+    if source[:5].lower() == "data:":
+        try:
+            media_type = data_url_media_type(source)
+        except MediaPolicyError as error:
+            raise RequestAdaptationError(str(error)) from error
+        if media_type != BUNDLE_MEDIA_TYPE:
+            raise RequestAdaptationError(f"draft_bundle data URLs must be data:{BUNDLE_MEDIA_TYPE};base64,...")
+        limit = get_media_reference_max_bytes() if max_bytes is None else max_bytes
+        decoding = asyncio.ensure_future(asyncio.to_thread(decode_data_url, source, target, max_bytes=limit))
+        try:
+            await asyncio.shield(decoding)
+        except asyncio.CancelledError:
+            # The decoding thread cannot be interrupted; remove its file once it has finished writing.
+            def remove(done: asyncio.Future) -> None:
+                if not done.cancelled():
+                    done.exception()  # mark it retrieved; the request is already gone
+                discard(target)
+
+            decoding.add_done_callback(remove)
+            raise
+        except MediaPolicyError as error:
+            raise RequestAdaptationError(str(error)) from error
+        return target, True
+    local = _local_media(source, policy)
+    if not local.endswith(".pt"):
+        raise RequestAdaptationError("A local draft_bundle must be a .pt file.")
+    return local, False
+
+
 async def _materialize_image_url(source: str, target_base: str, *, max_bytes: int | None, policy: MediaPolicy) -> str:
     target = f"{target_base}{image_suffix(source)}"
     try:
@@ -266,6 +323,12 @@ async def prepare_reference_media(
             request.continuation_video = await materialize_clip(request.continuation_video, "continuation", "video")
         for index, reference in enumerate(_as_list(request.audio_reference)):
             reference.audio_url = await materialize_clip(reference.audio_url, f"audio_{index}", "audio")
+        if request.draft_bundle is not None:
+            local, created_here = await _materialize_draft_bundle(request.draft_bundle,
+                                                                  os.path.join(uploads_dir, f"{request_id}_draft"),
+                                                                  max_bytes=max_bytes,
+                                                                  policy=policy)
+            request.draft_bundle = track(local) if created_here else local
     except BaseException:
         # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
         discard_materialized_media(created)
@@ -426,6 +489,9 @@ def _apply_reference_inputs(
         if normalized_task == "fl2va" and not images:
             raise RequestAdaptationError("MiniMax-H3 task='fl2va' requires one or two image references.")
 
+    if request.draft_bundle is not None and model_family != OPEN_H3_REGENERATE_2K_FAMILY:
+        raise RequestAdaptationError("draft_bundle is only accepted by Open-H3-Regenerate-2K servers.")
+
     if ref2va:
         from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
         from fastvideo.pipelines.basic.minimax_h3.reference import validate_references
@@ -449,6 +515,12 @@ def _apply_reference_inputs(
                                      "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
 
     if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if request.draft_bundle is not None:
+            if videos or images or audios:
+                raise RequestAdaptationError("Open-H3-Regenerate-2K takes either draft_bundle or one video_reference, "
+                                             "not both, and no image or audio references.")
+            kwargs["video_path"] = request.draft_bundle
+            return
         if len(videos) != 1 or images or audios:
             raise RequestAdaptationError("Open-H3-Regenerate-2K takes exactly one video_reference (the 768P draft) "
                                          "and no image or audio references.")
@@ -588,6 +660,9 @@ def build_generation_request(
         unknown_extra_params = sorted(set(request.extra_params) - set(REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS))
         if unknown_extra_params:
             raise RequestAdaptationError("Unsupported extra_params fields: " + ", ".join(unknown_extra_params))
+        server_owned = sorted(set(request.extra_params) & _SERVER_OWNED_EXTRA_PARAMS)
+        if server_owned:
+            raise RequestAdaptationError("extra_params may not set server-owned fields: " + ", ".join(server_owned))
         kwargs.update(request.extra_params)
 
     width = kwargs.get("width")
@@ -639,6 +714,10 @@ def build_generation_request(
     extension = ".wav" if is_audio else ".mp4"
     output_path = os.path.join(os.path.abspath(output_dir), media_dir, f"{request_id}{extension}")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if request.return_draft_bundle:
+        if model_family != "minimax_h3":
+            raise RequestAdaptationError("return_draft_bundle is only supported by MiniMax-H3 servers.")
+        kwargs[BUNDLE_PATH_EXTRA_KEY] = os.path.join(os.path.dirname(output_path), f"{request_id}{BUNDLE_SUFFIX}")
     kwargs.update({
         "output_path": output_path,
         "save_video": True,

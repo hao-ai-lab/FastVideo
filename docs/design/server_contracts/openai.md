@@ -23,6 +23,7 @@ requests. HTTP handling and job polling remain asynchronous.
 | `GET` | `/v1/videos` | List in-memory jobs with `after`, `limit`, and `order` |
 | `GET` | `/v1/videos/{id}` | Retrieve job status and metadata |
 | `GET` | `/v1/videos/{id}/content` | Download a completed MP4 |
+| `GET` | `/v1/videos/{id}/draft_bundle` | Download the MiniMax-H3 draft bundle of a video created with `return_draft_bundle` |
 | `DELETE` | `/v1/videos/{id}` | Delete a job and its completed artifact |
 | `POST` | `/v1/images` | Generate an image |
 | `POST` | `/v1/images/generations` | OpenAI-compatible alias for image generation |
@@ -88,6 +89,17 @@ block. If `num_frames` is absent, `seconds * fps` is used. FastVideo also keeps
 the legacy `input_reference`, `reference_url`, `video_path`, and `video_url`
 spellings.
 
+A MiniMax-H3 generator keeps the finished draft as a *draft bundle* (its
+normalized latent plus the prompt embeddings it was conditioned on) when the
+request sets `"return_draft_bundle": true`. The bundle is written beside the
+video and served by `GET /v1/videos/{id}/draft_bundle` as
+`application/x-fastvideo-h3-draft`. An Open-H3-Regenerate-2K server takes that
+bundle as `"draft_bundle"` instead of `video_reference`. The
+`pipeline.experimental.draft_bundle_prompt_embeds` policy (`match` by default)
+decides whether the 2K server reuses the bundle's embeddings or re-encodes the
+prompt. `return_draft_bundle` is rejected on `/v1/videos/sync`; submit
+`POST /v1/videos` and download the bundle from the job.
+
 Reference objects carry one string each through `image_url`, `video_url`, and
 `audio_url`. Each field accepts these forms:
 
@@ -96,6 +108,7 @@ Reference objects carry one string each through `image_url`, `video_url`, and
 | `image_reference[].image_url`, `input_reference`, `reference_url` | yes | `data:image/...;base64,` | under `server.media_roots` |
 | `video_reference[].video_url`, `video_path`, `video_url`, `continuation_video` | yes | `data:video/...;base64,` | under `server.media_roots` |
 | `audio_reference[].audio_url` | yes | `data:audio/...;base64,` | under `server.media_roots` |
+| `draft_bundle` (Open-H3-Regenerate-2K) | yes | `data:application/x-fastvideo-h3-draft;base64,` | a `.pt` file under `server.media_roots` |
 
 `input_reference` also accepts a multipart upload. `file_id` references are
 schema-compatible but return HTTP 400 because FastVideo does not provide an

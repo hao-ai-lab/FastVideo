@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -16,6 +17,8 @@ from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_fast_vae import fast_vae_decoder
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (BUNDLE_PATH_EXTRA_KEY, BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY,
+                                                               save_draft_bundle)
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_is_output_worker, h3_output_worker_rank
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -24,6 +27,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     unpack_audio_tokens,
     unpatchify_video_tokens,
 )
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import MINIMAX_H3_TEXT_TOKEN_TAGS_KEY
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -66,6 +70,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     """Drop visual condition rows, unpatchify, and decode the target video."""
 
     performance_component_metric = "vae_decode_time_s"
+
+    # Set by the pipeline; called only when a draft bundle is written, so a consumer can tell whose embeddings it gets.
+    text_encoder_fingerprint: Callable[[], str | None] | None = None
 
     def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
@@ -136,6 +143,18 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             channels,
             h3_dit_patch_size(fastvideo_args),
         )
+        bundle_path = batch.extra.get(BUNDLE_PATH_EXTRA_KEY)
+        if bundle_path and is_output_rank:
+            # The request asked for a draft bundle: the normalized latent and the conditioning it was made with, so
+            # another H3 pipeline (e.g. Open-H3-Regenerate-2K) can continue from it without a decode/re-encode.
+            save_draft_bundle(
+                bundle_path,
+                latent=latents,
+                prompt_embeds=batch.prompt_embeds[0] if batch.prompt_embeds else None,
+                text_token_tags=batch.extra.get(BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY,
+                                                batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY)),
+                prompt=str(batch.prompt or ""),
+                text_encoder=(self.text_encoder_fingerprint() if self.text_encoder_fingerprint is not None else None))
         device = get_local_torch_device()
         backend = getattr(fastvideo_args, "video_decode_backend", "h3-vae")
         if backend == "taeh3":
