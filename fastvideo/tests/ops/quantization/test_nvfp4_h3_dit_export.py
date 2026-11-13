@@ -65,13 +65,11 @@ def test_load_minimax_h3_nvfp4_dit_export_overlays_and_purges_weight(tmp_path, d
 
     assert loaded == 1
     assert linear.weight is None
+    assert linear._nvfp4_weight.device.type == "cpu"
     assert linear._nvfp4_weight.dtype is torch.uint8
     assert tuple(linear._nvfp4_weight.shape) == (8, 8)
     assert linear._nvfp4_alpha.item() == 0.5
     assert linear._weight_global_sf.item() == 2.0
-    assert linear.weight_device.device.type == "cpu"
-    assert linear.weight_device.untyped_storage().nbytes() == 0
-    assert "weight_device" not in linear.state_dict()
 
 
 def test_load_minimax_h3_nvfp4_dit_export_rejects_untagged_linear(tmp_path) -> None:

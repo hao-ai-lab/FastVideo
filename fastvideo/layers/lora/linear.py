@@ -274,6 +274,7 @@ class BaseLayerWithLoRA(nn.Module):
         if self.disable_lora or self.side_branch:
             return
 
+        assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if self.merged and not accumulate:
             self.unmerge_lora_weights()
         elif self.base_layer.weight is None:
@@ -281,7 +282,6 @@ class BaseLayerWithLoRA(nn.Module):
                 self._restore_merged_weight()
             else:
                 self._reset_to_base_weight()
-        assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         contribution = None
         if self._merged_loras is not None:
             scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)

@@ -255,8 +255,7 @@ def test_unmerge_then_merge_lora_weights_mxfp8_requantizes_each_step(
 @pytest.mark.parametrize("operation", ["merge_lora_weights", "unmerge_lora_weights"])
 def test_nvfp4_without_lora_layers_is_a_lifecycle_noop(retain_bf16_weight: bool, operation: str,
                                                       monkeypatch: pytest.MonkeyPatch) -> None:
-    """Public merge/unmerge only act on wrapped LoRA layers, not an adapter-free packed model."""
-    from fastvideo.pipelines.lora_pipeline import LoRAPipeline, _has_nvfp4_weights_without_bf16
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
     transformer = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
     transformer.linear.register_parameter(
@@ -272,8 +271,6 @@ def test_nvfp4_without_lora_layers_is_a_lifecycle_noop(retain_bf16_weight: bool,
         pytest.fail("An adapter-free lifecycle operation must not repack the model")
 
     monkeypatch.setattr(nvfp4, "convert_model_to_nvfp4", unexpected_pack)
-    # The conservative helper still scans an unwrapped transformer; public operations have no layers to change.
-    assert _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules) is (not retain_bf16_weight)
     getattr(LoRAPipeline, operation)(pipeline)
     assert transformer.linear.weight is previous_weight
     assert transformer.linear._nvfp4_weight is previous_packed
@@ -323,7 +320,6 @@ class _CpuPackedNVFP4Method(nvfp4.NVFP4QuantizeMethod):
 
 
 def _cpu_packed_state(weight: torch.Tensor) -> dict[str, torch.Tensor]:
-    # Deterministic reduced-precision storage makes stale packed values distinguishable from a fresh rebuild.
     return {
         "_nvfp4_weight": torch.round(weight.float() * 32).to(torch.int16),
         "_nvfp4_weight_scale": torch.full((), 1 / 32),
@@ -411,7 +407,6 @@ def test_nvfp4_cpu_backed_unmerge_remerge_rebuilds_every_buffer(cpu_nvfp4_lifecy
         assert not wrapped.merged
         if retain:
             assert not wrapped.base_layer.weight.requires_grad
-        # Unmerge keeps the adapter active beside the freshly packed base.
         packed = _cpu_packed_state(original)
         expected = torch.nn.functional.linear(
             inputs, packed["_nvfp4_weight"].to(inputs) * packed["_nvfp4_weight_scale"].to(inputs))
@@ -439,7 +434,6 @@ def test_lora_training_keeps_adapter_gradients_without_inference_restore(cpu_nvf
 
     torch.manual_seed(11)
     base = ReplicatedLinear(8, 6, bias=False, params_dtype=torch.float32)
-    # Start with a trainable parameter so wrapper initialization must explicitly freeze it.
     base.weight.requires_grad_(True)
     wrapped = get_lora_layer(base, lora_rank=2, lora_alpha=2, training_mode=True)
     assert wrapped.cpu_weight is None
@@ -556,7 +550,6 @@ def test_nvfp4_invalid_restore_fails_at_layer_boundary_without_mutation(cpu_nvfp
 
 def test_nvfp4_restore_uses_placement_marker_without_reading_packed_values(cpu_nvfp4_lifecycle) -> None:
     _, wrapped, original, _, _ = _nvfp4_lifecycle_pipeline(False)
-    # Payloads are not needed to recover the original full-precision snapshot.
     wrapped.base_layer._nvfp4_weight = None
     wrapped._restore_base_weight()
     torch.testing.assert_close(wrapped.base_layer.weight, original, rtol=0, atol=0)
@@ -657,8 +650,9 @@ class _NVFP4LifecycleTransformer(nn.Module):
 
 @pytest.mark.parametrize("retain", [False, True])
 @pytest.mark.parametrize("layerwise_offload", [False, True])
-def test_nvfp4_lora_round_trip_matches_bf16_on_blackwell(retain: bool, layerwise_offload: bool) -> None:
-    """Real NVFP4 FFN: preserve active LoRA through unmerge/remerge, with CPU restoration after purge."""
+@torch.no_grad()
+@torch._dynamo.config.patch(disable=True)
+def test_nvfp4_lora_lifecycle_matches_fresh_quantization_on_blackwell(retain: bool, layerwise_offload: bool) -> None:
     if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10:
         pytest.skip("NVFP4 lifecycle numerical validation requires an NVIDIA Blackwell GPU")
     pytest.importorskip("flashinfer")
@@ -668,102 +662,99 @@ def test_nvfp4_lora_round_trip_matches_bf16_on_blackwell(retain: bool, layerwise
     from fastvideo.pipelines.lora_pipeline import (LoRAModelLayers, LoRAPipeline,
                                                    _convert_quantized_weights_after_lora_change, _get_hook_ctx)
 
-    previous_dtype = torch.get_default_dtype()
-    torch.set_default_dtype(torch.bfloat16)
-    try:
-        dense = MiniMaxH3FeedForward(128, 256, prefix="minimax_h3.transformer_blocks.0.ff")
-        quantized = MiniMaxH3FeedForward(
-            128, 256,
-            quant_config=nvfp4.NVFP4Config(retain_original_weights=retain),
-            prefix="minimax_h3.transformer_blocks.0.ff")
-    finally:
-        torch.set_default_dtype(previous_dtype)
+    def new_ffn(keep_bf16):
+        previous_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.bfloat16)
+        try:
+            ffn = MiniMaxH3FeedForward(128, 256, quant_config=nvfp4.NVFP4Config(retain_original_weights=keep_bf16),
+                                       prefix="minimax_h3.transformer_blocks.0.ff")
+        finally:
+            torch.set_default_dtype(previous_dtype)
+        return ffn.cuda().eval()
+
     generator = torch.Generator().manual_seed(20261105)
-    with torch.no_grad():
-        for parameter in dense.parameters():
-            parameter.copy_(torch.randn(parameter.shape, generator=generator, dtype=parameter.dtype) * 0.02)
-    quantized.load_state_dict(dense.state_dict(), strict=True)
-    dense = dense.cuda().eval()
-    transformer = _NVFP4LifecycleTransformer(quantized).cuda().eval()
+
+    def randn(*shape):
+        return torch.randn(shape, generator=generator, dtype=torch.bfloat16).cuda()
+
+    base = {"fc_in": randn(512, 128) * 0.02, "fc_out": randn(128, 256) * 0.02}
+    first = {name: (randn(8, w.shape[1]) * 0.02, randn(w.shape[0], 8)) for name, w in base.items()}
+    inputs = randn(2, 128, 128)
+    second = {name: (randn(4, w.shape[1]) * 0.02, randn(w.shape[0], 4)) for name, w in base.items()}
+    first_weights = {name: w + first[name][1] @ first[name][0] for name, w in base.items()}
+    second_delta = {name: (b @ a) * 0.5 for name, (a, b) in second.items()}
+    accumulated = {name: w + second_delta[name] for name, w in first_weights.items()}
+    replacement = {name: w + second_delta[name] for name, w in base.items()}
+
+    quantized = new_ffn(retain)
+    for name, w in base.items():
+        getattr(quantized, name).weight.copy_(w)
+    transformer = _NVFP4LifecycleTransformer(quantized).eval()
     block = transformer.transformer_blocks[0]
     if layerwise_offload:
         enable_layerwise_offload(transformer)
-    factors = {
-        "fc_in": (torch.randn(8, 128, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
-                  torch.randn(512, 8, generator=generator, dtype=torch.bfloat16).cuda()),
-        "fc_out": (torch.randn(8, 256, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
-                   torch.randn(128, 8, generator=generator, dtype=torch.bfloat16).cuda()),
-    }
     layers = LoRAModelLayers([("transformer_blocks.0", block)])
     with _get_hook_ctx(block):
-        for name in ("fc_in", "fc_out"):
+        for name in base:
             wrapped = get_lora_layer(getattr(quantized, name))
             setattr(quantized, name, wrapped)
-            wrapped.set_lora_weights(*factors[name], lora_alpha=8)
+            wrapped.set_lora_weights(*first[name])
             layers.add_lora_layer("transformer_blocks.0", name, wrapped)
         _convert_quantized_weights_after_lora_change([block])
-    inputs = torch.randn(2, 128, 128, generator=generator, dtype=torch.bfloat16).cuda()
-    with torch.inference_mode():
-        dense_base = dense(inputs)
-    for name in ("fc_in", "fc_out"):
-        wrapped = get_lora_layer(getattr(dense, name))
-        setattr(dense, name, wrapped)
-        wrapped.set_lora_weights(*factors[name], lora_alpha=8)
-    with torch.inference_mode():
-        dense_merged = dense(inputs)
-    for name in ("fc_in", "fc_out"):
-        getattr(dense, name).unmerge_lora_weights()
-    with torch.inference_mode():
-        dense_unmerged = dense(inputs)
+
+    def assert_state(weights, *, unmerged=False):
+        reference = new_ffn(True)
+        for name, w in weights.items():
+            getattr(reference, name).weight.copy_(w)
+        nvfp4.convert_model_to_nvfp4(reference)
+
+        with _get_hook_ctx(block):
+            for name, w in weights.items():
+                layer = getattr(quantized, name).base_layer
+                expected = getattr(reference, name)
+                if retain:
+                    torch.testing.assert_close(layer.weight, w, rtol=0, atol=0)
+                else:
+                    assert layer.weight is None
+                    assert layer.weight_device.device == inputs.device
+                for key in nvfp4.H3_NVFP4_DIT_BUFFER_NAMES:
+                    actual_buffer, expected_buffer = getattr(layer, key), getattr(expected, key)
+                    assert actual_buffer.dtype == expected_buffer.dtype, f"{name}.{key}"
+                    torch.testing.assert_close(actual_buffer.float(), expected_buffer.float(), rtol=0, atol=0,
+                                               msg=lambda message: f"{name}.{key}: {message}")
+
+        def project(name, x, *, packed):
+            out = getattr(reference, name)(x)[0] if packed else nn.functional.linear(x, weights[name])
+            if unmerged:
+                a, b = first[name]
+                out = out + x @ a.T @ b.T
+            return out
+
+        def expected_output(*, packed):
+            value, gate = project("fc_in", inputs, packed=packed).chunk(2, dim=-1)
+            return project("fc_out", value * nn.functional.silu(gate), packed=packed)
+
+        actual = transformer(inputs)
+        packed_output = expected_output(packed=True)
+        bf16_output = expected_output(packed=False)
+        assert torch.isfinite(actual).all() and torch.isfinite(bf16_output).all()
+        torch.testing.assert_close(actual, packed_output)
+        assert ((actual.float() - bf16_output.float()).norm() <
+                (actual.float() - bf16_base_output.float()).norm())
+
+    base_value, base_gate = nn.functional.linear(inputs, base["fc_in"]).chunk(2, dim=-1)
+    bf16_base_output = nn.functional.linear(base_value * nn.functional.silu(base_gate), base["fc_out"])
     pipeline = SimpleNamespace(lora_layers={"transformer": layers},
                                trainable_transformer_modules={"transformer": transformer})
 
-    def relative_error(actual, expected):
-        return (actual.float() - expected.float()).norm() / expected.float().norm()
-
-    with torch.inference_mode():
-        assert relative_error(transformer(inputs), dense_merged) < 0.20
+    assert_state(first_weights)
     LoRAPipeline.unmerge_lora_weights(pipeline)
-    with torch.inference_mode():
-        unmerged = transformer(inputs)
-        assert relative_error(unmerged, dense_unmerged) < 0.20
-        assert relative_error(unmerged, dense_unmerged) < relative_error(unmerged, dense_base)
+    assert_state(base, unmerged=True)
     LoRAPipeline.merge_lora_weights(pipeline)
-    with torch.inference_mode():
-        assert relative_error(transformer(inputs), dense_merged) < 0.20
-
-    accumulated_factors = {
-        "fc_in": (torch.randn(4, 128, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
-                  torch.randn(512, 4, generator=generator, dtype=torch.bfloat16).cuda()),
-        "fc_out": (torch.randn(4, 256, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
-                   torch.randn(128, 4, generator=generator, dtype=torch.bfloat16).cuda()),
-    }
-    for name in ("fc_in", "fc_out"):
-        getattr(dense, name).merge_lora_weights()
-        getattr(dense, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5, accumulate=True)
-    with _get_hook_ctx(block):
-        for name in ("fc_in", "fc_out"):
-            getattr(quantized, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5,
-                                                     accumulate=True)
-        _convert_quantized_weights_after_lora_change([block])
-    with torch.inference_mode():
-        assert relative_error(transformer(inputs), dense(inputs)) < 0.20
-    if not retain:
-        assert len(quantized.fc_in._merged_loras) == 2
-        assert len(quantized.fc_out._merged_loras) == 2
-
-    for name in ("fc_in", "fc_out"):
-        getattr(dense, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5)
-    with _get_hook_ctx(block):
-        for name in ("fc_in", "fc_out"):
-            getattr(quantized, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5)
-        _convert_quantized_weights_after_lora_change([block])
-    with torch.inference_mode():
-        assert relative_error(transformer(inputs), dense(inputs)) < 0.20
-    assert (quantized.fc_in.base_layer.weight is not None) is retain
-    assert (quantized.fc_out.base_layer.weight is not None) is retain
-    if not retain:
-        assert len(quantized.fc_in._merged_loras) == 1
-        assert len(quantized.fc_out._merged_loras) == 1
-        assert quantized.fc_in.base_layer.weight_device.device == inputs.device
-        assert quantized.fc_out.base_layer.weight_device.device == inputs.device
+    assert_state(first_weights)
+    for add_to_existing, expected in [(True, accumulated), (False, replacement)]:
+        with _get_hook_ctx(block):
+            for name, factors in second.items():
+                getattr(quantized, name).set_lora_weights(*factors, strength=0.5, accumulate=add_to_existing)
+            _convert_quantized_weights_after_lora_change([block])
+        assert_state(expected)

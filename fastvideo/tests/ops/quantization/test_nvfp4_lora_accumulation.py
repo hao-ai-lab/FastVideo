@@ -81,6 +81,49 @@ def test_direct_accumulating_merge_after_each_purge_keeps_previous_updates(cpu_n
     assert len(wrapped._merged_loras) == 3
 
 
+def test_merge_after_clear_preserves_purged_state(cpu_nvfp4_lifecycle):
+    pipeline, wrapped, original, _, _ = _nvfp4_lifecycle_pipeline(False)
+    LoRAPipeline.clear_lora_adapter(pipeline)
+    assert wrapped.base_layer.weight is None
+    previous_flags = (wrapped.merged, wrapped.disable_lora, wrapped.side_branch)
+    previous_records = wrapped._merged_loras
+    buffers = {name: (value, value.clone()) for name, value in wrapped.base_layer.named_buffers()}
+
+    with pytest.raises(AssertionError, match="LoRA weights not set"):
+        LoRAPipeline.merge_lora_weights(pipeline)
+
+    assert wrapped.base_layer.weight is None
+    assert (wrapped.merged, wrapped.disable_lora, wrapped.side_branch) == previous_flags
+    assert wrapped.lora_A is None and wrapped.lora_B is None
+    assert wrapped._merged_loras is previous_records
+    torch.testing.assert_close(wrapped.cpu_weight, original, rtol=0, atol=0)
+    for name, (previous_buffer, expected) in buffers.items():
+        assert getattr(wrapped.base_layer, name) is previous_buffer
+        torch.testing.assert_close(getattr(wrapped.base_layer, name), expected, rtol=0, atol=0)
+
+
+def test_accumulated_round_trip_repacking_matches_dense_lifecycle(cpu_nvfp4_lifecycle):
+    pipeline, wrapped, original, first, second = _nvfp4_lifecycle_pipeline(False)
+    base = ReplicatedLinear(32, 32, bias=False, params_dtype=torch.bfloat16)
+    base.weight.data.copy_(original)
+    dense = get_lora_layer(base)
+    dense.set_lora_weights(*(factor.clone() for factor in first), lora_alpha=4)
+    dense.set_lora_weights(*(factor.clone() for factor in second), lora_alpha=4, strength=0.5, accumulate=True)
+    _install(pipeline, "second", second, alpha=4, strength=0.5)
+    _assert_cpu_packed_weight(wrapped, dense.base_layer.weight, False)
+
+    for _ in range(2):
+        dense.unmerge_lora_weights()
+        LoRAPipeline.unmerge_lora_weights(pipeline)
+        assert wrapped.merged == dense.merged
+        _assert_cpu_packed_weight(wrapped, dense.base_layer.weight, False)
+
+        dense.merge_lora_weights()
+        LoRAPipeline.merge_lora_weights(pipeline)
+        assert wrapped.merged == dense.merged
+        _assert_cpu_packed_weight(wrapped, dense.base_layer.weight, False)
+
+
 def test_replay_rounds_to_bf16_after_each_contribution(cpu_nvfp4_lifecycle):
     base = ReplicatedLinear(32, 32, bias=False, params_dtype=torch.bfloat16)
     base.weight.data.fill_(256)

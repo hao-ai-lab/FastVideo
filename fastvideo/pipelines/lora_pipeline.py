@@ -32,34 +32,6 @@ from fastvideo.utils import maybe_download_lora
 logger = init_logger(__name__)
 
 
-def _merge_mode_modules(pipeline: Any, transformer_modules: dict[str, nn.Module]) -> Iterable[nn.Module]:
-    """Yield loaded merge-mode base layers, or unwrapped transformer modules."""
-    lora_layers = getattr(pipeline, "lora_layers", None) or {}
-    for transformer_name, transformer in transformer_modules.items():
-        if is_lazy_module(transformer) and not transformer.is_materialized:
-            # Nothing resident to rewrite, and touching the proxy would load it, or reload it from inside its own
-            # materialize transform. A reload re-applies the adapter to fresh layers.
-            continue
-        transformer_layers = lora_layers.get(transformer_name)
-        if transformer_layers is None:
-            yield from transformer.modules()
-            continue
-        for _, layers in transformer_layers.lora_layers_by_block():
-            for layer in layers.values():
-                if not getattr(layer, "side_branch", False):
-                    yield getattr(layer, "base_layer", layer)
-
-
-def _has_nvfp4_weights_without_bf16(pipeline: Any, transformer_modules: dict[str, nn.Module]) -> bool:
-    """Return whether an NVFP4 candidate has packed weights but no BF16 parameter."""
-    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
-
-    return any(
-        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
-        and getattr(module, "_nvfp4_weight", None) is not None and getattr(module, "weight", None) is None
-        for module in _merge_mode_modules(pipeline, transformer_modules))
-
-
 def _get_hook_ctx(module: nn.Module | None):
     if module is None:
         return nullcontext()
