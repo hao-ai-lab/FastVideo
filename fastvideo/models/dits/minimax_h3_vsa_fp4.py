@@ -376,6 +376,13 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     import torch.nn.functional as F
 
     q, k, v = query[:, :prefix_rows], key[:, :logical], value[:, :logical]
+    if prepared_kv is not None and envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get():
+        from fastvideo.models.dits.minimax_h3_fusions.prefix_attention import dense_fp4_prefix_attention
+
+        dense = dense_fp4_prefix_attention(q.transpose(1, 2), prepared_kv[0].transpose(1, 2),
+                                           prepared_kv[1].transpose(1, 2))
+        if dense is not None:
+            return dense
     if not key_is_smoothed:
         k = k - k.mean(dim=1, keepdim=True)
     # Attend only the valid keys. Gathering them keeps SDPA on its unmasked (flash) kernel; a boolean

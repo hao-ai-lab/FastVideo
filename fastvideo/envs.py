@@ -662,6 +662,12 @@ FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
     category="attention",
     doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
     "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4 = EnvBool(
+    False,
+    category="performance",
+    doc="Run MiniMax-H3 dense prefix attention on the in-tree sm_12x dense NVFP4 SageAttention3 "
+    "kernel (attn_qat_infer) instead of bf16 SDPA. Approximate: it quantizes prefix Q/K/V to NVFP4, "
+    "measured 20.5-23.7 dB frames on one-Spark Omni at 1.27x.")
 FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
     0,
     category="performance",
