@@ -3,6 +3,15 @@ import sourceCatalog from "../../docs/assets/cookbook-recipes.json" with { type:
 /** Presentation metadata only. Deployments and editable fields come from the cookbook backend. */
 export const recipePages = [
   {
+    id: "fasth3-preview",
+    family: "MiniMax H3",
+    title: "FastH3 Preview V0.2",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-preview",
+    description: "The few-step FastH3 preview checkpoint on CUDA or native Apple Silicon MLX.",
+    tags: ["Text to video", "Audio", "4-step"],
+  },
+  {
     id: "fasth3-8step",
     family: "MiniMax H3",
     title: "FastH3 8-Step V2",
@@ -21,15 +30,6 @@ export const recipePages = [
     tags: ["Text to video", "Audio", "NVFP4", "8-step"],
   },
   {
-    id: "fasth3-preview",
-    family: "MiniMax H3",
-    title: "FastH3 Preview V0.2",
-    mark: "H3",
-    path: "/cookbook/minimax-h3/fasth3-preview",
-    description: "The few-step FastH3 preview checkpoint on CUDA or native Apple Silicon MLX.",
-    tags: ["Text to video", "Audio", "4-step"],
-  },
-  {
     id: "fasth3-4step",
     family: "MiniMax H3",
     title: "FastH3 4-Step V1",
@@ -41,12 +41,21 @@ export const recipePages = [
   {
     id: "fasth3-omniref",
     family: "MiniMax H3",
-    title: "FastH3 OmniRef",
+    title: "FastH3 Omni v1",
     mark: "H3",
     path: "/cookbook/minimax-h3/fasth3-omniref",
     description: "Video and audio from a prompt plus ordered image, video, and audio references.",
     tags: ["Reference to video", "Audio", "NVFP4"],
     featured: true,
+  },
+  {
+    id: "open-h3-regenerate-2k",
+    family: "MiniMax H3",
+    title: "Open-H3-Regenerate-2K",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/open-h3-regenerate-2k",
+    description: "Regenerate a 768P MiniMax-H3 draft at 2560x1440 with a three-step refiner.",
+    tags: ["Video upscale", "2K", "3-step"],
   },
   {
     id: "fastwan21",
@@ -65,6 +74,15 @@ export const recipePages = [
     path: "/cookbook/wan/wan21-i2v",
     description: "Turn a reference image into video with Wan2.1.",
     tags: ["Image to video", "14B", "480p"],
+  },
+  {
+    id: "pan2",
+    family: "PAN 2",
+    title: "PAN 2",
+    mark: "PAN",
+    path: "/cookbook/pan/pan2",
+    description: "Text-to-video and first-frame image-to-video from the 29B PAN 2 model.",
+    tags: ["Text or image to video", "29B"],
   },
   {
     id: "ltx2-distilled",
@@ -105,11 +123,13 @@ export interface SourceRecipe {
 export const sourceRecipes = sourceCatalog.recipes as SourceRecipe[];
 const familyInfo: Record<string, { title: string; path: string; logo: string; category: string }> = {
   minimax_h3: { title: "MiniMax H3", path: "minimax-h3", logo: "minimax", category: "Video" },
+  pika_h3_flex: { title: "MiniMax H3", path: "minimax-h3", logo: "pika", category: "Video" },
   wan: { title: "Wan", path: "wan", logo: "wan-ai", category: "Video" },
   ltx2: { title: "LTX", path: "ltx", logo: "ltx", category: "Video" },
   hunyuan: { title: "Hunyuan", path: "hunyuan", logo: "tencent-hunyuan", category: "Video" },
   kandinsky5: { title: "Kandinsky 5", path: "kandinsky5", logo: "kandinsky", category: "Video" },
   kandinsky6: { title: "Kandinsky 6", path: "kandinsky6", logo: "kandinsky", category: "Video" },
+  pan2: { title: "PAN 2", path: "pan", logo: "ifm", category: "Video" },
   flux: { title: "FLUX", path: "flux", logo: "black-forest-labs", category: "Image" },
   qwen_image21: { title: "Qwen-Image-2.1", path: "qwen-image21", logo: "qwen", category: "Image" },
   sd35: { title: "Stable Diffusion", path: "stable-diffusion", logo: "stabilityai", category: "Image" },
@@ -124,10 +144,22 @@ const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2": "fasth3-preview",
   "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": "fasth3-4step",
   "FastVideo/FastH3-OmniRef-NVFP4-QAD": "fasth3-omniref",
+  "Efficient-Large-Model/Open-H3-Regenerate-2K": "open-h3-regenerate-2k",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
+  "IFM/PAN2": "pan2",
 };
+const hiddenBackends = new Set(["fasth3-preview"]);
+
+const modelAddedOn: Record<string, string> = {
+  "Qwen/Qwen-Image-2.1": "2026-10-25",
+};
+export function recentlyAdded(model: string) {
+  const added = modelAddedOn[model];
+  return !!added && Date.now() - Date.parse(added) < 30 * 86_400_000;
+}
+
 const TASK_GROUPS: Array<[RegExp, string]> = [
   [/world/, "Text to world"],
   [/video\/text to audio|video.*to audio/, "Video to audio"],
@@ -138,7 +170,7 @@ const TASK_GROUPS: Array<[RegExp, string]> = [
   [/first\/last frame to video/, "Image to video"],
   [/text or image to video/, "Text/image to video"],
   [/image to video/, "Image to video"],
-  [/super-resolution/, "Video upscale"],
+  [/super-resolution|upscale/, "Video upscale"],
   [/video/, "Text to video"],
 ];
 /** A small discovery vocabulary derived from the recipe task, not a capability claim. */
@@ -147,57 +179,71 @@ export function taskLabel(value: string): string {
   return TASK_GROUPS.find(([pattern]) => pattern.test(normalized))?.[1] ?? "Text to video";
 }
 
-export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.model))]
-  .map((model) => {
-    const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
-    const first = recipes[0];
-    const family = familyInfo[first.family];
-    const backend = recipePages.find((page) => page.id === backendModels[model]);
-    const ownModel = model.startsWith("FastVideo/Fast");
-    const logo = ownModel ? "fastvideo" : family.logo;
-    const providers: Record<string, string> = {
-      fastvideo: "FastVideo",
-      minimax: "MiniMax",
-      "wan-ai": "Wan AI",
-      ltx: "Lightricks",
-      "tencent-hunyuan": "Tencent",
-      kandinsky: "Kandinsky Lab",
-      "black-forest-labs": "Black Forest Labs",
-      qwen: "Qwen",
-      stabilityai: "Stability AI",
-      nvidia: "NVIDIA",
-    };
-    return {
-      id: backend?.id ?? first.id,
-      model,
-      recipes,
-      title:
-        backend?.title ??
-        (model.includes("FastH3-4-step")
-          ? "FastH3 4-Step V1"
-          : model.includes("FastH3-Preview-v0.2")
-            ? "FastH3 Preview V0.2"
-            : model === "MiniMaxAI/MiniMax-H3"
-              ? "MiniMax H3"
-              : first.label.split(" on ")[0]),
-      family: backend?.family ?? family.title,
-      familyPath: `/cookbook/${family.path}`,
-      path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
-      logo,
-      provider: providers[logo],
-      category: family.category,
-      description: backend?.description ?? first.summary,
-      tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
-      task: taskLabel(backend?.tags[0] ?? first.task),
-      platforms: [...new Set(recipes.flatMap((recipe) => recipe.gpu_types))],
-      configurable: !!backend,
-      featured: backend?.featured ?? false,
-    };
-  })
-  .sort(
-    (a, b) =>
-      Number(b.featured) - Number(a.featured) ||
-      Number(b.family === "MiniMax H3") - Number(a.family === "MiniMax H3") ||
-      Number(b.configurable) - Number(a.configurable),
-  );
+const mappedModels = [...new Set(sourceRecipes.map((recipe) => recipe.model))].map((model) => {
+  const recipes = sourceRecipes.filter((recipe) => recipe.model === model);
+  const first = recipes[0];
+  const family = familyInfo[first.family];
+  const backend = recipePages.find((page) => page.id === backendModels[model]);
+  const ownModel = model.startsWith("FastVideo/Fast");
+  const logo = ownModel ? "fastvideo" : family.logo;
+  const providers: Record<string, string> = {
+    fastvideo: "FastVideo",
+    minimax: "MiniMax",
+    pika: "Pika",
+    "wan-ai": "Wan AI",
+    ltx: "Lightricks",
+    "tencent-hunyuan": "Tencent",
+    kandinsky: "Kandinsky Lab",
+    "black-forest-labs": "Black Forest Labs",
+    qwen: "Qwen",
+    ifm: "IFM",
+    stabilityai: "Stability AI",
+    nvidia: "NVIDIA",
+  };
+  return {
+    id: backend?.id ?? first.id,
+    model,
+    recipes,
+    title:
+      backend?.title ??
+      (model.includes("FastH3-4-step")
+        ? "FastH3 4-Step V1"
+        : model.includes("FastH3-Preview-v0.2")
+          ? "FastH3 Preview V0.2"
+          : model === "MiniMaxAI/MiniMax-H3"
+            ? "MiniMax H3"
+            : first.label.split(" on ")[0]),
+    family: backend?.family ?? family.title,
+    familyPath: `/cookbook/${family.path}`,
+    path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
+    logo,
+    provider: providers[logo],
+    category: family.category,
+    description: backend?.description ?? first.summary,
+    tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
+    task: taskLabel(backend?.tags[0] ?? first.task),
+    platforms: [...new Set(recipes.flatMap((recipe) => recipe.gpu_types))],
+    configurable: !!backend,
+    hidden: hiddenBackends.has(backend?.id ?? ""),
+    featured: backend?.featured ?? false,
+  };
+});
+
+const byPage = new Map<string, (typeof mappedModels)[number]>();
+for (const entry of mappedModels) {
+  const existing = byPage.get(entry.id);
+  if (!existing) {
+    byPage.set(entry.id, entry);
+    continue;
+  }
+  existing.recipes.push(...entry.recipes.filter((recipe) => !existing.recipes.some((seen) => seen.id === recipe.id)));
+  existing.platforms = [...new Set([...existing.platforms, ...entry.platforms])];
+}
+
+export const modelDirectory = [...byPage.values()].sort(
+  (a, b) =>
+    Number(b.featured) - Number(a.featured) ||
+    Number(b.family === "MiniMax H3") - Number(a.family === "MiniMax H3") ||
+    Number(b.configurable) - Number(a.configurable),
+);
 export type DirectoryModel = (typeof modelDirectory)[number];

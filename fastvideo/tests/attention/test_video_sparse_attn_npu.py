@@ -147,8 +147,8 @@ def test_hccl_preserves_npu_stream_handles(monkeypatch, operation, explicit_stre
     queried = []
     handles = []
 
-    def current_npu_stream():
-        queried.append(True)
+    def current_npu_stream(device):
+        queried.append(device)
         return implicit
 
     monkeypatch.setattr(torch, 'npu', SimpleNamespace(current_stream=current_npu_stream), raising=False)
@@ -172,4 +172,4 @@ def test_hccl_preserves_npu_stream_handles(monkeypatch, operation, explicit_stre
     else:
         communicator.broadcast(tensor, 0, **kwargs)
     assert handles == [5678 if explicit_stream else 1234]
-    assert len(queried) == (0 if explicit_stream else 1)
+    assert queried == ([] if explicit_stream else [communicator.device])

@@ -114,6 +114,24 @@ the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
 reduction order relative to fixed-length FA4, so treat it as a speed/quality
 evaluation option rather than an exact-parity mode.
 
+### cuDNN SDPA for H3 dense attention (opt-in)
+
+With the `FLASH_ATTN` backend, MiniMax-H3's dense, unmasked, inference-only DiT
+self-attention can use cuDNN's fused SDPA engine instead of FlashAttention:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_DENSE_ATTN=cudnn
+```
+
+It keeps the same precision contract (bf16 operands, fp32 softmax/accumulation,
+bf16 output) but uses a different reduction order, so treat it as a
+speed/quality option rather than an exact-parity mode. Training calls, compiled
+regions, head sizes above 128, non-contiguous inputs, and the sparse VSA blocks
+stay on their existing paths. Standalone kernel timings at 37.7k and 109k tokens
+are within measurement noise of FA4; an in-model A/B on one GB200 measured a
+2.2% faster DiT forward. Requires CUDA and a torch build with
+`aten::_scaled_dot_product_cudnn_attention` (cuDNN 9.x).
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**
@@ -483,17 +501,28 @@ MS-SSIM gate on *your* config, especially when combining
   path in the regional support envelope; other VSA paths and the FA3
   grad-enabled path remain outside it. Use the default inductor mode shown
   above unless your exact configuration has its own gate.
+- **Generic compile with `mode="reduce-overhead"`**: when the DiT compile
+  records CUDA graphs, the shared denoising loop (`DenoisingStage`, used by
+  Wan T2V) calls `torch.compiler.cudagraph_mark_step_begin()` once per step,
+  as the MiniMax-H3 loop does, so graph replays do not overwrite tensors the
+  current step still reads. Turn off layerwise offload
+  (`dit_layerwise_offload=False`) as well: offload copies the DiT weights to
+  new GPU memory on every forward, so the graphs are recorded again each
+  step instead of replayed, which is slower than the default mode. The win
+  is largest when the DiT is launch-bound (small shapes, few tokens); at
+  480x832 the step is GPU-bound and matches the default mode.
 
 Extra `torch.compile` options are passed through `torch_compile_kwargs`
 (a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
-CLI as a JSON string via `--torch-compile-kwargs`. Example (currently
-**not** recommended — see the CUDA-graphs caveat above):
+CLI as a JSON string via `--torch-compile-kwargs`. Example (see the
+CUDA-graphs notes above):
 
 ```python
 VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     enable_torch_compile=True,
-    torch_compile_kwargs={"mode": "reduce-overhead"},  # may error today
+    torch_compile_kwargs={"mode": "reduce-overhead"},
+    dit_layerwise_offload=False,
 )
 ```
 

@@ -49,7 +49,7 @@ node docs/js/build-cookbook-capacity.mjs --check
 node docs/js/build-cookbook-capacity.mjs --preview fastwan21
 ```
 
-The check currently prints `Validated 1 capacity model(s) and 50 hardware variant(s).`
+The check currently prints `Validated 1 capacity model(s) and 52 hardware variant(s).`
 The preview prints the model with component references expanded and each
 example's baseline under `base_config`. Inspect its identity, counts, geometry,
 and evidence. Both commands validate deployments and capacity metadata without
@@ -403,6 +403,42 @@ it does not verify every edited configuration. Calibration additionally requires
 matching metric, scope, phases, and execution context. One point can calibrate an
 existing scaling assumption, not establish accuracy across modes. Missing startup
 evidence leaves startup coverage unknown. Keep observations intact when deriving coefficients.
+
+## FastH3 coverage
+
+No FastH3 checkpoint has a full capacity model yet. The editor shows a
+checkpoint-size breakdown and device budget, with `status: unknown` for runtime
+fit. It does not subtract CPU-offloaded weights or divide file sizes by GPU
+count. Those operations need phase residency and per-rank placement models.
+
+Replacement components without matching data are omitted from the known-size
+subtotal and named as missing coverage. Host-only system RAM cannot establish
+GPU fit. A custom GiB budget keeps its unit; unified memory uses the shared
+normalizer's usable-memory policy instead of treating nominal RAM as VRAM.
+
+| Profile | First stop | Why |
+| --- | --- | --- |
+| OmniRef | Workload | Runs image-to-video; the estimator models text-to-video only |
+| 8-Step CUDA | Topology | Defaults to four GPUs and Ulysses sequence parallelism |
+| Trim Spark | Attention | `VIDEO_SPARSE_ATTN_H3` is not a dense backend, so VSA workspace is unmodeled |
+| 4-Step Spark | Execution | `h3_sequential_load` loads components on demand |
+| Omni NVFP4 decoder | Precision | The decoder swap changes decoder precision |
+
+To make a FastH3 estimate possible, in order:
+
+1. Add capacity entries for each checkpoint: transformer parameter counts and
+   geometry, the text encoder, the VAE, and the NVFP4 decoder variants.
+2. Model an image-to-video request: reference latents and audio tokens change
+   the working set, and OmniRef passes ordered image, video, and audio inputs.
+3. Model per-rank sharding for four-GPU Ulysses, including replicated weights
+   and per-rank sequence slices, so the estimate compares against one device.
+4. Add a VSA-H3 workspace term, or a dense upper bound that is labeled as one.
+5. Support quantized decoder precision instead of rejecting the configuration.
+6. Record successful runs on the RTX 5090, RTX PRO 6000, and DGX Spark profiles
+   so the analytical estimate can be calibrated rather than trusted blindly.
+
+Until those land, the cookbook can report checkpoint data but cannot answer
+whether an edited FastH3 request fits a GPU.
 
 ## Static consumers
 

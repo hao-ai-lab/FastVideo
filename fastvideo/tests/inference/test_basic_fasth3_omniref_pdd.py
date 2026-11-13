@@ -349,3 +349,30 @@ def test_row_split_is_an_explicit_spark_opt_in():
     assert envs.environment_variables["FASTVIDEO_NVFP4_MM_ROW_SPLIT"].default == "off"
     assert example.DEVICE_PROFILES["spark"].env["FASTVIDEO_NVFP4_MM_ROW_SPLIT"] == "table"
     assert "FASTVIDEO_NVFP4_MM_ROW_SPLIT" not in example.DEVICE_PROFILES["rtx-pro-6000"].env
+
+
+@pytest.mark.parametrize("flags", [
+    ("--token-reduction", "--token-reduction-blocks", "4:60"),
+    ("--token-reduction", "--token-reduction-early", "4:30"),
+    ("--token-reduction", "--token-reduction-scale", "3"),
+    ("--token-reduction-blocks", "4:20"),
+])
+def test_token_reduction_flags_are_checked_before_download(flags):
+    with pytest.raises(SystemExit):
+        _args(*flags)
+
+
+def test_token_reduction_flags_reach_the_generator_config(tmp_path):
+    args = _args("--token-reduction", "--token-reduction-blocks", "4:20", "--token-reduction-early", "0:0")
+    config = example.build_generator_config(tmp_path, 4, token_reduction=example.token_reduction_options(args))
+    assert config.pipeline.experimental == {"h3_token_reduction": {"enabled": True, "blocks": "4:20", "early": "0:0"}}
+    assert example.build_generator_config(tmp_path, 4).pipeline.experimental == {}
+
+
+def test_invalid_token_reduction_options_fail_when_args_are_built():
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    with pytest.raises(ValueError, match="h3_token_reduction"):
+        FastVideoArgs(model_path="unused", pipeline_config=MiniMaxH3PipelineConfig(),
+                      h3_token_reduction={"enabled": True, "blocks": "30:4"})

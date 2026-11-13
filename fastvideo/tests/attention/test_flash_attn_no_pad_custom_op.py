@@ -284,3 +284,46 @@ def test_varlen_qk_opcheck_with_grad_inputs(no_pad_impls):
         torch.ops.fastvideo._flash_attn_varlen_qk_no_pad_forward,
         (q, k, v, qmask, kmask, False, 0.0, None, False),
     )
+
+
+@pytest.mark.parametrize("query_len", [48, 64])
+@pytest.mark.parametrize("mask_kind", ["bool", "integer", "additive"])
+@pytest.mark.parametrize("mask_rank", [2, 3, 4])
+def test_backend_padding_mask_and_custom_scale(no_pad_impls, query_len, mask_kind, mask_rank):
+    """Masked FlashAttention agrees with SDPA for tokenizer and additive masks."""
+    from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
+    from fastvideo.attention.backends.sdpa import SDPAMetadata
+
+    torch.manual_seed(42)
+    batch, key_len, heads, head_dim = 2, 64, 2, 64
+    if query_len != key_len:
+        _fa2_only(no_pad_impls)
+    query = torch.randn(batch, query_len, heads, head_dim, device="cuda", dtype=torch.float16)
+    key = torch.randn(batch, key_len, heads, head_dim, device="cuda", dtype=torch.float16)
+    value = torch.randn_like(key)
+    valid = _padding_mask(batch, key_len, [50, 37], query.device)
+    if mask_kind == "integer":
+        mask = valid.to(torch.int64)
+    elif mask_kind == "additive":
+        mask = torch.where(valid, 0.0, float("-inf"))
+    else:
+        mask = valid
+    if mask_rank == 3:
+        mask = mask[:, None, :]
+    elif mask_rank == 4:
+        mask = mask[:, None, None, :]
+
+    scale = 0.37
+    impl = FlashAttentionImpl(num_heads=heads, head_size=head_dim, causal=False,
+                              softmax_scale=scale, nvfp4_fa4=False)
+    metadata = SDPAMetadata(current_timestep=0, attn_mask=mask)
+    with torch.inference_mode():
+        actual = impl.forward(query, key, value, metadata)
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2),
+            attn_mask=valid[:, None, None, :], scale=scale,
+        ).transpose(1, 2)
+    if query_len == key_len:
+        # The self-attention path also removes padded query rows.
+        actual, expected = actual[valid], expected[valid]
+    torch.testing.assert_close(actual, expected, atol=2e-2, rtol=2e-2)

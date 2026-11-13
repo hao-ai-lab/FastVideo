@@ -9,6 +9,10 @@
     "icon": "boxes"
   },
   {
+    "label": "News",
+    "href": "/news"
+  },
+  {
     "label": "Get started",
     "icon": "rocket",
     "items": [
@@ -128,6 +132,10 @@
         "display": "group"
       },
       {
+        "label": "PAN 2 text/image to video",
+        "href": "/inference/pan2"
+      },
+      {
         "label": "Examples",
         "href": "/inference/examples/examples_inference_index"
       }
@@ -142,20 +150,16 @@
         "href": "/cookbook"
       },
       {
-        "label": "H3 server and playground",
-        "href": "/cookbook/openai-api"
-      },
-      {
         "label": "MiniMax H3",
         "display": "group",
-        "collapsed": false,
+        "collapsed": true,
         "items": [
           {
             "label": "MiniMax H3",
             "href": "/cookbook/minimax-h3/models/minimax-h3-t2v"
           },
           {
-            "label": "FastH3 OmniRef",
+            "label": "FastH3 Omni v1",
             "href": "/cookbook/minimax-h3/fasth3-omniref"
           },
           {
@@ -167,12 +171,16 @@
             "href": "/cookbook/minimax-h3/fasth3-trim"
           },
           {
-            "label": "FastH3 Preview V0.2",
-            "href": "/cookbook/minimax-h3/fasth3-preview"
-          },
-          {
             "label": "FastH3 4-Step V1",
             "href": "/cookbook/minimax-h3/fasth3-4step"
+          },
+          {
+            "label": "Pika H3 Flex",
+            "href": "/cookbook/minimax-h3/models/pika-h3-flex-t2va"
+          },
+          {
+            "label": "Open-H3-Regenerate-2K",
+            "href": "/cookbook/minimax-h3/open-h3-regenerate-2k"
           },
           {
             "label": "Recipes and setup",
@@ -187,7 +195,7 @@
       {
         "label": "Wan",
         "display": "group",
-        "collapsed": false,
+        "collapsed": true,
         "items": [
           {
             "label": "FastWan2.1 1.3B",
@@ -246,6 +254,25 @@
           {
             "label": "Upscaling reference",
             "href": "/inference/kandinsky6_sr"
+          }
+        ]
+      },
+      {
+        "label": "PAN 2",
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "PAN 2",
+            "href": "/cookbook/pan/pan2"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/pan"
+          },
+          {
+            "label": "Model reference",
+            "href": "/inference/pan2"
           }
         ]
       },
@@ -309,6 +336,14 @@
       {
         "label": "Attn-QAT Training",
         "href": "/training/attn_qat"
+      },
+      {
+        "label": "FastH3 NVFP4 QAD",
+        "href": "/training/minimax_h3_fp4_qad"
+      },
+      {
+        "label": "Pika H3 Flex NVFP4 QAD",
+        "href": "/training/pika_h3_flex_qad"
       },
       {
         "label": "HunyuanVideo 1.5 T2V",
