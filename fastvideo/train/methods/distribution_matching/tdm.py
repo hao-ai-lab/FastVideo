@@ -404,10 +404,16 @@ class TDMMethod(DMD2Method):
                                  "existing local checkpoint directory or make the Hub repo reachable.") from exc
             except RepositoryNotFoundError as exc:
                 raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging Face "
-                                 f"Hub: {exc}. If the repo is gated or private, set HF_TOKEN (or run "
-                                 "`hf auth login`) and confirm you have access, or point training.model_path at an "
-                                 "existing local H3 checkpoint directory.") from exc
+                                 f"Hub: {exc}. Check that it names an existing local H3 checkpoint directory or the "
+                                 "correct Hub repo id. If the repo is gated or private, set HF_TOKEN (or run "
+                                 "`hf auth login`) and confirm you have access.") from exc
             except (HFValidationError, HfHubHTTPError) as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code in (401, 403):
+                    raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
+                                     f"Face Hub: {exc}. The Hub rejected the credentials; set HF_TOKEN (or run "
+                                     "`hf auth login`) to a token that can access the repo, or point "
+                                     "training.model_path at an existing local H3 checkpoint directory.") from exc
                 raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
                                  f"directory and the Hugging Face Hub lookup failed: {exc}. Set it to an existing "
                                  "local checkpoint directory or a valid Hub repo id.") from exc
@@ -420,7 +426,11 @@ class TDMMethod(DMD2Method):
                 logger.warning("Cannot verify the H3 TDM %s: %s at training.model_path %r has no shift.", attribute,
                                owner, model_path)
                 continue
-            trained = float(getattr(self.student, attribute))
+            trained = getattr(self.student, attribute, None)
+            if trained is None:
+                raise ValueError(f"training.model_path {model_path!r} is checked as an H3 checkpoint, but the "
+                                 f"H3 TDM student {type(self.student).__name__} exposes no {attribute}.")
+            trained = float(trained)
             if float(sampled) == trained:
                 continue
             raise ValueError(f"The H3 student trains with {attribute}={trained}, but the checkpoint's "

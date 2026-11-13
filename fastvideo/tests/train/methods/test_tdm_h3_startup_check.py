@@ -119,18 +119,21 @@ def test_real_h3_student_queries_both_scheduler_configs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _write_scheduler_configs(tmp_path)
-    queries: list[str] = []
+    queries: list[tuple[str, bool]] = []
     read_config = tdm_module.read_optional_model_json
 
     def spy(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
-        queries.append(owner)
+        queries.append((owner, strict))
         return read_config(model_path, owner, revision, strict=strict)
 
     monkeypatch.setattr(tdm_module, "read_optional_model_json", spy)
 
     _check(str(tmp_path))
 
-    assert queries == ["scheduler/scheduler_config.json", "audio_scheduler/scheduler_config.json"]
+    assert queries == [
+        ("scheduler/scheduler_config.json", True),
+        ("audio_scheduler/scheduler_config.json", True),
+    ]
 
 
 @pytest.mark.parametrize(("video", "audio", "attribute"), [
@@ -178,6 +181,23 @@ def test_scheduler_config_without_shift_warns(
                for warning in warnings)
 
 
+def test_student_without_h3_shift_attributes_fails_with_a_named_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NoShiftStudent(torch.nn.Module):
+        pass
+
+    method = TDMMethod.__new__(TDMMethod)
+    torch.nn.Module.__init__(method)
+    method.training_config = SimpleNamespace(model_path="org/repo")
+    method.student = _NoShiftStudent()
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", lambda *args, **kwargs: {"shift": 12.0})
+
+    with pytest.raises(ValueError, match="exposes no video_scheduler_shift"):
+        method._validate_h3_checkpoint_shifts()
+
+
 def test_nonexistent_local_model_path_fails_before_hub_lookup(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="training.model_path"):
         _check(str(tmp_path / "missing"))
@@ -213,6 +233,22 @@ def test_offline_hub_failure_is_not_reported_as_a_missing_config(
         _check("org/repo")
 
 
+def test_constructor_strict_helper_reports_an_unreachable_hub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import LocalEntryNotFoundError
+
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+
+    def fail(**kwargs) -> str:
+        raise LocalEntryNotFoundError(f"{kwargs['filename']} is not in the disk cache")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
+
+    with pytest.raises(ValueError, match="could not fetch"):
+        _build_h3_method("org/repo")
+
+
 def test_gated_hub_failure_asks_for_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -231,6 +267,49 @@ def test_gated_hub_failure_asks_for_credentials(
 
     with pytest.raises(ValueError, match="HF_TOKEN"):
         _check("MiniMaxAI/MiniMax-H3")
+
+
+def test_missing_hub_repo_suggests_both_local_and_remote_fixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import RepositoryNotFoundError
+
+    class _MissingRepoError(RepositoryNotFoundError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+
+    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
+        del model_path, owner, revision, strict
+        raise _MissingRepoError("404 Client Error: repository not found")
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+
+    with pytest.raises(ValueError, match=r"existing local H3 checkpoint.*correct Hub repo id"):
+        _check("checkpoints/does-not-exist")
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_rejected_hub_credentials_ask_for_a_token(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    from huggingface_hub.utils import HfHubHTTPError
+
+    class _UnauthorizedError(HfHubHTTPError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+            self.response = SimpleNamespace(status_code=status_code)
+
+    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
+        del model_path, owner, revision, strict
+        raise _UnauthorizedError(f"{status_code} Client Error: Invalid credentials in Authorization header")
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+
+    with pytest.raises(ValueError, match="HF_TOKEN"):
+        _check("org/repo")
 
 
 def test_constructor_rejects_a_mismatched_h3_checkpoint(
