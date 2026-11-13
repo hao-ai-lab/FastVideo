@@ -293,8 +293,9 @@ def test_file_download_rejected_credentials_ask_for_a_token(
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
 ) -> None:
-    # A 401/403 raised by hf_hub_download itself is the GET-stage case: the
-    # metadata HEAD succeeded and only the file download was rejected.
+    # A 401/403 HfHubHTTPError raised directly by hf_hub_download. huggingface_hub
+    # re-raises a HEAD 401 unchanged, while a HEAD 403 is normally wrapped into
+    # LocalEntryNotFoundError (see test_head_403_is_reported_as_a_token_problem).
     from huggingface_hub.utils import HfHubHTTPError
 
     class _UnauthorizedError(HfHubHTTPError):
@@ -336,6 +337,55 @@ def test_head_403_is_reported_as_a_token_problem(
 
     with pytest.raises(ValueError, match="HF_TOKEN"):
         _check("MiniMaxAI/MiniMax-H3")
+
+
+def test_head_403_for_a_disabled_repo_does_not_ask_for_a_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A disabled repo is a 403 HfHubHTTPError that huggingface_hub wraps in
+    # LocalEntryNotFoundError, but no token can open it.
+    from huggingface_hub.utils import DisabledRepoError, LocalEntryNotFoundError
+
+    class _DisabledRepoError(DisabledRepoError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+            self.response = SimpleNamespace(status_code=403)
+
+    def fail(**kwargs) -> str:
+        try:
+            raise _DisabledRepoError("403 Client Error: Access to this resource is disabled.")
+        except _DisabledRepoError as cause:
+            raise LocalEntryNotFoundError(f"{kwargs['filename']} is not in the disk cache") from cause
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
+
+    with pytest.raises(ValueError, match="disabled") as excinfo:
+        _check("MiniMaxAI/MiniMax-H3")
+
+    assert "HF_TOKEN" not in str(excinfo.value)
+
+
+def test_direct_403_for_a_disabled_repo_does_not_ask_for_a_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import DisabledRepoError
+
+    class _DisabledRepoError(DisabledRepoError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+            self.response = SimpleNamespace(status_code=403)
+
+    def fail(**kwargs) -> str:
+        raise _DisabledRepoError(f"{kwargs['filename']}: Access to this resource is disabled.")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
+
+    with pytest.raises(ValueError, match="disabled") as excinfo:
+        _check("MiniMaxAI/MiniMax-H3")
+
+    assert "HF_TOKEN" not in str(excinfo.value)
 
 
 def test_constructor_rejects_a_mismatched_h3_checkpoint(

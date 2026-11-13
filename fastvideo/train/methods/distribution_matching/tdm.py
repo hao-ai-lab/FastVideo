@@ -379,11 +379,13 @@ class TDMMethod(DMD2Method):
         Error taxonomy: a gated repo surfaces as ``GatedRepoError`` and a
         private or unauthenticated repo as ``RepositoryNotFoundError``. Both
         are caught by the ``RepositoryNotFoundError`` branch, which carries
-        the token guidance. Generic 401/403 ``HfHubHTTPError``
-        instances raised while fetching the file itself are handled by the
-        second branch. A 403 from the Hub HEAD call is converted by
-        ``huggingface_hub`` into ``LocalEntryNotFoundError``, so the first
-        branch inspects the chained cause to keep the token guidance.
+        the token guidance. A ``HfHubHTTPError`` raised directly by the Hub
+        (a HEAD 401 that ``huggingface_hub`` re-raises, or a GET-stage
+        rejection) lands in the second branch. ``huggingface_hub`` wraps
+        non-401 HEAD errors (notably 403) in ``LocalEntryNotFoundError``, so
+        the first branch inspects the chained cause: ``DisabledRepoError``
+        reports a disabled repo, while other 401/403 causes keep the token
+        guidance.
         """
         if self._model_family() != "minimax_h3":
             return
@@ -394,6 +396,7 @@ class TDMMethod(DMD2Method):
             raise ValueError(f"training.model_path {model_path!r} does not exist or is not a directory; it must "
                              "name a local H3 checkpoint directory or a Hub repo id.")
         from huggingface_hub.utils import (
+            DisabledRepoError,
             HFValidationError,
             HfHubHTTPError,
             LocalEntryNotFoundError,
@@ -408,10 +411,16 @@ class TDMMethod(DMD2Method):
             try:
                 scheduler_config = read_optional_model_json(model_path, owner, strict=True)
             except (LocalEntryNotFoundError, OfflineModeIsEnabled) as exc:
-                status_code = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+                cause = exc.__cause__
+                if isinstance(cause, DisabledRepoError):
+                    raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
+                                     f"Face Hub: {cause}. The Hub reports that access to the repository is disabled, "
+                                     "so no token can open it; point training.model_path at an existing local H3 "
+                                     "checkpoint directory or use a different Hub repo.") from exc
+                status_code = getattr(getattr(cause, "response", None), "status_code", None)
                 if status_code in (401, 403):
                     raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
-                                     f"Face Hub: {exc.__cause__}. The Hub rejected the credentials; set HF_TOKEN "
+                                     f"Face Hub: {cause}. The Hub rejected access; set HF_TOKEN "
                                      "(or run `hf auth login`) to a token that can access the repo, or point "
                                      "training.model_path at an existing local H3 checkpoint directory.") from exc
                 raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
@@ -423,10 +432,15 @@ class TDMMethod(DMD2Method):
                                  "correct Hub repo id. If the repo is gated or private, set HF_TOKEN (or run "
                                  "`hf auth login`) and confirm you have access.") from exc
             except (HFValidationError, HfHubHTTPError) as exc:
+                if isinstance(exc, DisabledRepoError):
+                    raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
+                                     f"Face Hub: {exc}. The Hub reports that access to the repository is disabled, "
+                                     "so no token can open it; point training.model_path at an existing local H3 "
+                                     "checkpoint directory or use a different Hub repo.") from exc
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
                 if status_code in (401, 403):
                     raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
-                                     f"Face Hub: {exc}. The Hub rejected the credentials; set HF_TOKEN (or run "
+                                     f"Face Hub: {exc}. The Hub rejected access; set HF_TOKEN (or run "
                                      "`hf auth login`) to a token that can access the repo, or point "
                                      "training.model_path at an existing local H3 checkpoint directory.") from exc
                 raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
