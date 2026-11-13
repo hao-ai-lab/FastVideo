@@ -15,6 +15,10 @@ from fastvideo.train.methods.distribution_matching import tdm as tdm_module
 from fastvideo.train.methods.distribution_matching.tdm import TDMMethod
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.models.minimax_h3 import MiniMaxH3Model
+from fastvideo.train.models.minimax_h3.minimax_h3 import (
+    _AUDIO_SCHEDULER_SHIFT,
+    _VIDEO_SCHEDULER_SHIFT,
+)
 from fastvideo.train.utils.config import load_run_config
 from fastvideo.train.utils.training_config import (
     DataConfig,
@@ -118,9 +122,9 @@ def test_real_h3_student_queries_both_scheduler_configs(
     queries: list[str] = []
     read_config = tdm_module.read_optional_model_json
 
-    def spy(model_path: str, owner: str, revision: str | None = None) -> dict | None:
+    def spy(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
         queries.append(owner)
-        return read_config(model_path, owner, revision)
+        return read_config(model_path, owner, revision, strict=strict)
 
     monkeypatch.setattr(tdm_module, "read_optional_model_json", spy)
 
@@ -174,24 +178,6 @@ def test_scheduler_config_without_shift_warns(
                for warning in warnings)
 
 
-def test_missing_student_shift_warns(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    warnings: list[str] = []
-    monkeypatch.setattr(tdm_module.logger, "warning", lambda message, *args: warnings.append(message % args))
-    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
-    _write_scheduler_configs(tmp_path)
-    method = TDMMethod.__new__(TDMMethod)
-    torch.nn.Module.__init__(method)
-    method.training_config = SimpleNamespace(model_path=str(tmp_path))
-    method.student = SimpleNamespace(video_scheduler_shift=12.0)
-
-    method._validate_h3_checkpoint_shifts()
-
-    assert any("audio_scheduler_shift" in warning for warning in warnings)
-
-
 def test_nonexistent_local_model_path_fails_before_hub_lookup(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="training.model_path"):
         _check(str(tmp_path / "missing"))
@@ -202,14 +188,49 @@ def test_relative_local_model_path_reports_hub_failure(
 ) -> None:
     from huggingface_hub.utils import HFValidationError
 
-    def fail(model_path: str, owner: str, revision: str | None = None) -> dict | None:
-        del owner, revision
+    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
+        del owner, revision, strict
         raise HFValidationError(f"Repo id must be in the form 'repo_name': {model_path!r}")
 
     monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
 
     with pytest.raises(ValueError, match="training.model_path.*local H3 checkpoint"):
         _check("checkpoints/does-not-exist")
+
+
+def test_offline_hub_failure_is_not_reported_as_a_missing_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import LocalEntryNotFoundError
+
+    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
+        del model_path, owner, revision, strict
+        raise LocalEntryNotFoundError("Cannot find the requested files in the disk cache")
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+
+    with pytest.raises(ValueError, match="could not fetch"):
+        _check("org/repo")
+
+
+def test_gated_hub_failure_asks_for_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import RepositoryNotFoundError
+
+    class _GatedRepoError(RepositoryNotFoundError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+
+    def fail(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict | None:
+        del model_path, owner, revision, strict
+        raise _GatedRepoError("401 Client Error: gated repo")
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+
+    with pytest.raises(ValueError, match="HF_TOKEN"):
+        _check("MiniMaxAI/MiniMax-H3")
 
 
 def test_constructor_rejects_a_mismatched_h3_checkpoint(
@@ -236,15 +257,13 @@ def test_constructor_accepts_a_matching_h3_checkpoint(
     assert method.student.audio_scheduler_shift == 3.0
 
 
-def test_shipped_h3_overfit_config_accepts_a_matching_local_checkpoint(tmp_path: Path) -> None:
+def test_shipped_h3_overfit_config_uses_the_checkpoint_defaults(tmp_path: Path) -> None:
     cfg = load_run_config(_H3_TDM_CONFIG, ["--training.model_path", str(tmp_path)])
     pipeline_config = cfg.training.pipeline_config
-    video = pipeline_config.video_scheduler_shift
-    audio = pipeline_config.audio_scheduler_shift
-    video = 12.0 if video is None else float(video)
-    audio = 3.0 if audio is None else float(audio)
-    _write_scheduler_configs(tmp_path, video=video, audio=audio)
+    assert pipeline_config.video_scheduler_shift in (None, _VIDEO_SCHEDULER_SHIFT)
+    assert pipeline_config.audio_scheduler_shift in (None, _AUDIO_SCHEDULER_SHIFT)
+    _write_scheduler_configs(tmp_path, video=_VIDEO_SCHEDULER_SHIFT, audio=_AUDIO_SCHEDULER_SHIFT)
 
-    _check(cfg.training.model_path, video=video, audio=audio)
+    _check(cfg.training.model_path, video=_VIDEO_SCHEDULER_SHIFT, audio=_AUDIO_SCHEDULER_SHIFT)
 
     assert cfg.training.model_path == str(tmp_path)

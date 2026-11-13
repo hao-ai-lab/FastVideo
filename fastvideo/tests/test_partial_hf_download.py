@@ -287,3 +287,16 @@ def test_read_optional_model_json_absent_hub_file(monkeypatch) -> None:
     monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)
 
     assert utils.read_optional_model_json("org/repo", "fastvideo_inference.json") is None
+
+
+def test_read_optional_model_json_strict_propagates_an_unreachable_hub(monkeypatch) -> None:
+    from huggingface_hub.utils import LocalEntryNotFoundError
+
+    def fake_hf_hub_download(**kwargs):
+        raise LocalEntryNotFoundError(f"{kwargs['filename']} is not in the disk cache")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)
+
+    assert utils.read_optional_model_json("org/repo", "scheduler/scheduler_config.json") is None
+    with pytest.raises(LocalEntryNotFoundError):
+        utils.read_optional_model_json("org/repo", "scheduler/scheduler_config.json", strict=True)

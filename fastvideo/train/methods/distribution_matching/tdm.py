@@ -384,14 +384,29 @@ class TDMMethod(DMD2Method):
         if (os.path.isabs(model_path) or model_path.startswith(".")) and not os.path.isdir(model_path):
             raise ValueError(f"training.model_path {model_path!r} does not exist or is not a directory; it must "
                              "name a local H3 checkpoint directory or a Hub repo id.")
-        from huggingface_hub.utils import HFValidationError, HfHubHTTPError
+        from huggingface_hub.utils import (
+            HFValidationError,
+            HfHubHTTPError,
+            LocalEntryNotFoundError,
+            OfflineModeIsEnabled,
+            RepositoryNotFoundError,
+        )
 
         for attribute, owner in (
             ("video_scheduler_shift", "scheduler/scheduler_config.json"),
             ("audio_scheduler_shift", "audio_scheduler/scheduler_config.json"),
         ):
             try:
-                scheduler_config = read_optional_model_json(model_path, owner)
+                scheduler_config = read_optional_model_json(model_path, owner, strict=True)
+            except (LocalEntryNotFoundError, OfflineModeIsEnabled) as exc:
+                raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
+                                 f"directory and the Hugging Face Hub could not fetch {owner}: {exc}. Set it to an "
+                                 "existing local checkpoint directory or make the Hub repo reachable.") from exc
+            except RepositoryNotFoundError as exc:
+                raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging Face "
+                                 f"Hub: {exc}. If the repo is gated or private, set HF_TOKEN (or run "
+                                 "`hf auth login`) and confirm you have access, or point training.model_path at an "
+                                 "existing local H3 checkpoint directory.") from exc
             except (HFValidationError, HfHubHTTPError) as exc:
                 raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
                                  f"directory and the Hugging Face Hub lookup failed: {exc}. Set it to an existing "
@@ -405,12 +420,8 @@ class TDMMethod(DMD2Method):
                 logger.warning("Cannot verify the H3 TDM %s: %s at training.model_path %r has no shift.", attribute,
                                owner, model_path)
                 continue
-            trained = getattr(self.student, attribute, None)
-            if trained is None:
-                logger.warning("Cannot verify the H3 TDM %s: the H3 student %s exposes no %s.", attribute,
-                               type(self.student).__name__, attribute)
-                continue
-            if float(sampled) == float(trained):
+            trained = float(getattr(self.student, attribute))
+            if float(sampled) == trained:
                 continue
             raise ValueError(f"The H3 student trains with {attribute}={trained}, but the checkpoint's "
                              f"{owner} samples with shift {sampled}. Train with the checkpoint's shift.")

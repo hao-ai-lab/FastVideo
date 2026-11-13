@@ -1216,9 +1216,9 @@ def test_tdm_accepts_h3_checkpoint_shift_match(tmp_path: Path, monkeypatch: pyte
     queries: list[str] = []
     read_config = tdm_module.read_optional_model_json
 
-    def spy(model_path: str, owner: str, revision: str | None = None) -> dict[str, Any] | None:
+    def spy(model_path: str, owner: str, revision: str | None = None, *, strict: bool = False) -> dict[str, Any] | None:
         queries.append(owner)
-        return read_config(model_path, owner, revision)
+        return read_config(model_path, owner, revision, strict=strict)
 
     monkeypatch.setattr(tdm_module, "read_optional_model_json", spy)
     monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")

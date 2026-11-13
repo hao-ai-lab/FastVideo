@@ -623,9 +623,10 @@ and friends). H3 conventions that differ from Wan:
   scheduler module exposes a shift. The checked checkpoint is
   `training.model_path`, which defaults to `models.student.init_from`. The
   defaults are video `12` / audio `3`, so a checkpoint with different shifts
-  still requires matching overrides. A missing scheduler config or a config
-  without a `shift` key logs a warning and cannot be verified at startup or at
-  validation.
+  still requires matching overrides. Construction warns when the checkpoint has
+  no scheduler config or its config has no `shift` key; validation silently
+  skips a loaded scheduler module that exposes no shift, so neither case can be
+  verified.
 - **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
 - **Velocity is data-ward**: the plugin negates the transformer output so the
   base conversion `x0 = x_t - sigma * pred_noise` is exactly
@@ -705,8 +706,9 @@ checkpoints in a separate process. TDM rejects a
 scheduler configs at `training.model_path` (default
 `models.student.init_from`) when the method is constructed, and the
 validation callback repeats that check at the final step as a backstop when
-the loaded scheduler exposes a shift. As at startup, a checkpoint missing a
-scheduler config or a `shift` key cannot be verified.
+the loaded scheduler exposes a shift. Construction warns when a checkpoint is
+missing a scheduler config or a `shift` key; that case cannot be verified, and
+validation silently skips it.
 Validation sets the `decode_on_all_ranks` batch flag, so every data-parallel
 rank decodes and saves the media for its own sample instead of only the global
 output rank.
