@@ -1,0 +1,132 @@
+# Pika H3 Flex FL2VA stage 2: adapt the stage-1 NVFP4 QAD student to dense FP4 attention.
+#
+# Same recipe, data and calibration as fl2va_nvfp4_qad.yaml, starting from that run's best
+# checkpoint (method.init_student_dcp). Attention runs the FlashAttention-4
+# NVFP4 numerics (Q/K in NVFP4 per 16 channels, P and V in BF16) through the
+# dense FP4 emulator with straight-through gradients. Q/K are preconditioned
+# exactly before quantization (token-mean subtraction on K, then a shared
+# 128-point Hadamard rotation of Q and K), and blocks 45 and 49, the two most
+# FP4-sensitive attention layers, keep BF16 attention. Deploy with the same
+# settings: FASTVIDEO_NVFP4_FA4_QK_TRANSFORM=smooth_k+hadamard and
+# FASTVIDEO_NVFP4_FA4_BF16_BLOCKS=45,49 (or the example's --nvfp4-attention
+# flags).
+#
+# Data and model paths are placeholders.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.flex.MiniMaxH3FlexFL2VAModel
+    init_from: data/models/pika-flex-fl2va-merged
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    qad:
+      enabled: true
+      linears:
+        enabled: true
+        amax_json: examples/train/calibration/pika_h3_flex/amax-fl2va-balanced.json
+        amax_sha256: b690d1176702b399975d4e0e838784edc89584fda520abb94911e53f553e0daa
+        # Attention linears use the unit activation scale; only the FFN
+        # linears read their calibrated amax from this table.
+        attention: true
+        ffn: true
+        skip_blocks: []
+      fp4_attention:
+        enabled: true
+        qk_transform: smooth_k+hadamard
+        bf16_blocks: [45, 49]
+    data:
+      manifests:
+      - data/flex-fl2va/MANIFEST.jsonl
+      cases:
+      - t2va
+      - i2va
+      - l2va
+      - fl2va
+      per_group:
+        480p: 160
+        768p: 40
+      seed: 20261007
+      max_frames: 345
+      # FL2VA holds out rows from its own groups (eval_per_group top-up); finalize writes an empty
+      # manifest here, which the trainer still expects.
+      eval_manifest: data/flex-fl2va/eval-manifest.json
+      eval_resolutions:
+      - 480p
+      - 768p
+      eval_per_group:
+        480p: 2
+        768p: 1
+      eval_max_frames: 0
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.flex.MiniMaxH3FlexFL2VAModel
+    init_from: data/models/pika-flex-fl2va-merged
+    trainable: false
+    frozen_bf16: true
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.pdd_qad.OmniRefPDDQADMethod
+  # Stage-1 best checkpoint (its tagged student weights).
+  init_student_dcp: outputs/pika_flex_fl2va_nvfp4_qad/best
+  video_weight: 1.0
+  audio_weight: 1.0
+  rollout_fraction: 0.25
+  rollout_start_step: 20
+  # Half of the six forwards train per row, as OmniRef trains 4 of 8.
+  rungs_per_row: 3
+  eval_every: 15
+  full_eval_every: 30
+  patience: 2
+  fidelity_tolerance: 0.05
+  # Ignored when init_student_dcp is set (the student no longer starts from the teacher's weights).
+  require_bitwise_init: true
+  save_best: true
+  select_metric: score
+  eval_save_dir: outputs/pika_flex_fl2va_fp4attn_qad/samples
+  objective: output+recon
+  recon_lambda: 1.0
+  recon_normalize: step0
+  max_rollout_rows: 10
+  noise_floor_eval: true
+  step0_cache: outputs/pika_flex_fl2va_fp4attn_qad/step0_cache.json
+
+training:
+  distributed:
+    num_gpus: 12
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 12
+    pin_cpu_memory: false
+  data:
+    train_batch_size: 1
+    seed: 1234
+  optimizer:
+    learning_rate: 3.0e-06
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+    weight_decay: 0.0
+    lr_scheduler: cosine_with_min_lr
+    lr_warmup_steps: 10
+    min_lr_ratio: 0.3
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/pika_flex_fl2va_fp4attn_qad
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: ''
+  tracker:
+    trackers: [wandb]
+    project_name: pika-h3-flex-nvfp4
+    run_name: pika-flex-fl2va-fp4attn-qad
+  model:
+    enable_gradient_checkpointing_type: full
+  dit_precision: fp32
+  vsa_sparsity: 0.0
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline: {}

@@ -254,25 +254,42 @@ def _layout_for(meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torc
     return layout
 
 
+def _prequantized_input_key(method: Any, linear: Any) -> tuple[Any, ...] | None:
+    """Key for linears that can share one pre-quantized input: unit-scale NVFP4, or FP8 by granularity."""
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    if type(method) is NVFP4QuantizeMethod:
+        if method.wants_prequantized_input() and method.uses_unit_activation_scale(linear):
+            return ("nvfp4", )
+        return None
+    if type(method) is FP8QuantizeMethod:
+        return ("fp8", method.granularity)
+    return None
+
+
 def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
     """Share compatible FP8 preparation or unit-scale NVFP4 activation quantization.
 
     Calibrated or dynamic NVFP4 activation scales retain independent preparation.
     """
-    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
-    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
-
     methods = [getattr(linear, "quant_method", None) for linear in linears]
-    if any(m is None for m in methods):  # LoRA wrappers keep quant_method on base_layer.
-        return [linear(x)[0] for linear in linears]
-    same_nvfp4 = all(type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input()
-                     and m.uses_unit_activation_scale(linear)
-                     for m, linear in zip(methods, linears, strict=True))
-    same_fp8 = all(type(m) is FP8QuantizeMethod and m.granularity == methods[0].granularity for m in methods)
-    if not (same_nvfp4 or same_fp8):
-        return [linear(x)[0] for linear in linears]
-    pre = methods[0].quantize_input(x)
-    return [m.apply(linear, x, linear.bias, pre_quantized=pre) for m, linear in zip(methods, linears, strict=True)]
+    keys = [
+        _prequantized_input_key(m, linear) if m is not None else None
+        for m, linear in zip(methods, linears, strict=True)
+    ]
+    outputs: list[torch.Tensor | None] = [None] * len(linears)
+    groups: dict[tuple[Any, ...], list[int]] = {}
+    for index, key in enumerate(keys):
+        if key is None:
+            outputs[index] = linears[index](x)[0]
+        else:
+            groups.setdefault(key, []).append(index)
+    for indices in groups.values():
+        pre = methods[indices[0]].quantize_input(x)
+        for index in indices:
+            outputs[index] = methods[index].apply(linears[index], x, linears[index].bias, pre_quantized=pre)
+    return outputs  # type: ignore[return-value]
 
 
 def _shared_qkv_gate_scale(attn: Any, x: torch.Tensor) -> torch.Tensor | None:
@@ -488,9 +505,11 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
     with STAGES.span("tile_input"):
         x_tiles = layout.gather_in(hidden_states)[:, :logical]
+    gate_linear = attn.to_gate_compress if attn.to_gate_compress is not None and attn._gate_active() else None
+    projections = (attn.to_q, attn.to_k, attn.to_v) + ((gate_linear, ) if gate_linear is not None else ())
     with STAGES.span("qkv_proj"):
-        query, key, value = (t.unflatten(-1, (heads, dim))
-                             for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), x_tiles))
+        query, key, value, *gate_out = _shared_input_projections(projections, x_tiles)
+        query, key, value = (t.unflatten(-1, (heads, dim)) for t in (query, key, value))
     with STAGES.span("qknorm_rope"):
         cos, sin = layout.cos[:logical], layout.sin[:logical]
         if use_fused_rope:
@@ -500,11 +519,8 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
         else:
             query = attn._apply_rotary_emb(attn.norm_q(query), (cos, sin))
             key = attn._apply_rotary_emb(attn.norm_k(key), (cos, sin))
-    gate = None
-    if attn.to_gate_compress is not None and attn._gate_active():
-        with STAGES.span("gate_proj"):
-            gate, _ = attn.to_gate_compress(x_tiles)
-            gate = gate.unflatten(-1, (heads, dim))
+    gate = gate_out[0].unflatten(-1, (heads, dim)) if gate_out else None
+    del gate_out
     capture_root = envs.FASTVIDEO_H3_CAPTURE_QKV.get()
     if capture_root and attn._layer_idx in (0, 20, 41):
         from pathlib import Path
@@ -886,10 +902,15 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
         layout = _SPTileLayout(meta, rank, local_rows)
         meta._h3_fp4_sp_layout = layout  # type: ignore[attr-defined]
 
+    gate_linear = attn.to_gate_compress if attn.to_gate_compress is not None and attn._gate_active() else None
+    projections = (attn.to_q, attn.to_k, attn.to_v) + ((gate_linear, ) if gate_linear is not None else ())
     with STAGES.span("qkv_proj_rope"):
         shared = _shared_qkv_gate_projections(attn, hidden_states, pre_quantized=pre_quantized)
+        gate_out: list[torch.Tensor] = []
         if shared is None:
-            projected = _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), hidden_states)
+            # Without a shared packed input, the gate still shares FP8/unit-scale preparation with QKV.
+            projected = _shared_input_projections(projections, hidden_states)
+            projected, gate_out = projected[:3], projected[3:]
             gate_pre = None
         else:
             projected, gate_pre = shared
@@ -912,7 +933,9 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
     def project_gate() -> None:
         nonlocal gate
         with STAGES.span("gate_proj"):
-            if gate_pre is None:
+            if gate_out:
+                gate = gate_out[0]
+            elif gate_pre is None:
                 gate, _ = attn.to_gate_compress(hidden_states)
             else:
                 linear = attn.to_gate_compress

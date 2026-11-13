@@ -211,11 +211,11 @@ def test_quant_gemm_env_selector_and_validation(env_overrides, quant_gemm_mode_r
         set_quant_gemm_mode("bogus")
 
 
-def test_unset_pipeline_quant_gemm_keeps_the_environment(monkeypatch) -> None:
+def test_unset_pipeline_quant_gemm_keeps_the_environment(env_overrides) -> None:
     from fastvideo.mlx_runtime import fastwan
     from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
 
-    monkeypatch.setenv("FASTVIDEO_MLX_QUANT_GEMM", "qmm")
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_QUANT_GEMM.override("qmm"))
     pipeline = object.__new__(MiniMaxH3MLXPipeline)
     pipeline._apply_quant_gemm(None)
     try:

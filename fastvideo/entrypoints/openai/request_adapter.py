@@ -9,9 +9,12 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
+from fastvideo.entrypoints.openai.lora import LoraRequestError, LoraRuntime, LoraSelection
 from fastvideo.entrypoints.openai.media_policy import (
     MediaPolicy,
     MediaPolicyError,
+    data_url_media_type,
+    decode_data_url,
     discard,
     fetch_media,
     resolve_local_media,
@@ -41,7 +44,27 @@ class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
 
 
-_VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"})
+OPEN_H3_REGENERATE_2K_FAMILY = "open_h3_regenerate_2k"
+OPEN_H3_REGENERATE_2K_SIZE = (2560, 1440)
+OPEN_H3_REGENERATE_2K_NUM_FRAMES = 124
+
+_MEDIA_SUFFIXES = {
+    "video": frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}),
+    "audio": frozenset({".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".webm"}),
+}
+_DEFAULT_SUFFIXES = {"video": ".mp4", "audio": ".wav"}
+# Media types whose subtype is not already the file suffix; decoding probes content, so this is only a hint.
+_DATA_URL_SUFFIXES = {
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+    "video/x-msvideo": ".avi",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/wave": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/x-flac": ".flac",
+}
 
 
 def _as_list(value: Any | list[Any] | None) -> list[Any]:
@@ -93,30 +116,63 @@ def _local_media(source: str, policy: MediaPolicy) -> str:
         raise RequestAdaptationError(str(error)) from error
 
 
-async def _materialize_video(source: str,
+async def _decode_data_media(source: str, target_base: str, kind: str, *, max_bytes: int | None) -> str:
+    try:
+        media_type = data_url_media_type(source)
+        if media_type.partition("/")[0] != kind:
+            raise MediaPolicyError(f"{kind.capitalize()} references need a data:{kind}/... URL, got media type "
+                                   f"{media_type or 'none'!r}.")
+        subtype_suffix = f".{media_type.partition('/')[2]}"
+        suffix = _DATA_URL_SUFFIXES.get(media_type, subtype_suffix)
+        target = f"{target_base}{suffix if suffix in _MEDIA_SUFFIXES[kind] else _DEFAULT_SUFFIXES[kind]}"
+        decoding = asyncio.ensure_future(
+            asyncio.to_thread(decode_data_url,
+                              source,
+                              target,
+                              max_bytes=get_media_reference_max_bytes() if max_bytes is None else max_bytes))
+        try:
+            await asyncio.shield(decoding)
+        except asyncio.CancelledError:
+            # The decoding thread cannot be interrupted; remove its file once it has finished writing.
+            def remove(done: asyncio.Future) -> None:
+                if not done.cancelled():
+                    done.exception()  # mark it retrieved; the request is already gone
+                discard(target)
+
+            decoding.add_done_callback(remove)
+            raise
+    except MediaPolicyError as error:
+        raise RequestAdaptationError(str(error)) from error
+    return target
+
+
+async def _materialize_media(source: str,
                              target_base: str,
+                             kind: str,
                              *,
                              max_bytes: int | None = None,
-                             policy: MediaPolicy | None = None) -> str:
+                             policy: MediaPolicy | None = None) -> tuple[str, bool]:
+    """Return a local file for a video or audio reference and whether this request created it."""
     policy = get_media_policy() if policy is None else policy
     source = source.strip()
     if not source:
-        raise RequestAdaptationError("Video references must not be empty.")
-    if source.lower().startswith(("http://", "https://")):
+        raise RequestAdaptationError(f"{kind.capitalize()} references must not be empty.")
+    # Only the scheme is lower-cased: copying a whole data: URL would double its memory.
+    if source[:8].lower().startswith(("http://", "https://")):
         suffix = os.path.splitext(urlparse(source).path)[1].lower()
-        if suffix not in _VIDEO_SUFFIXES:
-            suffix = ".mp4"
+        if suffix not in _MEDIA_SUFFIXES[kind]:
+            suffix = _DEFAULT_SUFFIXES[kind]
         target = f"{target_base}{suffix}"
         try:
             await _download_media(source, target, max_bytes=max_bytes, policy=policy)
         except RequestAdaptationError:
             raise
         except Exception as error:
-            raise RequestAdaptationError(f"Unable to fetch video reference: {error}") from error
-        return target
-    if source.lower().startswith("data:"):
-        raise RequestAdaptationError("Data video references are not supported; provide a URL or local path.")
-    return _local_media(source, policy)
+            raise RequestAdaptationError(f"Unable to fetch {kind} reference: {error}") from error
+        return target, True
+    if source[:5].lower() == "data:":
+        return await _decode_data_media(source, target_base, kind, max_bytes=max_bytes), True
+    return _local_media(source, policy), False
 
 
 async def _materialize_image_url(source: str, target_base: str, *, max_bytes: int | None, policy: MediaPolicy) -> str:
@@ -163,6 +219,8 @@ async def prepare_reference_media(
                 local_path = track(await save_base64_image_to_path(source, target))
             except Exception as error:
                 raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
+        elif source[:5].lower() == "data:":
+            raise RequestAdaptationError("Image references need a data:image/... URL.")
         elif is_remote(source):
             local_path = track(await _materialize_image_url(source, target, max_bytes=max_bytes, policy=policy))
         else:
@@ -172,6 +230,14 @@ async def prepare_reference_media(
         except Exception as error:
             raise RequestAdaptationError(f"Unable to decode image reference: {error}") from error
         return local_path
+
+    async def materialize_clip(source: str, name: str, kind: str) -> str:
+        local_path, created_here = await _materialize_media(source,
+                                                            os.path.join(uploads_dir, f"{request_id}_{name}"),
+                                                            kind,
+                                                            max_bytes=max_bytes,
+                                                            policy=policy)
+        return track(local_path) if created_here else local_path
 
     try:
         index = 0
@@ -191,29 +257,15 @@ async def prepare_reference_media(
 
         for index, reference in enumerate(_as_list(request.video_reference)):
             if isinstance(reference, UrlVideoReference):
-                remote = is_remote(reference.video_url)
-                reference.video_url = await _materialize_video(reference.video_url,
-                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"),
-                                                               max_bytes=max_bytes,
-                                                               policy=policy)
-                if remote:
-                    track(reference.video_url)
+                reference.video_url = await materialize_clip(reference.video_url, f"video_{index}", "video")
         if request.video_path:
-            remote = is_remote(request.video_path)
-            request.video_path = await _materialize_video(request.video_path,
-                                                          os.path.join(uploads_dir, f"{request_id}_video_path"),
-                                                          max_bytes=max_bytes,
-                                                          policy=policy)
-            if remote:
-                track(request.video_path)
+            request.video_path = await materialize_clip(request.video_path, "video_path", "video")
         if request.video_url:
-            remote = is_remote(request.video_url)
-            request.video_url = await _materialize_video(request.video_url,
-                                                         os.path.join(uploads_dir, f"{request_id}_video_url"),
-                                                         max_bytes=max_bytes,
-                                                         policy=policy)
-            if remote:
-                track(request.video_url)
+            request.video_url = await materialize_clip(request.video_url, "video_url", "video")
+        if request.continuation_video:
+            request.continuation_video = await materialize_clip(request.continuation_video, "continuation", "video")
+        for index, reference in enumerate(_as_list(request.audio_reference)):
+            reference.audio_url = await materialize_clip(reference.audio_url, f"audio_{index}", "audio")
     except BaseException:
         # Includes cancellation, so a disconnected client leaves no downloaded inputs behind.
         discard_materialized_media(created)
@@ -299,8 +351,11 @@ def validate_model_and_lora(
     request: VideoGenerationRequest,
     args: FastVideoArgs,
     served_model_name: str,
-) -> None:
-    """Validate vLLM-style model and LoRA selectors against startup state.
+    lora_runtime: LoraRuntime | None = None,
+) -> LoraSelection | None:
+    """Validate vLLM-style model and LoRA selectors; return the per-request selection when an allow-list is set.
+
+    With a ``lora_runtime`` allow-list, ``lora.name`` must be an allow-listed id and ``lora.scale`` its strength.
 
     FastVideo's published FastH3 adapters include dense replacement tensors in
     addition to low-rank factors. Those tensors are applied while the model is
@@ -309,8 +364,14 @@ def validate_model_and_lora(
     """
     validate_served_model_name(request.model, args, served_model_name)
 
+    if lora_runtime is not None:
+        try:
+            return lora_runtime.resolve(request.lora)
+        except LoraRequestError as error:
+            raise RequestAdaptationError(str(error)) from error
+
     if request.lora is None:
-        return
+        return None
     if not args.lora_path:
         raise RequestAdaptationError(
             "This server has no startup LoRA. Configure generator.pipeline.components.lora_path before using "
@@ -335,6 +396,7 @@ def validate_model_and_lora(
         if not math.isclose(scale_value, args.lora_strength, rel_tol=0.0, abs_tol=1e-8):
             raise RequestAdaptationError(
                 f"Requested LoRA scale {scale_value:g} does not match startup strength {args.lora_strength:g}.")
+    return None
 
 
 def _apply_reference_inputs(
@@ -371,6 +433,8 @@ def _apply_reference_inputs(
         references = [MiniMaxH3Reference(source=source, media_type="image") for source in images]
         references.extend(MiniMaxH3Reference(source=source, media_type="video") for source in videos)
         references.extend(MiniMaxH3Reference(source=source, media_type="audio") for source in audios)
+        if request.continuation_video:
+            references.append(MiniMaxH3Reference(source=request.continuation_video, media_type="continuation"))
         if references:
             try:
                 kwargs["references"] = validate_references(references)
@@ -380,6 +444,16 @@ def _apply_reference_inputs(
 
     if request.task is not None and model_family != "minimax_h3":
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
+    if request.continuation_video:
+        raise RequestAdaptationError("continuation_video requires a MiniMax-H3 server configured with "
+                                     "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
+
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if len(videos) != 1 or images or audios:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K takes exactly one video_reference (the 768P draft) "
+                                         "and no image or audio references.")
+        kwargs["video_path"] = videos[0]
+        return
 
     if model_family == "minimax_h3" and (videos or audios):
         raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
@@ -406,9 +480,10 @@ def build_generation_request(
     served_model_name: str,
     output_dir: str,
     default_request: GenerationRequest | None = None,
+    lora_runtime: LoraRuntime | None = None,
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
-    validate_model_and_lora(request, args, served_model_name)
+    validate_model_and_lora(request, args, served_model_name, lora_runtime)
     workload_type = getattr(args, "workload_type", "")
     workload_value = str(getattr(workload_type, "value", workload_type) or "")
     is_audio = workload_value.endswith("2a")
@@ -521,6 +596,16 @@ def build_generation_request(
         raise RequestAdaptationError(f"width must be a positive integer, got {width!r}")
     if height is not None and (not isinstance(height, int) or height <= 0):
         raise RequestAdaptationError(f"height must be a positive integer, got {height!r}")
+
+    if model_family == OPEN_H3_REGENERATE_2K_FAMILY:
+        if (width, height) not in ((None, None), OPEN_H3_REGENERATE_2K_SIZE):
+            raise RequestAdaptationError("Open-H3-Regenerate-2K always renders 2560x1440; omit size/width/height "
+                                         f"or pass 2560x1440, got {width}x{height}.")
+        if kwargs.get("num_frames", OPEN_H3_REGENERATE_2K_NUM_FRAMES) != OPEN_H3_REGENERATE_2K_NUM_FRAMES:
+            raise RequestAdaptationError("Open-H3-Regenerate-2K regenerates the draft's first 121 frames (24 fps); "
+                                         "omit seconds and num_frames.")
+        if kwargs["fps"] != 24:
+            raise RequestAdaptationError(f"Open-H3-Regenerate-2K requires fps=24, got {kwargs['fps']}.")
 
     if model_family == "minimax_h3":
         from fastvideo.pipelines.basic.minimax_h3.packing import (

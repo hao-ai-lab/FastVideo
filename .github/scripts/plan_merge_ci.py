@@ -132,6 +132,11 @@ class FamilyCoverage:
 
 FAMILY_COVERAGE = (
     FamilyCoverage(
+        re.compile(r"(^|[/_.-])qwen[_-]?image[_-]?2[._-]?1([/_.-]|$)"),
+        ("test_qwen_image21.py", ),
+        ("test_qwen_image21_similarity.py", ),
+    ),
+    FamilyCoverage(
         re.compile(r"(^|[/_.-])flux[_-]?2([/_.-]|$)"),
         ("test_flux2_klein.py", ),
         ("test_flux2_similarity.py", ),

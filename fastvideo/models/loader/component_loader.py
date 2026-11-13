@@ -1079,7 +1079,7 @@ class VAELoader(ComponentLoader):
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
         # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
-        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE"}
+        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE", "AutoencoderKLQwenImage21"}
         vae.load_state_dict(loaded, strict=strict_load)
         del loaded
         if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
@@ -1290,6 +1290,14 @@ class TransformerLoader(ComponentLoader):
             if not isinstance(dit_config, MiniMaxH3Config):
                 raise ValueError("h3_vsa_fp4 is only supported by MiniMax-H3")
             dit_config.vsa_fp4 = dict(fastvideo_args.h3_vsa_fp4)
+        token_reduction = getattr(fastvideo_args, "h3_token_reduction", None)
+        if token_reduction and token_reduction.get("enabled"):
+            from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+            from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
+            if not isinstance(dit_config, MiniMaxH3Config):
+                raise ValueError("h3_token_reduction is only supported by MiniMax-H3")
+            # The checkpoint's own config fixes the DiT depth; reject intervals past it before any weight loads.
+            MiniMaxH3TokenReductionSchedule.from_options(token_reduction, num_blocks=dit_config.arch_config.num_layers)
 
         # Generator-only QAT for DMD distillation: the teacher (real_score) and
         # critic (fake_score) transformers load with this flag set and must stay
@@ -1710,6 +1718,7 @@ class PipelineComponentLoader:
             component_model_path,
         )
 
+        module_name = module_name.rsplit("/", 1)[-1]
         # Get the appropriate loader for this module type
         loader = ComponentLoader.for_module_type(module_name, transformers_or_diffusers)
 
