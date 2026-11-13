@@ -1467,14 +1467,17 @@ def get_default_preset(model_path: str) -> str | None:
     return config_info.default_preset
 
 
-def get_preset_selection(model_path: str) -> tuple[str | None, str | None]:
+def get_preset_selection(model_path: str, *, allow_remote: bool = True) -> tuple[str | None, str | None]:
     """Return ``(default_preset, model_family)`` for a model path.
 
     Single-lookup variant of :func:`get_default_preset` +
     :func:`get_model_family`; callers that need both should prefer this
-    to avoid walking the registry twice.
+    to avoid walking the registry twice. With ``allow_remote=False`` the
+    family comes only from the registry and local directories, so an
+    unresolved path returns ``(None, None)`` instead of downloading a Hub
+    manifest.
     """
-    config_info = _get_config_info(model_path, raise_on_missing=False)
+    config_info = _get_config_info(model_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         return None, None
     return config_info.default_preset, config_info.model_family

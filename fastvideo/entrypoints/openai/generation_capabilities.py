@@ -2,6 +2,10 @@
 """Output geometry advertised by a loaded pipeline, independent of device capacity."""
 from typing import Any
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 def video_output_capabilities(args: Any) -> dict[str, Any] | None:
     """Return known output constraints, or None for an unregistered family.
@@ -11,7 +15,12 @@ def video_output_capabilities(args: Any) -> dict[str, Any] | None:
     """
     from fastvideo.registry import get_preset_selection
 
-    _, family = get_preset_selection(args.model_path)
+    try:
+        # Resolve locally: model discovery must never gate /v1/model_info on a Hub lookup.
+        _, family = get_preset_selection(args.model_path, allow_remote=False)
+    except Exception as exc:  # discovery is best-effort; report unknown instead of failing the request
+        logger.warning("Could not resolve output capabilities for %r: %s", args.model_path, exc)
+        return None
     if family not in {"minimax_h3", "pika_h3_flex"}:
         return None
 
@@ -37,13 +46,6 @@ def video_output_capabilities(args: Any) -> dict[str, Any] | None:
                 height, width = canvas_for_aspect(aspect, resolution)
             else:
                 height, width = resolve_canvas_size(aw, ah, short_edge=short_edge, max_pixels=max_pixels)
-                # Nearest-lattice rounding can exceed the area cap. These are recommendations for the
-                # explicit width/height path, whose adapter enforces the cap before admission.
-                while width * height > max_pixels:
-                    if width >= height:
-                        width -= MINIMAX_H3_CANVAS_MULTIPLE
-                    else:
-                        height -= MINIMAX_H3_CANVAS_MULTIPLE
             sizes[aspect][resolution] = [width, height]
     return {
         "schema_version": 1,

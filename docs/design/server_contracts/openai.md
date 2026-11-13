@@ -16,6 +16,8 @@ requests. HTTP handling and job polling remain asynchronous.
 (including FastH3 and Omni) and Pika H3 Flex. Version 1 reports the 24 fps
 frame grid, integer duration choices from 5 to 15 seconds, and recommended
 480p/768p width/height pairs by aspect ratio. Other families return `null`.
+The family is resolved from the registry and local checkpoints only, so
+discovery never downloads a Hub manifest.
 These values describe model geometry, independently of the serve file's
 default request. `recommended_frame_sizes` is not an exhaustive canvas list,
 and `hardware_capacity_verified: false` means the response does not establish
