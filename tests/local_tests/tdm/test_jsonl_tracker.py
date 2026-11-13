@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from fastvideo.training.trackers import initialize_trackers
 
 
@@ -68,6 +70,27 @@ def test_jsonl_tracker_writes_metrics_artifacts_and_files(tmp_path: Path) -> Non
     assert (tmp_path / "tracker" / "config.json").is_file()
     saved_run = tmp_path / "tracker" / "files" / "run.yaml"
     assert saved_run.read_text(encoding="utf-8") == "training: {}\n"
+
+
+def test_jsonl_tracker_saves_array_videos_to_files(tmp_path: Path) -> None:
+    """Legacy pipelines pass frame arrays; JSONL must persist a real artifact."""
+    tracker = initialize_trackers(
+        ["jsonl"],
+        experiment_name="unused",
+        config=None,
+        log_dir=str(tmp_path / "tracker"),
+    )
+    frames = np.zeros((2, 3, 16, 16), dtype=np.uint8)
+
+    video = tracker.video(frames, caption="prompt", fps=4)
+    tracker.log_artifacts({"validation": [video]}, step=3)
+
+    saved_path = Path(video["path"])
+    assert saved_path.is_file()
+    assert saved_path.parent == tmp_path / "tracker" / "files"
+    assert video["fps"] == 4.0
+    artifact_rows = _read_jsonl(tmp_path / "tracker" / "artifacts.jsonl")
+    assert artifact_rows[0]["artifacts"]["validation"][0]["path"] == str(saved_path)
 
 
 class _FakeWandbRun:

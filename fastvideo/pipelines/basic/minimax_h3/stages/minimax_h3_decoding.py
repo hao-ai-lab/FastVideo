@@ -56,16 +56,20 @@ def _decode_participation(
     ``parallel`` is only true when every rank in the active group will run the
     decode body, because its collectives require group-uniform participation.
     Training validation sets ``decode_all_ranks`` because every rank holds a
-    distinct sample that needs its own media.
+    distinct sample that needs its own media; that path always runs serially on
+    every rank so ranks outside the output group also decode.
     """
     if not model_parallel_is_initialized():
         return None, True, False
     sp_group = get_sp_group()
     is_output_rank = h3_is_output_worker(fastvideo_args)
+    if decode_all_ranks:
+        # Training validation gives every rank its own sample, and parallel
+        # decode assembles only on the output rank, so each rank takes the
+        # serial decode path.
+        return sp_group, True, False
     if bool(want_parallel) and sp_group.world_size > 1:
         return sp_group, is_output_rank, h3_output_worker_rank(fastvideo_args) in sp_group.ranks
-    if decode_all_ranks:
-        return sp_group, True, False
     return sp_group, is_output_rank, False
 
 

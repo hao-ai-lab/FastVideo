@@ -7,10 +7,11 @@ tool covers the missing axis on the modular validation layout.
 
 The validation callback shards the caption list across sequence-parallel
 groups and pads the list to a multiple of that degree (see
-``fastvideo/dataset/validation_dataset.py``); rank ``r`` therefore saves the
-``video_i`` sample of the padded row ``r * rows_per_group + i``. The tool
-rebuilds that mapping from the same caption file, then reports, per
-validation step and per caption:
+``fastvideo/dataset/validation_dataset.py``); the leader of SP group ``g``
+(global rank ``g * sp_size``) therefore saves the ``video_i`` sample of the
+padded row ``g * rows_per_group + i``. The tool rebuilds that mapping from the
+same caption file, then reports, per validation step, sampling schedule, and
+caption:
 
 - frame statistics (brightness/contrast/gradient sharpness), and
 - a within-caption spread over the repeated rows (each record may carry its
@@ -93,11 +94,19 @@ def _padded_rows(rows: list[str], num_groups: int) -> list[str]:
     return rows + rows[: num_groups - remainder]
 
 
+def _row_index(rank: int, video_index: int, sp_size: int, rows_per_group: int) -> int:
+    """Map an SP-group leader's global rank to its padded caption row."""
+    if rank % sp_size != 0:
+        raise ValueError(f"rank {rank} is not an SP group leader for sp_size={sp_size}")
+    return (rank // sp_size) * rows_per_group + video_index
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--captions-json", required=True)
     parser.add_argument("--num-sp-groups", type=int, default=4)
+    parser.add_argument("--sp-size", type=int, default=1)
     parser.add_argument("--num-train-prompts", type=int, default=4)
     parser.add_argument("--descriptor-size", type=int, default=32)
     parser.add_argument("--label", default="")
@@ -108,28 +117,36 @@ def main() -> None:
     if not run_dir.is_dir():
         raise FileNotFoundError(run_dir)
 
+    if args.num_sp_groups <= 0 or args.sp_size <= 0:
+        raise ValueError("--num-sp-groups and --sp-size must be positive")
+
     rows = _padded_rows(_load_caption_rows(Path(args.captions_json)), args.num_sp_groups)
     rows_per_group = len(rows) // args.num_sp_groups
 
-    per_step: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    per_key: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
     for path in sorted(run_dir.glob("**/*.mp4")):
         match = VALIDATION_PATTERN.search(path.name)
         if match is None:
             continue
         step = int(match.group(1))
+        inference_steps = int(match.group(2))
         rank = int(match.group(3))
         video_index = int(match.group(4))
-        row = rank * rows_per_group + video_index
+        group = rank // args.sp_size
+        if group >= args.num_sp_groups:
+            raise ValueError(f"{path.name}: SP group {group} outside {args.num_sp_groups} groups")
+        row = _row_index(rank, video_index, args.sp_size, rows_per_group)
         if row >= len(rows):
             raise ValueError(f"{path.name}: row {row} outside {len(rows)} padded rows")
-        per_step[step].append({
+        per_key[(step, inference_steps)].append({
             "caption": rows[row],
             "rank": rank,
+            "group": group,
             "video_index": video_index,
             "path": path,
         })
 
-    if not per_step:
+    if not per_key:
         raise ValueError(f"no validation videos matched under {run_dir}")
 
     report: dict[str, Any] = {
@@ -137,6 +154,7 @@ def main() -> None:
         "label": args.label,
         "captions_json": str(args.captions_json),
         "num_sp_groups": args.num_sp_groups,
+        "sp_size": args.sp_size,
         "rows_per_group": rows_per_group,
         "steps": {},
     }
@@ -146,8 +164,8 @@ def main() -> None:
     train_sharp: list[float] = []
     heldout_sharp: list[float] = []
 
-    for step in sorted(per_step):
-        entries = per_step[step]
+    for step, inference_steps in sorted(per_key):
+        entries = per_key[(step, inference_steps)]
         by_caption: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for entry in entries:
             by_caption[entry["caption"]].append(entry)
@@ -195,13 +213,16 @@ def main() -> None:
         cross_spread = float(np.mean(cross_pairs)) if cross_pairs else float("nan")
         within_all = [record["within_spread"] for record in caption_records.values()]
         mean_within = float(np.mean(within_all))
-        report["steps"][str(step)] = {
+        report["steps"][f"{step}_inference_steps_{inference_steps}"] = {
+            "step": step,
+            "inference_steps": inference_steps,
             "captions": caption_records,
             "mean_within_spread": mean_within,
             "cross_spread": cross_spread,
             "spread_ratio": (mean_within / cross_spread) if cross_spread else float("nan"),
         }
-        print(f"step={step:06d} mean_within={mean_within:.5f} cross={cross_spread:.5f} "
+        print(f"step={step:06d} inference_steps={inference_steps:03d} "
+              f"mean_within={mean_within:.5f} cross={cross_spread:.5f} "
               f"ratio={(mean_within / cross_spread):.4f} "
               f"train_sharp={np.mean(step_train_sharp):.2f} "
               f"heldout_sharp={np.mean(step_heldout_sharp):.2f}")

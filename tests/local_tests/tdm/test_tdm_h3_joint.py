@@ -38,6 +38,15 @@ def test_h3_sigma_grid_endpoints_and_closed_form() -> None:
     assert bool(torch.all(audio[1:-1] < video[1:-1]))
 
 
+def test_h3_sigma_grid_honors_shift_override() -> None:
+    """Configured scheduler shifts replace the checkpoint defaults."""
+    labels = torch.tensor([0.0, 500.0, 1000.0])
+    overridden = tdm_h3_sigma_grid(labels, "video", shift=6.0)
+    u = labels / 1000.0
+    expected = 6.0 * u / (1.0 + 5.0 * u)
+    assert torch.allclose(overridden, expected)
+
+
 def test_h3_model_time_is_one_minus_sigma() -> None:
     """H3's model timestep convention is ``1 - sigma`` in ``[0, 1]``."""
     sigma = torch.tensor([0.0, 0.25, 0.75, 1.0])

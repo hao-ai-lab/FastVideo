@@ -298,9 +298,10 @@ class TestH3ValidationContract:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A record seed overrides the training seed; absent, the training seed is used."""
+        """A record seed controls its generator; absent, the shared generator is used."""
         cb = _make_callback()
         cb.seed = 1000
+        cb.validation_random_generator = torch.Generator(device="cpu").manual_seed(1000)
         cb.training_config = SimpleNamespace(
             data=SimpleNamespace(
                 num_height=64,
@@ -333,6 +334,13 @@ class TestH3ValidationContract:
 
         assert with_seed.seed == 7
         assert without_seed.seed == 1000
+        assert with_seed.generator is not cb.validation_random_generator
+        assert without_seed.generator is cb.validation_random_generator
+        expected = torch.Generator(device="cpu").manual_seed(7)
+        assert torch.equal(
+            torch.randn(4, generator=with_seed.generator),
+            torch.randn(4, generator=expected),
+        )
 
     def test_prepare_validation_batch_requests_decode_on_all_ranks(
         self,

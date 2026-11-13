@@ -90,3 +90,15 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
     monkeypatch.setattr(nvfp4, "freeze_nvfp4_linears_on_device", freeze)
     monkeypatch.setattr(pinned_offload, "unload", unload)
     decoding.MiniMaxH3VideoDecodingStage(vae).forward(batch, args)
+
+
+def test_decode_all_ranks_takes_precedence_over_parallel_decode(monkeypatch):
+    """Validation ranks outside the output group must still decode their samples."""
+    sp_group = SimpleNamespace(world_size=8, ranks=list(range(8, 16)))
+    monkeypatch.setattr(decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(decoding, "get_sp_group", lambda: sp_group)
+    monkeypatch.setattr(decoding, "h3_is_output_worker", lambda args: False)
+    monkeypatch.setattr(decoding, "h3_output_worker_rank", lambda args: 0)
+
+    assert decoding._decode_participation(SimpleNamespace(), True, decode_all_ranks=True) == (sp_group, True, False)
+    assert decoding._decode_participation(SimpleNamespace(), True) == (sp_group, False, False)

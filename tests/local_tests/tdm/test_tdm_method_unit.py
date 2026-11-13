@@ -600,10 +600,8 @@ def test_tdm_rejects_invalid_denoising_step_schedules(
     steps: list[int],
     match: str,
 ) -> None:
-    method, _, _ = _build_method(method_overrides={"tdm_denoising_steps": steps})
-
     with pytest.raises(ValueError, match=match):
-        method._get_denoising_step_list(torch.device("cpu"))
+        _build_method(method_overrides={"tdm_denoising_steps": steps})
 
 
 def test_tdm_respects_generator_update_interval() -> None:
@@ -1052,6 +1050,42 @@ def test_tdm_critic_backward_restores_forward_attention_metadata(
 
     assert len(captured) == 1
     assert captured[0][1] is sparse_metadata
+
+
+def test_tdm_student_backward_restores_dense_attention_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dense roles restore ``attn_metadata`` when no sparse view exists."""
+    method, student, _ = _build_method()
+    dense_metadata = object()
+    original_prepare_batch = student.prepare_batch
+
+    def prepare_with_metadata(*args: Any, **kwargs: Any) -> TrainingBatch:
+        batch = original_prepare_batch(*args, **kwargs)
+        batch.attn_metadata = dense_metadata
+        batch.attn_metadata_vsa = None
+        return batch
+
+    captured: list[Any] = []
+    original_backward = student.backward
+
+    def recording_backward(loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+        captured.append(ctx)
+        original_backward(loss, ctx, grad_accum_rounds=grad_accum_rounds)
+
+    monkeypatch.setattr(student, "prepare_batch", prepare_with_metadata)
+    monkeypatch.setattr(student, "backward", recording_backward)
+
+    method.managed_train_step(iter([{}]), iteration=0)
+
+    assert len(captured) == 1
+    assert captured[0][1] is dense_metadata
+
+
+def test_tdm_rejects_schedule_with_empty_trajectory_interval() -> None:
+    """A schedule whose final context interval has no positive label fails at startup."""
+    with pytest.raises(ValueError, match="empty noise interval"):
+        _build_method(method_overrides={"tdm_denoising_steps": [1000, 1]})
 
 
 def test_tdm_rejects_nonunit_guidance_for_h3_family(monkeypatch: pytest.MonkeyPatch) -> None:

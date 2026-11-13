@@ -111,7 +111,7 @@ def _prepare_video_array(data: Any) -> np.ndarray:
     if channels not in (1, 3, 4):
         raise ValueError(f"Video data must have 1, 3, or 4 channels; got {channels}")
     if video.dtype != np.uint8:
-        logger.warning("Converting video data to uint8 for SwanLab")
+        logger.warning("Converting video data to uint8 for tracker video output")
         video = video.astype(np.uint8)
 
     # Match wandb.Video's batch tiling so the same input has a familiar layout
@@ -537,11 +537,27 @@ class JsonlTracker(BaseTracker):
         fps: int | None = None,
         format: str | None = None,
     ) -> Any:
+        video_format = (format or "mp4").lower()
+        video_fps: float | int | None
+        if isinstance(data, str | os.PathLike):
+            path = os.path.abspath(os.fspath(data))
+            video_fps = fps
+        else:
+            frames = _prepare_video_array(data)
+            video_fps = _coerce_video_fps(fps)
+            file_descriptor, path = tempfile.mkstemp(suffix=f".{video_format}", dir=self._files_dir)
+            os.close(file_descriptor)
+            if video_format == "gif":
+                _write_gif(path, frames, video_fps)
+            else:
+                import imageio.v2 as imageio
+
+                imageio.mimsave(path, frames, fps=video_fps, format=video_format)
         return {
-            "path": os.path.abspath(str(data)),
+            "path": path,
             "caption": caption,
-            "fps": fps,
-            "format": format or "mp4",
+            "fps": video_fps,
+            "format": video_format,
         }
 
 

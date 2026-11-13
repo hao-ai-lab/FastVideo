@@ -100,11 +100,16 @@ def tdm_h3_shift(modality: str) -> float:
     raise ValueError(f"unknown H3 TDM modality: {modality!r}")
 
 
-def tdm_h3_sigma_grid(timesteps: torch.Tensor, modality: str) -> torch.Tensor:
+def tdm_h3_sigma_grid(
+    timesteps: torch.Tensor,
+    modality: str,
+    *,
+    shift: float | None = None,
+) -> torch.Tensor:
     """Map integer H3 trajectory labels to sigmas for one modality."""
-    shift = tdm_h3_shift(modality)
+    resolved_shift = tdm_h3_shift(modality) if shift is None else float(shift)
     u = timesteps.to(dtype=torch.float32) / float(_H3_TRAJECTORY_TIMESTEPS)
-    return shift * u / (1.0 + (shift - 1.0) * u)
+    return resolved_shift * u / (1.0 + (resolved_shift - 1.0) * u)
 
 
 def tdm_h3_model_timestep(sigma: torch.Tensor) -> torch.Tensor:
@@ -1181,7 +1186,13 @@ class MiniMaxH3Model(ModelBase):
         modality: str,
     ) -> torch.Tensor:
         """Map integer H3 trajectory labels to one modality's sigmas."""
-        return tdm_h3_sigma_grid(timesteps, modality)
+        if modality == "video":
+            shift = self.video_scheduler_shift
+        elif modality == "audio":
+            shift = self.audio_scheduler_shift
+        else:
+            raise ValueError(f"unknown H3 TDM modality: {modality!r}")
+        return tdm_h3_sigma_grid(timesteps, modality, shift=shift)
 
     def tdm_terminal_sigma(self, modality: str) -> torch.Tensor:
         """Pure noise sits at trajectory label ``T`` where sigma is ``1``."""

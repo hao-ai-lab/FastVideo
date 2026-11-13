@@ -310,6 +310,7 @@ class TDMMethod(DMD2Method):
             raise ValueError("MiniMax H3 TDM requires method.real_score_guidance_scale == 1.0 "
                              "because the model has no unconditional branch for CFG guidance")
         self._validate_wan_validation_shift()
+        self._validate_denoising_schedules()
 
     def _validate_wan_validation_shift(self) -> None:
         """Reject a Wan config whose validation cannot match the trained grid.
@@ -672,7 +673,7 @@ class TDMMethod(DMD2Method):
         forward used, because activation-checkpointed layers re-read it from
         the forward context during the recompute.
         """
-        if self._attn_kind_for(role) == "vsa":
+        if self._attn_kind_for(role) == "vsa" and batch.attn_metadata_vsa is not None:
             return batch.attn_metadata_vsa
         return batch.attn_metadata
 
@@ -832,10 +833,41 @@ class TDMMethod(DMD2Method):
             if not bool(torch.all(sigmas[:-1] > sigmas[1:] + 1e-6).item()):
                 raise ValueError("method.tdm_denoising_steps must map to strictly decreasing scheduler sigmas")
 
+        self._validate_context_intervals(steps, self._modalities[0])
         self._denoising_step_list = steps
         self._denoising_sigma_lists = sigmas_by_modality
         self._cached_schedule_index = self._active_schedule_index
         return steps
+
+    def _validate_context_intervals(self, labels: torch.Tensor, modality: str) -> None:
+        """Require a positive label in every interval the context sampler draws.
+
+        ``separate`` mode and ``use_randmid`` draw between adjacent trajectory
+        points, and the final point draws down to zero. A schedule such as
+        ``[1000, 1]`` leaves ``[0, 1)`` with no positive label, so reject it
+        before training instead of failing on the step that samples that point.
+        """
+        if not self._use_randmid and self._noise_interval_mode != "separate":
+            return
+        max_label = int(self.student.tdm_max_trajectory_label(modality))
+        candidates = torch.arange(max_label, 0, -1, device=labels.device)
+        next_labels = torch.cat((labels[1:], labels.new_zeros(1)))
+        for current, following in zip(labels, next_labels, strict=True):
+            if not bool(torch.any((candidates >= following) & (candidates < current)).item()):
+                raise ValueError("method.tdm_denoising_steps maps trajectory point "
+                                 f"{float(current):g} to the empty noise interval "
+                                 f"[{float(following):g}, {float(current):g}); no positive "
+                                 "step label exists between adjacent points")
+
+    def _validate_denoising_schedules(self) -> None:
+        """Resolve every ladder stage once so a bad schedule fails at startup."""
+        for index in range(len(self._step_schedules)):
+            self._active_schedule_index = index
+            self._get_denoising_step_list(torch.device("cpu"))
+        self._active_schedule_index = 0
+        self._denoising_step_list = None
+        self._denoising_sigma_lists = None
+        self._cached_schedule_index = None
 
     def _timestep_to_sigma(
         self,

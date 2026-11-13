@@ -1363,9 +1363,14 @@ class ValidationCallback(Callback):
         if self.guidance_scale is not None:
             sampling_param.guidance_scale = float(self.guidance_scale)
         # A record may carry its own seed so repeated captions sample
-        # different noise; otherwise every record uses the training seed.
+        # different noise; otherwise the shared validation generator advances
+        # from the training seed.
         row_seed = validation_batch.get("seed")
         sampling_param.seed = (int(row_seed) if row_seed is not None else self.seed)
+        if row_seed is not None:
+            record_generator = torch.Generator(device="cpu").manual_seed(int(row_seed))
+        else:
+            record_generator = self.validation_random_generator
         # Output multiplicity belongs in SamplingParam so pipeline stages
         # allocate the same batch dimension that validation expects to log.
         sampling_param.num_videos_per_prompt = self.num_videos_per_prompt
@@ -1407,7 +1412,7 @@ class ValidationCallback(Callback):
 
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
-            generator=self.validation_random_generator,
+            generator=record_generator,
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=tc.vsa_sparsity,
