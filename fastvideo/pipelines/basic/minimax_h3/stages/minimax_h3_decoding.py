@@ -173,12 +173,17 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import freeze_nvfp4_linears_on_device
             if freeze_nvfp4_linears_on_device(vae):
                 pinned_offload.refresh_host_copies(vae, pin=fastvideo_args.pin_cpu_memory)
-            latents = vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
+            latents = latents.to(device=device, dtype=torch.float32)
             if fastvideo_args.output_type == "latent":
+                # Keep the export on the released VAE's denormalized, channel-first convention; the selected
+                # decoder's denormalize_latents prepares its own decode input instead.
+                export = getattr(vae, "denormalize_latents_for_export", None)
+                exported = export(latents) if export is not None else vae.denormalize_latents(latents)
                 # No collectives on this path, so uniform participation is
                 # trivial: every rank returns here.
-                batch.output = latents.detach().float().cpu() if is_output_rank else placeholder
+                batch.output = exported.detach().float().cpu() if is_output_rank else placeholder
                 return batch
+            latents = vae.denormalize_latents(latents)
 
             output = None
             if is_output_rank:

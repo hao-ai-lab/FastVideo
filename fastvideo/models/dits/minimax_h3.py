@@ -196,10 +196,15 @@ class MiniMaxH3FeedForward(nn.Module):
         # (4.5 GiB at 78k tokens), so chunks bound the activation peak on 24-32 GB GPUs.
         self.chunk_tokens = envs.FASTVIDEO_H3_FFN_CHUNK_TOKENS.get()
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def _should_chunk(self, hidden_states: torch.Tensor) -> bool:
         tokens = hidden_states.shape[-2] if hidden_states.dim() > 1 else 0
-        if (self.chunk_tokens and tokens > self.chunk_tokens and not torch.is_grad_enabled()
-                and not torch.compiler.is_compiling() and hidden_states.numel() == tokens * hidden_states.shape[-1]):
+        return bool(self.chunk_tokens and tokens > self.chunk_tokens and not torch.is_grad_enabled()
+                    and not torch.compiler.is_compiling()
+                    and hidden_states.numel() == tokens * hidden_states.shape[-1])
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self._should_chunk(hidden_states):
+            tokens = hidden_states.shape[-2]
             out = torch.empty_like(hidden_states)
             for start in range(0, tokens, self.chunk_tokens):
                 rows = slice(start, start + self.chunk_tokens)
@@ -835,7 +840,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         if use_modulate_fusion:
             if (self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
                     and self.norm2.eps == _MK_NORM_EPS):
-                if _wants_prequantized_linear(self.ff.fc_in):
+                if _wants_prequantized_linear(self.ff.fc_in) and not self.ff._should_chunk(hidden_states):
                     hidden_states, norm_hidden_states, _pq_values, _pq_scales = (
                         mk_kernels.residual_gate_rmsnorm_modulate(
                             hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp, shift_mlp,

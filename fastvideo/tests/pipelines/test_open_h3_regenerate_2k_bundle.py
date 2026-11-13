@@ -83,3 +83,19 @@ def test_latent_preparation_reads_the_bundle_latent(tmp_path):
     assert torch.equal(loaded, bundle["latent"])
     reused = stage._load_draft_latent(str(path), torch.device("cpu"), {"latent": torch.zeros(24, 3, 4, 6)})
     assert torch.count_nonzero(reused) == 0
+
+
+def test_configured_draft_path_beats_a_loaded_bundle(tmp_path):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.latent_preparation import (
+        Regenerate2KLatentPreparationStage)
+    stage = Regenerate2KLatentPreparationStage.__new__(Regenerate2KLatentPreparationStage)
+    batch = _batch(str(tmp_path / "incoming.pt"))
+    batch.extra[BUNDLE_EXTRA_KEY] = _bundle()
+    stage.draft_latent_path = str(tmp_path / "configured.pt")
+    source = stage._draft_latent_source(batch.video_path)
+    assert source == stage.draft_latent_path
+    assert stage._bundle_for_source(batch, source) is None
+    # With no configured override the request's own bundle is reused.
+    stage.draft_latent_path = None
+    assert stage._draft_latent_source(batch.video_path) == batch.video_path
+    assert stage._bundle_for_source(batch, batch.video_path) is batch.extra[BUNDLE_EXTRA_KEY]

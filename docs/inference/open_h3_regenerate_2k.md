@@ -7,7 +7,8 @@ and the output is a silent 2K MP4. FastVideo ports NVlabs'
 ([project page](https://nvlabs.github.io/Sana/Open-H3-Regenerate-2K/),
 [reference code](https://github.com/NVlabs/Sana/tree/sol-engine/models/Open-H3-Regenerate-2K)); the dense BF16
 `standard_fwd` path of that repo is the parity reference. The accelerated `sol_engine_fwd` path (Sol-Attn, MXFP8, CUDA
-graphs) and the fast 24-layer VAE decoder are not ported.
+graphs) and the fast 24-layer VAE decoder are ported as opt-ins; the dense `standard_fwd` path stays the default (see
+[DGX Spark opt-ins](#dgx-spark-gb10-opt-ins)).
 
 ```text
 draft video -> H3 VAE encode -> latent upscaler (2x, 3D conv) -> 3 Euler refine steps -> H3 VAE decode -> 2560x1440
@@ -89,6 +90,26 @@ The response headers carry `X-Request-Id`, `X-Model`, `X-Inference-Time-S` and `
 - `num_inference_steps` is 3 (default) or 2; `seed` sets the refine noise.
 - Serve with `attention_backend: TORCH_SDPA`: the refine stage selects cuDNN attention, which at about 133k tokens is
   about 3x faster than PyTorch's default flash dispatch. The `FLASH_ATTN` backend bypasses that selection.
+
+## DGX Spark opt-ins
+
+The accelerated `sol_engine_fwd` tiers are opt-in and off by default, so the dense `standard_fwd` refine stays the
+reference. On a GB10 (unified memory) the DiT and the Qwen3-VL text encoder cannot stay resident together, so components
+are released between stages and a later request pays a host-to-device reload.
+
+| Variable | Effect |
+|---|---|
+| `FASTVIDEO_H3_SOL_ATTN` | Route the refine attention through NVlabs' Sol-Attn block-sparse kernel (`sol_engine`, `sol_engine_fast`, `sol_engine_tau0`, `sol_engine_fast_tau0`). Approximate tier; `off` keeps dense attention. Needs the optional `sol_attn` package. |
+| `FASTVIDEO_H3_FAST_VAE_DECODER=<weights>` | Replace the released 36-block decoder with NVlabs' fast 24-layer non-causal decoder (approximate tier, 33.9 dB on a 2K clip). `FASTVIDEO_H3_FAST_VAE_LAYERS` selects a pruned subset. |
+| `FASTVIDEO_H3_VAE_ENCODE_TILE="H,W,OH,OW"` | Fewer, larger draft-encode tiles. Changes the encode at fp32 rounding level; an overlap at least as large as its tile is rejected. |
+| `FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH` | Spatial tiles per encoder call; changes only the reduction order. |
+| `FASTVIDEO_H3_VAE_COMPILE_ENCODER` | One fixed-shape `torch.compile` graph for the encoder tile. |
+| `FASTVIDEO_H3_KEEP_DIT_RESIDENT` | Keep the transformer materialized across requests instead of releasing it after denoising. Costs the transformer's ~45 GiB during the other stages; it only fits when the text encoder is not also resident. |
+| `FASTVIDEO_H3_KEEP_VAE_RESIDENT` | Keep the video VAE materialized across requests. The default schedule frees 9.7 GiB after every request and the next request pays a ~76 s host-to-device reload before the draft encode; residency costs that 9.7 GiB during the refine, and the load is byte-identical. |
+
+`FASTVIDEO_H3_PROMPT_EMBEDS_CACHE` and `FASTVIDEO_H3_DRAFT_LATENT_CACHE` reuse the text-encoder output and the draft VAE
+encode across identical requests. The prompt-embeds cache is disabled when the text encoder is tensor-parallel, so a
+per-rank hit cannot make one rank skip the encoder while its peers wait in the encoder's collectives.
 
 ## NVFP4 video decoder
 

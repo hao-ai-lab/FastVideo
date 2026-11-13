@@ -206,37 +206,6 @@ def _on_unified_memory(device: torch.device | None) -> bool:
         return False
 
 
-def _release_merged_adapter_factors(pipeline: Any, lora_nickname: str) -> None:
-    """Drop the fp32 adapter factors once they are merged, on unified-memory devices.
-
-    The bf16 base weights already carry the scaled delta, so the factors are dead weight unless the adapter is
-    unmerged, which inference never does. On the GB10 the six H3 projections per block are ~12 GiB of fp32 that the
-    3-step 2K activation peak cannot afford, so release them and let a re-materialized transformer reload the adapter
-    from disk. No-op on discrete GPUs and during training.
-    """
-    args = getattr(pipeline, "fastvideo_args", None)
-    if args is None or getattr(args, "training_mode", False):
-        return
-    if not _on_unified_memory(getattr(pipeline, "device", None)):
-        return
-    released = 0
-    for transformer_lora_layers in pipeline.lora_layers.values():
-        for _, layers in transformer_lora_layers.lora_layers_by_block():
-            for _, layer in layers.items():
-                if getattr(layer, "merged", False) and not getattr(layer, "side_branch", False):
-                    layer.lora_A = None
-                    layer.lora_B = None
-                    released += 1
-    if released:
-        pipeline.lora_adapters.pop(lora_nickname, None)
-        pipeline.lora_adapter_paths.pop(lora_nickname, None)
-        pipeline.cur_adapter_name = ""
-        pipeline.cur_adapter_path = ""
-        logger.info("Rank %d: released merged LoRA factors on %d layers to save unified device memory", dist.get_rank(),
-                    released)
-        torch.cuda.empty_cache()
-
-
 class LoRAPipeline(ComposedPipelineBase):
     """
     Pipeline that supports injecting LoRA adapters into the diffusion transformer.
@@ -852,7 +821,6 @@ class LoRAPipeline(ComposedPipelineBase):
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
         if not self._setting_constructor_adapter and not accumulate:
             self._runtime_adapter = (lora_nickname, strength)
-        _release_merged_adapter_factors(self, lora_nickname)
 
     def merge_lora_weights(self) -> None:
         """Merge LoRA weights, then repack the packed quantized buffers for the merged state.

@@ -121,6 +121,16 @@ class FastH3VaeDecoder(nn.Module):
         """``(B, C, T, H, W)`` normalized -> ``(B, T, C, H, W)``; the decoder denormalizes internally."""
         return latents.transpose(1, 2).contiguous()
 
+    def denormalize_latents_for_export(self, latents: torch.Tensor) -> torch.Tensor:
+        """The released VAE's latent-export convention: denormalized, channel-first ``(B, C, T, H, W)``.
+
+        ``denormalize_latents`` prepares this decoder's time-first input instead, so the export path keeps the
+        released convention and an opt-in decoder does not change what ``output_type="latent"`` returns.
+        """
+        mean = self.model.latents_mean.view(1, -1, 1, 1, 1)
+        std = self.model.latents_std.view(1, -1, 1, 1, 1)
+        return latents * std + mean
+
     def decoded_pixel_shape(self, latent_shape: torch.Size | tuple[int, ...]) -> tuple[int, int, int, int, int]:
         if len(latent_shape) != 5:
             raise ValueError(f"Fast H3 VAE latents must be five-dimensional, got {tuple(latent_shape)}.")
@@ -154,17 +164,25 @@ class FastH3VaeDecoder(nn.Module):
         return output
 
 
-_DECODERS: dict[tuple[str, str], FastH3VaeDecoder] = {}
+_DECODERS: dict[tuple[Any, ...], FastH3VaeDecoder] = {}
 
 
 def fast_vae_decoder(fastvideo_args: Any, device: torch.device) -> FastH3VaeDecoder | None:
-    """The opt-in fast decoder, built once per (weights, base model) and kept resident; ``None`` when off."""
+    """The opt-in fast decoder, built once per (weights, base model, construction settings); ``None`` when off."""
     weights = envs.FASTVIDEO_H3_FAST_VAE_DECODER.get()
     if not weights:
         return None
     base_model = envs.FASTVIDEO_H3_FAST_VAE_BASE_MODEL.get() or str(Path(fastvideo_args.model_path) / "base_model")
     num_layers = int(envs.FASTVIDEO_H3_FAST_VAE_LAYERS.get())
-    key = (str(weights), str(base_model), num_layers)
+    key = (
+        str(weights),
+        str(base_model),
+        num_layers,
+        bool(envs.FASTVIDEO_H3_FAST_VAE_FP8.get()),
+        bool(envs.FASTVIDEO_H3_FAST_VAE_FP8_STATIC.get()),
+        bool(envs.FASTVIDEO_H3_FAST_VAE_COMPILE.get()),
+        bool(envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.get()),
+    )
     decoder = _DECODERS.get(key)
     if decoder is None:
         logger.info("MiniMax-H3 video decode: fast %d-layer decoder %s (latent statistics from %s)", num_layers, weights,

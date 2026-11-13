@@ -103,6 +103,7 @@ class BaseLayerWithLoRA(nn.Module):
         # otherwise adds several GiB of host memory per HSDP rank. On unified
         # memory that host copy is a second allocation in the same physical
         # pool (see _unified_memory_weight), so skip it there and keep only the merge.
+        # Such a layer unmerges by reversing the delta, so the adapter factors must survive the merge.
         keep_snapshot = (not training_mode and not self.side_branch and not _unified_memory_weight(base_layer.weight))
         self.cpu_weight = (base_layer.weight.detach().to("cpu").clone() if keep_snapshot else None)
         # indicates adapter weights don't contain this layer
@@ -233,6 +234,10 @@ class BaseLayerWithLoRA(nn.Module):
                                  "forced side branch); load one adapter at a time.")
             # Kept in bf16 so the branch matches the activation dtype of a packed base layer.
             A, B = A.to(torch.bfloat16), B.to(torch.bfloat16)
+        if not training_mode and not self.side_branch and self.merged and not accumulate:
+            # Reverse the current merge while its own factors are still in place: a snapshot-less unified-memory
+            # layer subtracts the delta, and merge_lora_weights would run after the factors below are replaced.
+            self.unmerge_lora_weights()
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -307,6 +312,18 @@ class BaseLayerWithLoRA(nn.Module):
         scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
         return (weight.to(accumulate_dtype) + (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
 
+    def _unmerged_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """``weight`` minus the scaled adapter delta, for a layer merged without a snapshot.
+
+        Only used where ``cpu_weight`` was skipped (unified memory), and it needs the adapter factors, so the
+        pipeline must not release them for a layer that can still be unmerged.
+        """
+        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
+        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
+        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return (weight.to(accumulate_dtype) - (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
+
     @torch.no_grad()
     # @torch.compile(dynamic=True)
     def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
@@ -319,14 +336,22 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
         # avoid precision loss
-        if self.cpu_weight is None:
-            raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
-        if isinstance(self.base_layer.weight, DTensor):
+        if self.cpu_weight is not None:
+            if isinstance(self.base_layer.weight, DTensor):
+                device = self.base_layer.weight.data.device
+                self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True, copy=True))
+            else:
+                # copy=True: on the snapshot's own device .to() would alias it, and the next merge would write into it.
+                snapshot = self.cpu_weight
+                self.base_layer.weight.data = snapshot.data.to(self.base_layer.weight, non_blocking=True, copy=True)
+        elif self.lora_A is not None and self.lora_B is not None and not isinstance(self.base_layer.weight, DTensor):
+            # Unified-memory layers keep no full-weight snapshot; reverse the merge from the adapter factors,
+            # which therefore must outlive the merge (the pipeline never releases them).
             device = self.base_layer.weight.data.device
-            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True, copy=True))
+            data = self.base_layer.weight.data.to(get_local_torch_device())
+            self.base_layer.weight.data = self._unmerged_weight(data).to(device, non_blocking=True)
         else:
-            # copy=True: on the snapshot's own device .to() would alias it, and the next merge would write into it.
-            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight, non_blocking=True, copy=True)
+            raise RuntimeError("LoRA layer has no unmerge snapshot and no adapter factors to reverse the merge")
 
         self.merged = False
 

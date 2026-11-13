@@ -28,11 +28,16 @@ logger = init_logger(__name__)
 class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
     """MiniMax-H3 conditioning that takes the prompt embeddings from a draft bundle when it carries them.
 
-    ``before_encode`` runs only when the text encoder is actually needed; the pipeline uses it to drop a DiT kept
-    resident across requests, so the encoder and the DiT are never in unified memory together.
+    ``before_encode`` runs only once the parent has missed its prompt-embeds cache and the text encoder is actually
+    needed; the pipeline uses it to drop a DiT kept resident across requests, so the encoder and the DiT are never in
+    unified memory together.
     """
 
     before_encode: Callable[[], None] | None = None
+
+    def _before_text_encoder(self) -> None:
+        if self.before_encode is not None:
+            self.before_encode()
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -47,8 +52,6 @@ class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
                     batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = tags
                     logger.info("Open-H3-Regenerate-2K: prompt embeddings from the draft bundle; text encoder skipped")
                     return batch
-        if self.before_encode is not None:
-            self.before_encode()
         return super().forward(batch, fastvideo_args)
 
 
