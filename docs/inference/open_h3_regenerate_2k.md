@@ -8,7 +8,7 @@ and the output is a silent 2K MP4. FastVideo ports NVlabs'
 [reference code](https://github.com/NVlabs/Sana/tree/sol-engine/models/Open-H3-Regenerate-2K)); the dense BF16
 `standard_fwd` path of that repo is the parity reference. The accelerated `sol_engine_fwd` path (Sol-Attn, MXFP8, CUDA
 graphs) and the fast 24-layer VAE decoder are ported as opt-ins; the dense `standard_fwd` path stays the default (see
-[DGX Spark opt-ins](#dgx-spark-gb10-opt-ins)).
+[DGX Spark opt-ins](#dgx-spark-opt-ins)).
 
 ```text
 draft video -> H3 VAE encode -> latent upscaler (2x, 3D conv) -> 3 Euler refine steps -> H3 VAE decode -> 2560x1440

@@ -607,4 +607,4 @@ the feature is fully opt-in.
 
 The Open-H3-Regenerate-2K refine ships GB10-specific opt-ins — Sol-Attn, the fast 24-layer VAE decoder, video-VAE
 encoder tile overrides, and cross-request residency of the DiT and VAE. Each is off by default, so the dense reference
-path stays the default. See [Open-H3-Regenerate-2K: DGX Spark opt-ins](open_h3_regenerate_2k.md#dgx-spark-gb10-opt-ins).
+path stays the default. See [Open-H3-Regenerate-2K: DGX Spark opt-ins](open_h3_regenerate_2k.md#dgx-spark-opt-ins).
