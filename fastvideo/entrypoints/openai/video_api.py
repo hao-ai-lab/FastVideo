@@ -156,9 +156,15 @@ def _media_type_for_path(path: str) -> str:
     return "audio/wav" if path.lower().endswith(".wav") else "video/mp4"
 
 
+def _draft_bundle_path(file_path: str) -> str:
+    """The draft bundle a MiniMax-H3 request writes beside its video (``{request_id}.h3draft.pt``)."""
+    stem = os.path.splitext(os.path.basename(file_path))[0]
+    return os.path.join(os.path.dirname(file_path), f"{stem}{BUNDLE_SUFFIX}")
+
+
 def _remove_artifact(file_path: str | None) -> None:
     if file_path:
-        discard_materialized_media([file_path])
+        discard_materialized_media([file_path, _draft_bundle_path(file_path)])
 
 
 def _remove_artifacts(file_path: str | None, materialized: list[str]) -> None:
@@ -408,6 +414,10 @@ async def create_video(raw_request: Request) -> VideoResponse:
 async def create_video_sync(raw_request: Request) -> FileResponse:
     """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)
+    if request.return_draft_bundle:
+        raise HTTPException(status_code=400,
+                            detail="return_draft_bundle is not supported on /v1/videos/sync; submit POST /v1/videos "
+                                   "and download GET /v1/videos/{id}/draft_bundle.")
     request_id = f"video_sync-{generate_request_id()}"
     generation_request, materialized_media, lora = await _adapt_request(request_id, request)
     started = time.perf_counter()
@@ -534,7 +544,7 @@ async def download_draft_bundle(video_id: str = Path(...)) -> FileResponse:
     file_path = job.get("file_path")
     if status is not VideoGenerationStatus.COMPLETED or not file_path:
         raise HTTPException(status_code=404, detail="Generation is not complete")
-    bundle_path = os.path.join(os.path.dirname(file_path), f"{video_id}{BUNDLE_SUFFIX}")
+    bundle_path = _draft_bundle_path(file_path)
     if not os.path.exists(bundle_path):
         raise HTTPException(status_code=404,
                             detail="No draft bundle for this video; create it with "

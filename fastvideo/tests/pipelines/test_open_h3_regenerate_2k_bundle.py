@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Open-H3-Regenerate-2K draft bundles: latent + prompt conditioning handed over by a paired draft worker."""
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -103,6 +104,20 @@ def test_prompt_embeds_policy(tmp_path):
         bundle_prompt_conditioning(bundle, policy="sometimes")
 
 
+def test_prompt_mismatch_re_encodes_under_match():
+    bundle = _bundle()
+    bundle["text_encoder_fingerprint"] = "abc"
+    assert bundle_prompt_conditioning(bundle, policy="match", text_encoder="abc", prompt="a fox") is not None
+    assert bundle_prompt_conditioning(bundle, policy="match", text_encoder="abc", prompt="a wolf") is None
+    assert bundle_prompt_conditioning(bundle, policy="always", text_encoder="abc", prompt="a wolf") is not None
+
+
+def test_prompt_embeds_policies_match_the_pipeline_config():
+    from fastvideo.configs.pipelines.open_h3_regenerate_2k import PROMPT_EMBEDS_POLICIES as config_policies
+    from fastvideo.pipelines.basic.minimax_h3.draft_bundle import PROMPT_EMBEDS_POLICIES
+    assert config_policies == PROMPT_EMBEDS_POLICIES
+
+
 @torch.no_grad()
 def test_mismatched_encoder_re_encodes_after_the_release_hook(tmp_path):
     path = tmp_path / "clip.pt"
@@ -129,6 +144,25 @@ def test_text_encoder_fingerprint_tracks_files(tmp_path):
     (second / "model-00002-of-00002.safetensors").write_bytes(b"y")
     assert text_encoder_fingerprint(first) != text_encoder_fingerprint(second)
     assert text_encoder_fingerprint(tmp_path / "missing") is None
+
+
+def test_text_encoder_fingerprint_uses_only_the_selected_file(tmp_path):
+    folder = tmp_path / "enc"
+    folder.mkdir()
+    selected = folder / "encoder.safetensors"
+    selected.write_bytes(b"aaaa")
+    before = text_encoder_fingerprint(selected)
+    (folder / "sibling.safetensors").write_bytes(b"bbbb")
+    assert text_encoder_fingerprint(selected) == before  # a sibling is not part of a single-file fingerprint
+
+    twin_dir = tmp_path / "twin"
+    twin_dir.mkdir()
+    twin = twin_dir / "encoder.safetensors"
+    twin.write_bytes(b"aaaa")
+    assert text_encoder_fingerprint(twin) == before  # same bytes and name match across folders
+    twin.write_bytes(b"cccc")
+    os.utime(twin, ns=(2, 2))  # force a fresh stat key for the content cache
+    assert text_encoder_fingerprint(twin) != before  # same size, different bytes
 
 
 def test_save_then_load_round_trip(tmp_path):

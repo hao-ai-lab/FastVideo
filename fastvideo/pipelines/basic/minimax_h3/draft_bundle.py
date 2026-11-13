@@ -12,6 +12,7 @@ text encoder as well. The same file works in-process, on one machine, or across 
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -34,27 +35,48 @@ def is_bundle_path(path: str | None) -> bool:
     return bool(path) and str(path).endswith(".pt")
 
 
-def text_encoder_fingerprint(directory: str | os.PathLike[str] | None, quant: object = None) -> str | None:
-    """Stable id of the text encoder files in ``directory`` (config and shard names/sizes), or ``None``.
+_FINGERPRINT_CHUNK_BYTES = 1 << 20
 
-    Two pipelines whose fingerprints match produce the same prompt embeddings, so a consumer can reuse the producer's
-    embeddings instead of running its own encoder. It never loads the model.
+
+@functools.lru_cache(maxsize=32)
+def _fingerprint_shards(shards: tuple[tuple[str, int, int], ...], config: bytes, quant: object) -> str:
+    """SHA-256 over the shard contents, the config bytes and ``quant``.
+
+    Cached on the shard stat tuples, so only the first request per process reads a multi-GB encoder. ``mtime_ns`` is
+    part of the key, so a replaced file of the same size is hashed again.
+    """
+    digest = hashlib.sha256(config)
+    for path, size, mtime_ns in shards:
+        digest.update(f"{Path(path).name}:{size}".encode())
+        with open(path, "rb") as handle:
+            while chunk := handle.read(_FINGERPRINT_CHUNK_BYTES):
+                digest.update(chunk)
+    digest.update(f"quant:{quant}".encode())
+    return digest.hexdigest()[:32]
+
+
+def text_encoder_fingerprint(directory: str | os.PathLike[str] | None, quant: object = None) -> str | None:
+    """Stable id of the text encoder weights a pipeline loads, or ``None``.
+
+    Hashes the selected files' contents, plus ``config.json`` for a directory and ``quant``. Two pipelines whose
+    fingerprints match load byte-identical weights and so produce the same prompt embeddings. It never loads the model;
+    contents are read in chunks and cached per process.
     """
     if directory is None:
         return None
     root = Path(directory)
     if root.is_file():
-        root = root.parent
-    if not root.is_dir():
+        config = b""
+        shard_paths = [root]
+    elif root.is_dir():
+        config_path = root / "config.json"
+        config = (json.dumps(json.loads(config_path.read_text()), sort_keys=True).encode("utf-8")
+                  if config_path.is_file() else b"")
+        shard_paths = sorted(root.glob("*.safetensors"))
+    else:
         return None
-    digest = hashlib.sha256()
-    config = root / "config.json"
-    if config.is_file():
-        digest.update(json.dumps(json.loads(config.read_text()), sort_keys=True).encode("utf-8"))
-    for shard in sorted(root.glob("*.safetensors")):
-        digest.update(f"{shard.name}:{shard.stat().st_size}".encode())
-    digest.update(f"quant:{quant}".encode())
-    return digest.hexdigest()[:32]
+    shards = tuple((str(shard), shard.stat().st_size, shard.stat().st_mtime_ns) for shard in shard_paths)
+    return _fingerprint_shards(shards, config, quant)
 
 
 def keep_text_token_tags_for_bundle(extra: dict[str, Any], tags: Any) -> None:
@@ -99,12 +121,13 @@ def load_draft_bundle(path: str) -> dict[str, Any] | None:
 def bundle_prompt_conditioning(bundle: dict[str, Any],
                                *,
                                policy: str = "always",
-                               text_encoder: str | None = None) -> tuple[torch.Tensor, torch.Tensor] | None:
+                               text_encoder: str | None = None,
+                               prompt: str | None = None) -> tuple[torch.Tensor, torch.Tensor] | None:
     """``(prompt_embeds, text_token_tags)`` to reuse from the bundle, or ``None`` to run the consumer's encoder.
 
-    ``policy``: ``match`` reuses them only when the bundle's text-encoder fingerprint equals ``text_encoder``;
-    ``always`` reuses any embeddings the bundle carries (a different encoder conditions the consumer differently);
-    ``never`` always re-encodes.
+    ``policy``: ``match`` reuses them only when the bundle's text-encoder fingerprint equals ``text_encoder`` and its
+    prompt equals ``prompt`` (when both are known); ``always`` reuses any embeddings the bundle carries (a different
+    encoder conditions the consumer differently); ``never`` always re-encodes.
     """
     if policy not in PROMPT_EMBEDS_POLICIES:
         raise ValueError(f"policy must be one of {PROMPT_EMBEDS_POLICIES}, got {policy!r}")
@@ -114,6 +137,9 @@ def bundle_prompt_conditioning(bundle: dict[str, Any],
     if policy == "match":
         source = bundle.get("text_encoder_fingerprint")
         if source is None or text_encoder is None or source != text_encoder:
+            return None
+        draft_prompt = bundle.get("prompt")
+        if prompt and isinstance(draft_prompt, str) and draft_prompt and prompt != draft_prompt:
             return None
     return embeds, tags
 

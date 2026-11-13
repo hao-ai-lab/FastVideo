@@ -45,7 +45,10 @@ class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
                 batch.extra[BUNDLE_EXTRA_KEY] = bundle
                 ours = (self.text_encoder_fingerprint()
                         if self.prompt_embeds_policy == "match" and self.text_encoder_fingerprint is not None else None)
-                conditioning = bundle_prompt_conditioning(bundle, policy=self.prompt_embeds_policy, text_encoder=ours)
+                conditioning = bundle_prompt_conditioning(bundle,
+                                                          policy=self.prompt_embeds_policy,
+                                                          text_encoder=ours,
+                                                          prompt=batch.prompt)
                 if conditioning is not None:
                     embeds, tags = conditioning
                     batch.prompt_embeds = [embeds.to(device=get_local_torch_device())]
