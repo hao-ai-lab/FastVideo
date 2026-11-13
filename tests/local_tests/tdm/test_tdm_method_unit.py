@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -175,6 +176,7 @@ def _build_method(
     method_overrides: dict[str, Any] | None = None,
     pipeline_config: Any | None = None,
     student_shift: float | None = None,
+    model_path: str = "",
 ) -> tuple[TDMMethod, _TinyRoleModel, _TinyRoleModel]:
     training = TrainingConfig(
         data=DataConfig(preprocessed_data_type="text_only", seed=0),
@@ -186,6 +188,7 @@ def _build_method(
         ),
         loop=TrainingLoopConfig(max_train_steps=4),
         pipeline_config=pipeline_config,
+        model_path=model_path,
     )
     method_cfg = {
         "rollout_mode": "simulate",
@@ -222,6 +225,13 @@ def _build_method(
     )
     method.cuda_generator = torch.Generator(device="cpu").manual_seed(123)
     return method, student, critic
+
+
+def _write_h3_scheduler_configs(root: Path, *, video: float = 12.0, audio: float = 3.0) -> None:
+    for owner, shift in (("scheduler", video), ("audio_scheduler", audio)):
+        directory = root / owner
+        directory.mkdir()
+        (directory / "scheduler_config.json").write_text(f'{{"shift": {shift}}}')
 
 
 def test_tdm_managed_train_step_reports_losses_and_updates_both_roles() -> None:
@@ -1174,6 +1184,63 @@ def test_tdm_accepts_unit_guidance_for_h3_family(monkeypatch: pytest.MonkeyPatch
     method, _, _ = _build_method(method_overrides={"real_score_guidance_scale": 1.0})
 
     assert method._real_score_guidance() == 1.0
+
+
+@pytest.mark.parametrize(("video_shift", "audio_shift", "attribute"), [
+    (10.0, 3.0, "video_scheduler_shift"),
+    (12.0, 4.0, "audio_scheduler_shift"),
+])
+def test_tdm_rejects_h3_checkpoint_shift_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    video_shift: float,
+    audio_shift: float,
+    attribute: str,
+) -> None:
+    """H3 validates only at the final step, so a checkpoint mismatch must fail at startup."""
+    _write_h3_scheduler_configs(tmp_path)
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: video_shift), raising=False)
+    monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: audio_shift), raising=False)
+
+    with pytest.raises(ValueError, match=f"{attribute}="):
+        _build_method(
+            method_overrides={"real_score_guidance_scale": 1.0},
+            model_path=str(tmp_path),
+        )
+
+
+def test_tdm_accepts_h3_checkpoint_shift_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_h3_scheduler_configs(tmp_path)
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: 12.0), raising=False)
+    monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: 3.0), raising=False)
+
+    method, _, _ = _build_method(
+        method_overrides={"real_score_guidance_scale": 1.0},
+        model_path=str(tmp_path),
+    )
+
+    assert method._model_family() == "minimax_h3"
+
+
+def test_tdm_h3_startup_check_skips_a_missing_scheduler_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A checkpoint without an audio scheduler config does not expose a shift to compare."""
+    _write_h3_scheduler_configs(tmp_path)
+    (tmp_path / "audio_scheduler" / "scheduler_config.json").unlink()
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: 12.0), raising=False)
+    monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: 4.0), raising=False)
+
+    method, _, _ = _build_method(
+        method_overrides={"real_score_guidance_scale": 1.0},
+        model_path=str(tmp_path),
+    )
+
+    assert method._model_family() == "minimax_h3"
 
 
 def test_tdm_rejects_wan_flow_shift_that_dmd_validation_cannot_match(

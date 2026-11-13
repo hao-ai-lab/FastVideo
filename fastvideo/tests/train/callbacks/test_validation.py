@@ -656,7 +656,14 @@ class TestStudentSamplingContract:
             self._resolve(self._callback(shifts=(12.0, 4.0)), torch.nn.Identity(), 8)
 
     def test_validation_clock_is_noop_before_on_train_start(self) -> None:
-        """Direct validation calls without a method must not raise."""
+        """The callback leaves method as None until on_train_start assigns it."""
+        cb = self._callback(sparsity=0.0)
+        cb.method = None
+        config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
+        assert resolved is config
+
+    def test_validation_clock_is_noop_when_method_attribute_is_absent(self) -> None:
+        """The defensive lookup also handles callers that never set the attribute."""
         cb = self._callback(sparsity=0.0)
         del cb.method
         config, resolved = self._resolve(cb, torch.nn.Identity(), 8)

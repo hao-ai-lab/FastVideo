@@ -20,6 +20,7 @@ from fastvideo.train.utils.config import (
 )
 from fastvideo.train.utils.lora import sync_replicated_lora_gradients
 from fastvideo.train.utils.optimizer import clip_grad_norm_if_needed
+from fastvideo.utils import read_optional_model_json
 
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
@@ -310,6 +311,7 @@ class TDMMethod(DMD2Method):
             raise ValueError("MiniMax H3 TDM requires method.real_score_guidance_scale == 1.0 "
                              "because the model has no unconditional branch for CFG guidance")
         self._validate_wan_validation_shift()
+        self._validate_h3_checkpoint_shifts()
         self._validate_denoising_schedules()
 
     def _validate_wan_validation_shift(self) -> None:
@@ -358,6 +360,34 @@ class TDMMethod(DMD2Method):
                              "validation disagree with the trained sigma grid. Set the student's "
                              "flow shift (models.student.flow_shift overrides pipeline.flow_shift) "
                              f"to {DMD_TRAINING_NOISE_SHIFT}.")
+
+    def _validate_h3_checkpoint_shifts(self) -> None:
+        """Reject an H3 run whose training shifts disagree with its checkpoint.
+
+        H3 inference and validation sample through the checkpoint's
+        ``scheduler/scheduler_config.json`` and
+        ``audio_scheduler/scheduler_config.json`` shifts, while the training
+        grid comes from ``pipeline.video_scheduler_shift`` /
+        ``pipeline.audio_scheduler_shift``. The validation callback catches a
+        mismatch, but the H3 recipe validates only at the final step (and not
+        at all when validation is disabled), so check when the method is built.
+        """
+        if self._model_family() != "minimax_h3":
+            return
+        model_path = str(getattr(self.training_config, "model_path", "") or "")
+        if not model_path:
+            return
+        for attribute, owner in (
+            ("video_scheduler_shift", "scheduler/scheduler_config.json"),
+            ("audio_scheduler_shift", "audio_scheduler/scheduler_config.json"),
+        ):
+            scheduler_config = read_optional_model_json(model_path, owner)
+            sampled = None if scheduler_config is None else scheduler_config.get("shift")
+            trained = getattr(self.student, attribute, None)
+            if sampled is None or trained is None or float(sampled) == float(trained):
+                continue
+            raise ValueError(f"The H3 student trains with {attribute}={trained}, but the checkpoint's "
+                             f"{owner} samples with shift {sampled}. Train with the checkpoint's shift.")
 
     def manages_optimization(self) -> bool:
         return True
