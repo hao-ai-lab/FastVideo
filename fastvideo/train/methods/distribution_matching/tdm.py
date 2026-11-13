@@ -380,15 +380,16 @@ class TDMMethod(DMD2Method):
         private or unauthenticated repo as ``RepositoryNotFoundError``. Both
         are caught by the ``RepositoryNotFoundError`` branch, which carries
         the token guidance. A ``HfHubHTTPError`` raised directly by the Hub
-        (a generic HEAD 401 that ``huggingface_hub`` re-raises, or a GET-stage
-        rejection) lands in the final generic
-        ``(HFValidationError, HfHubHTTPError)`` branch. For other HEAD
-        failures, ``huggingface_hub`` wraps a non-401 ``HfHubHTTPError``
-        (including a 403 that is not a ``RepositoryNotFoundError`` or
-        ``GatedRepoError``, such as ``DisabledRepoError``) in
-        ``LocalEntryNotFoundError``, so the first branch inspects the chained
-        cause: ``DisabledRepoError`` reports a disabled repo, while other
-        403 causes keep the token guidance.
+        (a generic HEAD 401 that ``huggingface_hub`` re-raises, for example an
+        invalid or expired token, or a generic GET-stage 401/403 that is
+        neither ``RepositoryNotFoundError`` nor ``GatedRepoError``) lands in
+        the final generic ``(HFValidationError, HfHubHTTPError)`` branch. For
+        other HEAD failures, ``huggingface_hub`` wraps a non-401
+        ``HfHubHTTPError`` (including a 403 that is not a
+        ``RepositoryNotFoundError`` or ``GatedRepoError``, such as
+        ``DisabledRepoError``) in ``LocalEntryNotFoundError``, so the first
+        branch inspects the chained cause: ``DisabledRepoError`` reports a
+        disabled repo, while other 403 causes keep the token guidance.
         """
         if self._model_family() != "minimax_h3":
             return
