@@ -118,6 +118,18 @@ def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
     return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
+def _wants_prequantized_linear(linear: nn.Module) -> bool:
+    """Whether one wrapped linear accepts a pre-quantized MXFP8 activation."""
+    base = getattr(linear, "base_layer", linear)
+    method = getattr(base, "quant_method", None)
+    return bool(method is not None and getattr(method, "wants_prequantized_input", lambda: False)())
+
+
+def _attention_wants_prequantized(attention: nn.Module) -> bool:
+    to_q = getattr(attention, "to_q", None)
+    return to_q is not None and _wants_prequantized_linear(to_q)
+
+
 @torch.compile(dynamic=True, fullgraph=True)
 def _gated_residual(hidden_states: torch.Tensor, gate_table: torch.Tensor, indices: torch.Tensor,
                     branch: torch.Tensor) -> torch.Tensor:
@@ -788,8 +800,14 @@ class MiniMaxH3TransformerBlock(nn.Module):
         if use_modulate_fusion:
             if (self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
                     and self.norm1.eps == _MK_NORM_EPS):
-                norm_hidden_states = mk_kernels.rmsnorm_modulate(hidden_states, self.norm1.weight, scale_msa,
-                                                                 shift_msa, adaln_indices)
+                if _attention_wants_prequantized(self.attn):
+                    norm_hidden_states, _pq_values, _pq_scales = mk_kernels.rmsnorm_modulate(
+                        hidden_states, self.norm1.weight, scale_msa, shift_msa, adaln_indices,
+                        prequantize=True)
+                    norm_hidden_states._mxfp8_prequantized = (_pq_values, _pq_scales, None)
+                else:
+                    norm_hidden_states = mk_kernels.rmsnorm_modulate(hidden_states, self.norm1.weight, scale_msa,
+                                                                     shift_msa, adaln_indices)
             else:
                 with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                     norm_hidden_states = fused_rmsnorm_modulate(
@@ -817,9 +835,16 @@ class MiniMaxH3TransformerBlock(nn.Module):
         if use_modulate_fusion:
             if (self.mk_tier and mk_kernels.HAVE_TRITON and not torch.compiler.is_compiling()
                     and self.norm2.eps == _MK_NORM_EPS):
-                hidden_states, norm_hidden_states = mk_kernels.residual_gate_rmsnorm_modulate(
-                    hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp, shift_mlp,
-                    adaln_indices)
+                if _wants_prequantized_linear(self.ff.fc_in):
+                    hidden_states, norm_hidden_states, _pq_values, _pq_scales = (
+                        mk_kernels.residual_gate_rmsnorm_modulate(
+                            hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp, shift_mlp,
+                            adaln_indices, prequantize=True))
+                    norm_hidden_states._mxfp8_prequantized = (_pq_values, _pq_scales, None)
+                else:
+                    hidden_states, norm_hidden_states = mk_kernels.residual_gate_rmsnorm_modulate(
+                        hidden_states, attention_output, gate_msa, self.norm2.weight, scale_mlp, shift_mlp,
+                        adaln_indices)
             else:
                 with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                     hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(

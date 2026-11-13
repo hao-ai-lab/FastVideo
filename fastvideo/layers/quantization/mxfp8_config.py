@@ -71,6 +71,10 @@ class MXFP8QuantizeMethod(QuantizeMethodBase):
         from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
 
         original_shape = hidden_states.shape
+        if pre_quantized is None:
+            # A producer kernel (e.g. the fused H3 RMSNorm+modulation) may already have emitted the
+            # MXFP8 image of this activation; reuse it instead of re-quantizing from DRAM.
+            pre_quantized = getattr(hidden_states, "_mxfp8_prequantized", None)
         if pre_quantized is not None:
             activation_values, activation_scales, _ = pre_quantized
             if activation_values.dim() > 2:
@@ -87,6 +91,9 @@ class MXFP8QuantizeMethod(QuantizeMethodBase):
         """Pre-quantize an activation once for reuse across to_q/to_k/to_v."""
         from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
 
+        pre = getattr(x, "_mxfp8_prequantized", None)
+        if pre is not None:
+            return pre
         x_2d = x.reshape(-1, x.shape[-1])
         activation_values, activation_scales = quantize_mxfp8_blockwise(x_2d)
         return activation_values, activation_scales, None
