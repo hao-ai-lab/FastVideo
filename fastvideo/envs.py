@@ -476,6 +476,76 @@ FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
     doc="MiniMax-H3 inference-only Triton kernels that reproduce the eager output bit for bit: all, 1, or a "
     "comma-separated subset of rope,modulate,swiglu. An op whose FASTVIDEO_MINIMAX_H3_FUSIONS fusion is on keeps "
     "the fusion. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_H3_MXFP8 = EnvBool(
+    False,
+    category="performance",
+    doc="Quantize the MiniMax-H3 feed-forward (fc_in/fc_out) linears to MXFP8 (block-scaled E4M3, E8M0 per 32 "
+    "along K) on Blackwell. Approximate tier: ~1.6x faster FFN GEMMs. When no transformer_quant is set it pins "
+    "transformer_quant=MXFP8; an explicit transformer_quant wins.")
+FASTVIDEO_H3_MXFP8_ATTN = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_MXFP8, also MXFP8-quantize the MiniMax-H3 attention projections (to_q/to_k/to_v/to_out), "
+    "matching NVlabs' six big Linears. Approximate tier; only takes effect when transformer_quant=MXFP8.")
+FASTVIDEO_H3_SOL_ATTN = EnvChoice(
+    "off",
+    choices=("off", "sol_engine", "sol_engine_fast", "sol_engine_tau0", "sol_engine_fast_tau0"),
+    category="performance",
+    doc="Open-H3-Regenerate-2K refine attention through NVlabs' training-free Sol-Attn block-sparse kernel (needs the "
+    "optional sol_attn package). sol_engine: step 0 dense, steps 1-2 tau 1.0; sol_engine_fast: every step tau 1.75; "
+    "the _tau0 variants run step 0 sparse at tau 0.0. Approximate tier; off keeps dense attention.")
+FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
+    None,
+    category="performance",
+    doc="Path to NVlabs' fast 24-layer non-causal MiniMax-H3 video decoder (fast_h3_vae_noncausal_24l.safetensors "
+    "from Efficient-Large-Model/Open-H3-Regenerate-2K). Replaces the released VAE decoder in the MiniMax-H3 "
+    "video-decoding stage. Approximate tier; unset keeps the released decoder.")
+FASTVIDEO_H3_FAST_VAE_BASE_MODEL = EnvPath(
+    None,
+    category="performance",
+    doc="MiniMax-H3 base model directory whose vae/config.json supplies the latent statistics for "
+    "FASTVIDEO_H3_FAST_VAE_DECODER. Unset uses <model_path>/base_model.")
+FASTVIDEO_H3_FAST_VAE_COMPILE = EnvBool(
+    True,
+    category="performance",
+    doc="torch.compile the FASTVIDEO_H3_FAST_VAE_DECODER decoder. At 2K on GB10 this cuts the warm decode from ~60 s "
+    "to ~37 s and the peak from ~95 GiB to ~36 GiB; the first call of each latent shape pays the compile.")
+FASTVIDEO_H3_FAST_VAE_FP8 = EnvBool(
+    False,
+    category="performance",
+    doc="Run the FASTVIDEO_H3_FAST_VAE_DECODER attention/FFN linears in per-tensor FP8 E4M3 (torch._scaled_mm). "
+    "Approximate tier: on sm_121 the decoder's bf16 GEMMs run at ~82-101 TFLOPS and the same shapes at 154-199 "
+    "TFLOPS in FP8. The conv/embedder/proj_out stay bf16.")
+FASTVIDEO_H3_FAST_VAE_FP8_STATIC = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_FAST_VAE_FP8, store activations directly in E4M3 at scale 1 instead of computing a "
+    "per-call per-tensor absmax and passing scale_a=amax/448 to torch._scaled_mm. E4M3 is a floating-point format, "
+    "so per-tensor scaling only affects range (±448) and denormals; the static path removes the full absmax "
+    "reduction pass over every activation (~4 s of a 33 s warm 2K decode on GB10). Approximate tier.")
+FASTVIDEO_H3_FAST_VAE_LAYERS = EnvInt(
+    24,
+    category="performance",
+    doc="Number of transformer layers of the FASTVIDEO_H3_FAST_VAE_DECODER fast H3 decoder. The released "
+    "fast_h3_vae_noncausal_24l checkpoint holds the 24 layers NVlabs kept from the 36-layer released decoder; this "
+    "selects one of NVlabs' greedy-pruned subsets (24, 16, 12, 8 or 6) by remapping the checkpoint's block indices. "
+    "Approximate tier: fewer layers is faster and further from the released VAE decoder; 24 is the released fast "
+    "decoder.")
+FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK = EnvBool(
+    False,
+    category="performance",
+    doc="In the FASTVIDEO_H3_FAST_VAE_DECODER, drop the window/global attention key-only padding mask and use the "
+    "flash kernel plus an exact denominator correction. Invalid keys are all-zero, so each contributes exactly 1 to "
+    "the softmax denominator; the maskless output times exp(lse)/(exp(lse)-n_invalid) equals the masked output. On "
+    "sm_121 the bool mask forces the sm_80 memory-efficient kernel (2.3x slower than flash at the decoder's window "
+    "shape). Exact tier: same math at bf16 rounding. Requires FASTVIDEO_H3_FAST_VAE_COMPILE for the full gain.")
+FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_MXFP8, release the BF16 source weight after the MXFP8 copy is built. Exact tier: "
+    "inference never reads the BF16 weight again, this returns the whole quantized set (~20-38 GiB) to the "
+    "allocator, and the quantized values are bit-identical. Set to 0 to keep the BF16 weights, e.g. when an "
+    "adapter must be unmerged and re-merged after packing.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
@@ -828,6 +898,50 @@ FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH = EnvInt(1,
                                             doc="Spatial tiles per MiniMax-H3 video VAE encoder call (reference and "
                                             "keyframe encodes); 1 encodes per tile. Batched tiles differ from "
                                             "per-tile encoding only in reduction order.")
+FASTVIDEO_H3_VAE_ENCODE_TILE = EnvStr(None,
+                                      category="performance",
+                                      doc="MiniMax-H3 video VAE encoder spatial tile override 'H,W,OH,OW' "
+                                      "(e.g. '768,768,128,128'). Unset keeps the reference tiling "
+                                      "(tile_sample_min_height/width, overlap 64). Fewer, larger tiles cut the "
+                                      "launch/copy overhead on sm_121 but change the blended encode slightly.")
+FASTVIDEO_H3_VAE_COMPILE_ENCODER = EnvBool(False,
+                                           category="performance",
+                                           doc="Run the MiniMax-H3 video VAE encoder tile (quant_conv(encoder(tile))) "
+                                           "through one fixed-shape torch.compile graph with mode='reduce-overhead' "
+                                           "(CUDA-graph replay). The encoder tile grid is static, so one graph "
+                                           "serves every tile; cuts the ~66k kernel launches that make the fp32 "
+                                           "draft encode launch-bound on sm_121. Values change only at fp32 "
+                                           "rounding level.")
+FASTVIDEO_H3_KEEP_DIT_RESIDENT = EnvBool(
+    False,
+    category="performance",
+    doc="Keep the MiniMax-H3 transformer materialized across requests instead of releasing it after the "
+    "denoising stage. On the Spark the next request otherwise pays ~47 s to reload, re-merge the LoRA "
+    "adapter, and re-pack the MXFP8 weights every time. Exact tier: the weights are unchanged. Costs the "
+    "transformer's ~45 GiB during the other stages, so it only fits when the text encoder is not also "
+    "resident (the product path supplies prompt embeddings).")
+FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
+                                         category="performance",
+                                         doc="Keep the MiniMax-H3 video VAE materialized on the accelerator "
+                                         "across requests instead of releasing it after the video-decoding "
+                                         "stage. Saves the ~76 s host-to-device reload the Spark pays before "
+                                         "every draft encode, at the cost of ~9.7 GiB held during the refine.")
+FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
+    "",
+    category="performance",
+    doc="Directory for an exact cross-request cache of the MiniMax-H3 Qwen3-VL conditioning output, keyed by the "
+    "prompt presentation. A hit attaches the cached prompt_embeds/text_token_tags and never materializes the "
+    "text encoder, so an identical request skips the ~31 s encoder reload+encode the Spark pays on unified "
+    "memory. Exact tier: the cached tensor is the encoder's own output, byte-identical. Off by default (it changes "
+    "behavior for every MiniMax-H3 pipeline); 'memory' keeps an in-process LRU, a directory also persists entries.")
+FASTVIDEO_H3_DRAFT_LATENT_CACHE = EnvStr(
+    "",
+    category="performance",
+    doc="Directory for an exact cross-request cache of the Open-H3-Regenerate-2K draft-latent encode, keyed by the "
+    "draft file content, tiling, fixed posterior seed and model bundle. A hit returns the H3 VAE's own normalized "
+    "latent and skips the ~82 s fp32 draft encode the Spark pays per request on the official 768p draft path. "
+    "Exact tier. Off by default; 'memory' keeps an in-process LRU, a directory also persists entries. The "
+    "native-latent product path never reaches this cache.")
 FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
                                               category="performance",
                                               doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "

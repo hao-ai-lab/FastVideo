@@ -13,6 +13,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
+from fastvideo.models.vaes.minimax_h3_fast_vae import fast_vae_decoder
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_is_output_worker, h3_output_worker_rank
@@ -157,32 +158,43 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 raise RuntimeError(f"TAEH3 wrote {tuple(batch.output.shape)}, expected {expected}.")
             return batch
 
-        if self.vae is None:
-            raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        vae = fast_vae_decoder(fastvideo_args, device)
+        if vae is not None:
+            if parallel:
+                raise RuntimeError("The fast 24-layer H3 VAE decoder does not support sequence-parallel decode yet.")
+        else:
+            if self.vae is None:
+                raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
+            pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+            vae = self.vae
         try:
             # An NVFP4 decoder swapped in on the CPU could not pack its linears there;
             # freeze them now that the VAE is on the device, on the first decode.
             from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import freeze_nvfp4_linears_on_device
-            if freeze_nvfp4_linears_on_device(self.vae):
-                pinned_offload.refresh_host_copies(self.vae, pin=fastvideo_args.pin_cpu_memory)
-            latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
+            if freeze_nvfp4_linears_on_device(vae):
+                pinned_offload.refresh_host_copies(vae, pin=fastvideo_args.pin_cpu_memory)
+            latents = latents.to(device=device, dtype=torch.float32)
             if fastvideo_args.output_type == "latent":
+                # Keep the export on the released VAE's denormalized, channel-first convention; the selected
+                # decoder's denormalize_latents prepares its own decode input instead.
+                export = getattr(vae, "denormalize_latents_for_export", None)
+                exported = export(latents) if export is not None else vae.denormalize_latents(latents)
                 # No collectives on this path, so uniform participation is
                 # trivial: every rank returns here.
-                batch.output = latents.detach().float().cpu() if is_output_rank else placeholder
+                batch.output = exported.detach().float().cpu() if is_output_rank else placeholder
                 return batch
+            latents = vae.denormalize_latents(latents)
 
             output = None
             if is_output_rank:
                 pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
                 ) and not parallel else torch.float32
-                output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
+                output = self._pixel_buffer(tuple(vae.decoded_pixel_shape(latents.shape)),
                                             fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             # fp16 for the release decoders; NVFP4 decoders were trained under bf16.
-            autocast_dtype = getattr(self.vae, "decode_autocast_dtype", torch.float16)
+            autocast_dtype = getattr(vae, "decode_autocast_dtype", torch.float16)
             with (
                     nvtx_range("minimax_h3.vae"),
                     torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=device.type == "cuda"),
@@ -191,9 +203,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     strategy = fastvideo_args.vae_parallel_decode_strategy or DEFAULT_DECODE_GATHER_STRATEGY
                     logger.info("MiniMax-H3 VAE decode: sequence-parallel chunks across %d ranks (%s)",
                                 sp_group.world_size, strategy)
-                    decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
+                    decode_to_pixels_parallel(vae, latents, output, sp_group, strategy=strategy)
                 else:
-                    self.vae.decode_to_pixels(latents, output)
+                    vae.decode_to_pixels(latents, output)
             if is_output_rank and output is not None and output.dtype == torch.float32:
                 # Quantize to uint8 here, before the frames cross the
                 # multiprocess-executor boundary. A 345-frame 1344x768 clip is
@@ -206,7 +218,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:
-            if fastvideo_args.vae_cpu_offload:
+            if vae is self.vae and fastvideo_args.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
 

@@ -222,6 +222,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     # Family subclasses override these to swap geometry and sampler stages
     # without copying the whole stage assembly.
     input_preparation_stage_cls: type[MiniMaxH3InputPreparationStage] = MiniMaxH3InputPreparationStage
+    conditioning_stage_cls: type[MiniMaxH3ConditioningStage] = MiniMaxH3ConditioningStage
     denoising_stage_cls: type[MiniMaxH3DenoisingStage] = MiniMaxH3DenoisingStage
     _required_config_modules = [
         "text_encoder",
@@ -715,7 +716,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         self._add_input_stage(fastvideo_args, ref2va=ref2va)
         self.add_stage(
             "conditioning_stage",
-            MiniMaxH3ConditioningStage(
+            self.conditioning_stage_cls(
                 conditioner=self.get_module("text_encoder"),
                 tokenizer=self.get_module("tokenizer"),
                 processor=self.get_module("processor"),

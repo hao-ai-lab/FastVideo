@@ -21,11 +21,13 @@ from fastvideo.models.upsamplers.minimax_h3_latent_upscaler import MiniMaxH3Late
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
 from fastvideo.pipelines.basic.minimax_h3.stages import MiniMaxH3VideoDecodingStage
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.sharp_curve import SharpCurveBranches
+from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.conditioning import Regenerate2KConditioningStage
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import (
     Regenerate2KDenoisingStage,
     Regenerate2KFinalizeStage,
     Regenerate2KLatentPreparationStage,
 )
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
 
 logger = init_logger(__name__)
@@ -58,6 +60,8 @@ def refuse_adaln_cache() -> None:
 
 class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
     """MiniMax-H3 T2VA layout with a draft-latent start, fixed sigmas and a silent output."""
+
+    conditioning_stage_cls = Regenerate2KConditioningStage
 
     _extra_config_module_map = {name: f"{BASE_MODEL_DIR}/{name}" for name in _BASE_COMPONENTS}
     # The merged LoRA reaches only these linears; the AdaLN projections carry the Sharp curve branches instead.
@@ -99,6 +103,25 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
         if self._curve is None:
             self._curve = SharpCurveBranches(Path(self.model_path))
         return self._curve
+
+    def _add_condition_stages(self, fastvideo_args: FastVideoArgs, *, ref2va: bool) -> None:
+        super()._add_condition_stages(fastvideo_args, ref2va=ref2va)
+        stage = self._stage_name_mapping.get("conditioning_stage")
+        if isinstance(stage, Regenerate2KConditioningStage):
+            stage.before_encode = self._release_resident_transformer
+
+    def _release_resident_transformer(self) -> None:
+        """Drop a DiT kept across requests before the text encoder loads, so they never share unified memory.
+
+        Only matters with ``FASTVIDEO_H3_KEEP_DIT_RESIDENT``: requests with a draft bundle carrying prompt embeddings
+        never reach the encoder and keep the DiT; a plain-video request pays one DiT reload instead of an OOM.
+        """
+        if not envs.FASTVIDEO_H3_KEEP_DIT_RESIDENT.get():
+            return
+        transformer = self.modules.get("transformer")
+        if is_lazy_module(transformer) and transformer.is_materialized:
+            logger.info("Releasing the resident DiT before the text encoder runs for this request")
+            transformer.release()
 
     def _add_denoise_stages(self, *, ref2va: bool) -> None:
         config = self.fastvideo_args.pipeline_config

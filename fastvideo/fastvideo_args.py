@@ -426,6 +426,11 @@ class FastVideoArgs:
                 raise
         self._apply_ltx2_vae_overrides()
         self._resolve_refine_args()
+        import fastvideo.envs as envs
+        if self.transformer_quant is None and envs.FASTVIDEO_H3_MXFP8.get():
+            # Approximate-tier MXFP8 FFN: opt in via env; an explicit
+            # transformer_quant (CLI/API/config) still wins.
+            self.transformer_quant = "MXFP8"
         self._apply_transformer_quant()
         if not self.inference_torch_compile:
             # Parse-once adapter (same pattern as attention_backend below): the

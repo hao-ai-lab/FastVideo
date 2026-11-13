@@ -195,6 +195,17 @@ class LoRAModelLayers:
         yield None, self.other_lora_layers
 
 
+def _on_unified_memory(device: torch.device | None) -> bool:
+    """Whether ``device`` is a CUDA device whose memory is shared with the host (DGX Spark, GB10)."""
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        from fastvideo.platforms import current_platform
+        return bool(current_platform.has_unified_memory(device.index or 0))
+    except Exception:  # a platform probe must never break adapter loading
+        return False
+
+
 class LoRAPipeline(ComposedPipelineBase):
     """
     Pipeline that supports injecting LoRA adapters into the diffusion transformer.
@@ -656,7 +667,13 @@ class LoRAPipeline(ComposedPipelineBase):
             try:
                 self.lora_adapters[lora_nickname] = {}
                 lora_local_path = maybe_download_lora(lora_path)
-                lora_state_dict = self.convert_adapter_state_dict(load_file(lora_local_path), lora_path)
+                # On unified-memory GPUs (DGX Spark) a CPU staging dict is a full second copy of the adapter
+                # in the same physical memory the DiT already occupies (a 12 GB merged adapter is what pushes
+                # the 2K refine over the cap), so load it straight onto the device there.
+                device = getattr(self, "device", None)
+                raw_state_dict = (load_file(lora_local_path, device=str(device))
+                                  if _on_unified_memory(device) else load_file(lora_local_path))
+                lora_state_dict = self.convert_adapter_state_dict(raw_state_dict, lora_path)
 
                 # Map the hf layer names to our custom layer names
                 param_names_mapping, lora_param_names_mapping = self._transformer_name_mappings()

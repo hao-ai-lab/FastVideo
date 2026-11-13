@@ -16,6 +16,7 @@ from fastvideo.models.utils import set_weight_attrs
 logger = init_logger(__name__)
 
 _MINIMAX_H3_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
+_MINIMAX_H3_ATTN_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out)$")
 
 
 class MXFP8QuantizeMethod(QuantizeMethodBase):
@@ -60,15 +61,45 @@ class MXFP8QuantizeMethod(QuantizeMethodBase):
         layer: torch.nn.Module,
         hidden_states: torch.Tensor,
         bias: torch.Tensor | None = None,
+        pre_quantized: tuple[torch.Tensor, torch.Tensor, None] | None = None,
     ) -> torch.Tensor:
-        """Quantize one BF16 activation and apply the prequantized linear."""
+        """Quantize one BF16 activation and apply the prequantized linear.
+
+        ``pre_quantized`` lets several linears that share the same input (Q/K/V) reuse one
+        MXFP8 activation quantization instead of quantizing it once per projection.
+        """
         from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
 
         original_shape = hidden_states.shape
-        hidden_states_2d = hidden_states.reshape(-1, hidden_states.shape[-1])
-        activation_values, activation_scales = quantize_mxfp8_blockwise(hidden_states_2d)
+        if pre_quantized is None:
+            # A producer kernel (e.g. the fused H3 RMSNorm+modulation) may already have emitted the
+            # MXFP8 image of this activation; reuse it instead of re-quantizing from DRAM.
+            pre_quantized = getattr(hidden_states, "_mxfp8_prequantized", None)
+        if pre_quantized is not None:
+            activation_values, activation_scales, _ = pre_quantized
+            if activation_values.dim() > 2:
+                activation_values = activation_values.reshape(-1, activation_values.shape[-1])
+            if activation_scales.dim() > 2:
+                activation_scales = activation_scales.reshape(-1, activation_scales.shape[-1])
+        else:
+            hidden_states_2d = hidden_states.reshape(-1, hidden_states.shape[-1])
+            activation_values, activation_scales = quantize_mxfp8_blockwise(hidden_states_2d)
         output_2d = self.apply_quantized(layer, activation_values, activation_scales, bias)
         return output_2d.reshape(*original_shape[:-1], layer.output_size)
+
+    def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
+        """Pre-quantize an activation once for reuse across to_q/to_k/to_v."""
+        from fastvideo.layers.mxfp8linear import quantize_mxfp8_blockwise
+
+        pre = getattr(x, "_mxfp8_prequantized", None)
+        if pre is not None:
+            return pre
+        x_2d = x.reshape(-1, x.shape[-1])
+        activation_values, activation_scales = quantize_mxfp8_blockwise(x_2d)
+        return activation_values, activation_scales, None
+
+    def wants_prequantized_input(self) -> bool:
+        return True
 
     def apply_quantized(
         self,
@@ -116,13 +147,25 @@ class MXFP8Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
         from fastvideo.layers.linear import LinearBase
 
-        if isinstance(layer, LinearBase) and _MINIMAX_H3_FF_PREFIX.search(prefix):
+        if not isinstance(layer, LinearBase):
+            return None
+        if _MINIMAX_H3_FF_PREFIX.search(prefix):
             return MXFP8QuantizeMethod()
+        if _MINIMAX_H3_ATTN_PREFIX.search(prefix):
+            # Opt-in extension to the attention projections (NVlabs' full "six big
+            # Linears"). Kept separate from the FFN set so the quality ladder can
+            # measure FFN-only and FFN+attention independently.
+            import fastvideo.envs as envs
+            if envs.FASTVIDEO_H3_MXFP8_ATTN.get():
+                return MXFP8QuantizeMethod()
         return None
 
 
 def convert_model_to_mxfp8(model: torch.nn.Module) -> int:
     """Prequantize every MXFP8-tagged weight and return the converted count."""
+    import fastvideo.envs as envs
+
+    release_bf16 = envs.FASTVIDEO_H3_MXFP8_RELEASE_BF16.get()
     converted_count = 0
     with torch.no_grad():
         for module in model.modules():
@@ -133,6 +176,11 @@ def convert_model_to_mxfp8(model: torch.nn.Module) -> int:
                 raise RuntimeError("MXFP8 inference requires an NVIDIA Blackwell GPU with compute capability 10.0+.")
             quant_method.process_weights_after_loading(module)
             converted_count += 1
+            if release_bf16 and module.weight is not None and module.weight.numel():
+                # Exact-tier memory win: the quantized buffers are the only tensors used by
+                # ``MXFP8QuantizeMethod.apply`` from here on, so hand the BF16 storage back.
+                # Keep a zero-element Parameter (not None) so ``.weight.dtype`` reads stay valid.
+                module.weight.data = torch.empty(0, dtype=module.weight.dtype, device=module.weight.device)
 
     if converted_count:
         logger.info("Prequantized %d MiniMax-H3 feed-forward linear weights to MXFP8", converted_count)

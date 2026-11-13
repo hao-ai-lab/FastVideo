@@ -87,6 +87,50 @@ def _fuse_adaln_kernel(
     tl.store(b_ptr + out, h.to(b_ptr.dtype.element_ty), mask=mask)
 
 
+_MXFP8_BLOCK = 32
+
+
+@triton.jit
+def _store_mxfp8_row_blocks(
+    matrix,
+    quantized_ptr,
+    scale_ptr,
+    row,
+    first_block,
+    column_count,
+    scale_column_count,
+    BLOCKS_PER_PROGRAM: tl.constexpr,
+):
+    """Store one row-chunk as MXFP8 values + cuBLAS 32x4x4 blocked E8M0 scales.
+
+    Byte-for-byte the same math as ``mxfp8linear._store_mxfp8_blocks``; inlined here so the
+    producer norm kernel can write the quantized tensor without a second DRAM round-trip of
+    the bf16 activation.
+    """
+    matrix = tl.reshape(matrix, (BLOCKS_PER_PROGRAM, 32))
+    max_abs = tl.max(tl.abs(matrix), axis=1)
+    exponent = (max_abs.to(tl.int32, bitcast=True) >> 23) & 0xFF
+    scale_biased = tl.maximum(tl.minimum(exponent - 8, 255), 0)
+    scale_biased = tl.where(max_abs != max_abs, 255, scale_biased)
+    scale_bits = scale_biased.to(tl.int32) << 23
+    scale = tl.maximum(scale_bits.to(tl.float32, bitcast=True), 1.1754943508222875e-38)
+    scaled_matrix = tl.maximum(tl.minimum(matrix / scale[:, None], 448.0), -448.0)
+    columns = first_block * 32 + tl.arange(0, BLOCKS_PER_PROGRAM * 32)
+    tl.store(
+        quantized_ptr + row.to(tl.int64) * column_count + columns,
+        tl.reshape(scaled_matrix.to(tl.float8e4nv), (BLOCKS_PER_PROGRAM * 32, )),
+        mask=columns < column_count,
+    )
+    blocks = first_block + tl.arange(0, BLOCKS_PER_PROGRAM)
+    row_block = row // 128
+    row_in_block = row % 128
+    column_block = blocks // 4
+    column_in_block = blocks % 4
+    scale_offset = ((row_block * (scale_column_count // 4) + column_block) * 512 + (row_in_block % 32) * 16 +
+                    (row_in_block // 32) * 4 + column_in_block)
+    tl.store(scale_ptr + scale_offset, scale_biased.to(tl.uint8), mask=blocks < scale_column_count)
+
+
 @triton.jit
 def _rmsnorm_modulate_kernel(
     out_ptr,
@@ -98,9 +142,14 @@ def _rmsnorm_modulate_kernel(
     eps,
     stride_a_row,
     stride_b_row,
+    quantized_ptr,
+    scale_ptr,
     NC: tl.constexpr,
     BLOCK: tl.constexpr,
     NCHUNK: tl.constexpr,
+    QUANT: tl.constexpr,
+    SCC: tl.constexpr,
+    BPP: tl.constexpr,
 ):
     """One program per row: sumsq pass over the row, then an apply pass.
 
@@ -145,6 +194,17 @@ def _rmsnorm_modulate_kernel(
         mask=mask,
         cache_modifier=".cs",
     )
+    if QUANT:
+        _store_mxfp8_row_blocks(
+            y.to(tl.bfloat16).to(tl.float32),
+            quantized_ptr,
+            scale_ptr,
+            row,
+            chunk * BPP,
+            NC,
+            SCC,
+            BPP,
+        )
 
     for chunk in tl.static_range(NCHUNK - 1):
         off = chunk * BLOCK + cols
@@ -159,6 +219,17 @@ def _rmsnorm_modulate_kernel(
             mask=mask,
             cache_modifier=".cs",
         )
+        if QUANT:
+            _store_mxfp8_row_blocks(
+                y.to(tl.bfloat16).to(tl.float32),
+                quantized_ptr,
+                scale_ptr,
+                row,
+                chunk * BPP,
+                NC,
+                SCC,
+                BPP,
+            )
 
 
 def _next_power_of_two(value: int) -> int:
@@ -185,8 +256,16 @@ def rmsnorm_modulate(
     scale: torch.Tensor,
     shift: torch.Tensor,
     index: torch.Tensor,
-) -> torch.Tensor:
-    """RMSNorm + per-token AdaLN modulation with one activation read and write."""
+    prequantize: bool = False,
+):
+    """RMSNorm + per-token AdaLN modulation with one activation read and write.
+
+    With ``prequantize=True`` the kernel also writes the MXFP8 (E4M3 + blocked E8M0 scales)
+    image of the bf16 output and returns ``(output, quantized, scales)``.  The quantize is
+    bit-identical to a separate ``quantize_mxfp8_blockwise`` pass over ``output`` (the
+    in-register bf16 rounding is the same round-to-nearest the store/load round-trip does),
+    but it avoids re-reading the activation from DRAM.
+    """
     if not x.is_cuda:
         raise ValueError("h3_rmsnorm_modulate requires CUDA tensors")
     hidden = x.shape[-1]
@@ -221,6 +300,15 @@ def rmsnorm_modulate(
     )
 
     block = _main_block(hidden)
+    if prequantize:
+        scc = triton.cdiv((hidden // _MXFP8_BLOCK), 4) * 4
+        blocked_size = triton.cdiv(flat_x.shape[0], 128) * 128 * scc
+        quantized = torch.empty((flat_x.shape[0], hidden), dtype=torch.float8_e4m3fn, device=flat_x.device)
+        scales_u8 = torch.empty(blocked_size, dtype=torch.uint8, device=flat_x.device)
+    else:
+        scc = 4
+        quantized = output
+        scales_u8 = output
     _rmsnorm_modulate_kernel[(flat_x.shape[0], )](
         output,
         flat_x,
@@ -231,9 +319,16 @@ def rmsnorm_modulate(
         H3_NORM_EPS,
         fused_a.stride(0),
         fused_b.stride(0),
+        quantized,
+        scales_u8,
         NC=hidden,
         BLOCK=block,
         NCHUNK=triton.cdiv(hidden, block),
+        QUANT=prequantize,
+        SCC=scc,
+        BPP=block // _MXFP8_BLOCK,
         num_warps=_num_warps(block),
     )
+    if prequantize:
+        return output.view_as(x), quantized, scales_u8.view(torch.float8_e8m0fnu)
     return output.view_as(x)

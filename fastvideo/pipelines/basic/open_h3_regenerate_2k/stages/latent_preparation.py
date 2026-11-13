@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -24,6 +25,11 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
     MINIMAX_H3_LAYOUT_KEY,
     MiniMaxH3LatentPreparationStage,
 )
+from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_bundle import BUNDLE_EXTRA_KEY, load_draft_bundle
+from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_latent_cache import (
+    DraftLatentCache,
+    draft_latent_cache_key,
+)
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_video import load_draft_pixels
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.sampling import mix_initial_state, refine_sigmas
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -32,6 +38,21 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 logger = init_logger(__name__)
 
 DRAFT_FRAME_COUNT = 124
+
+
+def _parse_encode_tile(tile_spec: str | None) -> tuple[int, int, int, int] | None:
+    """Parse ``FASTVIDEO_H3_VAE_ENCODE_TILE`` and reject a spec that would stall the tiler."""
+    if not tile_spec:
+        return None
+    try:
+        tile_height, tile_width, overlap_height, overlap_width = (int(value) for value in tile_spec.split(","))
+    except ValueError as error:
+        raise ValueError(f"FASTVIDEO_H3_VAE_ENCODE_TILE must be 'H,W,OH,OW' integers, got {tile_spec!r}.") from error
+    if min(tile_height, tile_width) <= 0 or min(overlap_height, overlap_width) < 0:
+        raise ValueError(f"FASTVIDEO_H3_VAE_ENCODE_TILE needs positive tiles, got {tile_spec!r}.")
+    if overlap_height >= tile_height or overlap_width >= tile_width:
+        raise ValueError(f"FASTVIDEO_H3_VAE_ENCODE_TILE overlaps must be smaller than tiles, got {tile_spec!r}.")
+    return tile_height, tile_width, overlap_height, overlap_width
 
 
 class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
@@ -52,6 +73,7 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         self.start_sigma = start_sigma
         self.draft_latent_path = draft_latent_path
         self._silence: tuple[tuple[str, int], torch.Tensor] | None = None
+        self._draft_cache = DraftLatentCache()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = super().verify_input(batch, fastvideo_args)
@@ -63,13 +85,58 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         """Normalized native latent [C, T, h, w] of the draft, with the VAE posterior sampled under a fixed seed."""
         pixels = load_draft_pixels(video_path, self.draft_size)
         pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        vae = self.vae
+        tile_override = _parse_encode_tile(envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get())
+        overridden = tile_override is not None
+        previous_use_tiling = vae.use_tiling
+        previous_height = vae.tile_sample_min_height
+        previous_width = vae.tile_sample_min_width
+        previous_overlap_height = vae.tile_sample_min_overlap_height
+        previous_overlap_width = vae.tile_sample_min_overlap_width
+        if overridden:
+            vae.enable_tiling(*tile_override)
         try:
-            posterior = self.vae.encode_pixels(pixels).latent_dist
+            posterior = vae.encode_pixels(pixels).latent_dist
             sample = posterior.sample(generator=torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED))
-            return self.vae.normalize_latents(sample.float())[0].to(device)
+            return vae.normalize_latents(sample.float())[0].to(device)
         finally:
+            # The decode path reads the same tile fields, so an encode override must not outlive the encode.
+            if overridden:
+                vae.use_tiling = previous_use_tiling
+                vae.tile_sample_min_height = previous_height
+                vae.tile_sample_min_width = previous_width
+                vae.tile_sample_min_overlap_height = previous_overlap_height
+                vae.tile_sample_min_overlap_width = previous_overlap_width
             if fastvideo_args.vae_cpu_offload:
-                pinned_offload.unload(self.vae)
+                pinned_offload.unload(vae)
+
+    def _encode_draft_cached(self, video_path: str, device: torch.device,
+                             fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        """``_encode_draft`` behind an exact content-keyed cache (draft_latent_cache).
+
+        The encode is a pure function of the draft file, tiling, fixed posterior
+        seed and model bundle, so an identical presentation reuses the encoder's
+        own output bit-for-bit instead of re-encoding (~82 s on the Spark).
+        """
+        cache = self._draft_cache
+        if not cache.enabled:
+            return self._encode_draft(video_path, device, fastvideo_args)
+        # The compiled encoder differs from the eager one at fp32 rounding level, and a batched tile call
+        # changes the reduction order, so both are part of the key.
+        tile = envs.FASTVIDEO_H3_VAE_ENCODE_TILE.get()
+        tile_batch = envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.get()
+        compiled = envs.FASTVIDEO_H3_VAE_COMPILE_ENCODER.get()
+        settings = (tile, tile_batch, compiled)
+        model_path = getattr(fastvideo_args, "model_path", None)
+        seed = MINIMAX_H3_KEYFRAME_ENCODE_SEED
+        key = draft_latent_cache_key(video_path, self.draft_size, settings, model_path, seed)
+        cached = cache.get(key)
+        if cached is not None:
+            logger.info("Open-H3 draft-latent cache hit (%s); skipping the VAE encode", key)
+            return cached.to(device=device, dtype=torch.float32)
+        draft = self._encode_draft(video_path, device, fastvideo_args)
+        cache.put(key, draft)
+        return draft
 
     def _draft_latent_source(self, video_path: str | None) -> str | None:
         """The saved draft latent for this request: the configured one, or a ``.pt`` passed as the draft video."""
@@ -77,11 +144,28 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
             return self.draft_latent_path
         return video_path if video_path is not None and video_path.lower().endswith(".pt") else None
 
-    def _load_draft_latent(self, path: str, device: torch.device) -> torch.Tensor:
-        """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video."""
-        tensor = torch.load(path, map_location="cpu", weights_only=True)
-        if isinstance(tensor, dict):
-            raise ValueError(f"{path} holds a mapping; save the draft latent tensor itself.")
+    @staticmethod
+    def _bundle_for_source(batch: ForwardBatch, latent_source: str) -> dict | None:
+        """The conditioning stage's already-loaded bundle, only when it is the source selected for this request.
+
+        The stage loads the bundle from ``batch.video_path``; a configured ``draft_latent_path`` must win over it.
+        """
+        if latent_source != batch.video_path:
+            return None
+        return batch.extra.get(BUNDLE_EXTRA_KEY)
+
+    def _load_draft_latent(self, path: str, device: torch.device, bundle: dict | None = None) -> torch.Tensor:
+        """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video.
+
+        ``path`` holds the bare latent tensor or a draft bundle (``draft_bundle``); ``bundle`` is the copy the
+        conditioning stage already loaded for this request.
+        """
+        if bundle is None:
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            bundle = load_draft_bundle(path) if isinstance(payload, dict) else None
+            tensor = bundle["latent"] if bundle is not None else payload
+        else:
+            tensor = bundle["latent"]
         tensor = torch.as_tensor(tensor)
         if tensor.ndim == 5 and tensor.shape[0] == 1:
             tensor = tensor[0]
@@ -121,8 +205,10 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         _, channels, num_latent_frames, latent_height, latent_width = batch.raw_latent_shape
 
         latent_source = self._draft_latent_source(batch.video_path)
-        draft = (self._encode_draft(batch.video_path, device, fastvideo_args)
-                 if latent_source is None else self._load_draft_latent(latent_source, device))
+        if latent_source is None:
+            draft = self._encode_draft_cached(batch.video_path, device, fastvideo_args)
+        else:
+            draft = self._load_draft_latent(latent_source, device, self._bundle_for_source(batch, latent_source))
         upscaler = self.load_upscaler()
         upscaled = upscale_latent(upscaler, draft, (batch.height, batch.width))
         if tuple(upscaled.shape) != (channels, num_latent_frames, latent_height, latent_width):
