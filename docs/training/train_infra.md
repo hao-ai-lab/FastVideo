@@ -358,6 +358,11 @@ pipeline:
   flow_shift: 8
 ```
 
+Validation loads its scheduler modules from the checkpoint. Students that
+expose resolved per-modality shifts (PDD and MiniMax H3) must therefore train
+with the checkpoint's scheduler shifts; the callback refuses to start
+validation when the student and checkpoint shifts differ.
+
 Registered transformer linear-quantization configs can also be selected by
 name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs
 with a straight-through-estimator backward to its deployment-targeted
@@ -607,8 +612,13 @@ The plugin implements the per-modality contract the method loops over
 and friends). H3 conventions that differ from Wan:
 
 - **Sigma grid**: `shift * u / (1 + (shift - 1) * u)` with `u = label / 1000`,
-  video shift `12` and audio shift `3`; the same integer labels drive both
-  modalities, each mapped through its own shift.
+  default video shift `12` and audio shift `3`; the same integer labels drive
+  both modalities, each mapped through its own shift. The role's resolved
+  `pipeline.video_scheduler_shift` / `pipeline.audio_scheduler_shift` override
+  those defaults for training, but validation samples the checkpoint's
+  scheduler configs. A training shift that differs from the checkpoint is
+  rejected when validation starts, and because the H3 recipe validates only at
+  the final step, verify the shifts before launching a long run.
 - **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
 - **Velocity is data-ward**: the plugin negates the transformer output so the
   base conversion `x0 = x_t - sigma * pred_noise` is exactly
@@ -683,7 +693,10 @@ autograd/CUDA stream state inconsistent, and the next training backward raises
 `opt_ready_stream && opt_parent_stream`. Validate once at the final step
 (`callbacks.validation.run_at_start: false`,
 `callbacks.validation.every_steps: <max_train_steps>`) or sample from
-checkpoints in a separate process. Validation sets the
+checkpoints in a separate process. The sampling-clock check therefore runs at
+that final step: a non-default `video_scheduler_shift` /
+`audio_scheduler_shift` that disagrees with the checkpoint's scheduler configs
+fails the run after training rather than before it. Validation sets the
 `decode_on_all_ranks` batch flag, so every data-parallel rank decodes and saves
 the media for its own sample instead of only the global output rank.
 

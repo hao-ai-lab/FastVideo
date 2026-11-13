@@ -18,6 +18,11 @@ caption:
   own ``seed`` so repeated captions sample different noise), plus the
   cross-caption spread and their ratio.
 
+``report["summary"]`` is keyed by sampling schedule
+(``inference_steps_<n>``), so a run that samples several step counts keeps
+each schedule's headline means separate instead of blending them. Consumers
+of an older flat summary must read ``summary["inference_steps_<n>"]``.
+
 Spread is the mean pairwise L2 distance between per-video descriptors: the
 temporal-mean frame pooled to ``--descriptor-size`` squared and flattened.
 It is reference-free, matching the measurement policy that never

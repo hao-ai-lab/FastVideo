@@ -620,10 +620,18 @@ class SequentialTracker(BaseTracker):
         fps: int | None = None,
         format: str | None = None,
     ) -> Any | None:
-        videos = tuple(tracker.video(data, caption=caption, fps=fps, format=format) for tracker in self._trackers)
+        videos: list[Any | None] = []
+        for tracker in self._trackers:
+            try:
+                videos.append(tracker.video(data, caption=caption, fps=fps, format=format))
+            except Exception as exc:
+                # One backend rejecting the artifact must not abort training or
+                # hide the other backends' copies.
+                logger.warning("%s could not create the video artifact: %s", type(tracker).__name__, exc)
+                videos.append(None)
         if all(video is None for video in videos):
             return None
-        return _SequentialArtifact(videos)
+        return _SequentialArtifact(tuple(videos))
 
 
 class SwanlabTracker(BaseTracker):

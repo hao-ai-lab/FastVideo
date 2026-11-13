@@ -1088,6 +1088,36 @@ def test_tdm_rejects_schedule_with_empty_trajectory_interval() -> None:
         _build_method(method_overrides={"tdm_denoising_steps": [1000, 1]})
 
 
+def test_tdm_validates_context_intervals_for_every_modality(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A two-modality student validates predictions for each modality at startup."""
+    seen: list[str] = []
+    original = TDMMethod._validate_context_intervals
+
+    def recording(self: TDMMethod, labels: torch.Tensor, modality: str) -> None:
+        seen.append(modality)
+        original(self, labels, modality)
+
+    monkeypatch.setattr(TDMMethod, "_validate_context_intervals", recording)
+    monkeypatch.setattr(_TinyRoleModel, "tdm_modalities", lambda self: ("video", "audio"))
+
+    _build_method()
+
+    assert seen == ["video", "audio"]
+
+
+def test_tdm_rejects_per_modality_label_horizon_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared label sampler cannot honor modalities with different horizons."""
+    monkeypatch.setattr(_TinyRoleModel, "tdm_modalities", lambda self: ("video", "audio"))
+    monkeypatch.setattr(
+        _TinyRoleModel,
+        "tdm_max_trajectory_label",
+        lambda self, modality: 1000 if modality == "video" else 500,
+    )
+
+    with pytest.raises(ValueError, match="one trajectory label horizon"):
+        _build_method()
+
+
 def test_tdm_to_terminal_accepts_schedule_without_intermediate_labels() -> None:
     """``to_terminal`` draws targets up to the terminal label, so ``[1000, 1]`` is valid."""
     method, _, _ = _build_method(

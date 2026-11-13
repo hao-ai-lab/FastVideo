@@ -840,6 +840,18 @@ class TDMMethod(DMD2Method):
         self._cached_schedule_index = self._active_schedule_index
         return steps
 
+    def _trajectory_label_horizon(self) -> int:
+        """Return the one label horizon the shared context sampler can use.
+
+        Every modality samples the same integer labels, so per-modality
+        horizons would make startup validation disagree with the sampler.
+        """
+        horizons = {modality: int(self.student.tdm_max_trajectory_label(modality)) for modality in self._modalities}
+        if len(set(horizons.values())) > 1:
+            raise ValueError("TDM requires one trajectory label horizon across modalities; "
+                             f"got {horizons}")
+        return next(iter(horizons.values()))
+
     def _validate_context_intervals(self, labels: torch.Tensor, modality: str) -> None:
         """Require a positive label in every interval the context sampler draws.
 
@@ -850,7 +862,7 @@ class TDMMethod(DMD2Method):
         """
         if not self._use_randmid and self._noise_interval_mode != "separate":
             return
-        max_label = int(self.student.tdm_max_trajectory_label(modality))
+        max_label = self._trajectory_label_horizon()
         candidates = torch.arange(max_label, 0, -1, device=labels.device)
         next_labels = torch.cat((labels[1:], labels.new_zeros(1)))
         for current, following in zip(labels, next_labels, strict=True):
@@ -862,6 +874,7 @@ class TDMMethod(DMD2Method):
 
     def _validate_denoising_schedules(self) -> None:
         """Resolve every ladder stage once so a bad schedule fails at startup."""
+        self._trajectory_label_horizon()
         for index in range(len(self._step_schedules)):
             self._active_schedule_index = index
             self._get_denoising_step_list(torch.device("cpu"))
@@ -1054,7 +1067,7 @@ class TDMMethod(DMD2Method):
             generator=self.cuda_generator,
         )
         step_labels = reference.timesteps
-        max_label = int(self.student.tdm_max_trajectory_label("video"))
+        max_label = self._trajectory_label_horizon()
         # Descending labels keep the candidate order identical to the
         # scheduler-sigma sampling this replaces (largest sigma first).
         all_labels = torch.arange(max_label, 0, -1, device=device)

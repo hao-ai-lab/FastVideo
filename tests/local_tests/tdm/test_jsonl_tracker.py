@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from fastvideo.training.trackers import initialize_trackers
+from fastvideo.training.trackers import SequentialTracker, initialize_trackers
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
@@ -120,6 +120,50 @@ def test_jsonl_tracker_video_failures_stay_best_effort(
 
     assert tracker.video(frames, caption="prompt", fps=4) is None
     assert list(files_dir.iterdir()) == []
+
+
+def test_sequential_tracker_keeps_other_backends_when_video_fails() -> None:
+    """One tracker rejecting an array must not drop the other backends' copies."""
+
+    class FailingTracker:
+
+        def video(self, data: Any, *, caption: str | None = None, fps: int | None = None,
+                  format: str | None = None) -> Any:
+            raise RuntimeError("bad array")
+
+    class RecordingTracker:
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[Any, str | None, int | None, str | None]] = []
+
+        def video(self, data: Any, *, caption: str | None = None, fps: int | None = None,
+                  format: str | None = None) -> str:
+            self.calls.append((data, caption, fps, format))
+            return "recorded"
+
+    recording = RecordingTracker()
+    tracker = SequentialTracker([FailingTracker(), recording])
+    frames = np.zeros((2, 3, 16, 16), dtype=np.uint8)
+
+    video = tracker.video(frames, caption="prompt", fps=4)
+
+    assert recording.calls == [(frames, "prompt", 4, None)]
+    assert video is not None
+    assert video.values == (None, "recorded")
+
+
+def test_sequential_tracker_returns_none_when_every_video_fails() -> None:
+    """No backend producing an artifact stays equivalent to no artifact."""
+
+    class FailingTracker:
+
+        def video(self, data: Any, *, caption: str | None = None, fps: int | None = None,
+                  format: str | None = None) -> Any:
+            raise RuntimeError("bad array")
+
+    tracker = SequentialTracker([FailingTracker(), FailingTracker()])
+
+    assert tracker.video(np.zeros((2, 3, 16, 16), dtype=np.uint8), caption="prompt", fps=4) is None
 
 
 class _FakeWandbRun:

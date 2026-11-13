@@ -178,6 +178,7 @@ class ValidationCallback(Callback):
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
+        self.method: Any | None = None
         self._pipeline: Any | None = None
         self._pipeline_key: tuple[Any, ...] | None = None
         self._sampling_param: SamplingParam | None = None
@@ -1531,7 +1532,7 @@ class ValidationCallback(Callback):
         that expose modality shifts (PDD and H3) therefore fail fast here
         instead of silently sampling a different sigma grid.
         """
-        student = getattr(self.method, "student", None)
+        student = getattr(getattr(self, "method", None), "student", None)
         get_module = getattr(pipeline, "get_module", None)
         if student is None or not callable(get_module):
             return
