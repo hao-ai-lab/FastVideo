@@ -109,6 +109,8 @@ class OpenH3Regenerate2KPipeline(MiniMaxH3Pipeline):
         stage = self._stage_name_mapping.get("conditioning_stage")
         if isinstance(stage, Regenerate2KConditioningStage):
             stage.before_encode = self._release_resident_transformer
+            stage.prompt_embeds_policy = fastvideo_args.pipeline_config.draft_bundle_prompt_embeds
+            stage.text_encoder_fingerprint = self.text_encoder_fingerprint
 
     def _release_resident_transformer(self) -> None:
         """Drop a DiT kept across requests before the text encoder loads, so they never share unified memory.

@@ -171,6 +171,11 @@ class VideoGenerationRequest(BaseModel):
 
     lora: dict[str, Any] | None = None
     extra_params: dict[str, Any] | None = None
+    # MiniMax-H3 draft handoff (see fastvideo/pipelines/basic/minimax_h3/draft_bundle.py): a generator keeps the
+    # finished draft's latent + conditioning (GET /v1/videos/{id}/draft_bundle); Open-H3-Regenerate-2K takes one as its
+    # draft (an http(s) URL, a local path under server.media_roots, or a data:application/x-fastvideo-h3-draft URL).
+    return_draft_bundle: bool = False
+    draft_bundle: str | None = None
 
     @field_validator("prompt")
     @classmethod

@@ -25,7 +25,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
     MINIMAX_H3_LAYOUT_KEY,
     MiniMaxH3LatentPreparationStage,
 )
-from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_bundle import BUNDLE_EXTRA_KEY, load_draft_bundle
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_EXTRA_KEY, load_draft_bundle
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_latent_cache import (
     DraftLatentCache,
     draft_latent_cache_key,

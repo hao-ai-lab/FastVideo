@@ -54,6 +54,8 @@ REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
     "vsa_mode",
     "vsa_dense_first_n_steps",
     "vsa_dense_layers",
+    # MiniMax-H3: write a draft bundle (normalized latent + prompt conditioning) here; see draft_bundle.py.
+    "h3_draft_bundle_path",
     # Recognized transport keys; validate_request_batch_extra restricts them to Kandinsky6 SR.
     *SR_REQUEST_FIELDS,
 )
