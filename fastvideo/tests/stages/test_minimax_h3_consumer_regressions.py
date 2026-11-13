@@ -71,7 +71,7 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
                             raw_latent_shape=(1, 2, 1, 1, 1), output=None)
     args = SimpleNamespace(vae_parallel_decode=False, pin_cpu_memory=False, vae_cpu_offload=True,
                            output_type="latent")
-    monkeypatch.setattr(decoding, "_decode_participation", lambda *a: (None, True, False))
+    monkeypatch.setattr(decoding, "_decode_participation", lambda *a, **k: (None, True, False))
     monkeypatch.setattr(decoding, "_layout", lambda batch: layout)
     monkeypatch.setattr(decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(decoding, "h3_dit_patch_size", lambda *a: (1, 1, 1))
@@ -90,3 +90,15 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
     monkeypatch.setattr(nvfp4, "freeze_nvfp4_linears_on_device", freeze)
     monkeypatch.setattr(pinned_offload, "unload", unload)
     decoding.MiniMaxH3VideoDecodingStage(vae).forward(batch, args)
+
+
+def test_decode_all_ranks_takes_precedence_over_parallel_decode(monkeypatch):
+    """Validation ranks outside the output group must still decode their samples."""
+    sp_group = SimpleNamespace(world_size=8, ranks=list(range(8, 16)))
+    monkeypatch.setattr(decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(decoding, "get_sp_group", lambda: sp_group)
+    monkeypatch.setattr(decoding, "h3_is_output_worker", lambda args: False)
+    monkeypatch.setattr(decoding, "h3_output_worker_rank", lambda args: 0)
+
+    assert decoding._decode_participation(SimpleNamespace(), True, decode_all_ranks=True) == (sp_group, True, False)
+    assert decoding._decode_participation(SimpleNamespace(), True) == (sp_group, False, False)

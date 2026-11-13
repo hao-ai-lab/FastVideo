@@ -21,6 +21,7 @@ import pytest
 import torch
 
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.pipelines.pipeline_batch_info import DECODE_ON_ALL_RANKS_KEY
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.callbacks.ema import EMACallback
 from fastvideo.train.callbacks.validation import (
@@ -292,6 +293,84 @@ class TestH3ValidationContract:
         )
 
         assert batch.num_videos_per_prompt == 3
+
+    def test_prepare_validation_batch_uses_record_seed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A record seed controls its generator; absent, the shared generator is used."""
+        cb = _make_callback()
+        cb.seed = 1000
+        cb.validation_random_generator = torch.Generator(device="cpu").manual_seed(1000)
+        cb.training_config = SimpleNamespace(
+            data=SimpleNamespace(
+                num_height=64,
+                num_width=96,
+                num_latent_t=2,
+            ),
+            pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(
+                arch_config=SimpleNamespace(temporal_compression_ratio=4), ), ),
+            model_path="unused",
+            vsa_sparsity=0.0,
+        )
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.make_inference_args",
+            lambda *args, **kwargs: SimpleNamespace(),
+        )
+
+        with_seed = cb._prepare_validation_batch(
+            SamplingParam(),
+            {
+                "prompt": "Generate synchronized media.",
+                "seed": 7,
+            },
+            num_inference_steps=5,
+        )
+        without_seed = cb._prepare_validation_batch(
+            SamplingParam(),
+            {"prompt": "Generate synchronized media."},
+            num_inference_steps=5,
+        )
+
+        assert with_seed.seed == 7
+        assert without_seed.seed == 1000
+        assert with_seed.generator is not cb.validation_random_generator
+        assert without_seed.generator is cb.validation_random_generator
+        expected = torch.Generator(device="cpu").manual_seed(7)
+        assert torch.equal(
+            torch.randn(4, generator=with_seed.generator),
+            torch.randn(4, generator=expected),
+        )
+
+    def test_prepare_validation_batch_requests_decode_on_all_ranks(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Every data-parallel rank must decode its own validation sample."""
+        cb = _make_callback()
+        cb.training_config = SimpleNamespace(
+            data=SimpleNamespace(
+                num_height=64,
+                num_width=96,
+                num_latent_t=2,
+            ),
+            pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(
+                arch_config=SimpleNamespace(temporal_compression_ratio=4), ), ),
+            model_path="unused",
+            vsa_sparsity=0.0,
+        )
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.make_inference_args",
+            lambda *args, **kwargs: SimpleNamespace(),
+        )
+
+        batch = cb._prepare_validation_batch(
+            SamplingParam(),
+            {"prompt": "Generate synchronized media."},
+            num_inference_steps=5,
+        )
+
+        assert batch.extra[DECODE_ON_ALL_RANKS_KEY] is True
 
     def test_prepare_validation_batch_ignores_media_for_text_only_generation(
         self,
@@ -565,6 +644,47 @@ class TestStudentSamplingContract:
     def test_pdd_validation_refuses_a_different_sampling_clock(self) -> None:
         with pytest.raises(ValueError, match="video_scheduler_shift=10.0"):
             self._resolve(self._callback(shifts=(10.0, 3.0)), self._pdd_transformer(), 8)
+
+    def test_non_pdd_validation_refuses_a_different_sampling_clock(self) -> None:
+        """H3 TDM/DMD students also train on scheduler shifts the checkpoint does not sample."""
+        with pytest.raises(ValueError, match="video_scheduler_shift=10.0"):
+            self._resolve(self._callback(shifts=(10.0, 3.0)), torch.nn.Identity(), 8)
+
+    def test_validation_refuses_an_audio_only_sampling_clock_mismatch(self) -> None:
+        """A matching video shift must not hide a different audio clock."""
+        with pytest.raises(ValueError, match="audio_scheduler_shift=4.0"):
+            self._resolve(self._callback(shifts=(12.0, 4.0)), torch.nn.Identity(), 8)
+
+    def test_validation_clock_is_noop_before_on_train_start(self) -> None:
+        """The callback leaves method as None until on_train_start assigns it."""
+        cb = self._callback(sparsity=0.0)
+        cb.method = None
+        config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
+        assert resolved is config
+
+    def test_validation_clock_is_noop_when_method_attribute_is_absent(self) -> None:
+        """The defensive lookup also handles callers that never set the attribute."""
+        cb = self._callback(sparsity=0.0)
+        del cb.method
+        config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
+        assert resolved is config
+
+    def test_validation_clock_allows_students_without_shift_attributes(self) -> None:
+        """Video-only students expose neither shift and skip the module lookup."""
+        cb = self._callback(sparsity=0.0)
+        cb.method = SimpleNamespace(student=SimpleNamespace())
+        config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
+        assert resolved is config
+
+    def test_validation_clock_skips_a_missing_scheduler_module(self) -> None:
+        """A checkpoint without an audio scheduler is not a shift mismatch."""
+        config, resolved = self._resolve(
+            self._callback(sparsity=0.0),
+            torch.nn.Identity(),
+            8,
+            schedulers={"scheduler": SimpleNamespace(shift=12.0)},
+        )
+        assert resolved is config
 
     def test_validation_forward_receives_the_pdd_partition(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = []

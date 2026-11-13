@@ -1,0 +1,273 @@
+#!/usr/bin/env python
+"""Reference-free multi-prompt diversity report for TDM validation videos.
+
+The earlier acceptance check only had one prompt, so it could show coherence
+and sharpness but not whether the student recovers sample diversity. This
+tool covers the missing axis on the modular validation layout.
+
+The validation callback shards the caption list across sequence-parallel
+groups and pads the list to a multiple of that degree (see
+``fastvideo/dataset/validation_dataset.py``); the leader of SP group ``g``
+(global rank ``g * sp_size``) therefore saves the ``video_i`` sample of the
+padded row ``g * rows_per_group + i``. The tool rebuilds that mapping from the
+same caption file, then reports, per validation step, sampling schedule, and
+caption:
+
+- frame statistics (brightness/contrast/gradient sharpness), and
+- a within-caption spread over the repeated rows (each record may carry its
+  own ``seed`` so repeated captions sample different noise), plus the
+  cross-caption spread and their ratio.
+
+``report["summary"]`` is keyed by sampling schedule
+(``inference_steps_<n>``), so a run that samples several step counts keeps
+each schedule's headline means separate instead of blending them. Consumers
+of an older flat summary must read ``summary["inference_steps_<n>"]``.
+
+Spread is the mean pairwise L2 distance between per-video descriptors: the
+temporal-mean frame pooled to ``--descriptor-size`` squared and flattened.
+It is reference-free, matching the measurement policy that never
+asserts paired metrics. A regression-only (conditional-mean) student
+tightens within-caption spread toward zero, while a distribution-matched
+student keeps the seeds apart; the cross-caption spread is the control for
+"the samples merely differ by prompt".
+
+Example (from the repo root):
+
+    PYTHONPATH=. python tests/local_tests/tdm/tools/tdm_multiprompt_report.py \
+        --run-dir <run-dir> \
+        --captions-json examples/train/configs/distribution_matching/wan/tdm_multiprompt_validation.json \
+        --out /tmp/multiprompt-treatment.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+from fastvideo.train.utils.tdm_metrics import frame_statistics
+
+VALIDATION_PATTERN = re.compile(r"validation_step_(\d+)_inference_steps_(\d+)_rank_(\d+)_video_(\d+)\.mp4$")
+
+
+def _load_video(path: Path) -> np.ndarray:
+    import av
+
+    with av.open(str(path)) as container:
+        frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    if not frames:
+        raise ValueError(f"no decodable frames in {path}")
+    return np.stack(frames)
+
+
+def _descriptor(frames: np.ndarray, size: int) -> torch.Tensor:
+    """Temporal-mean frame pooled to ``size`` squared, flattened and L2-normalized."""
+    tensor = torch.as_tensor(frames).float()
+    if tensor.ndim == 4:
+        tensor = tensor.mean(dim=0)
+    chw = tensor.permute(2, 0, 1).unsqueeze(0)
+    pooled = torch.nn.functional.adaptive_avg_pool2d(chw, size).flatten()
+    return pooled / pooled.norm().clamp_min(1e-6)
+
+
+def _mean_pairwise(vectors: list[torch.Tensor]) -> float:
+    if len(vectors) < 2:
+        return float("nan")
+    stacked = torch.stack(vectors)
+    distances = torch.cdist(stacked, stacked)
+    upper = torch.triu_indices(len(vectors), len(vectors), offset=1)
+    return float(distances[upper[0], upper[1]].mean())
+
+
+def _load_caption_rows(path: Path) -> list[str]:
+    payload = json.loads(path.read_text())
+    rows = [entry["caption"] for entry in payload["data"]]
+    if not rows:
+        raise ValueError(f"no captions in {path}")
+    return rows
+
+
+def _padded_rows(rows: list[str], num_groups: int) -> list[str]:
+    remainder = len(rows) % num_groups
+    if remainder == 0:
+        return rows
+    return rows + rows[: num_groups - remainder]
+
+
+def _row_index(rank: int, video_index: int, sp_size: int, rows_per_group: int) -> int:
+    """Map an SP-group leader's global rank to its padded caption row."""
+    if rank % sp_size != 0:
+        raise ValueError(f"rank {rank} is not an SP group leader for sp_size={sp_size}")
+    return (rank // sp_size) * rows_per_group + video_index
+
+
+def _nanmean(values: list[float]) -> float:
+    return float(np.mean(values)) if values else float("nan")
+
+
+def _summarize_schedules(
+    records_by_inference_steps: dict[int, list[dict[str, dict[str, float]]]],
+    train_captions: set[str],
+) -> dict[str, dict[str, float]]:
+    """Aggregate per-caption stats once per sampling schedule.
+
+    A headline mean over every schedule would mix a different
+    ``inference_steps`` into the spread and sharpness numbers, so each
+    schedule keeps its own summary.
+    """
+    summary: dict[str, dict[str, float]] = {}
+    for inference_steps, schedules in sorted(records_by_inference_steps.items()):
+        train_within: list[float] = []
+        heldout_within: list[float] = []
+        train_sharp: list[float] = []
+        heldout_sharp: list[float] = []
+        for caption_records in schedules:
+            for caption, record in caption_records.items():
+                if caption in train_captions:
+                    train_within.append(record["within_spread"])
+                    train_sharp.append(record["sharpness"])
+                else:
+                    heldout_within.append(record["within_spread"])
+                    heldout_sharp.append(record["sharpness"])
+        summary[f"inference_steps_{inference_steps}"] = {
+            "train_mean_within_spread": _nanmean(train_within),
+            "heldout_mean_within_spread": _nanmean(heldout_within),
+            "train_mean_sharpness": _nanmean(train_sharp),
+            "heldout_mean_sharpness": _nanmean(heldout_sharp),
+        }
+    return summary
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", required=True)
+    parser.add_argument("--captions-json", required=True)
+    parser.add_argument("--num-sp-groups", type=int, default=4)
+    parser.add_argument("--sp-size", type=int, default=1)
+    parser.add_argument("--num-train-prompts", type=int, default=4)
+    parser.add_argument("--descriptor-size", type=int, default=32)
+    parser.add_argument("--label", default="")
+    parser.add_argument("--out", default="")
+    args = parser.parse_args()
+
+    run_dir = Path(args.run_dir)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(run_dir)
+
+    if args.num_sp_groups <= 0 or args.sp_size <= 0:
+        raise ValueError("--num-sp-groups and --sp-size must be positive")
+
+    rows = _padded_rows(_load_caption_rows(Path(args.captions_json)), args.num_sp_groups)
+    rows_per_group = len(rows) // args.num_sp_groups
+
+    per_key: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+    for path in sorted(run_dir.glob("**/*.mp4")):
+        match = VALIDATION_PATTERN.search(path.name)
+        if match is None:
+            continue
+        step = int(match.group(1))
+        inference_steps = int(match.group(2))
+        rank = int(match.group(3))
+        video_index = int(match.group(4))
+        group = rank // args.sp_size
+        if group >= args.num_sp_groups:
+            raise ValueError(f"{path.name}: SP group {group} outside {args.num_sp_groups} groups")
+        row = _row_index(rank, video_index, args.sp_size, rows_per_group)
+        if row >= len(rows):
+            raise ValueError(f"{path.name}: row {row} outside {len(rows)} padded rows")
+        per_key[(step, inference_steps)].append({
+            "caption": rows[row],
+            "rank": rank,
+            "group": group,
+            "video_index": video_index,
+            "path": path,
+        })
+
+    if not per_key:
+        raise ValueError(f"no validation videos matched under {run_dir}")
+
+    report: dict[str, Any] = {
+        "run_dir": str(run_dir),
+        "label": args.label,
+        "captions_json": str(args.captions_json),
+        "num_sp_groups": args.num_sp_groups,
+        "sp_size": args.sp_size,
+        "rows_per_group": rows_per_group,
+        "steps": {},
+    }
+    train_captions = set(list(dict.fromkeys(rows))[:args.num_train_prompts])
+    records_by_inference_steps: dict[int, list[dict[str, dict[str, float]]]] = defaultdict(list)
+
+    for step, inference_steps in sorted(per_key):
+        entries = per_key[(step, inference_steps)]
+        by_caption: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for entry in entries:
+            by_caption[entry["caption"]].append(entry)
+
+        caption_records: dict[str, dict[str, float]] = {}
+        descriptors: dict[str, list[torch.Tensor]] = {}
+        step_train_sharp: list[float] = []
+        step_heldout_sharp: list[float] = []
+        for caption, group in by_caption.items():
+            vectors = []
+            sharpness = []
+            std = []
+            for entry in group:
+                frames = _load_video(entry["path"])
+                stats = frame_statistics(frames)
+                sharpness.append(stats["sharpness"])
+                std.append(stats["std"])
+                vectors.append(_descriptor(frames, args.descriptor_size))
+            descriptors[caption] = vectors
+            within = _mean_pairwise(vectors)
+            caption_records[caption] = {
+                "seeds": float(len(group)),
+                "sharpness": float(np.mean(sharpness)),
+                "std": float(np.mean(std)),
+                "within_spread": within,
+            }
+            if caption in train_captions:
+                step_train_sharp.append(float(np.mean(sharpness)))
+            else:
+                step_heldout_sharp.append(float(np.mean(sharpness)))
+
+        cross_vectors: list[tuple[str, torch.Tensor]] = []
+        for caption, vectors in descriptors.items():
+            for vector in vectors:
+                cross_vectors.append((caption, vector))
+        cross_pairs = []
+        for i in range(len(cross_vectors)):
+            for j in range(i + 1, len(cross_vectors)):
+                if cross_vectors[i][0] != cross_vectors[j][0]:
+                    cross_pairs.append(float((cross_vectors[i][1] - cross_vectors[j][1]).norm()))
+        cross_spread = float(np.mean(cross_pairs)) if cross_pairs else float("nan")
+        within_all = [record["within_spread"] for record in caption_records.values()]
+        mean_within = float(np.mean(within_all))
+        records_by_inference_steps[inference_steps].append(caption_records)
+        report["steps"][f"{step}_inference_steps_{inference_steps}"] = {
+            "step": step,
+            "inference_steps": inference_steps,
+            "captions": caption_records,
+            "mean_within_spread": mean_within,
+            "cross_spread": cross_spread,
+            "spread_ratio": (mean_within / cross_spread) if cross_spread else float("nan"),
+        }
+        print(f"step={step:06d} inference_steps={inference_steps:03d} "
+              f"mean_within={mean_within:.5f} cross={cross_spread:.5f} "
+              f"ratio={(mean_within / cross_spread):.4f} "
+              f"train_sharp={np.mean(step_train_sharp):.2f} "
+              f"heldout_sharp={np.mean(step_heldout_sharp):.2f}")
+
+    report["summary"] = _summarize_schedules(records_by_inference_steps, train_captions)
+    if args.out:
+        Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        print(f"MULTIPROMPT_REPORT {args.out}")
+
+
+if __name__ == "__main__":
+    main()

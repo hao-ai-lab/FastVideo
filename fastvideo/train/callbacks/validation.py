@@ -32,6 +32,7 @@ from fastvideo.distributed import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import DECODE_ON_ALL_RANKS_KEY
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
 from fastvideo.train.utils.moduleloader import (
@@ -177,6 +178,7 @@ class ValidationCallback(Callback):
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
+        self.method: Any | None = None
         self._pipeline: Any | None = None
         self._pipeline_key: tuple[Any, ...] | None = None
         self._sampling_param: SamplingParam | None = None
@@ -1361,7 +1363,15 @@ class ValidationCallback(Callback):
         sampling_param.data_type = "video"
         if self.guidance_scale is not None:
             sampling_param.guidance_scale = float(self.guidance_scale)
-        sampling_param.seed = self.seed
+        # A record may carry its own seed so repeated captions sample
+        # different noise; otherwise the shared validation generator advances
+        # from the training seed.
+        row_seed = validation_batch.get("seed")
+        sampling_param.seed = (int(row_seed) if row_seed is not None else self.seed)
+        if row_seed is not None:
+            record_generator = torch.Generator(device="cpu").manual_seed(int(row_seed))
+        else:
+            record_generator = self.validation_random_generator
         # Output multiplicity belongs in SamplingParam so pipeline stages
         # allocate the same batch dimension that validation expects to log.
         sampling_param.num_videos_per_prompt = self.num_videos_per_prompt
@@ -1403,7 +1413,7 @@ class ValidationCallback(Callback):
 
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
-            generator=self.validation_random_generator,
+            generator=record_generator,
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=tc.vsa_sparsity,
@@ -1418,6 +1428,10 @@ class ValidationCallback(Callback):
         # mask instead of the current one, mismatching prompt_embeds.
         batch.prompt_attention_mask = []
         batch.negative_attention_mask = []
+        # Validation drives one sample per data-parallel rank, so pipelines
+        # that default to decoding only on the global output rank must decode
+        # on every rank; otherwise three of four samples never get media.
+        batch.extra[DECODE_ON_ALL_RANKS_KEY] = True
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.
@@ -1494,8 +1508,8 @@ class ValidationCallback(Callback):
             configured = getattr(tc, "vsa_ref_keep_rate", None)
             updates["vsa_ref_keep_rate"] = 1.0 - sparsity if configured is None else float(configured)
         pdd_steps = getattr(transformer, "pdd_steps", None)
+        self._check_sampling_clock(pipeline)
         if pdd_steps is not None and hasattr(pipeline_config, "pdd_step_indices"):
-            self._check_pdd_sampling_clock(pipeline)
             indices = pipeline_config.pdd_step_indices
             if indices is None or len(indices) != int(num_inference_steps) + 1:
                 # The balanced partition PDDMethodMixin checks against the
@@ -1510,18 +1524,26 @@ class ValidationCallback(Callback):
             setattr(pipeline_config, name, value)
         return pipeline_config
 
-    def _check_pdd_sampling_clock(self, pipeline: Any) -> None:
-        """A PDD student's heads are tied to its training clocks; validation must sample on the same ones."""
-        student = getattr(self.method, "student", None)
+    def _check_sampling_clock(self, pipeline: Any) -> None:
+        """Validation must sample the scheduler shifts the student trains with.
+
+        Students that expose resolved per-modality shifts (PDD and H3) load
+        those scheduler modules from the checkpoint, while the training grid
+        may come from a pipeline-config shift override. Such students therefore
+        fail fast here instead of silently sampling a different sigma grid.
+        """
+        student = getattr(getattr(self, "method", None), "student", None)
         get_module = getattr(pipeline, "get_module", None)
         if student is None or not callable(get_module):
             return
         for attribute, module_name in (("video_scheduler_shift", "scheduler"), ("audio_scheduler_shift",
                                                                                 "audio_scheduler")):
             trained = getattr(student, attribute, None)
+            if trained is None:
+                continue
             sampled = getattr(get_module(module_name), "shift", None)
-            if trained is not None and sampled is not None and float(trained) != float(sampled):
-                raise ValueError(f"PDD validation samples with {module_name} shift {sampled}, but the student "
+            if sampled is not None and float(trained) != float(sampled):
+                raise ValueError(f"Validation samples with {module_name} shift {sampled}, but the student "
                                  f"trains with {attribute}={trained}. Train with the checkpoint's shift.")
 
     def _run_validation_for_steps(
