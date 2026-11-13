@@ -16,7 +16,12 @@ def _backend():
     try:
         import _fastvideo_h3_swiglu_gemm
     except ImportError:
-        return None
+        try:
+            # The repository's own ctypes binding; the "Spark prebuild"
+            # module name above is not produced by any in-tree build rule.
+            from fastvideo_kernel import h3_swiglu_gemm_binding as _fastvideo_h3_swiglu_gemm
+        except ImportError:
+            return None
     return _fastvideo_h3_swiglu_gemm
 
 
