@@ -619,7 +619,11 @@ and friends). H3 conventions that differ from Wan:
   those defaults for training, but validation samples the checkpoint's
   scheduler configs. TDM compares the training shifts with those configs when
   the method is constructed, so a mismatch fails before training; the
-  validation callback repeats the check when validation starts.
+  validation callback repeats the check when validation starts. The checked
+  checkpoint is `training.model_path`, which defaults to
+  `models.student.init_from`. The defaults are video `12` / audio `3`, so a
+  checkpoint with different shifts still requires matching overrides. A missing
+  scheduler config logs a warning and cannot be verified at startup.
 - **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
 - **Velocity is data-ward**: the plugin negates the transformer output so the
   base conversion `x0 = x_t - sigma * pred_noise` is exactly
@@ -694,9 +698,10 @@ autograd/CUDA stream state inconsistent, and the next training backward raises
 `opt_ready_stream && opt_parent_stream`. Validate once at the final step
 (`callbacks.validation.run_at_start: false`,
 `callbacks.validation.every_steps: <max_train_steps>`) or sample from
-checkpoints in a separate process. TDM rejects a non-default
+checkpoints in a separate process. TDM rejects a
 `video_scheduler_shift` / `audio_scheduler_shift` that disagrees with the
-checkpoint's scheduler configs when the method is constructed, and the
+scheduler configs at `training.model_path` (default
+`models.student.init_from`) when the method is constructed, and the
 validation callback repeats that check at the final step as a backstop.
 Validation sets the `decode_on_all_ranks` batch flag, so every data-parallel
 rank decodes and saves the media for its own sample instead of only the global

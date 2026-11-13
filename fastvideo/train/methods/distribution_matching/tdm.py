@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.logger import init_logger
 from fastvideo.train.methods.base import LogScalar
 from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.train.models.base import ModelBase
@@ -24,6 +26,8 @@ from fastvideo.utils import read_optional_model_json
 
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
+
+logger = init_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -377,14 +381,21 @@ class TDMMethod(DMD2Method):
         model_path = str(getattr(self.training_config, "model_path", "") or "")
         if not model_path:
             return
+        if (os.path.isabs(model_path) or model_path.startswith(".")) and not os.path.isdir(model_path):
+            raise ValueError(f"training.model_path {model_path!r} does not exist or is not a directory; it must "
+                             "name a local H3 checkpoint directory or a Hub repo id.")
         for attribute, owner in (
             ("video_scheduler_shift", "scheduler/scheduler_config.json"),
             ("audio_scheduler_shift", "audio_scheduler/scheduler_config.json"),
         ):
             scheduler_config = read_optional_model_json(model_path, owner)
             sampled = None if scheduler_config is None else scheduler_config.get("shift")
+            if sampled is None:
+                logger.warning("Cannot verify the H3 TDM %s: training.model_path %r has no %s with a shift.", attribute,
+                               model_path, owner)
+                continue
             trained = getattr(self.student, attribute, None)
-            if sampled is None or trained is None or float(sampled) == float(trained):
+            if trained is None or float(sampled) == float(trained):
                 continue
             raise ValueError(f"The H3 student trains with {attribute}={trained}, but the checkpoint's "
                              f"{owner} samples with shift {sampled}. Train with the checkpoint's shift.")

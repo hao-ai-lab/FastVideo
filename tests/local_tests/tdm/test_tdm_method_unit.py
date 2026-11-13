@@ -13,6 +13,7 @@ from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.train.methods.distribution_matching import tdm as tdm_module
 from fastvideo.train.methods.distribution_matching.tdm import (
     TDMMethod,
     flow_effective_noise,
@@ -1212,35 +1213,78 @@ def test_tdm_rejects_h3_checkpoint_shift_mismatch(
 
 def test_tdm_accepts_h3_checkpoint_shift_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_h3_scheduler_configs(tmp_path)
+    queries: list[str] = []
+    read_config = tdm_module.read_optional_model_json
+
+    def spy(model_path: str, owner: str, revision: str | None = None) -> dict[str, Any] | None:
+        queries.append(owner)
+        return read_config(model_path, owner, revision)
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", spy)
     monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
     monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: 12.0), raising=False)
     monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: 3.0), raising=False)
 
-    method, _, _ = _build_method(
+    _build_method(
         method_overrides={"real_score_guidance_scale": 1.0},
         model_path=str(tmp_path),
     )
 
-    assert method._model_family() == "minimax_h3"
+    assert queries == ["scheduler/scheduler_config.json", "audio_scheduler/scheduler_config.json"]
 
 
-def test_tdm_h3_startup_check_skips_a_missing_scheduler_config(
+def test_tdm_h3_startup_check_warns_on_missing_scheduler_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A checkpoint without an audio scheduler config does not expose a shift to compare."""
+    """A missing config is not silently treated as verified."""
+    warnings: list[str] = []
+    monkeypatch.setattr(tdm_module.logger, "warning", lambda message, *args: warnings.append(message % args))
     _write_h3_scheduler_configs(tmp_path)
     (tmp_path / "audio_scheduler" / "scheduler_config.json").unlink()
     monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
     monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: 12.0), raising=False)
     monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: 4.0), raising=False)
 
-    method, _, _ = _build_method(
+    _build_method(
         method_overrides={"real_score_guidance_scale": 1.0},
         model_path=str(tmp_path),
     )
 
-    assert method._model_family() == "minimax_h3"
+    assert any("audio_scheduler/scheduler_config.json" in warning for warning in warnings)
+
+
+def test_tdm_h3_startup_check_warns_on_config_without_shift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(tdm_module.logger, "warning", lambda message, *args: warnings.append(message % args))
+    _write_h3_scheduler_configs(tmp_path)
+    (tmp_path / "audio_scheduler" / "scheduler_config.json").write_text("{}")
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    monkeypatch.setattr(_TinyRoleModel, "video_scheduler_shift", property(lambda self: 12.0), raising=False)
+    monkeypatch.setattr(_TinyRoleModel, "audio_scheduler_shift", property(lambda self: 4.0), raising=False)
+
+    _build_method(
+        method_overrides={"real_score_guidance_scale": 1.0},
+        model_path=str(tmp_path),
+    )
+
+    assert any("audio_scheduler/scheduler_config.json" in warning for warning in warnings)
+
+
+def test_tdm_h3_startup_check_rejects_nonexistent_local_model_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+
+    with pytest.raises(ValueError, match="training.model_path"):
+        _build_method(
+            method_overrides={"real_score_guidance_scale": 1.0},
+            model_path=str(tmp_path / "missing"),
+        )
 
 
 def test_tdm_rejects_wan_flow_shift_that_dmd_validation_cannot_match(
