@@ -13,8 +13,15 @@ import torch
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.train.methods.distribution_matching import tdm as tdm_module
 from fastvideo.train.methods.distribution_matching.tdm import TDMMethod
+from fastvideo.train.models.base import ModelBase
 from fastvideo.train.models.minimax_h3 import MiniMaxH3Model
 from fastvideo.train.utils.config import load_run_config
+from fastvideo.train.utils.training_config import (
+    DataConfig,
+    OptimizerConfig,
+    TrainingConfig,
+    TrainingLoopConfig,
+)
 
 _H3_TDM_CONFIG = "examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml"
 
@@ -48,6 +55,59 @@ def _check(model_path: str, *, video: float = 12.0, audio: float = 3.0) -> None:
     method.student = _h3_student(video=video, audio=audio)
     assert method._model_family() == "minimax_h3"
     method._validate_h3_checkpoint_shifts()
+
+
+class _FakeH3Role(MiniMaxH3Model):
+    """H3 role with real scheduler shifts but no transformer weights."""
+
+    def __init__(self, *, video: float = 12.0, audio: float = 3.0, trainable: bool = True) -> None:
+        ModelBase.__init__(self, trainable=trainable)
+        self.transformer = torch.nn.Linear(1, 1, bias=False)
+        self.transformer.requires_grad_(trainable)
+        self.noise_scheduler = MiniMaxH3Scheduler(shift=video)
+        self.audio_noise_scheduler = MiniMaxH3Scheduler(shift=audio)
+
+    def init_preprocessors(self, training_config: TrainingConfig) -> None:
+        pass
+
+
+def _build_h3_method(model_path: str, *, video: float = 12.0, audio: float = 3.0) -> TDMMethod:
+    training = TrainingConfig(
+        data=DataConfig(preprocessed_data_type="text_only", seed=0),
+        optimizer=OptimizerConfig(
+            learning_rate=1.0e-3,
+            betas=(0.0, 0.999),
+            weight_decay=0.0,
+            lr_scheduler="constant",
+        ),
+        loop=TrainingLoopConfig(max_train_steps=4),
+        model_path=model_path,
+    )
+    cfg = SimpleNamespace(
+        training=training,
+        method={
+            "rollout_mode": "simulate",
+            "generator_update_interval": 1,
+            "real_score_guidance_scale": 1.0,
+            "tdm_denoising_steps": [1000, 750, 500, 250],
+            "student_sample_type": "ode",
+            "noise_interval_mode": "separate",
+            "use_randmid": False,
+            "max_grad_norm": 1.0,
+            "fake_score_learning_rate": 1.0e-3,
+            "fake_score_betas": [0.0, 0.999],
+            "fake_score_lr_scheduler": "constant",
+        },
+        validation={},
+    )
+    return TDMMethod(
+        cfg=cfg,
+        role_models={
+            "student": _FakeH3Role(video=video, audio=audio, trainable=True),
+            "teacher": _FakeH3Role(video=video, audio=audio, trainable=False),
+            "critic": _FakeH3Role(video=video, audio=audio, trainable=True),
+        },
+    )
 
 
 def test_real_h3_student_queries_both_scheduler_configs(
@@ -96,7 +156,7 @@ def test_missing_scheduler_config_warns_instead_of_skipping_silently(
 
     _check(str(tmp_path), audio=4.0)
 
-    assert any("audio_scheduler/scheduler_config.json" in warning for warning in warnings)
+    assert any("has no audio_scheduler/scheduler_config.json" in warning for warning in warnings)
 
 
 def test_scheduler_config_without_shift_warns(
@@ -110,7 +170,26 @@ def test_scheduler_config_without_shift_warns(
 
     _check(str(tmp_path), audio=4.0)
 
-    assert any("audio_scheduler/scheduler_config.json" in warning for warning in warnings)
+    assert any("has no shift" in warning and "audio_scheduler/scheduler_config.json" in warning
+               for warning in warnings)
+
+
+def test_missing_student_shift_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(tdm_module.logger, "warning", lambda message, *args: warnings.append(message % args))
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    _write_scheduler_configs(tmp_path)
+    method = TDMMethod.__new__(TDMMethod)
+    torch.nn.Module.__init__(method)
+    method.training_config = SimpleNamespace(model_path=str(tmp_path))
+    method.student = SimpleNamespace(video_scheduler_shift=12.0)
+
+    method._validate_h3_checkpoint_shifts()
+
+    assert any("audio_scheduler_shift" in warning for warning in warnings)
 
 
 def test_nonexistent_local_model_path_fails_before_hub_lookup(tmp_path: Path) -> None:
@@ -118,10 +197,54 @@ def test_nonexistent_local_model_path_fails_before_hub_lookup(tmp_path: Path) ->
         _check(str(tmp_path / "missing"))
 
 
-def test_shipped_h3_overfit_config_accepts_a_matching_local_checkpoint(tmp_path: Path) -> None:
-    cfg = load_run_config(_H3_TDM_CONFIG, ["--training.model_path", str(tmp_path)])
+def test_relative_local_model_path_reports_hub_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.utils import HFValidationError
+
+    def fail(model_path: str, owner: str, revision: str | None = None) -> dict | None:
+        del owner, revision
+        raise HFValidationError(f"Repo id must be in the form 'repo_name': {model_path!r}")
+
+    monkeypatch.setattr(tdm_module, "read_optional_model_json", fail)
+
+    with pytest.raises(ValueError, match="training.model_path.*local H3 checkpoint"):
+        _check("checkpoints/does-not-exist")
+
+
+def test_constructor_rejects_a_mismatched_h3_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
     _write_scheduler_configs(tmp_path)
 
-    _check(cfg.training.model_path)
+    with pytest.raises(ValueError, match="video_scheduler_shift="):
+        _build_h3_method(str(tmp_path), video=10.0)
+
+
+def test_constructor_accepts_a_matching_h3_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+    _write_scheduler_configs(tmp_path)
+
+    method = _build_h3_method(str(tmp_path))
+
+    assert method.student.video_scheduler_shift == 12.0
+    assert method.student.audio_scheduler_shift == 3.0
+
+
+def test_shipped_h3_overfit_config_accepts_a_matching_local_checkpoint(tmp_path: Path) -> None:
+    cfg = load_run_config(_H3_TDM_CONFIG, ["--training.model_path", str(tmp_path)])
+    pipeline_config = cfg.training.pipeline_config
+    video = pipeline_config.video_scheduler_shift
+    audio = pipeline_config.audio_scheduler_shift
+    video = 12.0 if video is None else float(video)
+    audio = 3.0 if audio is None else float(audio)
+    _write_scheduler_configs(tmp_path, video=video, audio=audio)
+
+    _check(cfg.training.model_path, video=video, audio=audio)
 
     assert cfg.training.model_path == str(tmp_path)

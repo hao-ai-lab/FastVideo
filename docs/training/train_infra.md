@@ -619,11 +619,13 @@ and friends). H3 conventions that differ from Wan:
   those defaults for training, but validation samples the checkpoint's
   scheduler configs. TDM compares the training shifts with those configs when
   the method is constructed, so a mismatch fails before training; the
-  validation callback repeats the check when validation starts. The checked
-  checkpoint is `training.model_path`, which defaults to
-  `models.student.init_from`. The defaults are video `12` / audio `3`, so a
-  checkpoint with different shifts still requires matching overrides. A missing
-  scheduler config logs a warning and cannot be verified at startup.
+  validation callback repeats the check when validation starts and the loaded
+  scheduler module exposes a shift. The checked checkpoint is
+  `training.model_path`, which defaults to `models.student.init_from`. The
+  defaults are video `12` / audio `3`, so a checkpoint with different shifts
+  still requires matching overrides. A missing scheduler config or a config
+  without a `shift` key logs a warning and cannot be verified at startup or at
+  validation.
 - **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
 - **Velocity is data-ward**: the plugin negates the transformer output so the
   base conversion `x0 = x_t - sigma * pred_noise` is exactly
@@ -702,7 +704,9 @@ checkpoints in a separate process. TDM rejects a
 `video_scheduler_shift` / `audio_scheduler_shift` that disagrees with the
 scheduler configs at `training.model_path` (default
 `models.student.init_from`) when the method is constructed, and the
-validation callback repeats that check at the final step as a backstop.
+validation callback repeats that check at the final step as a backstop when
+the loaded scheduler exposes a shift. As at startup, a checkpoint missing a
+scheduler config or a `shift` key cannot be verified.
 Validation sets the `decode_on_all_ranks` batch flag, so every data-parallel
 rank decodes and saves the media for its own sample instead of only the global
 output rank.
