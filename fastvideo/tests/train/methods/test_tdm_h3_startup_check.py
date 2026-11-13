@@ -289,10 +289,12 @@ def test_missing_hub_repo_suggests_both_local_and_remote_fixes(
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
-def test_rejected_hub_credentials_ask_for_a_token(
+def test_file_download_rejected_credentials_ask_for_a_token(
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
 ) -> None:
+    # A 401/403 raised by hf_hub_download itself is the GET-stage case: the
+    # metadata HEAD succeeded and only the file download was rejected.
     from huggingface_hub.utils import HfHubHTTPError
 
     class _UnauthorizedError(HfHubHTTPError):
@@ -308,6 +310,32 @@ def test_rejected_hub_credentials_ask_for_a_token(
 
     with pytest.raises(ValueError, match="HF_TOKEN"):
         _check("org/repo")
+
+
+def test_head_403_is_reported_as_a_token_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # huggingface_hub converts a non-401 HEAD HfHubHTTPError (including 403)
+    # into LocalEntryNotFoundError chained from the original error, so the
+    # connectivity branch must inspect the cause to keep the token advice.
+    from huggingface_hub.utils import HfHubHTTPError, LocalEntryNotFoundError
+
+    class _ForbiddenError(HfHubHTTPError):
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+            self.response = SimpleNamespace(status_code=403)
+
+    def fail(**kwargs) -> str:
+        try:
+            raise _ForbiddenError("403 Client Error: Forbidden")
+        except _ForbiddenError as cause:
+            raise LocalEntryNotFoundError(f"{kwargs['filename']} is not in the disk cache") from cause
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fail)
+
+    with pytest.raises(ValueError, match="HF_TOKEN"):
+        _check("MiniMaxAI/MiniMax-H3")
 
 
 def test_constructor_rejects_a_mismatched_h3_checkpoint(

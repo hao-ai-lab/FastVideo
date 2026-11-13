@@ -630,9 +630,11 @@ and friends). H3 conventions that differ from Wan:
   (default `12`), so a missing scheduler file fails pipeline load, and a config
   without `shift` makes validation compare against that `12` default, which
   will not match the student's `3` audio default unless the student uses the
-  same override. When construction warns, the shift is unverified: fix the
-  checkpoint config or set explicit matching overrides, because validation may
-  fail later or may agree with the scheduler default.
+  same override. When construction warns, the shift is unverified. A missing
+  scheduler file needs a supplied or fixed checkpoint file, because pipeline
+  load fails otherwise and overrides cannot prevent that. A config without
+  `shift` needs either matching overrides (`12`, the scheduler default) or a
+  fixed config.
 - **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
 - **Velocity is data-ward**: the plugin negates the transformer output so the
   base conversion `x0 = x_t - sigma * pred_noise` is exactly
@@ -718,8 +720,10 @@ cannot verify them; validation is not a silent fallback: a missing scheduler
 file fails pipeline load, and a config without `shift` is compared against H3's
 `12` scheduler default, which will not match the student's `3` audio default
 unless the student uses the same override. A warning here means the shift is
-unverified: fix the checkpoint config or set explicit matching overrides,
-because validation may fail later or may agree with the scheduler default.
+unverified: a missing scheduler file needs a supplied or fixed checkpoint file
+(pipeline load fails otherwise and overrides cannot prevent that), while a
+config without `shift` needs either matching overrides (`12`, the scheduler
+default) or a fixed config.
 Validation sets the `decode_on_all_ranks` batch flag, so every data-parallel
 rank decodes and saves the media for its own sample instead of only the global
 output rank.

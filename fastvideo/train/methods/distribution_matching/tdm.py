@@ -376,10 +376,14 @@ class TDMMethod(DMD2Method):
         mismatch, but the H3 recipe validates only at the final step (and not
         at all when validation is disabled), so check when the method is built.
 
-        A gated or private repo surfaces as ``GatedRepoError`` (a
-        ``RepositoryNotFoundError``) on the Hub HEAD call, so that branch
-        carries the token guidance; the generic 401/403 branch covers auth
-        errors raised while fetching the file itself.
+        Error taxonomy: a gated repo surfaces as ``GatedRepoError`` and a
+        private or unauthenticated repo as ``RepositoryNotFoundError``. Both
+        are caught by the ``RepositoryNotFoundError`` branch, which carries
+        the token guidance. Generic 401/403 ``HfHubHTTPError``
+        instances raised while fetching the file itself are handled by the
+        second branch. A 403 from the Hub HEAD call is converted by
+        ``huggingface_hub`` into ``LocalEntryNotFoundError``, so the first
+        branch inspects the chained cause to keep the token guidance.
         """
         if self._model_family() != "minimax_h3":
             return
@@ -404,6 +408,12 @@ class TDMMethod(DMD2Method):
             try:
                 scheduler_config = read_optional_model_json(model_path, owner, strict=True)
             except (LocalEntryNotFoundError, OfflineModeIsEnabled) as exc:
+                status_code = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+                if status_code in (401, 403):
+                    raise ValueError(f"training.model_path {model_path!r} could not read {owner} from the Hugging "
+                                     f"Face Hub: {exc.__cause__}. The Hub rejected the credentials; set HF_TOKEN "
+                                     "(or run `hf auth login`) to a token that can access the repo, or point "
+                                     "training.model_path at an existing local H3 checkpoint directory.") from exc
                 raise ValueError(f"training.model_path {model_path!r} is not an existing local H3 checkpoint "
                                  f"directory and the Hugging Face Hub could not fetch {owner}: {exc}. Set it to an "
                                  "existing local checkpoint directory or make the Hub repo reachable.") from exc
