@@ -9,6 +9,7 @@ FastVideo's legacy behavior and mappings intact.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import re
 from collections.abc import Callable
@@ -46,6 +47,7 @@ from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
 from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
 from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
+from fastvideo.configs.pipelines.pjit import PJiTPipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -262,6 +264,14 @@ def _get_config_info(
     if os.path.exists(model_path) and _is_open_h3_regenerate_2k_release(model_path):
         # The release keeps its Diffusers manifest under base_model/, so a renamed local copy has no root manifest.
         return _CONFIG_REGISTRY.get(_MODEL_HF_PATH_TO_NAME[OPEN_H3_REGENERATE_2K_HF_PATH])
+    if (os.path.isfile(os.path.join(model_path, "model.safetensors")) and not any(
+            os.path.isfile(os.path.join(model_path, name)) for name in ("model_index.json", "modular_model_index.json"))
+            and os.path.isfile(os.path.join(model_path, "config.json"))):
+        # Linum's single-file release identifies itself in config.json, including in renamed local snapshots.
+        with open(os.path.join(model_path, "config.json")) as f:
+            raw_config = json.load(f)
+        if isinstance(raw_config, dict) and raw_config.get("model") == "P-JiT 21K":
+            return _CONFIG_REGISTRY[_MODEL_HF_PATH_TO_NAME["Linum-AI/pjit-21k"]]
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
     elif allow_remote:
@@ -1245,6 +1255,17 @@ def _register_configs() -> None:
         pipeline_cls_name="PAN2ModularPipeline",
     )
 
+    # Linum ships a raw flat checkpoint without a Diffusers model index.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=PJiTPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=["Linum-AI/pjit-21k"],
+        model_family="pjit",
+        default_preset="pjit_21k",
+        pipeline_cls_name="PJiTPipeline",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -1424,6 +1445,7 @@ def _register_presets() -> None:
         ALL_PRESETS as MMAUDIO_PRESETS, )
     from fastvideo.pipelines.basic.pan2.presets import (
         ALL_PRESETS as PAN2_PRESETS, )
+    from fastvideo.pipelines.basic.pjit.presets import ALL_PRESETS as PJIT_PRESETS
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1459,6 +1481,7 @@ def _register_presets() -> None:
         OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,
         PAN2_PRESETS,
+        PJIT_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         WAN_PRESETS,
