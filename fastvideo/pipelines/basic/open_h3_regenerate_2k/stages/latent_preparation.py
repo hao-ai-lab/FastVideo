@@ -25,6 +25,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
     MINIMAX_H3_LAYOUT_KEY,
     MiniMaxH3LatentPreparationStage,
 )
+from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_bundle import BUNDLE_EXTRA_KEY, load_draft_bundle
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_latent_cache import (
     DraftLatentCache,
     draft_latent_cache_key,
@@ -114,11 +115,18 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
             return self.draft_latent_path
         return video_path if video_path is not None and video_path.lower().endswith(".pt") else None
 
-    def _load_draft_latent(self, path: str, device: torch.device) -> torch.Tensor:
-        """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video."""
-        tensor = torch.load(path, map_location="cpu", weights_only=True)
-        if isinstance(tensor, dict):
-            raise ValueError(f"{path} holds a mapping; save the draft latent tensor itself.")
+    def _load_draft_latent(self, path: str, device: torch.device, bundle: dict | None = None) -> torch.Tensor:
+        """Normalized native latent [C, T, h, w] saved by a draft run, standing in for the encoded draft video.
+
+        ``path`` holds the bare latent tensor or a draft bundle (``draft_bundle``); ``bundle`` is the copy the
+        conditioning stage already loaded for this request.
+        """
+        if bundle is None:
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            bundle = load_draft_bundle(path) if isinstance(payload, dict) else None
+            tensor = bundle["latent"] if bundle is not None else payload
+        else:
+            tensor = bundle["latent"]
         tensor = torch.as_tensor(tensor)
         if tensor.ndim == 5 and tensor.shape[0] == 1:
             tensor = tensor[0]
@@ -161,7 +169,7 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         if latent_source is None:
             draft = self._encode_draft_cached(batch.video_path, device, fastvideo_args)
         else:
-            draft = self._load_draft_latent(latent_source, device)
+            draft = self._load_draft_latent(latent_source, device, batch.extra.get(BUNDLE_EXTRA_KEY))
         upscaler = self.load_upscaler()
         upscaled = upscale_latent(upscaler, draft, (batch.height, batch.width))
         if tuple(upscaled.shape) != (channels, num_latent_frames, latent_height, latent_width):
