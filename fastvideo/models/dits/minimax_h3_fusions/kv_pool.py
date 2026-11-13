@@ -15,7 +15,9 @@ def _smooth_pack(K, V, MEAN, INV, K4, S4, K8, V8, KB: tl.constexpr, KS: tl.const
                  R: tl.constexpr, VALUE_INDEX=None, GATHER_VALUE: tl.constexpr = False,
                  PREPARE_PREFIX: tl.constexpr = True,
                  POOL=None, TILE_VALID=None, POOL_KEYS: tl.constexpr = False,
-                 VP=None, V4=None, VS4=None, HEAD_FIRST: tl.constexpr = False):
+                 VP=None, V4=None, VS4=None, HEAD_FIRST: tl.constexpr = False,
+                 K4D=None, S4D=None, EMIT_BF16: tl.constexpr = True,
+                 EMIT_BF16_V: tl.constexpr = True, DENSE_K: tl.constexpr = False):
     row = tl.program_id(0).to(tl.int64) * R + tl.arange(0, R)
     batch = tl.program_id(1)
     head = tl.program_id(2)
@@ -60,11 +62,41 @@ def _smooth_pack(K, V, MEAN, INV, K4, S4, K8, V8, KB: tl.constexpr, KS: tl.const
         offset = ((batch * VALID + destination[:, None]) * H + head) * 128 + col[None, :]
         if HEAD_FIRST:
             offset = ((batch * H + head) * VALID + destination[:, None]) * 128 + col[None, :]
-        tl.store(K8 + offset, key8 * scale8[:, None], valid)
+        k8v = (key8 * scale8[:, None]).to(tl.bfloat16)
+        if EMIT_BF16:
+            tl.store(K8 + offset, k8v, valid)
+        # Emit the dense-prefix FP4 K (codes + 128x4-swizzled e4m3 scales) directly
+        # so the sm_12x dense kernel no longer re-reads and re-quantizes K8. The
+        # quantizer here is bit-identical to fp4quant_cuda.scaled_fp4_quant_permute
+        # on the same bf16 input (per-16-element e2m1/e4m3, 32-row permuted store).
+        if DENSE_K:
+            k8b = k8v.to(tl.float32)
+            groups8 = tl.reshape(k8b, (R, 8, 16))
+            maximum8 = tl.max(tl.abs(groups8), 2)
+            sf8 = (maximum8 * (1.0 / 6.0)).to(tl.float8e4nv)
+            inv8b = tl.where(sf8.to(tl.float32) == 0, 0, _rcp(sf8.to(tl.float32)))
+            q8 = tl.reshape(groups8 * inv8b[:, :, None], (R, 64, 2))
+            lo8, hi8 = tl.split(q8)
+            packed8 = tl.inline_asm_elementwise('''{
+                .reg .b8 q;
+                cvt.rn.satfinite.e2m1x2.f32 q,$1,$2;
+                mov.b32 $0,{q,q,q,q};
+            }''', constraints='=r,f,f', args=[hi8, lo8], dtype=tl.uint8, is_pure=True, pack=1)
+            dsafe = tl.where(destination >= 0, destination, 0)
+            drem = dsafe % 32
+            token = dsafe // 32 * 32 + (drem // 8) * 2 + (drem % 8 // 2) * 8 + drem % 2
+            c4d = tl.arange(0, 64)
+            tl.store(K4D + ((batch * H + head) * VALID + token[:, None]) * 64 + c4d[None, :],
+                     packed8, valid)
+            g8 = tl.arange(0, 8)
+            si8 = ((token[:, None] // 64) * 512 + (g8[None, :] // 4) * 256 + g8[None, :] % 4
+                   + (token[:, None] % 64 // 16) * 4 + (token[:, None] % 16) * 16)
+            tl.store(S4D + (batch * H + head) * VALID * 8 + si8, sf8, valid)
         value_source = tl.load(VALUE_INDEX + source, row < N, other=-1) if GATHER_VALUE else source
         value = tl.load(V + batch * VB + value_source[:, None] * VS + head * VH + col[None, :],
                         mask & (value_source[:, None] >= 0), other=0)
-        tl.store(V8 + offset, value, valid)
+        if EMIT_BF16_V:
+            tl.store(V8 + offset, value, valid)
 
 
     # V was already gathered for dense prefix attention; keep its rounded bits.
@@ -94,12 +126,63 @@ def _smooth_pack(K, V, MEAN, INV, K4, S4, K8, V8, KB: tl.constexpr, KS: tl.const
     tl.store(VP + ((batch * (N // R) + tile) * H + head) * 128 + col, tl.div_rn(vtotal, count))
 
 
+@triton.jit
+def _dense_v_pack(V, VALID, V4D, VS4D, VB: tl.constexpr, VS: tl.constexpr, VH: tl.constexpr,
+                  H: tl.constexpr, N: tl.constexpr, N_VALID: tl.constexpr,
+                  GROUP: tl.constexpr = 16, VALUE_INDEX=None, GATHER_VALUE: tl.constexpr = False):
+    """Gather-quantize V into the dense-prefix transposed FP4 layout.
+
+    Program ``dg`` handles the ``GROUP`` destination tokens ``[dg*GROUP, (dg+1)*GROUP)``:
+    it gathers their source rows through ``VALID`` (destination -> source), quantizes
+    with the same per-16-token e4m3 scale / e2m1 codes as
+    ``fp4quant_cuda.scaled_fp4_quant_trans`` on the destination-ordered BF16 V, and
+    stores into the ``[B, H, 128, N/2]`` codes / ``[B, H, 128, N/16]`` scale layout.
+    Tokens past ``N_VALID`` read as zero, matching the zero tail of that BF16 V.
+    """
+    dg = tl.program_id(0)
+    batch = tl.program_id(1)
+    head = tl.program_id(2)
+    d = tl.arange(0, 128)
+    i = tl.arange(0, GROUP)
+    tok = dg * GROUP + i
+    row = tl.load(VALID + tok, tok < N_VALID, other=-1).to(tl.int64)
+    if GATHER_VALUE:
+        vsrc = tl.load(VALUE_INDEX + row, (tok < N_VALID) & (row >= 0), other=-1).to(tl.int64)
+    else:
+        vsrc = row
+    valid = (tok < N_VALID) & (vsrc >= 0)
+    v = tl.load(V + batch * VB + vsrc[:, None] * VS + head * VH + d[None, :],
+                valid[:, None], other=0).to(tl.float32)
+    maximum = tl.max(tl.abs(v), 0)
+    sf = (maximum * (1.0 / 6.0)).to(tl.float8e4nv)
+    inv = tl.where(sf.to(tl.float32) == 0, 0, _rcp(sf.to(tl.float32)))
+    scaled = v * inv[None, :]
+    grp = tl.reshape(scaled, (GROUP // 2, 2, 128))
+    vlo, vhi = tl.split(tl.trans(grp, (0, 2, 1)))
+    codes = tl.inline_asm_elementwise("""{
+        .reg .b8 q;
+        cvt.rn.satfinite.e2m1x2.f32 q,$1,$2;
+        mov.b32 $0,{q,q,q,q};
+    }""", constraints='=r,f,f', args=[vhi, vlo], dtype=tl.uint8, is_pure=True, pack=1)
+    j = tl.arange(0, GROUP // 2)
+    voffset = ((batch * H + head) * 128 + d[None, :]) * (N // 2) + dg * (GROUP // 2) + j[:, None]
+    tl.store(V4D + voffset, codes)
+    soffset = ((batch * H + head) * 128 * (N // 16)
+               + (d // 64) * 64 * (N // 16)
+               + (dg // 4) * 256 + dg % 4
+               + (d % 64 // 16) * 4 + (d % 16) * 16)
+    tl.store(VS4D + soffset, sf)
+
+
 def pool_quantize_prefix_kv(
     k: torch.Tensor, v: torch.Tensor, mean: torch.Tensor, inverse: torch.Tensor,
     n_valid: int, valid: torch.Tensor, value_index: torch.Tensor | None, *, tile_elems: int = 64,
+    dense_k: bool = False, emit_bf16_k: bool = True,
+    dense_v: bool = False, emit_bf16_v: bool = True, valid_index: torch.Tensor | None = None,
 ) -> tuple[
-    tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor],
-    tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+    tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor | None, torch.Tensor | None, torch.Tensor,
+          tuple[torch.Tensor, torch.Tensor] | None],
+    tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor] | None],
 ]:
     """Return exact pooled/native KV plus dense-prefix KV with contiguous head sequences.
 
@@ -118,12 +201,15 @@ def pool_quantize_prefix_kv(
     if (mean.shape != (batch, 1, heads, 128) or mean.dtype != k.dtype or mean.device != k.device
             or not mean.is_contiguous() or not 0 < n_valid <= rows):
         raise ValueError("Combined KV preparation requires a BF16 key mean and valid prefix extent")
-    for index, size in ((inverse, rows), (value_index, rows), (valid, rows // tile_elems)):
+    for index, size in ((inverse, rows), (value_index, rows), (valid, rows // tile_elems),
+                        (valid_index, n_valid)):
         if index is None:
             continue
         if (index.shape != (size,) or index.device != k.device or not index.is_contiguous()
                 or index.dtype not in (torch.int32, torch.int64)):
             raise ValueError("Combined KV preparation requires contiguous integer row maps and tile counts")
+    if dense_v and valid_index is None:
+        raise ValueError("Dense-prefix value packing requires a destination-to-source row map")
     if torch.is_grad_enabled() or torch.compiler.is_compiling():
         raise RuntimeError("Combined KV preparation requires eager inference")
     k4 = torch.empty((batch, heads, rows, 64), device=k.device, dtype=torch.uint8)
@@ -135,20 +221,58 @@ def pool_quantize_prefix_kv(
     # length, so the FP4 output is approximate (REVIEW S49).  The BF16/FP8 SDPA
     # fallback trims the tail in _prefix_dense_attention and is unchanged.
     padded = ((n_valid + 127) // 128) * 128
-    k8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
-    v8_buf = torch.empty_like(k8_buf)
+    v8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
     if padded > n_valid:
-        k8_buf[:, :, n_valid:].zero_()
         v8_buf[:, :, n_valid:].zero_()
-    k8 = k8_buf.transpose(1, 2)
     v8 = v8_buf.transpose(1, 2)
+    k4d = s4d = None
+    if dense_k:
+        # Zero only the swizzled tail.  The producer writes only valid destinations,
+        # and both dense layouts permute within a fixed token block (32 rows for the
+        # codes, 64 rows for the 128x4-swizzled scales), so zero whole blocks from the
+        # first block that can hold a tail destination; the kernel then overwrites the
+        # valid slots.  Zeroing natural rows from ``n_valid`` is NOT enough: the tail
+        # destinations of a partial block map to permuted code rows / swizzled scale
+        # slots that can sit below ``n_valid``.  This replaces a full 117 MB memset
+        # per call with <=128 rows (0.633 -> 0.010 ms/call at the real Omni shape).
+        k4d = torch.empty((batch, heads, padded, 64), device=k.device, dtype=torch.uint8)
+        s4d = torch.empty((batch, heads, padded, 8), device=k.device, dtype=torch.float8_e4m3fn)
+        if padded > n_valid:
+            k4d[:, :, (n_valid // 32) * 32:].zero_()
+            s4d[:, :, (n_valid // 64) * 64:].zero_()
+    if emit_bf16_k:
+        k8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
+        if padded > n_valid:
+            k8_buf[:, :, n_valid:].zero_()
+        k8 = k8_buf.transpose(1, 2)
+        k8_arg: torch.Tensor = k8
+    else:
+        k8 = None
+        k8_arg = torch.empty((1,), device=k.device, dtype=torch.bfloat16)
+    if emit_bf16_v:
+        v8 = v8_buf.transpose(1, 2)
+    else:
+        v8 = None
     kp = torch.empty((batch, rows // tile_elems, heads, 128), device=k.device, dtype=torch.float32)
     vp = torch.empty_like(kp)
     v4 = torch.empty((batch, heads, 128, rows // 2), device=k.device, dtype=torch.uint8)
     vs4 = torch.empty((batch, heads, 128, rows // 16), device=k.device, dtype=torch.float8_e4m3fn)
     _smooth_pack[(rows // tile_elems, batch, heads)](
-        k, v, mean, inverse, k4, s4, k8, v8, *k.stride()[:3], *v.stride()[:3],
+        k, v, mean, inverse, k4, s4, k8_arg, v8 if v8 is not None else v8_buf, *k.stride()[:3], *v.stride()[:3],
         batch, rows, heads, padded, tile_elems, VALUE_INDEX=value_index, GATHER_VALUE=value_index is not None,
-        POOL=kp, TILE_VALID=valid, POOL_KEYS=True, VP=vp, V4=v4, VS4=vs4, HEAD_FIRST=True, num_warps=4 if tile_elems == 64 else 8,
+        POOL=kp, TILE_VALID=valid, POOL_KEYS=True, VP=vp, V4=v4, VS4=vs4, HEAD_FIRST=True,
+        K4D=k4d, S4D=s4d, EMIT_BF16=emit_bf16_k, EMIT_BF16_V=emit_bf16_v, DENSE_K=dense_k,
+        num_warps=4 if tile_elems == 64 else 8,
     )
-    return ((k4, s4), k8, v8, kp.permute(0, 2, 1, 3)), (vp.permute(0, 2, 1, 3), (v4, vs4))
+    v4d = vs4d = None
+    if dense_v:
+        assert valid_index is not None
+        v4d = torch.empty((batch, heads, 128, padded // 2), device=k.device, dtype=torch.uint8)
+        vs4d = torch.empty((batch, heads, 128, padded // 16), device=k.device,
+                           dtype=torch.float8_e4m3fn)
+        _dense_v_pack[(padded // 16, batch, heads)](
+            v, valid_index, v4d, vs4d, *v.stride()[:3], heads, padded, n_valid,
+            VALUE_INDEX=value_index, GATHER_VALUE=value_index is not None, num_warps=4,
+        )
+    return (((k4, s4), k8, v8, kp.permute(0, 2, 1, 3), (k4d, s4d) if dense_k else None),
+            (vp.permute(0, 2, 1, 3), (v4, vs4), (v4d, vs4d) if dense_v else None))
