@@ -317,7 +317,7 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
         else:
             full, packed = qknorm_rope_quantize_fp4(x, weight, cos, sin, 1e-6, prefix_rows // 128 * 128)
         expected_pool = _pool_tiles(full, valid, tile)
-        prefix, actual_packed, pool = prepare_pooled_queries(
+        prefix, actual_packed, pool, _prefix_q = prepare_pooled_queries(
             x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
         )
     assert prefix.shape == (batch, prefix_rows, heads, 128)
@@ -328,7 +328,7 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
     if tile == 128:
         for split_prefix in (False, True):
             with torch.inference_mode():
-                prefix8, packed8, pool8 = prepare_pooled_queries(
+                prefix8, packed8, pool8, _prefix_q = prepare_pooled_queries(
                     x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
                     prefix_fp8=True, split_prefix=split_prefix,
                 )
@@ -337,6 +337,34 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
             assert torch.equal(packed8[0], packed[0])
             assert torch.equal(packed8[1].view(torch.uint8), packed[1].view(torch.uint8))
             assert torch.equal(pool8.contiguous().view(torch.int32), expected_pool.contiguous().view(torch.int32))
+        # The producer's opt-in dense-prefix FP4 query must be bit-identical to
+        # scale_and_quant_fp4 on the stored FP8-roundtripped BF16 prefix.
+        try:
+            import attn_qat_infer.api as _api
+        except ImportError:
+            _api = None
+        if _api is not None:
+            with torch.inference_mode():
+                prefix8, _packed8, _pool8, prefix_q = prepare_pooled_queries(
+                    x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
+                    prefix_fp8=True, split_prefix=True, prefix_fp4=True,
+                )
+                expected_q = _api.scale_and_quant_fp4(prefix8.transpose(1, 2))
+            assert prefix_q is not None
+            assert torch.equal(prefix_q[0], expected_q[0])
+            assert torch.equal(prefix_q[1].view(torch.uint8), expected_q[1].view(torch.uint8))
+            # Pass-20: under the same gate the BF16 prefix store is dead weight
+            # (the dense kernel reads only q.shape when q_prequant is present);
+            # skipping it must not change the emitted FP4 codes/scales.
+            with torch.inference_mode():
+                prefix_skip, _packed8s, _pool8s, prefix_q_skip = prepare_pooled_queries(
+                    x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
+                    prefix_fp8=True, split_prefix=True, prefix_fp4=True, skip_prefix_store=True,
+                )
+            assert prefix_skip.shape == prefix8.shape
+            assert prefix_q_skip is not None
+            assert torch.equal(prefix_q_skip[0], prefix_q[0])
+            assert torch.equal(prefix_q_skip[1].view(torch.uint8), prefix_q[1].view(torch.uint8))
 
 
 
