@@ -28,14 +28,19 @@ logger = init_logger(__name__)
 class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
     """MiniMax-H3 conditioning that takes the prompt embeddings from a draft bundle when it carries them.
 
-    ``before_encode`` runs only when the text encoder is actually needed; the pipeline uses it to drop a DiT kept
-    resident across requests, so the encoder and the DiT are never in unified memory together.
+    ``before_encode`` runs only once the parent has missed its prompt-embeds cache and the text encoder is actually
+    needed; the pipeline uses it to drop a DiT kept resident across requests, so the encoder and the DiT are never in
+    unified memory together.
     """
 
     before_encode: Callable[[], None] | None = None
     # Set by the pipeline: how to treat a bundle's prompt embeddings, and our own text-encoder fingerprint.
     prompt_embeds_policy: str = "match"
     text_encoder_fingerprint: Callable[[], str | None] | None = None
+
+    def _before_text_encoder(self) -> None:
+        if self.before_encode is not None:
+            self.before_encode()
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -58,8 +63,6 @@ class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
                 logger.info(
                     "Open-H3-Regenerate-2K: re-encoding the prompt (draft bundle embeddings not reused, policy=%s)",
                     self.prompt_embeds_policy)
-        if self.before_encode is not None:
-            self.before_encode()
         return super().forward(batch, fastvideo_args)
 
 

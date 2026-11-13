@@ -14,6 +14,7 @@ from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedRefe
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import (
     MiniMaxH3ConditioningStage,
     prompt_embeds_cache_key,
+    text_encoder_cache_settings,
 )
 
 
@@ -40,6 +41,12 @@ def test_key_is_content_keyed_and_refuses_video_references() -> None:
     assert base != prompt_embeds_cache_key(_batch("hello"), False, "m2", device)
     assert base != prompt_embeds_cache_key(_batch("hello", keyframes=[_image(0)], anchors=["first"]), False, "m",
                                            device)
+    settings = text_encoder_cache_settings(SimpleNamespace(override_text_encoder_safetensors="enc.safetensors",
+                                                           override_text_encoder_quant=None))
+    other_encoder = text_encoder_cache_settings(SimpleNamespace(override_text_encoder_safetensors="other.safetensors",
+                                                                override_text_encoder_quant=None))
+    assert base != prompt_embeds_cache_key(_batch("hello"), False, "m", device, settings)
+    assert settings != other_encoder
     video = [MiniMaxH3PreparedReference("video", frames=np.zeros((2, 4, 4, 3), dtype=np.uint8))]
     assert prompt_embeds_cache_key(_batch("p", references=video), True, "m", device) is None
 
@@ -78,11 +85,13 @@ def test_forward_hit_never_touches_the_conditioner() -> None:
     with envs.FASTVIDEO_H3_PROMPT_EMBEDS_CACHE.override("memory"):
         stage = MiniMaxH3ConditioningStage(conditioner=None, tokenizer=None, processor=None, ref2va=False)
         batch = _batch("p")
-        key = prompt_embeds_cache_key(batch, False, "m", get_local_torch_device())
+        args = SimpleNamespace(model_path="m")
+        key = prompt_embeds_cache_key(batch, False, "m", get_local_torch_device(),
+                                      text_encoder_cache_settings(args))
         embeds = torch.randn(1, 4, 3)
         tags = torch.arange(4)
         stage._prompt_embeds_cache.put(key, embeds, tags)
-        out = stage.forward(batch, SimpleNamespace(model_path="m"))
+        out = stage.forward(batch, args)
     assert torch.equal(out.prompt_embeds[0].cpu(), embeds)
     assert torch.equal(out.extra["minimax_h3_text_token_tags"], tags)
 

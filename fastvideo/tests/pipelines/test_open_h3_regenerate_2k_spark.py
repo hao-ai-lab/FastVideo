@@ -73,6 +73,22 @@ def test_fast_vae_rejects_wrong_channel_count():
         decoder.decoded_pixel_shape((1, 5, 16, 2, 3))
 
 
+def test_fast_vae_latent_export_keeps_the_released_convention():
+    # Distinct statistics make it visible that the export denormalizes channel-first and does not transpose.
+    model = NonCausalViTDecoder([0.5] * 24, [2.0] * 24, list(range(2)), time_norm=5, heads=2, dim_head=8)
+    decoder = FastH3VaeDecoder.__new__(FastH3VaeDecoder)
+    torch.nn.Module.__init__(decoder)
+    decoder.model = model.eval()
+    decoder.latent_channels = 24
+    decoder.spatial_compression_ratio = 16
+    latents = torch.randn(1, 24, 3, 2, 3)
+    exported = decoder.denormalize_latents_for_export(latents)
+    assert exported.shape == latents.shape
+    assert torch.allclose(exported, latents * 2.0 + 0.5)
+    # The decode-preparation method still reorders for the decoder's time-first input.
+    assert decoder.denormalize_latents(latents).shape == (1, 3, 24, 2, 3)
+
+
 def test_fast_vae_fp8_conversion_replaces_only_block_linears():
     from fastvideo.models.vaes.fast_vae_fp8 import FP8Linear, convert_linears_to_fp8
 

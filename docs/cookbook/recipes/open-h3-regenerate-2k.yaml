@@ -11,6 +11,7 @@ deployments:
       - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
       - "One GPU with about 150 GB free (B200 or GB200). Send the draft as video_reference; local paths must sit under server.media_roots."
       - "Optional NVFP4 decoder (Blackwell only): hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'quality-36L/decoder-nvfp4.safetensors' --local-dir fasth3-nvfp4-vae"
+      - "Optional fast 24-layer decoder: hf download Efficient-Large-Model/Open-H3-Regenerate-2K --include 'fast_h3_vae_noncausal_24l.safetensors' --local-dir open-h3-fast-vae and set FASTVIDEO_H3_FAST_VAE_DECODER=open-h3-fast-vae/fast_h3_vae_noncausal_24l.safetensors"
     options:
       - server.*
       - generator.engine.offload.text_encoder
