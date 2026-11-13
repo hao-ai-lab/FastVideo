@@ -390,6 +390,14 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     if prepared_kv is not None:
         q = _fp8_per_token(q) if precision == "fp8" and not query_is_fp8 else q
         k, v = prepared_kv
+        # The producer pre-pads the dense-prefix K/V to the FP4 kernel's 128-row
+        # block; trim that zero tail here so the BF16/FP8 SDPA fallback still sees
+        # exactly the n_valid keys.  (The FP4 branch above consumed the padded
+        # tensor: the CUDA kernel attends to the full padded length, so that path
+        # is an approximation, not a bit-identical repro.)
+        valid_keys = valid_index.numel()
+        if k.shape[1] != valid_keys:
+            k, v = k[:, :valid_keys], v[:, :valid_keys]
     elif (precision == "fp8" and k.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
             and k.dtype == torch.bfloat16 and v.dtype == k.dtype
             and k.shape[-1] == 128 and k.stride(-1) == 1 and v.stride(-1) == 1

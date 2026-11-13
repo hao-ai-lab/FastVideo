@@ -128,15 +128,27 @@ def pool_quantize_prefix_kv(
         raise RuntimeError("Combined KV preparation requires eager inference")
     k4 = torch.empty((batch, heads, rows, 64), device=k.device, dtype=torch.uint8)
     s4 = torch.empty((batch, heads, rows, 8), device=k.device, dtype=torch.float8_e4m3fn)
-    k8 = torch.empty((batch, heads, n_valid, 128), device=k.device, dtype=torch.bfloat16).transpose(1, 2)
-    v8 = torch.empty_like(k8)
+    # Pre-pad the dense-prefix BF16 K/V to the FP4 kernel's 128-row block so its
+    # internal F.pad + contiguous copy becomes a no-op (10.75 ms/call at the real
+    # Omni shape).  The valid rows are bit-identical and the zero tail matches what
+    # the kernel would pad with, but the CUDA kernel attends to the full padded
+    # length, so the FP4 output is approximate (REVIEW S49).  The BF16/FP8 SDPA
+    # fallback trims the tail in _prefix_dense_attention and is unchanged.
+    padded = ((n_valid + 127) // 128) * 128
+    k8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
+    v8_buf = torch.empty_like(k8_buf)
+    if padded > n_valid:
+        k8_buf[:, :, n_valid:].zero_()
+        v8_buf[:, :, n_valid:].zero_()
+    k8 = k8_buf.transpose(1, 2)
+    v8 = v8_buf.transpose(1, 2)
     kp = torch.empty((batch, rows // tile_elems, heads, 128), device=k.device, dtype=torch.float32)
     vp = torch.empty_like(kp)
     v4 = torch.empty((batch, heads, 128, rows // 2), device=k.device, dtype=torch.uint8)
     vs4 = torch.empty((batch, heads, 128, rows // 16), device=k.device, dtype=torch.float8_e4m3fn)
     _smooth_pack[(rows // tile_elems, batch, heads)](
         k, v, mean, inverse, k4, s4, k8, v8, *k.stride()[:3], *v.stride()[:3],
-        batch, rows, heads, n_valid, tile_elems, VALUE_INDEX=value_index, GATHER_VALUE=value_index is not None,
+        batch, rows, heads, padded, tile_elems, VALUE_INDEX=value_index, GATHER_VALUE=value_index is not None,
         POOL=kp, TILE_VALID=valid, POOL_KEYS=True, VP=vp, V4=v4, VS4=vs4, HEAD_FIRST=True, num_warps=4 if tile_elems == 64 else 8,
     )
     return ((k4, s4), k8, v8, kp.permute(0, 2, 1, 3)), (vp.permute(0, 2, 1, 3), (v4, vs4))
