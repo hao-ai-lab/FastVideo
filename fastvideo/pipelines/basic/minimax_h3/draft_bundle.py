@@ -25,6 +25,8 @@ BUNDLE_SUFFIX = ".h3draft.pt"
 BUNDLE_MEDIA_TYPE = "application/x-fastvideo-h3-draft"
 BUNDLE_EXTRA_KEY = "open_h3_regenerate_2k_draft_bundle"
 BUNDLE_PATH_EXTRA_KEY = "h3_draft_bundle_path"
+# The text token tags kept for the bundle writer: latent preparation consumes and drops the conditioning's copy.
+BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY = "h3_draft_bundle_text_token_tags"
 PROMPT_EMBEDS_POLICIES = ("match", "always", "never")
 
 
@@ -53,6 +55,12 @@ def text_encoder_fingerprint(directory: str | os.PathLike[str] | None, quant: ob
         digest.update(f"{shard.name}:{shard.stat().st_size}".encode())
     digest.update(f"quant:{quant}".encode())
     return digest.hexdigest()[:32]
+
+
+def keep_text_token_tags_for_bundle(extra: dict[str, Any], tags: Any) -> None:
+    """Keep ``tags`` for the bundle writer when this request asked for a draft bundle; a no-op otherwise."""
+    if extra.get(BUNDLE_PATH_EXTRA_KEY) and isinstance(tags, torch.Tensor):
+        extra[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] = tags
 
 
 def save_draft_bundle(path: str | os.PathLike[str], *, latent: torch.Tensor, prompt_embeds: torch.Tensor | None,
@@ -116,9 +124,11 @@ __all__ = [
     "BUNDLE_MEDIA_TYPE",
     "BUNDLE_PATH_EXTRA_KEY",
     "BUNDLE_SUFFIX",
+    "BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY",
     "PROMPT_EMBEDS_POLICIES",
     "bundle_prompt_conditioning",
     "is_bundle_path",
+    "keep_text_token_tags_for_bundle",
     "load_draft_bundle",
     "save_draft_bundle",
     "text_encoder_fingerprint",

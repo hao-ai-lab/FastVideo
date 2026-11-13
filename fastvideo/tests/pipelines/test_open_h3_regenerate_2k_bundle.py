@@ -10,6 +10,9 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import 
 from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (
     BUNDLE_EXTRA_KEY,
     bundle_prompt_conditioning,
+    BUNDLE_PATH_EXTRA_KEY,
+    BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY,
+    keep_text_token_tags_for_bundle,
     load_draft_bundle,
     save_draft_bundle,
     text_encoder_fingerprint,
@@ -139,3 +142,15 @@ def test_save_then_load_round_trip(tmp_path):
     with pytest.raises(ValueError, match="C, T, h, w"):
         save_draft_bundle(target, latent=torch.zeros(3, 3), prompt_embeds=None, text_token_tags=None, prompt="",
                           text_encoder=None)
+
+
+def test_text_token_tags_survive_latent_preparation_only_for_bundle_requests():
+    tags = torch.ones(5, dtype=torch.long)
+    plain: dict = {}
+    keep_text_token_tags_for_bundle(plain, tags)
+    assert BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY not in plain
+    requested = {BUNDLE_PATH_EXTRA_KEY: "/tmp/x.h3draft.pt"}
+    keep_text_token_tags_for_bundle(requested, tags)
+    assert requested[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] is tags
+    keep_text_token_tags_for_bundle(requested, None)
+    assert requested[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] is tags

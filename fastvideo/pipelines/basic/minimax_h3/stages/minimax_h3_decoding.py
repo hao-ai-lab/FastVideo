@@ -17,7 +17,8 @@ from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_fast_vae import fast_vae_decoder
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
-from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_PATH_EXTRA_KEY, save_draft_bundle
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (BUNDLE_PATH_EXTRA_KEY, BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY,
+                                                               save_draft_bundle)
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_is_output_worker, h3_output_worker_rank
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -150,7 +151,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 bundle_path,
                 latent=latents,
                 prompt_embeds=batch.prompt_embeds[0] if batch.prompt_embeds else None,
-                text_token_tags=batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY),
+                text_token_tags=batch.extra.get(BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY,
+                                                batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY)),
                 prompt=str(batch.prompt or ""),
                 text_encoder=(self.text_encoder_fingerprint() if self.text_encoder_fingerprint is not None else None))
         device = get_local_torch_device()
