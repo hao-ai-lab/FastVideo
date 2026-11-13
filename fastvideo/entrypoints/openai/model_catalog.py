@@ -201,11 +201,17 @@ class ResidentModels:
             raise ValueError(f"Model {profile.model} is not installed locally")
         if profile.args is None:
             # The model was installed after the catalog was read; build its arguments before releasing the old one.
+            previous = {name: (getattr(envs, name).is_set(), getattr(envs, name).get()) for name in self._baseline}
             apply_environment(profile.environment, self._baseline)
             try:
                 profile.args = generator_config_to_fastvideo_args(profile.config.generator)
             except Exception:
-                apply_environment({}, self._baseline)
+                for name, (was_set, value) in previous.items():
+                    field = getattr(envs, name)
+                    if was_set:
+                        field.set(value)
+                    else:
+                        field.clear()
                 raise
         identities = {name: _component_identity(profile, name) for name in self.catalog.shared_components}
         self.loading, self.error = profile, None
