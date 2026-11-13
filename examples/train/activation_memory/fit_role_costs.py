@@ -24,7 +24,7 @@ def main() -> None:
     args = parser.parse_args()
     profile = MemoryProfile.load(args.profile)
     reference = json.loads(Path(args.reference).read_text())
-    if any(set(policies.values()) != {'recompute'} for policies in reference['manual_policies'].values()):
+    if any(policies is None or set(policies.values()) != {'recompute'} for policies in reference['manual_policies'].values()):
         raise ValueError('The reference must recompute both trainable roles')
     baseline_ms = mean(step['step_ms'] for step in reference['steps'])
     counts = Counter(block.role for block in profile.blocks)
@@ -40,7 +40,7 @@ def main() -> None:
                 raise ValueError('Role costs must use the same independent calibration sample')
             for name, policies in record['manual_policies'].items():
                 expected = policy if name == role else 'recompute'
-                if set(policies.values()) != {expected}:
+                if policies is None or set(policies.values()) != {expected}:
                     raise ValueError(f'{path} must change only {role} to {policy}')
             elapsed = mean(step['step_ms'] for step in record['steps'])
             deltas[role][policy] = elapsed - baseline_ms

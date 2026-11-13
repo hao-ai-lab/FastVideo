@@ -18,7 +18,8 @@ training:
 ```
 
 `activation_memory_host_budget_gib` optionally bounds activation storage on the
-CPU. The budget uses GiB (2^30 bytes). Omit the manual
+CPU. Both this option and `activation_memory_plan_output` require the device
+budget and measured profile. The budget uses GiB (2^30 bytes). Omit the manual
 `enable_gradient_checkpointing_type` when enabling the planner. Roles with
 planned blocks must use an adapter that explicitly declares
 `activation_memory_plan` in its constructor. Unsupported adapters are rejected
@@ -132,6 +133,10 @@ Multi-rank DMD2 reports retain every rank's records and take the maximum step
 time, allocated memory, and reserved memory across ranks for each step.
 
 ## Limitations
+
+CI runs the CPU correctness tests; it does not rerun the Ascend profiling
+examples or regenerate the performance tables. Those tables use the committed
+measurements; reproducing them requires the documented Ascend workloads.
 
 The budget constrains profiled allocated bytes. Reserved allocator storage and
 driver allocations also consume physical memory. Workspace or shape changes

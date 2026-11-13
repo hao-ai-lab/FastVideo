@@ -176,7 +176,7 @@ def apply_activation_memory_plan(module: torch.nn.Module, policies: dict[str, st
 
         def forward(self, *args, **kwargs):
             device_type = next(self._checkpoint_wrapped_module.parameters()).device.type
-            with torch.autograd.graph.save_on_cpu(pin_memory=True, device_type=device_type):
+            with torch.autograd.graph.save_on_cpu(pin_memory=device_type != "cpu", device_type=device_type):
                 return self._checkpoint_wrapped_module(*args, **kwargs)
 
     blocks = {name: module.get_submodule(name) for name in policies}

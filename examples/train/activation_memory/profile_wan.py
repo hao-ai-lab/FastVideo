@@ -361,6 +361,8 @@ def main() -> None:
     parser.add_argument('--save-model')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+    if args.profile and args.budget_gib is None:
+        parser.error('--budget-gib is required with --profile')
     torch.set_num_threads(8)
     local_rank = int(os.environ.get('LOCAL_RANK', 0))
     rank, world = int(os.environ.get('RANK', 0)), int(os.environ.get('WORLD_SIZE', 1))

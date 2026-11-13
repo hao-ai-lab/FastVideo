@@ -9,6 +9,7 @@ import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import Mock
 
 import pytest
@@ -166,6 +167,48 @@ def test_configuration_requires_budget_profile_pair_and_no_manual_policy():
     with pytest.raises(ValueError, match="manual"):
         config.ModelTrainingConfig(activation_memory_budget_gib=32, activation_memory_profile="measured.json",
                                    enable_gradient_checkpointing_type="full")
+
+
+@pytest.mark.parametrize("options", [
+    {"activation_memory_host_budget_gib": 8},
+    {"activation_memory_host_budget_gib": 0},
+    {"activation_memory_plan_output": "plan.json"},
+])
+def test_auxiliary_planning_options_require_device_budget(options):
+    with pytest.raises(ValueError, match="device budget"):
+        config.ModelTrainingConfig(**options)
+    config.ModelTrainingConfig(activation_memory_budget_gib=32,
+                               activation_memory_profile="measured.json", **options)
+
+
+def test_wan_profile_requires_budget_before_device_setup(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "torch_npu", ModuleType("torch_npu"))
+    profile_wan = load_source("activation_memory_profile_wan", "examples/train/activation_memory/profile_wan.py")
+    monkeypatch.setattr(sys, "argv", ["profile_wan", "benchmark", "--model", "unused", "--training-sample", "unused",
+                                      "--profile", "measured.json", "--output", "unused"])
+    with pytest.raises(SystemExit) as error:
+        profile_wan.main()
+    assert error.value.code == 2
+    assert "--budget-gib is required with --profile" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("budget_record", ["reference", "student-save"])
+def test_role_cost_fit_rejects_budget_mode_records(tmp_path, monkeypatch, budget_record):
+    fit = load_source("activation_memory_fit_role_costs", "examples/train/activation_memory/fit_role_costs.py")
+    profile_path = tmp_path / "profile.json"
+    memory.MemoryProfile(("forward",), (0,), (), {}).save(profile_path)
+    manual = {"student": {"blocks.0": "recompute"}, "critic": {"blocks.0": "recompute"}}
+    argv = ["fit_role_costs", "--profile", str(profile_path), "--output", str(tmp_path / "fitted.json")]
+    for name in ("reference", "student-save", "student-offload", "critic-save", "critic-offload"):
+        path = tmp_path / f"{name}.json"
+        policies = {"student": None, "critic": None} if name == budget_record else manual
+        path.write_text(json.dumps({"manual_policies": policies, "training_sample": "calibration.pt",
+                                    "steps": [{"step_ms": 1}]}))
+        argv.extend([f"--{name}", str(path)])
+    monkeypatch.setattr(sys, "argv", argv)
+    message = "reference must recompute both trainable roles" if budget_record == "reference" else "must change only student"
+    with pytest.raises(ValueError, match=message):
+        fit.main()
 
 
 def test_yaml_budget_fields_and_cli_override_reach_typed_config(tmp_path):

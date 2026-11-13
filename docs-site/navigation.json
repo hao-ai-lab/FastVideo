@@ -311,6 +311,10 @@
         "href": "/training/attn_qat"
       },
       {
+        "label": "Activation Memory Budgets",
+        "href": "/training/activation_memory"
+      },
+      {
         "label": "FastH3 NVFP4 QAD",
         "href": "/training/minimax_h3_fp4_qad"
       },

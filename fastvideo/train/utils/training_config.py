@@ -207,6 +207,10 @@ class ModelTrainingConfig:
     def __post_init__(self) -> None:
         if (self.activation_memory_budget_gib is None) != (not self.activation_memory_profile):
             raise ValueError("Activation memory planning requires both a budget and a measured profile")
+        if self.activation_memory_budget_gib is None and (self.activation_memory_host_budget_gib is not None
+                                                          or self.activation_memory_plan_output):
+            raise ValueError(
+                "Activation memory host budget and plan output require a device budget and measured profile")
         if self.activation_memory_budget_gib is not None:
             if self.activation_memory_budget_gib <= 0:
                 raise ValueError("activation_memory_budget_gib must be positive")
