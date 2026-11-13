@@ -69,7 +69,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
     factory = app.state.generator_factory
     generator = factory() if factory is not None else VideoGenerator.from_fastvideo_args(args)
-    serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator, app.state.lora_runtime)
+    model_manager = None
+    if app.state.model_catalog is not None:
+        from fastvideo.entrypoints.openai.model_catalog import ModelCatalog, ResidentModels
+
+        model_manager = ResidentModels(generator, ModelCatalog(app.state.model_catalog), args, served_model_name)
+    serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator, app.state.lora_runtime,
+                                         model_manager)
     logger.info("Generation runtime ready.")
 
     set_state(
@@ -107,6 +113,7 @@ def create_app(
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
     media_policy: MediaPolicy | None = None,
     lora_runtime: LoraRuntime | None = None,
+    model_catalog: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -132,6 +139,7 @@ def create_app(
     app.state.video_request_validator = video_request_validator
     app.state.runtime = runtime
     app.state.lora_runtime = lora_runtime
+    app.state.model_catalog = model_catalog
 
     app.add_middleware(
         CORSMiddleware,
@@ -178,7 +186,7 @@ def create_app(
 
     app.include_router(common_router)
     app.include_router(video_router)
-    if runtime != "mlx":
+    if runtime != "mlx" and model_catalog is None:
         app.include_router(image_router)
     app.include_router(playground_router)
 
@@ -226,6 +234,7 @@ def run_server(
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
     media_policy: MediaPolicy | None = None,
     lora_runtime: LoraRuntime | None = None,
+    model_catalog: str | None = None,
 ):
     """Create the app and run it with uvicorn"""
     os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
@@ -240,6 +249,7 @@ def run_server(
         media_reference_max_bytes=media_reference_max_bytes,
         media_policy=media_policy,
         lora_runtime=lora_runtime,
+        model_catalog=model_catalog,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)

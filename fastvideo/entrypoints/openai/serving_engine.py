@@ -37,13 +37,15 @@ class OpenAIServingEngine:
     def __init__(self,
                  generator: ServingGenerator,
                  video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
-                 lora_runtime: LoraRuntime | None = None) -> None:
+                 lora_runtime: LoraRuntime | None = None,
+                 model_manager=None) -> None:
         self._generator = generator
         self._lora_runtime = lora_runtime
         self._video_request_validator = video_request_validator
         self._generation_lock = asyncio.Lock()
         self._closed = False
         self._unhealthy_reason: str | None = None
+        self.model_manager = model_manager
 
     @property
     def generator(self) -> ServingGenerator:
@@ -87,7 +89,23 @@ class OpenAIServingEngine:
         lora: LoraSelection | None = None,
     ) -> Any:
         """Generate one typed request without blocking the event loop."""
-        return await self.run_serialized(self._generator.generate, request, on_start=on_start, lora=lora)
+
+        def generate_selected():
+            if self.model_manager is not None:
+                from fastvideo.entrypoints.openai.state import request_model_profile
+
+                profile = request_model_profile.get()
+                if profile is None:
+                    raise ValueError("A catalog generation requires a selected model/task")
+                self.model_manager.activate(profile)
+            return self._generator.generate(request)
+
+        return await self.run_serialized(generate_selected, on_start=on_start, lora=lora)
+
+    @property
+    def busy(self) -> bool:
+        """Whether generation or a model lifecycle operation holds the worker."""
+        return self._generation_lock.locked()
 
     async def run_serialized(
         self,
