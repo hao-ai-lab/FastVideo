@@ -19,8 +19,10 @@ def _backend():
         try:
             # The repository's own ctypes binding; the "Spark prebuild"
             # module name above is not produced by any in-tree build rule.
+            # It loads its .so at import, so a wheel without the built library
+            # raises OSError, not ImportError.
             from fastvideo_kernel import h3_swiglu_gemm_binding as _fastvideo_h3_swiglu_gemm
-        except ImportError:
+        except (ImportError, OSError):
             return None
     return _fastvideo_h3_swiglu_gemm
 
