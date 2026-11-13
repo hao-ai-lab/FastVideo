@@ -369,6 +369,8 @@ def test_head_403_for_a_disabled_repo_does_not_ask_for_a_token(
 def test_direct_403_for_a_disabled_repo_does_not_ask_for_a_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Direct (GET-stage) DisabledRepoError; the HEAD path wraps it in
+    # LocalEntryNotFoundError, covered by the previous test.
     from huggingface_hub.utils import DisabledRepoError
 
     class _DisabledRepoError(DisabledRepoError):
