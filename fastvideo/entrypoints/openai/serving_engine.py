@@ -61,23 +61,26 @@ class OpenAIServingEngine:
     def closed(self) -> bool:
         return self._closed
 
+    def health_status(self) -> tuple[bool, str | None]:
+        """Probe executor liveness once and return ``(healthy, reason)``.
+
+        The executor probe may make a synchronous control-plane call, so callers
+        on the event loop must run it in a worker thread.
+        """
+        if self._closed or self._unhealthy_reason is not None:
+            return False, self._unhealthy_reason or "one or more generation workers are not alive"
+        executor = getattr(self._generator, "executor", None)
+        if executor is None or executor.healthy:
+            return True, None
+        return False, "one or more generation workers are not alive"
+
     @property
     def healthy(self) -> bool:
-        if self._closed or self._unhealthy_reason is not None:
-            return False
-        executor = getattr(self._generator, "executor", None)
-        workers = getattr(executor, "workers", None)
-        if workers is None:
-            return True
-        return bool(workers) and all(worker.proc.is_alive() for worker in workers)
+        return self.health_status()[0]
 
     @property
     def unhealthy_reason(self) -> str | None:
-        if self._unhealthy_reason is not None:
-            return self._unhealthy_reason
-        if not self.healthy:
-            return "one or more generation workers are not alive"
-        return None
+        return self.health_status()[1]
 
     async def generate(
         self,
