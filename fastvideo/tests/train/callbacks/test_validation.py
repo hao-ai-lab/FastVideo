@@ -657,14 +657,14 @@ class TestStudentSamplingContract:
 
     def test_validation_clock_is_noop_before_on_train_start(self) -> None:
         """Direct validation calls without a method must not raise."""
-        cb = self._callback()
-        cb.method = None
+        cb = self._callback(sparsity=0.0)
+        del cb.method
         config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
         assert resolved is config
 
     def test_validation_clock_allows_students_without_shift_attributes(self) -> None:
         """Video-only students expose neither shift and skip the module lookup."""
-        cb = self._callback()
+        cb = self._callback(sparsity=0.0)
         cb.method = SimpleNamespace(student=SimpleNamespace())
         config, resolved = self._resolve(cb, torch.nn.Identity(), 8)
         assert resolved is config
@@ -672,7 +672,7 @@ class TestStudentSamplingContract:
     def test_validation_clock_skips_a_missing_scheduler_module(self) -> None:
         """A checkpoint without an audio scheduler is not a shift mismatch."""
         config, resolved = self._resolve(
-            self._callback(),
+            self._callback(sparsity=0.0),
             torch.nn.Identity(),
             8,
             schedulers={"scheduler": SimpleNamespace(shift=12.0)},

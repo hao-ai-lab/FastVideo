@@ -358,10 +358,10 @@ pipeline:
   flow_shift: 8
 ```
 
-Validation loads its scheduler modules from the checkpoint. Students that
-expose resolved per-modality shifts (PDD and MiniMax H3) must therefore train
-with the checkpoint's scheduler shifts; the callback refuses to start
-validation when the student and checkpoint shifts differ.
+Students that expose resolved per-modality shifts (PDD and MiniMax H3) load
+their scheduler modules from the checkpoint during validation. Such students
+must therefore train with the checkpoint's scheduler shifts; the callback
+refuses to start validation when the student and checkpoint shifts differ.
 
 Registered transformer linear-quantization configs can also be selected by
 name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs

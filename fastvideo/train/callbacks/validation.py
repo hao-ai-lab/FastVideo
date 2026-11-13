@@ -1527,10 +1527,10 @@ class ValidationCallback(Callback):
     def _check_sampling_clock(self, pipeline: Any) -> None:
         """Validation must sample the scheduler shifts the student trains with.
 
-        Validation loads its scheduler modules from the checkpoint, while the
-        training grid may come from a pipeline-config shift override. Students
-        that expose modality shifts (PDD and H3) therefore fail fast here
-        instead of silently sampling a different sigma grid.
+        Students that expose resolved per-modality shifts (PDD and H3) load
+        those scheduler modules from the checkpoint, while the training grid
+        may come from a pipeline-config shift override. Such students therefore
+        fail fast here instead of silently sampling a different sigma grid.
         """
         student = getattr(getattr(self, "method", None), "student", None)
         get_module = getattr(pipeline, "get_module", None)
