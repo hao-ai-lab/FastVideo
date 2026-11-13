@@ -395,7 +395,10 @@ class MultiprocExecutor(Executor):
     @property
     def healthy(self) -> bool:
         """Check process liveness even while a worker is executing a forward pass."""
-        return bool(self.workers) and all(worker.proc.is_alive() for worker in self.workers)
+        workers = getattr(self, "workers", None)
+        if not workers:
+            return False
+        return all(worker.proc.is_alive() for worker in workers)
 
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""

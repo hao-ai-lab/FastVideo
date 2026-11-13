@@ -907,3 +907,39 @@ def test_serving_health_uses_executor_liveness_contract() -> None:
     generator.executor.healthy = False
     assert engine.healthy is False
     assert engine.unhealthy_reason == "one or more generation workers are not alive"
+
+
+def test_health_probe_is_bounded_and_off_the_event_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from fastvideo.entrypoints.openai import api_server, state
+    from fastvideo.entrypoints.openai.api_server import create_app
+
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    class _StalledExecutor:
+
+        @property
+        def healthy(self) -> bool:
+            probe_started.set()
+            release_probe.wait(timeout=3)
+            return True
+
+    generator = _WaveGenerator()
+    generator.executor = _StalledExecutor()
+    monkeypatch.setattr(api_server, "HEALTH_PROBE_TIMEOUT_SECONDS", 0.5, raising=False)
+    app = create_app(_args("m"), str(tmp_path), generator_factory=lambda: generator)
+
+    try:
+        with TestClient(app) as client:
+            started = time.monotonic()
+            response = client.get("/health")
+            elapsed = time.monotonic() - started
+            assert probe_started.is_set()
+            assert response.status_code == 503
+            assert "timed out" in response.json()["error"]["message"]
+            # An inline probe would wait for the executor (3s here), not the 0.5s bound.
+            assert elapsed < 2
+    finally:
+        release_probe.set()
+        asyncio.run(VIDEO_STORE.clear())
+        state.clear_state()

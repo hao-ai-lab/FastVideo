@@ -3,6 +3,7 @@
 
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable
+import asyncio
 import os
 
 import uvicorn
@@ -32,6 +33,10 @@ logger = init_logger(__name__)
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
+
+# Executor liveness can block on a distributed control plane; bound how long
+# ``/health`` waits so one stalled probe cannot hold the route open.
+HEALTH_PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def _validate_default_request_against_preset(
@@ -187,8 +192,16 @@ def create_app(
         from fastvideo.entrypoints.openai.state import get_serving_engine
 
         engine = get_serving_engine()
-        if not engine.healthy:
-            raise HTTPException(status_code=503, detail=engine.unhealthy_reason or "generation engine is unhealthy")
+        # The executor probe may block on a distributed control plane, so run it
+        # off the event loop and bound the wait; a probe that never returns is
+        # reported unhealthy instead of holding the route open.
+        probe = asyncio.to_thread(engine.health_status)
+        try:
+            healthy, reason = await asyncio.wait_for(probe, timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=503, detail="generation engine health probe timed out") from None
+        if not healthy:
+            raise HTTPException(status_code=503, detail=reason or "generation engine is unhealthy")
         return {"status": "ok"}
 
     return app
