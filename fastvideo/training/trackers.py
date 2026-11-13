@@ -536,23 +536,33 @@ class JsonlTracker(BaseTracker):
         caption: str | None = None,
         fps: int | None = None,
         format: str | None = None,
-    ) -> Any:
+    ) -> Any | None:
         video_format = (format or "mp4").lower()
         video_fps: float | int | None
         if isinstance(data, str | os.PathLike):
             path = os.path.abspath(os.fspath(data))
             video_fps = fps
         else:
-            frames = _prepare_video_array(data)
-            video_fps = _coerce_video_fps(fps)
-            file_descriptor, path = tempfile.mkstemp(suffix=f".{video_format}", dir=self._files_dir)
-            os.close(file_descriptor)
-            if video_format == "gif":
-                _write_gif(path, frames, video_fps)
-            else:
-                import imageio.v2 as imageio
+            path = ""
+            try:
+                frames = _prepare_video_array(data)
+                video_fps = _coerce_video_fps(fps)
+                file_descriptor, path = tempfile.mkstemp(suffix=f".{video_format}", dir=self._files_dir)
+                os.close(file_descriptor)
+                if video_format == "gif":
+                    _write_gif(path, frames, video_fps)
+                else:
+                    import imageio.v2 as imageio
 
-                imageio.mimsave(path, frames, fps=video_fps, format=video_format)
+                    imageio.mimsave(path, frames, fps=video_fps, format=video_format)
+            except Exception as exc:
+                # Artifact logging is best-effort; a bad array or encoder must
+                # not abort the training loop or leave a partial temp file.
+                logger.warning("JSONL tracker could not encode video artifact: %s", exc)
+                if path:
+                    with contextlib.suppress(OSError):
+                        os.remove(path)
+                return None
         return {
             "path": path,
             "caption": caption,

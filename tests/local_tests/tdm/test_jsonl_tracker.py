@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from fastvideo.training.trackers import initialize_trackers
 
@@ -91,6 +92,34 @@ def test_jsonl_tracker_saves_array_videos_to_files(tmp_path: Path) -> None:
     assert video["fps"] == 4.0
     artifact_rows = _read_jsonl(tmp_path / "tracker" / "artifacts.jsonl")
     assert artifact_rows[0]["artifacts"]["validation"][0]["path"] == str(saved_path)
+
+
+def test_jsonl_tracker_video_failures_stay_best_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bad arrays and encoder failures must not abort logging or leak temp files."""
+    tracker = initialize_trackers(
+        ["jsonl"],
+        experiment_name="unused",
+        config=None,
+        log_dir=str(tmp_path / "tracker"),
+    )
+    files_dir = tmp_path / "tracker" / "files"
+
+    bad_channels = np.zeros((2, 2, 16, 16), dtype=np.uint8)
+    assert tracker.video(bad_channels, caption="prompt", fps=4) is None
+    assert list(files_dir.iterdir()) == []
+
+    frames = np.zeros((2, 3, 16, 16), dtype=np.uint8)
+
+    def fail_encode(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("encoder failed")
+
+    monkeypatch.setattr("imageio.v2.mimsave", fail_encode)
+
+    assert tracker.video(frames, caption="prompt", fps=4) is None
+    assert list(files_dir.iterdir()) == []
 
 
 class _FakeWandbRun:

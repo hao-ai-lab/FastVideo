@@ -833,7 +833,8 @@ class TDMMethod(DMD2Method):
             if not bool(torch.all(sigmas[:-1] > sigmas[1:] + 1e-6).item()):
                 raise ValueError("method.tdm_denoising_steps must map to strictly decreasing scheduler sigmas")
 
-        self._validate_context_intervals(steps, self._modalities[0])
+        for modality in self._modalities:
+            self._validate_context_intervals(steps, modality)
         self._denoising_step_list = steps
         self._denoising_sigma_lists = sigmas_by_modality
         self._cached_schedule_index = self._active_schedule_index
@@ -854,7 +855,7 @@ class TDMMethod(DMD2Method):
         next_labels = torch.cat((labels[1:], labels.new_zeros(1)))
         for current, following in zip(labels, next_labels, strict=True):
             if not bool(torch.any((candidates >= following) & (candidates < current)).item()):
-                raise ValueError("method.tdm_denoising_steps maps trajectory point "
+                raise ValueError(f"method.tdm_denoising_steps maps {modality} trajectory point "
                                  f"{float(current):g} to the empty noise interval "
                                  f"[{float(following):g}, {float(current):g}); no positive "
                                  "step label exists between adjacent points")

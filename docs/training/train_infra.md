@@ -548,9 +548,9 @@ labels only match a student flow shift of `1.0`.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `rollout_mode` | *(required)* | Currently must be `"simulate"` |
-| `tdm_denoising_steps` | *(required)* | Few-step student trajectory schedule; mapped sigmas must start at scheduler terminal noise and strictly decrease |
+| `tdm_denoising_steps` | *(required)* | Few-step student trajectory schedule; mapped sigmas must start at scheduler terminal noise and strictly decrease. With `noise_interval_mode: separate` or `use_randmid: true`, every interval between adjacent points and the final interval down to zero must contain a positive trajectory label, so a schedule such as `[1000, 1]` is rejected at startup unless it uses `noise_interval_mode: to_terminal` with `use_randmid: false` |
 | `warmup_steps` | `200` for Wan, `0` otherwise | Regression-warmup updates that fit the student to the guidance-combined teacher x0 at its own rollout states before TDM starts; the first `warmup_steps` 1-based training steps are warmup (inclusive), and the critic takes no updates and stays out of the optimizers, LR schedulers, and grad-clip targets while warmup is active |
-| `tdm_step_ladder` | *(unset)* | Staged step counts, `[{denoising_steps: [...], until_iteration: N}]`; a stage applies through 1-based step `N` (inclusive), counts must strictly decrease, boundaries strictly increase, and only the last stage may omit `until_iteration`. Validation and inference adopt the final stage's schedule |
+| `tdm_step_ladder` | *(unset)* | Staged step counts, `[{denoising_steps: [...], until_iteration: N}]`; a stage applies through 1-based step `N` (inclusive), counts must strictly decrease, boundaries strictly increase, and only the last stage may omit `until_iteration`. Every stage is resolved and validated at startup. Validation and inference adopt the final stage's schedule |
 | `student_sample_type` | `"sde"` | `"sde"` re-noises each predicted x0; `"ode"` carries effective flow noise |
 | `noise_interval_mode` | `"separate"` | Fake-score noising target selection mode; see note below |
 | `use_randmid` | `false` | Randomly sample the intermediate sigma between the source point and the next trajectory sigma when enabled |

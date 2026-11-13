@@ -1507,8 +1507,8 @@ class ValidationCallback(Callback):
             configured = getattr(tc, "vsa_ref_keep_rate", None)
             updates["vsa_ref_keep_rate"] = 1.0 - sparsity if configured is None else float(configured)
         pdd_steps = getattr(transformer, "pdd_steps", None)
+        self._check_sampling_clock(pipeline)
         if pdd_steps is not None and hasattr(pipeline_config, "pdd_step_indices"):
-            self._check_pdd_sampling_clock(pipeline)
             indices = pipeline_config.pdd_step_indices
             if indices is None or len(indices) != int(num_inference_steps) + 1:
                 # The balanced partition PDDMethodMixin checks against the
@@ -1523,8 +1523,14 @@ class ValidationCallback(Callback):
             setattr(pipeline_config, name, value)
         return pipeline_config
 
-    def _check_pdd_sampling_clock(self, pipeline: Any) -> None:
-        """A PDD student's heads are tied to its training clocks; validation must sample on the same ones."""
+    def _check_sampling_clock(self, pipeline: Any) -> None:
+        """Validation must sample the scheduler shifts the student trains with.
+
+        Validation loads its scheduler modules from the checkpoint, while the
+        training grid may come from a pipeline-config shift override. Students
+        that expose modality shifts (PDD and H3) therefore fail fast here
+        instead of silently sampling a different sigma grid.
+        """
         student = getattr(self.method, "student", None)
         get_module = getattr(pipeline, "get_module", None)
         if student is None or not callable(get_module):
@@ -1532,9 +1538,11 @@ class ValidationCallback(Callback):
         for attribute, module_name in (("video_scheduler_shift", "scheduler"), ("audio_scheduler_shift",
                                                                                 "audio_scheduler")):
             trained = getattr(student, attribute, None)
+            if trained is None:
+                continue
             sampled = getattr(get_module(module_name), "shift", None)
-            if trained is not None and sampled is not None and float(trained) != float(sampled):
-                raise ValueError(f"PDD validation samples with {module_name} shift {sampled}, but the student "
+            if sampled is not None and float(trained) != float(sampled):
+                raise ValueError(f"Validation samples with {module_name} shift {sampled}, but the student "
                                  f"trains with {attribute}={trained}. Train with the checkpoint's shift.")
 
     def _run_validation_for_steps(

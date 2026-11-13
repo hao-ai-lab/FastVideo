@@ -1088,6 +1088,49 @@ def test_tdm_rejects_schedule_with_empty_trajectory_interval() -> None:
         _build_method(method_overrides={"tdm_denoising_steps": [1000, 1]})
 
 
+def test_tdm_to_terminal_accepts_schedule_without_intermediate_labels() -> None:
+    """``to_terminal`` draws targets up to the terminal label, so ``[1000, 1]`` is valid."""
+    method, _, _ = _build_method(
+        method_overrides={
+            "tdm_denoising_steps": [1000, 1],
+            "noise_interval_mode": "to_terminal",
+            "use_randmid": False,
+        },
+    )
+
+    assert method._get_denoising_step_list(torch.device("cpu")).tolist() == [1000.0, 1.0]
+
+
+def test_tdm_use_randmid_rejects_schedule_without_intermediate_labels() -> None:
+    """Random midpoints can land in ``[0, 1)`` even when the target mode is ``to_terminal``."""
+    with pytest.raises(ValueError, match="empty noise interval"):
+        _build_method(
+            method_overrides={
+                "tdm_denoising_steps": [1000, 1],
+                "noise_interval_mode": "to_terminal",
+                "use_randmid": True,
+            },
+        )
+
+
+def test_tdm_ladder_rejects_stage_with_empty_trajectory_interval() -> None:
+    """Every ladder stage is resolved at startup, so a bad later stage fails immediately."""
+    with pytest.raises(ValueError, match="empty noise interval"):
+        _build_method(
+            method_overrides={
+                "tdm_step_ladder": [
+                    {
+                        "denoising_steps": [1000, 750, 500, 250],
+                        "until_iteration": 10,
+                    },
+                    {
+                        "denoising_steps": [1000, 1],
+                    },
+                ],
+            },
+        )
+
+
 def test_tdm_rejects_nonunit_guidance_for_h3_family(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
 

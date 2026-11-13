@@ -101,6 +101,43 @@ def _row_index(rank: int, video_index: int, sp_size: int, rows_per_group: int) -
     return (rank // sp_size) * rows_per_group + video_index
 
 
+def _nanmean(values: list[float]) -> float:
+    return float(np.mean(values)) if values else float("nan")
+
+
+def _summarize_schedules(
+    records_by_inference_steps: dict[int, list[dict[str, dict[str, float]]]],
+    train_captions: set[str],
+) -> dict[str, dict[str, float]]:
+    """Aggregate per-caption stats once per sampling schedule.
+
+    A headline mean over every schedule would mix a different
+    ``inference_steps`` into the spread and sharpness numbers, so each
+    schedule keeps its own summary.
+    """
+    summary: dict[str, dict[str, float]] = {}
+    for inference_steps, schedules in sorted(records_by_inference_steps.items()):
+        train_within: list[float] = []
+        heldout_within: list[float] = []
+        train_sharp: list[float] = []
+        heldout_sharp: list[float] = []
+        for caption_records in schedules:
+            for caption, record in caption_records.items():
+                if caption in train_captions:
+                    train_within.append(record["within_spread"])
+                    train_sharp.append(record["sharpness"])
+                else:
+                    heldout_within.append(record["within_spread"])
+                    heldout_sharp.append(record["sharpness"])
+        summary[f"inference_steps_{inference_steps}"] = {
+            "train_mean_within_spread": _nanmean(train_within),
+            "heldout_mean_within_spread": _nanmean(heldout_within),
+            "train_mean_sharpness": _nanmean(train_sharp),
+            "heldout_mean_sharpness": _nanmean(heldout_sharp),
+        }
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
@@ -159,10 +196,7 @@ def main() -> None:
         "steps": {},
     }
     train_captions = set(list(dict.fromkeys(rows))[:args.num_train_prompts])
-    train_within: list[float] = []
-    heldout_within: list[float] = []
-    train_sharp: list[float] = []
-    heldout_sharp: list[float] = []
+    records_by_inference_steps: dict[int, list[dict[str, dict[str, float]]]] = defaultdict(list)
 
     for step, inference_steps in sorted(per_key):
         entries = per_key[(step, inference_steps)]
@@ -193,12 +227,8 @@ def main() -> None:
                 "within_spread": within,
             }
             if caption in train_captions:
-                train_within.append(within)
-                train_sharp.append(float(np.mean(sharpness)))
                 step_train_sharp.append(float(np.mean(sharpness)))
             else:
-                heldout_within.append(within)
-                heldout_sharp.append(float(np.mean(sharpness)))
                 step_heldout_sharp.append(float(np.mean(sharpness)))
 
         cross_vectors: list[tuple[str, torch.Tensor]] = []
@@ -213,6 +243,7 @@ def main() -> None:
         cross_spread = float(np.mean(cross_pairs)) if cross_pairs else float("nan")
         within_all = [record["within_spread"] for record in caption_records.values()]
         mean_within = float(np.mean(within_all))
+        records_by_inference_steps[inference_steps].append(caption_records)
         report["steps"][f"{step}_inference_steps_{inference_steps}"] = {
             "step": step,
             "inference_steps": inference_steps,
@@ -227,12 +258,7 @@ def main() -> None:
               f"train_sharp={np.mean(step_train_sharp):.2f} "
               f"heldout_sharp={np.mean(step_heldout_sharp):.2f}")
 
-    report["summary"] = {
-        "train_mean_within_spread": float(np.mean(train_within)),
-        "heldout_mean_within_spread": float(np.mean(heldout_within)),
-        "train_mean_sharpness": float(np.mean(train_sharp)),
-        "heldout_mean_sharpness": float(np.mean(heldout_sharp)),
-    }
+    report["summary"] = _summarize_schedules(records_by_inference_steps, train_captions)
     if args.out:
         Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         print(f"MULTIPROMPT_REPORT {args.out}")

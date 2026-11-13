@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 from fastvideo.train.models.minimax_h3.minimax_h3 import (
+    MiniMaxH3Model,
     tdm_h3_model_timestep,
     tdm_h3_shift,
     tdm_h3_sigma_grid,
@@ -45,6 +48,21 @@ def test_h3_sigma_grid_honors_shift_override() -> None:
     u = labels / 1000.0
     expected = 6.0 * u / (1.0 + 5.0 * u)
     assert torch.allclose(overridden, expected)
+
+
+def test_h3_model_sigma_grid_uses_its_resolved_shifts() -> None:
+    """The model method must pass its configured video/audio shifts to the grid."""
+    model = SimpleNamespace(video_scheduler_shift=10.0, audio_scheduler_shift=3.5)
+    labels = torch.tensor([0.0, 500.0, 1000.0])
+    u = labels / 1000.0
+
+    video = MiniMaxH3Model.tdm_sigma_grid(model, labels, "video")
+    audio = MiniMaxH3Model.tdm_sigma_grid(model, labels, "audio")
+
+    assert torch.allclose(video, 10.0 * u / (1.0 + 9.0 * u))
+    assert torch.allclose(audio, 3.5 * u / (1.0 + 2.5 * u))
+    with pytest.raises(ValueError, match="unknown H3 TDM modality"):
+        MiniMaxH3Model.tdm_sigma_grid(model, labels, "motion")
 
 
 def test_h3_model_time_is_one_minus_sigma() -> None:

@@ -645,6 +645,11 @@ class TestStudentSamplingContract:
         with pytest.raises(ValueError, match="video_scheduler_shift=10.0"):
             self._resolve(self._callback(shifts=(10.0, 3.0)), self._pdd_transformer(), 8)
 
+    def test_non_pdd_validation_refuses_a_different_sampling_clock(self) -> None:
+        """H3 TDM/DMD students also train on scheduler shifts the checkpoint does not sample."""
+        with pytest.raises(ValueError, match="video_scheduler_shift=10.0"):
+            self._resolve(self._callback(shifts=(10.0, 3.0)), torch.nn.Identity(), 8)
+
     def test_validation_forward_receives_the_pdd_partition(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = []
         schedulers = self._schedulers()
