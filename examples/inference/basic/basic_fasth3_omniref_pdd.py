@@ -327,6 +327,9 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
             # cuDNN mm_fp4 is 2.7-3x faster than CUTLASS on the H3 FFN shapes on GB10.
             "FASTVIDEO_NVFP4_MM_BACKEND": "cudnn",
             "FASTVIDEO_NVFP4_MM_ROW_SPLIT": "table",
+            # Enables the resident AdaLN per-timestep cache and the cross-block fused
+            # driver it gates (bit-identical; ~1.03x warm T2AV, ~1.01x warm Omni).
+            "FASTVIDEO_H3_ADALN_CACHE": "1",
             "FASTVIDEO_H3_VAE_TILE_BATCH": "12",
             "FASTVIDEO_H3_VAE_INT8_OVERLAY": "0",
         },
