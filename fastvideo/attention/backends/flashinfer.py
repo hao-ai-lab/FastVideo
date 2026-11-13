@@ -41,6 +41,9 @@ class FlashInferMetadata(AttentionMetadata):
 
 class FlashInferMetadataBuilder(AttentionMetadataBuilder):
 
+    def __init__(self) -> None:
+        pass
+
     def prepare(self):
         pass
 

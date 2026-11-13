@@ -9,7 +9,21 @@ import torch
 from fastvideo import envs
 import torch.nn.functional as F
 
-from fastvideo.attention.backends.flashinfer import FlashInferImpl, FlashInferMetadata, _mask_for_sample
+from fastvideo.attention.backends.flashinfer import FlashInferBackend, FlashInferImpl, FlashInferMetadata, _mask_for_sample
+
+
+@pytest.mark.parametrize("with_mask", [False, True])
+def test_metadata_builder_can_be_instantiated_and_build_metadata(with_mask: bool) -> None:
+    builder = FlashInferBackend.get_builder_cls()()
+    builder.prepare()
+    mask = torch.tensor([[True, False]]) if with_mask else None
+
+    metadata = builder.build(current_timestep=7, attn_mask=mask)
+
+    assert isinstance(metadata, FlashInferMetadata)
+    assert metadata.current_timestep == 7
+    assert metadata.attn_mask is mask
+    assert metadata.is_causal is False
 
 
 def test_padding_mask_is_front_padded_and_expanded() -> None:
