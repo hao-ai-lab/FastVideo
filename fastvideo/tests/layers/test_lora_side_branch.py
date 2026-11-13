@@ -331,6 +331,67 @@ def test_side_branch_rejects_accumulating_a_second_adapter() -> None:
         layer.set_lora_weights(a, b, accumulate=True)
 
 
+@pytest.mark.parametrize("mode", ["dense", "training", "side_branch"])
+def test_invalid_replacement_keeps_the_current_adapter(mode: str) -> None:
+    training = mode == "training"
+    base = _packed_linear() if mode == "side_branch" else _dense_linear()
+    layer = get_lora_layer(base, lora_rank=RANK, lora_alpha=RANK, training_mode=training)
+    a, b = _factors()
+    layer.set_lora_weights(a, b, lora_alpha=RANK, strength=0.5, training_mode=training)
+    previous_a, previous_b = layer.lora_A, layer.lora_B
+    inputs = _x()
+    output = layer(inputs)[0].detach().clone()
+    assert (layer.cpu_weight is None) == (training or mode == "side_branch")
+
+    invalid = [
+        (a, b, float("nan"), 1.0),
+        (a, b, RANK, float("inf")),
+        (a.unsqueeze(0), b, RANK, 1.0),
+        (a[:0], b[:, :0], RANK, 1.0),
+        (a, b[:, :-1], RANK, 1.0),
+        (a[:, :-1], b, RANK, 1.0),
+        (a, b[:-1], RANK, 1.0),
+    ]
+    for new_a, new_b, alpha, strength in invalid:
+        with pytest.raises(ValueError):
+            layer.set_lora_weights(new_a, new_b, lora_alpha=alpha, strength=strength, training_mode=training)
+        assert layer.lora_A is previous_a and layer.lora_B is previous_b
+        assert layer.lora_strength == 0.5 and layer.lora_alpha == RANK
+        torch.testing.assert_close(layer(inputs)[0], output, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("axis", ["row", "column"])
+def test_parallel_layer_merges_full_factors_into_local_partition(monkeypatch, axis: str) -> None:
+    from fastvideo.layers import linear
+
+    monkeypatch.setattr(linear, "get_tp_world_size", lambda: 2)
+    monkeypatch.setattr(linear, "get_tp_rank", lambda: 1)
+    monkeypatch.setattr(lora_linear, "get_tp_rank", lambda: 1)
+    projection = linear.RowParallelLinear if axis == "row" else linear.ColumnParallelLinear
+    base = projection(IN, OUT, bias=False, params_dtype=torch.float32)
+    base.weight.data.zero_()
+    layer = get_lora_layer(base)
+    a, b = _factors()
+    layer.set_lora_weights(a, b)
+    full_delta = b @ a
+    expected = full_delta[:, IN // 2:] if axis == "row" else full_delta[OUT // 2:, :]
+    torch.testing.assert_close(layer.base_layer.weight, expected)
+
+
+def test_fused_training_layer_accepts_stacked_projection_factors(monkeypatch) -> None:
+    from fastvideo.layers import linear
+
+    monkeypatch.setattr(linear, "get_tp_world_size", lambda: 1)
+    base = linear.MergedColumnParallelLinear(IN, [OUT, OUT], bias=False, params_dtype=torch.bfloat16)
+    layer = get_lora_layer(base, lora_rank=RANK, lora_alpha=RANK, training_mode=True)
+    a, b = _factors()
+    fused_b = torch.stack([b, b * 2])
+    layer.set_lora_weights(a, fused_b, training_mode=True)
+    torch.testing.assert_close(layer.lora_B, fused_b)
+    with pytest.raises(ValueError, match="finite"):
+        layer.set_lora_weights(a, fused_b, strength=float("nan"), training_mode=True)
+
+
 def test_dense_linear_still_merges_and_unmerges_exactly() -> None:
     base = _dense_linear()
     original = base.weight.detach().clone()

@@ -190,11 +190,14 @@ def test_tensor_restore_preserves_state_until_explicit_reset(cpu_nvfp4_lifecycle
 
 
 @pytest.mark.parametrize("invalid", ["rank", "width", "alpha", "strength"])
-def test_invalid_accumulation_preserves_previous_factors_history_and_packed_weights(cpu_nvfp4_lifecycle, invalid):
-    pipeline, wrapped, _, _, second = _nvfp4_lifecycle_pipeline(False)
+@pytest.mark.parametrize("retain", [False, True])
+def test_invalid_accumulation_preserves_previous_factors_history_and_packed_weights(cpu_nvfp4_lifecycle, invalid,
+                                                                                   retain):
+    pipeline, wrapped, _, _, second = _nvfp4_lifecycle_pipeline(retain)
     _install(pipeline, "second", second, strength=0.5)
     previous_a, previous_b = wrapped.lora_A, wrapped.lora_B
     previous_records = wrapped._merged_loras
+    previous_weight = wrapped.base_layer.weight.detach().clone() if retain else None
     packed = {name: value.clone() for name, value in wrapped.base_layer.named_buffers()}
     a, b = torch.randn(3, 32), torch.randn(32, 3)
     alpha, strength = 3.0, 1.0
@@ -210,10 +213,13 @@ def test_invalid_accumulation_preserves_previous_factors_history_and_packed_weig
     with pytest.raises(ValueError):
         wrapped.set_lora_weights(a, b, lora_alpha=alpha, strength=strength, accumulate=True)
 
-    assert wrapped.base_layer.weight is None and wrapped.merged
+    assert wrapped.merged
+    if retain:
+        torch.testing.assert_close(wrapped.base_layer.weight, previous_weight, rtol=0, atol=0)
+    else:
+        assert wrapped.base_layer.weight is None and len(previous_records) == 2
     assert wrapped.lora_A is previous_a and wrapped.lora_B is previous_b
     assert wrapped._merged_loras is previous_records
-    assert len(previous_records) == 2
     for name, value in packed.items():
         torch.testing.assert_close(getattr(wrapped.base_layer, name), value, rtol=0, atol=0)
 

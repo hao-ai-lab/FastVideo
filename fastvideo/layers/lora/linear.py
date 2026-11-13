@@ -232,13 +232,17 @@ class BaseLayerWithLoRA(nn.Module):
                          lora_path: str | None = None,
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
-        if self._merged_loras is not None:
+        if not math.isfinite(strength) or (lora_alpha is not None and not math.isfinite(lora_alpha)):
+            raise ValueError("LoRA alpha and strength must be finite")
+        if (isinstance(self.base_layer, LinearBase | nn.Linear)
+                and not isinstance(self.base_layer, MergedColumnParallelLinear | QKVParallelLinear)):
             if A.ndim != 2 or B.ndim != 2 or A.shape[0] == 0 or B.shape[1] != A.shape[0]:
                 raise ValueError("LoRA factors must be matrices with matching nonzero rank")
-            if not math.isfinite(strength) or (lora_alpha is not None and not math.isfinite(lora_alpha)):
-                raise ValueError("LoRA alpha and strength must be finite")
-            if (self.slice_lora_a_weights(A).shape[1] != self.cpu_weight.shape[1]
-                    or self.slice_lora_b_weights(B).shape[0] != self.cpu_weight.shape[0]):
+            if isinstance(self.base_layer, nn.Linear):
+                input_size, output_size = self.base_layer.in_features, self.base_layer.out_features
+            else:
+                input_size, output_size = self.base_layer.input_size, self.base_layer.output_size
+            if A.shape[1] != input_size or B.shape[0] != output_size:
                 raise ValueError("LoRA factor dimensions do not match the base weight")
         if not training_mode and not self.side_branch and self.base_layer.weight is None:
             if accumulate and self.merged:
