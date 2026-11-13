@@ -314,6 +314,8 @@ class _CpuPackedNVFP4Method(nvfp4.NVFP4QuantizeMethod):
 
     def __init__(self, retain: bool) -> None:
         self.retain = retain
+        self._retain_original_weights = retain
+        self._is_refine_only_layer = False
 
     def apply(self, layer, x, bias=None):
         weight = layer._nvfp4_weight.to(x.dtype) * layer._nvfp4_weight_scale.to(x.dtype)
@@ -489,23 +491,50 @@ def test_nvfp4_retained_bf16_accumulation_requantizes(cpu_nvfp4_lifecycle) -> No
 
 
 @pytest.mark.parametrize("entrypoint", ["pipeline", "layer", "merge"])
-def test_nvfp4_purged_accumulation_rejects_before_mutation(cpu_nvfp4_lifecycle, entrypoint: str) -> None:
+def test_nvfp4_purged_accumulation_reconstructs_before_appending(cpu_nvfp4_lifecycle, entrypoint: str) -> None:
     from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
-    pipeline, wrapped, _, _, second = _nvfp4_lifecycle_pipeline(False)
-    previous_a, previous_b = wrapped.lora_A, wrapped.lora_B
-    packed_before = {name: value.clone() for name, value in wrapped.base_layer.named_buffers()}
-    with pytest.raises(RuntimeError, match="[Aa]ccumulat|accumulation"):
-        if entrypoint == "pipeline":
-            LoRAPipeline.set_lora_adapter(pipeline, "second", accumulate=True)
-        elif entrypoint == "layer":
-            wrapped.set_lora_weights(*second, accumulate=True)
-        else:
-            wrapped.merge_lora_weights(accumulate=True)
-    assert wrapped.lora_A is previous_a and wrapped.lora_B is previous_b
-    assert wrapped.base_layer.weight is None and wrapped.merged
-    for name, value in packed_before.items():
-        torch.testing.assert_close(getattr(wrapped.base_layer, name), value, rtol=0, atol=0)
+    pipeline, wrapped, original, first, second = _nvfp4_lifecycle_pipeline(False)
+    expected = original + first[1] @ first[0]
+    if entrypoint == "pipeline":
+        LoRAPipeline.set_lora_adapter(pipeline, "second", accumulate=True)
+    elif entrypoint == "layer":
+        wrapped.set_lora_weights(*second, accumulate=True)
+        _cpu_pack_nvfp4(wrapped)
+    else:
+        wrapped.merge_lora_weights(accumulate=True)
+        _cpu_pack_nvfp4(wrapped)
+    added = first if entrypoint == "merge" else second
+    _assert_cpu_packed_weight(wrapped, expected + added[1] @ added[0], False)
+    assert len(wrapped._merged_loras) == 2
+    torch.testing.assert_close(wrapped.cpu_weight, original, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("retain", [False, True])
+def test_disjoint_nvfp4_accumulation_then_clear(cpu_nvfp4_lifecycle, retain: bool) -> None:
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    pipeline, first_layer, original, first, second = _nvfp4_lifecycle_pipeline(retain)
+    _, second_layer, _, _, _ = _nvfp4_lifecycle_pipeline(retain)
+    model = nn.Module()
+    model.first, model.second = first_layer, second_layer
+    layers = {"first": first_layer, "second": second_layer}
+    pipeline.trainable_transformer_modules = {"transformer": model}
+    pipeline.lora_layers = {"transformer": SimpleNamespace(lora_layers_by_block=lambda: iter([(None, layers)]))}
+    pipeline.lora_adapters = {
+        "a": {"first.lora_A": first[0], "first.lora_B": first[1]},
+        "b": {"second.lora_A": second[0], "second.lora_B": second[1]},
+    }
+    LoRAPipeline.clear_lora_adapter(pipeline)
+    LoRAPipeline.set_lora_adapter(pipeline, "a")
+    LoRAPipeline.set_lora_adapter(pipeline, "b", accumulate=True)
+    _assert_cpu_packed_weight(first_layer, original + first[1] @ first[0], retain)
+    _assert_cpu_packed_weight(second_layer, original + second[1] @ second[0], retain)
+    LoRAPipeline.clear_lora_adapter(pipeline)
+    for layer in layers.values():
+        _assert_cpu_packed_weight(layer, original, retain)
+        assert layer.lora_A is None and layer.lora_B is None
+        assert layer._merged_loras in (None, [])
 
 
 @pytest.mark.parametrize("missing", ["snapshot", "weight_device"])
@@ -702,8 +731,39 @@ def test_nvfp4_lora_round_trip_matches_bf16_on_blackwell(retain: bool, layerwise
     LoRAPipeline.merge_lora_weights(pipeline)
     with torch.inference_mode():
         assert relative_error(transformer(inputs), dense_merged) < 0.20
+
+    accumulated_factors = {
+        "fc_in": (torch.randn(4, 128, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
+                  torch.randn(512, 4, generator=generator, dtype=torch.bfloat16).cuda()),
+        "fc_out": (torch.randn(4, 256, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
+                   torch.randn(128, 4, generator=generator, dtype=torch.bfloat16).cuda()),
+    }
+    for name in ("fc_in", "fc_out"):
+        getattr(dense, name).merge_lora_weights()
+        getattr(dense, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5, accumulate=True)
+    with _get_hook_ctx(block):
+        for name in ("fc_in", "fc_out"):
+            getattr(quantized, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5,
+                                                     accumulate=True)
+        _convert_quantized_weights_after_lora_change([block])
+    with torch.inference_mode():
+        assert relative_error(transformer(inputs), dense(inputs)) < 0.20
+    if not retain:
+        assert len(quantized.fc_in._merged_loras) == 2
+        assert len(quantized.fc_out._merged_loras) == 2
+
+    for name in ("fc_in", "fc_out"):
+        getattr(dense, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5)
+    with _get_hook_ctx(block):
+        for name in ("fc_in", "fc_out"):
+            getattr(quantized, name).set_lora_weights(*accumulated_factors[name], lora_alpha=4, strength=0.5)
+        _convert_quantized_weights_after_lora_change([block])
+    with torch.inference_mode():
+        assert relative_error(transformer(inputs), dense(inputs)) < 0.20
     assert (quantized.fc_in.base_layer.weight is not None) is retain
     assert (quantized.fc_out.base_layer.weight is not None) is retain
     if not retain:
+        assert len(quantized.fc_in._merged_loras) == 1
+        assert len(quantized.fc_out._merged_loras) == 1
         assert quantized.fc_in.base_layer.weight_device.device == inputs.device
         assert quantized.fc_out.base_layer.weight_device.device == inputs.device

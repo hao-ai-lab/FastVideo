@@ -598,9 +598,7 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
             strength: Scale for the low-rank adapter. Hybrid adapters must set this at construction
                 so their dense payload receives the same scale.
-            accumulate: Add this adapter to an already merged pure low-rank adapter. Merge-mode NVFP4
-                accumulation requires retain_original_weights=True; a base-only CPU snapshot cannot recover
-                the previously accumulated weight after its BF16 parameter is purged.
+            accumulate: Add this adapter to an already merged pure low-rank adapter.
         """
 
         if not math.isfinite(strength):
@@ -613,13 +611,7 @@ class LoRAPipeline(ComposedPipelineBase):
             return
 
         if not self.lora_initialized:
-            # Wrap the layers first, so the NVFP4 check skips packed linears that will run as side branches.
             self.convert_to_lora_layers()
-
-        if not self._setting_constructor_adapter and accumulate and _has_nvfp4_weights_without_bf16(
-                self, self.trainable_transformer_modules):
-            raise RuntimeError("Accumulating LoRA after NVFP4 removed the BF16 weight requires retained BF16 weights; "
-                               "load with NVFP4Config(retain_original_weights=True).")
 
         if not self._setting_constructor_adapter:
             if self._constructor_dense_lora_path is not None:
