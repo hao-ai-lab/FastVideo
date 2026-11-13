@@ -187,17 +187,22 @@ def create_app(
         app.include_router(image_router)
     app.include_router(playground_router)
 
+    health_probe: asyncio.Future[tuple[bool, str | None]] | None = None
+
     @app.get("/health")
     async def health():
+        nonlocal health_probe
         from fastvideo.entrypoints.openai.state import get_serving_engine
 
         engine = get_serving_engine()
-        # The executor probe may block on a distributed control plane, so run it
-        # off the event loop and bound the wait; a probe that never returns is
-        # reported unhealthy instead of holding the route open.
-        probe = asyncio.to_thread(engine.health_status)
+        # A worker thread cannot be cancelled once it starts, so an in-flight
+        # probe is shared across requests: a stalled control plane then occupies
+        # at most one thread instead of one per /health request.
+        if health_probe is None or health_probe.done():
+            health_probe = asyncio.get_running_loop().run_in_executor(None, engine.health_status)
+        wait = asyncio.shield(health_probe)
         try:
-            healthy, reason = await asyncio.wait_for(probe, timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
+            healthy, reason = await asyncio.wait_for(wait, timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             raise HTTPException(status_code=503, detail="generation engine health probe timed out") from None
         if not healthy:
