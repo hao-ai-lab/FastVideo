@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from NVlabs/Sana (Apache-2.0), branch sol-engine @ 1e3c9c27ce56ca03b203cff9f63bed225a1599cd,
 # models/Open-H3-Regenerate-2K/open_h3/fast_vae/decoder.py (the StreamRender-H3 fast H3 VAE decoder, NVIDIA).
-# Unchanged apart from this header; the weights (fast_h3_vae_noncausal_24l.safetensors) are distributed separately
-# under the MiniMax H3 Community License.
+# FastVideo changes: an opt-in maskless flash path for the window attention (FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK).
+# The weights (fast_h3_vae_noncausal_24l.safetensors) are distributed separately under the MiniMax H3 Community
+# License.
 """General (non-causal) fast H3 VAE decoder: the released H3 VAE ViT decoder pruned to 24 layers, decoding whole
 native 5-latent blocks with window attention and no tiling / temporal-overlap recomputation.
 

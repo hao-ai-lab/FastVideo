@@ -111,10 +111,10 @@ def test_fast_vae_fp8_static_activation_flag_propagates():
     assert not dynamic.blocks[0].ff.w2.static_activation
 
 
-def test_fast_vae_attn_nomask_flag_propagates(monkeypatch):
+def test_fast_vae_attn_nomask_flag_propagates():
     args = ([0.0] * 24, [1.0] * 24, list(range(2)))
     kwargs = {"time_norm": 5, "heads": 2, "dim_head": 8}
-    monkeypatch.setenv("FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK", "1")
-    assert NonCausalViTDecoder(*args, **kwargs).attn_no_mask
-    monkeypatch.setenv("FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK", "0")
-    assert not NonCausalViTDecoder(*args, **kwargs).attn_no_mask
+    with envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.override(True):
+        assert NonCausalViTDecoder(*args, **kwargs).attn_no_mask
+    with envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.override(False):
+        assert not NonCausalViTDecoder(*args, **kwargs).attn_no_mask
