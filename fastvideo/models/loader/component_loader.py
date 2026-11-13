@@ -1379,7 +1379,10 @@ class TransformerLoader(ComponentLoader):
                               and fastvideo_args.dit_layerwise_offload and not fastvideo_args.use_fsdp_inference)
             # The AdaLN host cache also needs the projection weights to stay off the device from the start.
             adaln_table = envs.FASTVIDEO_H3_ADALN_TABLE.get() or None
+            # The cache empties each block's adaln_proj.linear weight, and an adapter on that layer has to
+            # merge into it (and would be skipped by the cached forward), so keep it off for any adapter.
             adaln_host_cache = (fastvideo_args.inference_mode and not fastvideo_args.use_fsdp_inference
+                                and getattr(fastvideo_args, "lora_path", None) is None
                                 and (envs.FASTVIDEO_H3_ADALN_CACHE.get() or adaln_table is not None))
             from fastvideo.platforms import current_platform
             adaln_resident_cache = (adaln_host_cache and adaln_table is None
