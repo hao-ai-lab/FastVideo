@@ -50,11 +50,15 @@ def test_unknown_family_does_not_advertise_h3_options(monkeypatch):
 
 
 def test_unresolved_model_path_stays_offline(monkeypatch):
-    def _no_download(*_args, **_kwargs):
-        raise AssertionError("model discovery must not download a Hub manifest")
+    downloads: list[tuple] = []
 
-    monkeypatch.setattr("fastvideo.registry.maybe_download_model_index", _no_download)
+    def _record_download(*args, **kwargs):
+        downloads.append((args, kwargs))
+        return {}
+
+    monkeypatch.setattr("fastvideo.registry.maybe_download_model_index", _record_download)
     assert video_output_capabilities(SimpleNamespace(model_path="unregistered-org/unregistered-model")) is None
+    assert downloads == []
 
 
 def test_model_info_exposes_output_constraints_without_generation(monkeypatch):
