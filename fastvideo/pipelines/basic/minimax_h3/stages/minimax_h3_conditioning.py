@@ -57,12 +57,18 @@ def _text_encoder_sharded() -> bool:
         return False
 
 
-def text_encoder_cache_settings(fastvideo_args: Any, conditioner: Any) -> tuple[str, str, str]:
-    """The resolved text-encoder identity: checkpoint override, its quantization, and compute dtype."""
+def text_encoder_cache_settings(fastvideo_args: Any) -> tuple[str, str, str | None]:
+    """The resolved text-encoder identity: checkpoint override, quantization, and configured precision.
+
+    Reads only saved arguments. Touching a deferred conditioner here would materialize Qwen3-VL before the
+    cache lookup, which is the reload the prompt-embeds cache exists to avoid.
+    """
     override = str(getattr(fastvideo_args, "override_text_encoder_safetensors", None))
     quant = str(getattr(fastvideo_args, "override_text_encoder_quant", None))
-    dtype = str(getattr(conditioner, "dtype", None))
-    return override, quant, dtype
+    pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+    precisions = getattr(pipeline_config, "text_encoder_precisions", None) or ()
+    precision = str(precisions[0]) if precisions else None
+    return override, quant, precision
 
 
 def prompt_embeds_cache_key(batch: Any,
@@ -361,7 +367,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         cache_usable = cache is not None and cache.enabled and not _text_encoder_sharded()
         cache_key: str | None = None
         if cache_usable:
-            settings = text_encoder_cache_settings(fastvideo_args, self.conditioner)
+            settings = text_encoder_cache_settings(fastvideo_args)
             model_path = getattr(fastvideo_args, "model_path", None)
             cache_key = prompt_embeds_cache_key(batch, self.ref2va, model_path, device, settings)
             cached = cache.get(cache_key)

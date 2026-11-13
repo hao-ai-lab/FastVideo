@@ -165,6 +165,9 @@ class FastH3VaeDecoder(nn.Module):
 
 
 _DECODERS: dict[tuple[Any, ...], FastH3VaeDecoder] = {}
+# One live profile plus the previous one. The key covers the construction settings, so without a bound a
+# profile switch would keep a GPU-resident decoder for every combination of FP8, compile and mask settings.
+_MAX_DECODERS = 2
 
 
 def fast_vae_decoder(fastvideo_args: Any, device: torch.device) -> FastH3VaeDecoder | None:
@@ -189,6 +192,8 @@ def fast_vae_decoder(fastvideo_args: Any, device: torch.device) -> FastH3VaeDeco
                     base_model)
         decoder = FastH3VaeDecoder(weights, base_model, device=device)
         _DECODERS[key] = decoder
+        while len(_DECODERS) > _MAX_DECODERS:
+            _DECODERS.pop(next(iter(_DECODERS)))
     return decoder
 
 

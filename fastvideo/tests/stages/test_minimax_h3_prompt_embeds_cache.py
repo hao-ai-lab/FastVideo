@@ -42,9 +42,9 @@ def test_key_is_content_keyed_and_refuses_video_references() -> None:
     assert base != prompt_embeds_cache_key(_batch("hello", keyframes=[_image(0)], anchors=["first"]), False, "m",
                                            device)
     settings = text_encoder_cache_settings(SimpleNamespace(override_text_encoder_safetensors="enc.safetensors",
-                                                           override_text_encoder_quant=None), None)
+                                                           override_text_encoder_quant=None))
     other_encoder = text_encoder_cache_settings(SimpleNamespace(override_text_encoder_safetensors="other.safetensors",
-                                                                override_text_encoder_quant=None), None)
+                                                                override_text_encoder_quant=None))
     assert base != prompt_embeds_cache_key(_batch("hello"), False, "m", device, settings)
     assert settings != other_encoder
     video = [MiniMaxH3PreparedReference("video", frames=np.zeros((2, 4, 4, 3), dtype=np.uint8))]
@@ -87,7 +87,7 @@ def test_forward_hit_never_touches_the_conditioner() -> None:
         batch = _batch("p")
         args = SimpleNamespace(model_path="m")
         key = prompt_embeds_cache_key(batch, False, "m", get_local_torch_device(),
-                                      text_encoder_cache_settings(args, None))
+                                      text_encoder_cache_settings(args))
         embeds = torch.randn(1, 4, 3)
         tags = torch.arange(4)
         stage._prompt_embeds_cache.put(key, embeds, tags)
