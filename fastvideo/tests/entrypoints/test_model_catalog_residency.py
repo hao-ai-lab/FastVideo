@@ -150,7 +150,6 @@ def test_a_lazy_profile_shares_nothing_and_frees_the_previous_model(tmp_path, mo
     runtime.activate(second)
     assert runtime.reused == []
     assert "text_encoder" not in runtime.generator.executor.driver_worker.worker.pipeline.modules
-    # Back to the eager model: the lazy one handed nothing over either.
     runtime.activate(first)
     assert runtime.reused == []
 

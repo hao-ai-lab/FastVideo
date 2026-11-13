@@ -46,6 +46,7 @@ from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 from fastvideo.entrypoints.openai.utils import parse_size, save_image_to_path
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_MEDIA_TYPE, BUNDLE_SUFFIX
+from fastvideo.registry import get_preset_selection
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
@@ -400,6 +401,11 @@ async def _catalog_profile(raw_request: Request):
             raise ValueError(f"Model {profile.model} is not installed locally")
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    # The catalog uses `task` as a profile key; the request-level task selector is only defined
+    # for MiniMax-H3, so drop it for other families before the adapter applies its model-specific check.
+    _, model_family = get_preset_selection(profile.config.generator.model_path)
+    if request.task is not None and model_family != "minimax_h3":
+        request = request.model_copy(update={"task": None})
     raw_request.state.parsed_catalog_video = request
     token = request_model_profile.set(profile)
     try:

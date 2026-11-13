@@ -30,18 +30,21 @@ async def available_models():
     """Show available models"""
     manager = get_serving_engine().model_manager
     if manager is not None:
+        created = int(time.time())
         grouped: dict[str, dict[str, Any]] = {}
         for profile in manager.catalog.profiles.values():
             entry = grouped.setdefault(
                 profile.model, {
                     "id": profile.model,
                     "object": "model",
+                    "created": created,
                     "owned_by": "fastvideo",
                     "tasks": [],
-                    "installed": profile.installed,
+                    "installed": False,
                     "loaded": manager.active is not None and manager.active.model == profile.model,
                 })
             entry["tasks"].append(profile.task)
+            entry["installed"] = entry["installed"] or profile.installed
         return {"object": "list", "data": list(grouped.values())}
     args = get_server_args()
     cards = [ModelCard(id=get_served_model_name(), root=args.model_path)]

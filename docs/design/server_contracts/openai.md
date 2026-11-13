@@ -18,6 +18,9 @@ requests. HTTP handling and job polling remain asynchronous.
 | --- | --- | --- |
 | `GET` | `/v1/models` | List the served model and optional startup adapter |
 | `GET` | `/v1/models/{model}` | Retrieve one served model card |
+| `GET` | `/v1/model_state` | Report the loaded catalog model (catalog servers) |
+| `POST` | `/v1/models/load` | Load a catalog model/task (catalog servers) |
+| `POST` | `/v1/models/unload` | Unload the catalog model (catalog servers) |
 | `POST` | `/v1/videos` | Submit an asynchronous video job |
 | `POST` | `/v1/videos/sync` | Generate and return an MP4 response directly |
 | `GET` | `/v1/videos` | List in-memory jobs with `after`, `limit`, and `order` |
@@ -156,6 +159,31 @@ The selector must match the adapter already loaded at startup. FastH3 adapter
 files can contain dense replacement tensors and VSA gates in addition to
 low-rank factors, so swapping them inside concurrent requests would corrupt
 shared pipeline state. A mismatch is rejected with HTTP 400.
+
+## Model catalog
+
+`server.model_catalog` points at a JSON document that lets one single-GPU server hold several
+serve configurations and switch between them:
+
+```json
+{
+  "shared_components": ["text_encoder"],
+  "models": {
+    "fasth3-4step": {
+      "tasks": {"t2va": "fasth3_4step.yaml"},
+      "environment": {"FASTVIDEO_H3_SOL_ATTN": "sol_engine_fast"}
+    },
+    "open-h3-regen-2k": {"tasks": {"ref2va": "open_h3_regen_2k.yaml"}}
+  }
+}
+```
+
+Each `tasks` entry names a normal single-GPU serve config whose `served_model_name` is the
+catalog alias. `GET /v1/models` lists the aliases with their tasks and install state,
+`GET /v1/model_info?model=&task=` reports one profile, `GET /v1/model_state` reports what is
+loaded, and `POST /v1/models/load` / `POST /v1/models/unload` change it. A generation request
+for another alias loads it first, serialized behind the generation lock. A catalog server
+mounts the video routes only, so `/v1/images` is unavailable.
 
 ## MiniMax-H3 and FastH3
 
