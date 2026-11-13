@@ -46,7 +46,7 @@ def _write_scheduler_configs(
 
 def _h3_student(*, video: float = 12.0, audio: float = 3.0) -> MiniMaxH3Model:
     student = MiniMaxH3Model.__new__(MiniMaxH3Model)
-    torch.nn.Module.__init__(student)
+    ModelBase.__init__(student)
     student.noise_scheduler = MiniMaxH3Scheduler(shift=video)
     student.audio_noise_scheduler = MiniMaxH3Scheduler(shift=audio)
     return student
