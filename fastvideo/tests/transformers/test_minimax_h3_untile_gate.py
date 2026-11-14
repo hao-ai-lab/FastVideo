@@ -66,8 +66,9 @@ def test_split_untile_gate_matches_concatenation(prefix_rows):
     assert torch.equal(actual, expected.flatten(2, 3))
 
 
+@pytest.mark.parametrize("tiled_rows", [192, 384])
 @pytest.mark.parametrize("width,scale", [(64, 1.0), (5376, 0.7079)])
-def test_quantized_tile_matches_flashinfer_quantization(width, scale):
+def test_quantized_tile_matches_flashinfer_quantization(tiled_rows, width, scale):
     if torch.cuda.get_device_capability()[0] < 10:
         pytest.skip("NVFP4 quantization requires Blackwell")
     from fastvideo.layers.quantization.nvfp4_config import _nvfp4_quantize, _require_flashinfer
@@ -77,10 +78,10 @@ def test_quantized_tile_matches_flashinfer_quantization(width, scale):
     layout, _, _ = _require_flashinfer()
     x = torch.randn((129, width), device="cuda", dtype=torch.bfloat16)
     global_sf = torch.tensor(scale, device="cuda")
-    index = torch.randperm(384, device="cuda")[:129]
-    inverse = torch.full((384,), -1, device="cuda", dtype=torch.int64)
+    index = torch.randperm(tiled_rows, device="cuda")[:129]
+    inverse = torch.full((tiled_rows,), -1, device="cuda", dtype=torch.int64)
     inverse[index] = torch.arange(129, device="cuda")
-    tiled = x.new_zeros((384, width)).index_copy_(0, index, x)
+    tiled = x.new_zeros((tiled_rows, width)).index_copy_(0, index, x)
     expected = _nvfp4_quantize(tiled, global_sf, sfLayout=layout.layout_128x4)
     codes, scales = _nvfp4_quantize(x, global_sf, sfLayout=layout.layout_128x4)
     actual = tile_quantized(codes, scales, inverse)

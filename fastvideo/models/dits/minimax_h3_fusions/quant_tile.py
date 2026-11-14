@@ -22,8 +22,13 @@ def _tile_quantized(Q, S, Index, OQ, OS, WIDTH: tl.constexpr, ROWS: tl.constexpr
 def tile_quantized(q: torch.Tensor, s: torch.Tensor, inverse: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Gather NVFP4 rows, including 128x4-swizzled scales; -1 indices produce zero padding."""
     rows, width = inverse.numel(), q.shape[-1] * 2
+    if width % 64:
+        raise ValueError("NVFP4 tile gather requires a width divisible by 64")
     oq = torch.empty((rows, width // 2), device=q.device, dtype=q.dtype)
-    os = torch.empty((rows, width // 16), device=s.device, dtype=s.dtype)
-    _tile_quantized[(rows, triton.cdiv(width // 2, 512))](q, s, inverse, oq, os, width, rows, 512)
+    scale_rows = triton.cdiv(rows, 128) * 128
+    alloc = torch.empty if rows == scale_rows else torch.zeros
+    os = alloc((scale_rows, width // 16), device=s.device, dtype=s.dtype)
+    if rows:
+        _tile_quantized[(rows, triton.cdiv(width // 2, 512))](q, s, inverse, oq, os, width, rows, 512)
     return oq, os
 
