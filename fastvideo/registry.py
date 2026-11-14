@@ -267,7 +267,8 @@ def _get_config_info(
     elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
     else:
-        return None
+        # Offline resolution still matches the path-name detectors; only the model index is unavailable.
+        config = {}
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")

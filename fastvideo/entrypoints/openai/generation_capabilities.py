@@ -67,7 +67,16 @@ def video_output_capabilities(args: Any) -> dict[str, Any] | None:
 
 
 def _generation_tasks(args: Any, family: str) -> dict[str, Any]:
-    """The request tasks this server accepts (``task`` values and the media each one takes)."""
+    """The request tasks this server accepts, limited to ``args.supported_tasks`` when a runtime sets it."""
+    result = _pipeline_tasks(args, family)
+    supported = getattr(args, "supported_tasks", None)
+    if supported is not None:
+        result = {**result, "tasks": [entry for entry in result["tasks"] if entry["task"] in supported]}
+    return result
+
+
+def _pipeline_tasks(args: Any, family: str) -> dict[str, Any]:
+    """The request tasks the loaded pipeline accepts (``task`` values and the media each one takes)."""
     from fastvideo.entrypoints.openai.request_adapter import is_ref2va_server
 
     if not is_ref2va_server(args, family):

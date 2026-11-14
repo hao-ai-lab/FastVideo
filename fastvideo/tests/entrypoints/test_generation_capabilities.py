@@ -96,3 +96,17 @@ def test_discovery_reports_the_tasks_of_the_loaded_pipeline(monkeypatch, family,
     else:
         assert result["reference_limits"]["images"] == 9
         assert result["reference_limits"]["continuation_video"] is (family == "minimax_h3")
+
+
+def test_offline_discovery_matches_a_hub_id_by_name():
+    result = video_output_capabilities(SimpleNamespace(model_path="FastVideo/Pika-H3-Flex-NVFP4-QAD",
+                                                       override_pipeline_cls_name=None))
+    assert result is not None
+    assert [entry["task"] for entry in result["tasks"]] == ["t2va", "i2va", "l2va", "fl2va"]
+
+
+def test_a_runtime_limits_the_advertised_tasks(monkeypatch):
+    _family(monkeypatch, "minimax_h3")
+    result = video_output_capabilities(SimpleNamespace(model_path="local-model", override_pipeline_cls_name=None,
+                                                       supported_tasks=("t2va", )))
+    assert [entry["task"] for entry in result["tasks"]] == ["t2va"]
