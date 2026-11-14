@@ -396,12 +396,6 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
             q = _fp8_per_token(q) if not query_is_fp8 else q
             k = _fp8_per_token(k)
         k, v = k.index_select(1, valid_index), v.index_select(1, valid_index)
-    if prefix_rows == 15360 and precision == "fp8":
-        from fastvideo.models.dits.minimax_h3_fusions.prefix_attention import try_prefix_attention
-
-        specialized = try_prefix_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2))
-        if specialized is not None:
-            return specialized
     return F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
                                           scale=1.0 / math.sqrt(q.shape[-1]))
 
