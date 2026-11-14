@@ -1,18 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Guard: every test directory must be collected by some CI lane or be on
-the explicit allowlist below.
+"""Guard: every test file must be collected by some CI lane or be on the
+explicit allowlist below.
 
 Three separate incidents on 2026-07-05 found test files that no CI lane
 ever collects (fastvideo/tests/stages/, tests/local_tests/ additions in
 PR #1509, and this sweep found seven dark directories in total): the tests
-pass review, merge, and then silently never run. This test makes going
-dark an explicit, reviewed decision instead of an accident: adding a new
-test directory fails CI until it is either wired into a lane or
-allowlisted here with a reason.
+pass review, merge, and then silently never run. A directory-level check
+misses the common case where a lane names a directory or a few files and a
+new file lands beside them, so this guard resolves what each lane actually
+passes to pytest and checks every test file: a new file fails CI until it
+is wired into a lane or allowlisted here with a reason.
 
-Pure text analysis — no fastvideo imports, no GPU, no torch.
+Pure text analysis: no fastvideo imports, no GPU, no torch. A lane that
+selects tests through a variable, a glob or a generated list is not
+resolved, so its files look dark; wire them by name or add an entry. A file
+whose tests are all gpu-marked is dark under a lane that runs with
+``-m "not gpu"``.
 """
+import ast
 import re
+import shlex
 from pathlib import Path
 
 import yaml
@@ -56,38 +63,253 @@ SLURM_LANES = [
     ("eval", "eval-ci", "eval", "eval_ci", "eval", False, "run-ci"),
 ]
 
-# Directories that intentionally have no CI lane today. Every entry needs a
-# reason; remove the entry when the directory gets wired into a lane.
-# State as found on 2026-07-05 — these SHOULD shrink over time, not grow.
-ALLOWLIST = {
-    "audio": "no lane yet — audio encoder tests, run manually",
-    "distributed": "no lane yet — multi-GPU torchrun tests, run manually",
-    "hooks": "no lane yet — run manually",
-    "layers": "no lane yet — torchrun FSDP dispatch tests, run manually",
-    "nightly": "by design: nightly cadence, not per-PR",
-    "modal": "CI infrastructure itself, not a test suite",
+# Test files that intentionally have no CI lane today. Every entry needs a
+# reason; delete the entry when the file is wired into a lane. This list only
+# shrinks: test_dark_test_allowlist_stays_accurate fails when an entry stops
+# being dark, so a fixed entry is removed instead of left stale.
+# State as found on 2026-11-10.
+DARK_TESTS = {
+    "fastvideo/tests/attention/test_vsa_h3_heads_first_tile.py": "gpu-only file; the unit lane runs -m not gpu",
+    "fastvideo/tests/audio/test_ltx2_bwe.py": "no lane: audio encoder test",
+    "fastvideo/tests/distributed/test_sp_hunyuanvideo.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_sp_lingbot_video.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_sp_ltx2.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_sp_wan.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_ulysses_a2a_parity.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_ulysses_fault_injection.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/distributed/test_ulysses_h3_policy.py": "no lane: multi-GPU torchrun test",
+    "fastvideo/tests/hooks/test_activation_trace.py": "no lane: hook-system test",
+    "fastvideo/tests/hooks/test_hooks_api.py": "no lane: hook-system test",
+    "fastvideo/tests/hooks/test_layerwise_offload.py": "no lane: hook-system test",
+    "fastvideo/tests/hooks/test_pinned_memory.py": "no lane: hook-system test",
+    "fastvideo/tests/inference/bsa/test_bsa_inference.py": "no lane: run manually",
+    "fastvideo/tests/inference/lora/test_merge_lora_math.py": "no lane: run manually",
+    "fastvideo/tests/inference/test_basic_fasth3_profile.py": "no lane: run manually",
+    "fastvideo/tests/inference/test_benchmark_fasth3_spark_nvfp4.py": "no lane: run manually",
+    "fastvideo/tests/layers/test_linear_mlp_quant_gating.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/layers/test_lora_merge_precision.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/layers/test_mxfp8_optional_quack.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/layers/test_mxfp8_scaled_mm_scale_dtype.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/layers/test_nvfp4_mm_backend.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/layers/test_rmsnorm_forward_dispatch.py": "no lane: FSDP or torchrun dispatch test",
+    "fastvideo/tests/mlx/test_import_laziness.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_diffusers_compile_dispatch.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_8step_schedule.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_bf16_checkpoint.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_conditioner.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_modulation.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_ref2va.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_simd.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_minimax_h3_weight_reads.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_taeh3.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_taehv_parity.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_wan22_memory_handoff.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_wan22_parity.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_wan22_real_weights_parity.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_mlx_wan_vae_denormalization.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/mlx/test_quant_backends.py": "not in the macOS MLX smoke selection",
+    "fastvideo/tests/nightly/test_e2e_dmd_t2v_crush_smol.py": "by design: nightly cadence, not per-PR",
+    "fastvideo/tests/nightly/test_e2e_i2v_overfit_single_sample.py": "by design: nightly cadence, not per-PR",
+    "fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py": "by design: nightly cadence, not per-PR",
+    "fastvideo/tests/nightly/test_e2e_ltx2_overfit_new_stack.py": "by design: nightly cadence, not per-PR",
+    "fastvideo/tests/nightly/test_e2e_overfit_single_sample.py": "by design: nightly cadence, not per-PR",
+    "fastvideo/tests/training/checkpoint/test_checkpointing_utils.py": "no lane: run manually",
+    "fastvideo/tests/training/distill/test_anyflow_onpolicy.py": "no lane: run manually",
+    "fastvideo/tests/training/distill/test_anyflow_pretrain.py": "no lane: run manually",
+    "fastvideo/tests/training/distill/test_anyflow_smoke.py": "no lane: run manually",
+    "fastvideo/tests/training/distill/test_wan_i2v_distillation.py": "no lane: run manually",
+    "fastvideo/tests/test_logger.py": "no lane: run manually",
+    "fastvideo/tests/test_partial_hf_download.py": "no lane: run manually",
 }
 
-
-def _dirs_with_tests() -> list[str]:
-    dirs = []
-    for child in sorted(TESTS_ROOT.iterdir()):
-        if child.is_dir() and any(child.rglob("test_*.py")):
-            dirs.append(child.name)
-    return dirs
+_PATH_RE = re.compile(r"(?:\./)?(?:fastvideo|apps)/[A-Za-z0-9_./-]+")
+_ASSIGNMENT_RE = re.compile(
+    r"""^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=["']?(\.?/?(?:fastvideo|apps)/[A-Za-z0-9_./-]+)["']?\s*$""")
+# A real pytest command word, not a variable such as ``$pytest_rc``.
+_PYTEST_COMMAND_RE = re.compile(r"(^|[\s;|&])pytest(\s|$)")
 
 
 def _ci_text() -> str:
     return "\n".join(src.read_text(errors="replace") for src in CI_SOURCES if src.exists())
 
 
-def test_every_test_directory_is_collected_or_allowlisted():
-    ci_text = _ci_text()
-    dark = [name for name in _dirs_with_tests() if f"tests/{name}" not in ci_text and name not in ALLOWLIST]
-    assert not dark, (f"Test directories not referenced by any CI lane and not "
-                      f"allowlisted: {dark}. Wire them into a lane in "
-                      f"a .buildkite lane script, or add an "
-                      f"allowlist entry with a reason in {__file__}.")
+def _normalise(path: str) -> str:
+    return path[2:] if path.startswith("./") else path
+
+
+def _shell_tokens(line: str) -> list[str]:
+    """Split a command line, keeping a quoted argument such as ``-m "not gpu"`` in one token."""
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
+
+
+def _marker_names(node: ast.AST) -> set[str]:
+    return set(re.findall(r"mark\.(\w+)", ast.unparse(node)))
+
+
+def _gpu_only(path: Path) -> bool:
+    """True when every test in ``path`` is marked gpu, so ``-m "not gpu"`` drops the whole file."""
+    try:
+        tree = ast.parse(path.read_text(errors="replace"))
+    except (OSError, SyntaxError):
+        return False
+    module_gpu = any(
+        isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "pytestmark"
+                                             for target in node.targets) and "gpu" in _marker_names(node.value)
+        for node in tree.body)
+    tests = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+            marks: set[str] = set()
+            for decorator in node.decorator_list:
+                marks |= _marker_names(decorator)
+            tests.append(marks)
+    return bool(tests) and all("gpu" in marks or module_gpu for marks in tests)
+
+
+def _ssim_test_files() -> set[str]:
+    """Files the SSIM lane globs at the ssim root; ``ci_runner.py`` is not recursive."""
+    return {path.relative_to(REPO_ROOT).as_posix() for path in sorted((TESTS_ROOT / "ssim").glob("test_*.py"))}
+
+
+def _pytest_invocations(sources: list[Path] | None = None) -> list[tuple[set[str], set[str], set[str], bool]]:
+    """Resolve what each CI ``pytest`` invocation collects.
+
+    Returns one ``(files, directories, ignored, not_gpu)`` tuple per invocation.
+    A shell variable assigned a repository path (``golden_root=./fastvideo/tests/...``)
+    is substituted into the command, and ``--ignore`` subtrees are recorded so
+    they do not count as coverage for that invocation. ``not_gpu`` records
+    ``-m "not gpu"`` so a gpu-only file does not count as covered.
+    """
+    invocations: list[tuple[set[str], set[str], set[str], bool]] = []
+    for source in CI_SOURCES if sources is None else sources:
+        if not source.exists():
+            continue
+        # Shell and YAML continuations keep one pytest command on one line.
+        text = re.sub(r"\\\n", " ", source.read_text(errors="replace"))
+        variables: dict[str, str] = {}
+        for line in text.splitlines():
+            match = _ASSIGNMENT_RE.match(line)
+            if match is not None:
+                variables[match.group(1)] = match.group(2)
+        for line in text.splitlines():
+            if line.lstrip().startswith("#") or not _PYTEST_COMMAND_RE.search(line):
+                continue
+            expanded = line
+            for name, value in variables.items():
+                expanded = re.sub(r"\$\{?" + re.escape(name) + r"\}?(?![A-Za-z0-9_])", lambda _match, v=value: v,
+                                  expanded)
+            tokens = [token.strip("'\"()") for token in _shell_tokens(expanded)]
+            files: set[str] = set()
+            directories: set[str] = set()
+            ignored: set[str] = set()
+            not_gpu = False
+            for index, token in enumerate(tokens):
+                token = token.strip("'\"),")
+                if token == "--ignore" and index + 1 < len(tokens):
+                    ignored.add(_normalise(tokens[index + 1].strip("'\"),").rstrip("/")))
+                    continue
+                if token.startswith("--ignore="):
+                    ignored.add(_normalise(token.split("=", 1)[1].rstrip("/")))
+                    continue
+                if token == "-m" and index + 1 < len(tokens):
+                    not_gpu = tokens[index + 1].strip("'\"") == "not gpu"
+                    continue
+                if token.startswith("-"):
+                    continue
+                match = _PATH_RE.match(token)
+                if match is None:
+                    continue
+                path = _normalise(match.group(0).rstrip("/"))
+                absolute = REPO_ROOT / path
+                if absolute.is_dir():
+                    directories.add(path)
+                elif path.endswith(".py") and absolute.is_file():
+                    files.add(path)
+            invocations.append((files, directories, ignored, not_gpu))
+        if "ci_runner.py" in text:
+            invocations.append((_ssim_test_files(), set(), set(), False))
+    return invocations
+
+
+def _is_dark(path: str, invocations: list[tuple[set[str], set[str], set[str], bool]]) -> bool:
+    gpu_only: bool | None = None
+    for files, directories, ignored, not_gpu in invocations:
+        if any(path == prefix or path.startswith(prefix + "/") for prefix in ignored):
+            continue
+        if path not in files and not any(path == directory or path.startswith(directory + "/")
+                                         for directory in directories):
+            continue
+        if not_gpu:
+            gpu_only = _gpu_only(REPO_ROOT / path) if gpu_only is None else gpu_only
+            if gpu_only:
+                continue
+        return False
+    return True
+
+
+def _test_files() -> list[str]:
+    return [
+        path.relative_to(REPO_ROOT).as_posix() for path in sorted(TESTS_ROOT.rglob("test_*.py"))
+        if "__pycache__" not in path.parts
+    ]
+
+
+def test_every_test_file_is_collected_or_allowlisted():
+    invocations = _pytest_invocations()
+    dark = [path for path in _test_files() if _is_dark(path, invocations) and path not in DARK_TESTS]
+    assert not dark, (f"Test files not collected by any CI lane and not allowlisted: "
+                      f"{dark}. Wire each file into a lane, or add an allowlist "
+                      f"entry with a reason in {__file__}.")
+
+
+def test_dark_test_allowlist_stays_accurate():
+    # A stale allowlist hides regressions: every entry must still name a test
+    # file that no CI lane collects, so fixing one forces its removal.
+    invocations = _pytest_invocations()
+    stale: list[str] = []
+    for path in DARK_TESTS:
+        absolute = REPO_ROOT / path
+        if not absolute.is_file():
+            stale.append(f"{path} (missing)")
+        elif not _is_dark(path, invocations):
+            stale.append(f"{path} (collected now)")
+    assert not stale, f"Allowlist entries no longer dark; delete them from {__file__}: {stale}"
+
+
+def test_parser_handles_the_command_shapes_ci_uses(tmp_path):
+    def dark(fixture: str, path: str) -> bool:
+        source = tmp_path / "ci.sh"
+        source.write_text(fixture)
+        return _is_dark(path, _pytest_invocations([source]))
+
+    continuation = "exec pytest \\\n  fastvideo/tests/encoders -q\n"
+    assert not dark(continuation, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    gpu_only = 'exec pytest fastvideo/tests/attention -m "not gpu" -q\n'
+    assert dark(gpu_only, "fastvideo/tests/attention/test_vsa_h3_heads_first_tile.py")
+    assert not dark(gpu_only, "fastvideo/tests/attention/test_selector_role_override.py")
+
+    for ignore in ("--ignore", "--ignore="):
+        separator = " " if ignore == "--ignore" else ""
+        assert dark(f"exec pytest fastvideo/tests/layers {ignore}{separator}"
+                    f"fastvideo/tests/layers/test_nvfp4_mm_backend.py -q\n",
+                    "fastvideo/tests/layers/test_nvfp4_mm_backend.py")
+
+    mirrored = 'export root="./fastvideo/tests/encoders"\nexec pytest "$root" -q\n'
+    assert not dark(mirrored, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    prefixed = "a=fastvideo/tests/encoders\nab=fastvideo/tests/vaes\nexec pytest $ab -q\n"
+    assert not dark(prefixed, "fastvideo/tests/vaes/test_wan_vae.py")
+
+    phantom = "PERF_PYTEST_RC=$pytest_rc python ./fastvideo/tests/encoders/summary.py\n"
+    assert dark(phantom, "fastvideo/tests/encoders/test_t5_encoder.py")
+
+    non_recursive = "exec python fastvideo/tests/ssim/ci_runner.py\n"
+    assert not dark(non_recursive, "fastvideo/tests/ssim/test_causal_similarity.py")
+    assert dark(non_recursive, "fastvideo/tests/ssim/nested/test_parity.py")
 
 
 def test_local_tests_stays_out_of_ci():
@@ -484,12 +706,6 @@ def test_golden_lane_accepts_only_focused_test_basenames():
     assert 'golden_root=./fastvideo/tests/golden_gate' in lane_script
     assert 'if [ "${TEST_SCOPE:-}" = merge ]; then' in lane_script
     assert "Missing FASTVIDEO_GOLDEN_TEST_FILES for merge scope" in lane_script
-
-
-def test_allowlist_entries_are_still_real_directories():
-    # A stale allowlist hides regressions; entries must track reality.
-    missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
-    assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")
 
 
 def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
