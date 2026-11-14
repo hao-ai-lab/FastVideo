@@ -34,6 +34,22 @@ configs = [
     for w in [4, 8]\
 ]
 
+# Triton's AMD backend takes two launch keys the generic configs above never
+# set: ``matrix_instr_nonkdim`` (MFMA instruction shape) and ``waves_per_eu``
+# (occupancy hint). ``kpack`` is left out: Triton deprecates it from gfx950 on
+# and overrides kpack=2 to 1 there. The CUDA backend rejects these keys, so
+# they are HIP-gated.
+def _hip_configs():
+    return [
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': wpe, 'matrix_instr_nonkdim': 16},
+                      num_stages=2,
+                      num_warps=w) for w in [4, 8] for wpe in [1, 2]
+    ]
+
+
+if getattr(torch.version, "hip", None):
+    configs += _hip_configs()
+
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
 @triton.autotune(configs, key=["N_CTX_Q", "HEAD_DIM"])
