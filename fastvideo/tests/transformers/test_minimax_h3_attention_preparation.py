@@ -399,13 +399,18 @@ def test_combined_kv_preserves_separate_prefix_pool_and_native_bytes(batch, head
         )
     for actual, expected in ((actual_key[0][0], expected_key[0][0]),
                              (actual_key[0][1], expected_key[0][1]),
-                             (actual_key[1], expected_key[1]), (actual_key[2], expected_key[2]),
                              (actual_key[3], expected_key[3]), (actual_value[0], expected_value[0]),
                              (actual_value[1][0], expected_value[1][0]),
                              (actual_value[1][1], expected_value[1][1])):
         assert torch.equal(actual.contiguous().view(torch.uint8), expected.contiguous().view(torch.uint8))
-    assert actual_key[1].transpose(1, 2).is_contiguous()
-    assert actual_key[2].transpose(1, 2).is_contiguous()
+    # The dense prefix K/V are padded with zero rows to the FP4 kernel's 128-row block.
+    n_valid = valid_index.numel()
+    for padded, expected in ((actual_key[1], expected_key[1]), (actual_key[2], expected_key[2])):
+        assert padded.shape[1] == (n_valid + 127) // 128 * 128
+        assert torch.equal(padded[:, :n_valid].contiguous().view(torch.uint8),
+                           expected.contiguous().view(torch.uint8))
+        assert not padded[:, n_valid:].any()
+        assert padded.transpose(1, 2).is_contiguous()
 
 
 @pytest.mark.parametrize("batch", [1, 2])
