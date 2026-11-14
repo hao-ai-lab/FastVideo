@@ -349,6 +349,11 @@ attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
 against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
 reference (0.002 for Triton BF16).
 
+The same `12.1a` build also produces `lib_fastvideo_h3_swiglu_gemm.so`, which fuses
+the NVFP4 FFN-in GEMM, SwiGLU and the FFN-out activation quantization. Its output
+is bit-identical to the unfused path (one Spark T2AV, 1.007x). It runs only at the
+measured T2AV and Omni geometries and logs once when it falls back to the unfused path.
+
 The FastH3-QAD-v2 recipes, `basic_fasth3_spark_qad_v2_nvfp4.yaml` and
 `basic_fasth3_spark_pair_qad_v2_nvfp4.yaml`, select
 `FastVideo/FastH3-QAD-v2` explicitly. The older
