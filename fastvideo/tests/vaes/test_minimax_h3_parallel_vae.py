@@ -443,3 +443,27 @@ def test_encode_keyframe_routes_through_the_tile_split(monkeypatch, tile_paralle
     results = group.run(lambda rank: vae.encode_keyframe(keyframe).latent_dist.parameters)
     for moments in results:
         assert_close(moments, expected, atol=0.0, rtol=0.0)
+
+
+@pytest.mark.parametrize("latent_frames", [12, 13])
+@torch.inference_mode()
+def test_idle_callback_preserves_decode_and_runs_only_on_idle_rank(latent_frames: int) -> None:
+    vae = _tiny_vae()
+    latents = torch.randn(1, 4, latent_frames, 4, 4)
+    expected = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, expected)
+    _, chunks, _ = vae._temporal_decode_plan(latent_frames)
+    group = _ThreadedFakeGroup(2)
+    calls = [0, 0]
+
+    def rank_main(rank):
+        output = torch.empty_like(expected) if rank == 0 else None
+
+        def callback():
+            calls[rank] += 1
+
+        return decode_to_pixels_parallel(vae, latents, output, group, idle_callback=callback)
+
+    result = group.run(rank_main)
+    assert_close(result[0], expected, atol=0, rtol=0)
+    assert calls == [0, chunks % 2]
