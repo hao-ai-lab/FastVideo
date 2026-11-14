@@ -437,7 +437,8 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
                         prefix_query_is_fp8: bool = False,
                         value_index: torch.Tensor | None = None,
                         prepared_keys: tuple[
-                            tuple[torch.Tensor, torch.Tensor], torch.Tensor, torch.Tensor,
+                            tuple[torch.Tensor, torch.Tensor], torch.Tensor | None, torch.Tensor | None,
+                            tuple[torch.Tensor, torch.Tensor] | None,
                             tuple[torch.Tensor, torch.Tensor] | None,
                             tuple[torch.Tensor, torch.Tensor] | None,
                         ] | tuple[
