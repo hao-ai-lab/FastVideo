@@ -549,16 +549,24 @@ def test_loader_applies_nvfp4_decoder_from_config(tmp_path):
     assert len(vae.decoder.transformer_blocks) == 3
 
 
-@pytest.mark.parametrize("student_layers,base_layers,heads,match", [(6, 6, 2, "needs 6 decoder blocks"),
-                                                                     (2, 2, 4, "does not fit")])
-def test_loader_refuses_incompatible_nvfp4_decoder(tmp_path, student_layers, base_layers, heads, match):
+def test_loader_refuses_incompatible_nvfp4_decoder(tmp_path):
     import fastvideo.envs as envs
 
     _write_vae_dir(tmp_path / "vae", decoder_layers=4)
-    _write_deploy_checkpoint(tmp_path / "bad.pt", student_layers, base_layers, heads)
+    _write_deploy_checkpoint(tmp_path / "bad.pt", student_layers=2, base_layers=2, heads=4)
     with envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.override(str(tmp_path / "bad.pt")), pytest.raises(ValueError,
-                                                                                               match=match):
+                                                                                               match="does not fit"):
         _load_h3_vae(tmp_path / "vae")
+
+
+def test_loader_deepens_a_shallower_vae_for_a_complete_nvfp4_decoder(tmp_path):
+    import fastvideo.envs as envs
+
+    _write_vae_dir(tmp_path / "vae", decoder_layers=4)
+    _write_deploy_checkpoint(tmp_path / "deep.pt", student_layers=6, base_layers=6)
+    with envs.FASTVIDEO_H3_VAE_NVFP4_DECODER.override(str(tmp_path / "deep.pt")):
+        vae = _load_h3_vae(tmp_path / "vae")
+    assert len(vae.decoder.transformer_blocks) == 6
 
 
 def test_loader_rejects_non_deploy_checkpoint(tmp_path):
