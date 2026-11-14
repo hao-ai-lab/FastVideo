@@ -302,6 +302,28 @@ def _parse_aspect_ratio(value: str) -> tuple[float, float]:
     return result
 
 
+def _h3_canvas_for_aspect(model_family: str, aspect_width: float, aspect_height: float,
+                          short_edge: int | None) -> tuple[int, int]:
+    """``(height, width)`` of the 480p or 768p canvas for an aspect ratio (768p when short_edge is omitted)."""
+    from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_RESOLUTION_TIERS, resolve_canvas_size
+
+    tier = "768p" if short_edge is None else f"{short_edge}p"
+    if tier not in MINIMAX_H3_RESOLUTION_TIERS:
+        raise RequestAdaptationError(f"{H3_TASK_FAMILIES[model_family]} serves short_edge 480 or 768, "
+                                     f"got {short_edge}.")
+    try:
+        if model_family == "pika_h3_flex":
+            from fastvideo.pipelines.basic.pika_h3_flex.buckets import canvas_for_aspect, resolve_canvas
+
+            height, width = canvas_for_aspect((aspect_width, aspect_height), tier)
+            height, width, _, _ = resolve_canvas(height, width)
+            return height, width
+        tier_edge, tier_pixels = MINIMAX_H3_RESOLUTION_TIERS[tier]
+        return resolve_canvas_size(aspect_width, aspect_height, short_edge=tier_edge, max_pixels=tier_pixels)
+    except ValueError as error:
+        raise RequestAdaptationError(str(error)) from error
+
+
 def _apply_aspect_ratio(
     kwargs: dict[str, Any],
     request: VideoGenerationRequest,
@@ -311,16 +333,8 @@ def _apply_aspect_ratio(
     if request.aspect_ratio is None:
         return
     aspect_width, aspect_height = _parse_aspect_ratio(request.aspect_ratio)
-    if model_family == "minimax_h3":
-        from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_SHORT_EDGE, resolve_canvas_size
-
-        if request.short_edge is not None and request.short_edge != MINIMAX_H3_SHORT_EDGE:
-            raise RequestAdaptationError(
-                f"MiniMax-H3 currently uses a fixed short_edge={MINIMAX_H3_SHORT_EDGE}, got {request.short_edge}.")
-        try:
-            height, width = resolve_canvas_size(aspect_width, aspect_height)
-        except ValueError as error:
-            raise RequestAdaptationError(str(error)) from error
+    if model_family in H3_TASK_FAMILIES:
+        height, width = _h3_canvas_for_aspect(model_family, aspect_width, aspect_height, request.short_edge)
     elif request.short_edge is not None:
         if aspect_width >= aspect_height:
             height = request.short_edge
@@ -399,6 +413,37 @@ def validate_model_and_lora(
     return None
 
 
+H3_TASK_FAMILIES = {"minimax_h3": "MiniMax-H3", "pika_h3_flex": "Pika H3 Flex"}
+H3_TASK_ALIASES = {"t2v": "t2va", "i2v": "i2va"}
+
+
+def is_ref2va_server(args: FastVideoArgs, model_family: str | None) -> bool:
+    """Whether a MiniMax-H3 or Pika H3 Flex server was started with its Ref2VA pipeline."""
+    return model_family in H3_TASK_FAMILIES and "ref2va" in (getattr(args, "override_pipeline_cls_name", None)
+                                                             or "").lower()
+
+
+def _check_task(task: str, model_family: str | None, ref2va: bool, *, images: list[str], media: bool) -> None:
+    if model_family not in H3_TASK_FAMILIES:
+        raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 and Pika H3 Flex servers.")
+    name = H3_TASK_FAMILIES[model_family]
+    normalized = H3_TASK_ALIASES.get(task.lower(), task.lower())
+    if normalized not in {"t2va", "i2va", "fl2va", "ref2va"}:
+        raise RequestAdaptationError(f"{name} task must be one of t2va, i2va, fl2va or ref2va.")
+    if normalized == "t2va" and media:
+        raise RequestAdaptationError(f"{name} task='t2va' does not accept reference media.")
+    if ref2va:
+        if normalized == "ref2va" or (normalized == "t2va" and model_family == "minimax_h3"):
+            return
+        raise RequestAdaptationError(f"This server is configured for {name} Ref2VA, not task={normalized!r}.")
+    if normalized == "ref2va":
+        raise RequestAdaptationError(f"{name} task='ref2va' requires its Ref2VA pipeline at server startup.")
+    if normalized == "i2va" and len(images) != 1:
+        raise RequestAdaptationError(f"{name} task='i2va' requires exactly one image reference (the first frame).")
+    if normalized == "fl2va" and not images:
+        raise RequestAdaptationError(f"{name} task='fl2va' requires one or two image references.")
+
+
 def _apply_reference_inputs(
     kwargs: dict[str, Any],
     request: VideoGenerationRequest,
@@ -409,22 +454,9 @@ def _apply_reference_inputs(
     images = _image_sources(request)
     videos = _video_sources(request)
     audios = _audio_sources(request)
-    ref2va = model_family == "minimax_h3" and "ref2va" in (args.override_pipeline_cls_name or "").lower()
-
-    if model_family == "minimax_h3" and request.task is not None:
-        normalized_task = request.task.lower()
-        if normalized_task not in {"t2va", "fl2va", "ref2va"}:
-            raise RequestAdaptationError("MiniMax-H3 task must be one of t2va, fl2va, or ref2va.")
-        if normalized_task == "ref2va" and not ref2va:
-            raise RequestAdaptationError(
-                "MiniMax-H3 task='ref2va' requires MiniMaxH3Ref2VAModularPipeline at server startup.")
-        if normalized_task != "ref2va" and ref2va:
-            raise RequestAdaptationError(
-                f"This server is configured for MiniMax-H3 Ref2VA, not task={normalized_task!r}.")
-        if normalized_task == "t2va" and (images or videos or audios):
-            raise RequestAdaptationError("MiniMax-H3 task='t2va' does not accept reference media.")
-        if normalized_task == "fl2va" and not images:
-            raise RequestAdaptationError("MiniMax-H3 task='fl2va' requires one or two image references.")
+    ref2va = is_ref2va_server(args, model_family)
+    if request.task is not None:
+        _check_task(request.task, model_family, ref2va, images=images, media=bool(images or videos or audios))
 
     if ref2va:
         from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
@@ -434,7 +466,12 @@ def _apply_reference_inputs(
         references.extend(MiniMaxH3Reference(source=source, media_type="video") for source in videos)
         references.extend(MiniMaxH3Reference(source=source, media_type="audio") for source in audios)
         if request.continuation_video:
+            if model_family == "pika_h3_flex":
+                raise RequestAdaptationError("Pika H3 Flex Ref2VA does not accept a continuation_video.")
             references.append(MiniMaxH3Reference(source=request.continuation_video, media_type="continuation"))
+        if not references and model_family == "pika_h3_flex":
+            raise RequestAdaptationError("Pika H3 Flex Ref2VA requires at least one image or video reference; "
+                                         "serve the FL2VA model for text-only generation.")
         if references:
             try:
                 kwargs["references"] = validate_references(references)
@@ -442,8 +479,6 @@ def _apply_reference_inputs(
                 raise RequestAdaptationError(str(error)) from error
         return
 
-    if request.task is not None and model_family != "minimax_h3":
-        raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
     if request.continuation_video:
         raise RequestAdaptationError("continuation_video requires a MiniMax-H3 server configured with "
                                      "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
@@ -455,9 +490,9 @@ def _apply_reference_inputs(
         kwargs["video_path"] = videos[0]
         return
 
-    if model_family == "minimax_h3" and (videos or audios):
-        raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
-                                     "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
+    if model_family in H3_TASK_FAMILIES and (videos or audios):
+        raise RequestAdaptationError(f"{H3_TASK_FAMILIES[model_family]} video/audio references require a server "
+                                     "configured with its Ref2VA pipeline (override_pipeline_cls_name).")
     if len(images) > 2:
         raise RequestAdaptationError("The loaded pipeline accepts at most first and last image references.")
     if images:
@@ -470,6 +505,29 @@ def _apply_reference_inputs(
         kwargs["video_path"] = videos[0]
     if audios:
         raise RequestAdaptationError("The loaded pipeline does not accept audio reference inputs.")
+
+
+def _validate_pika_geometry(kwargs: dict[str, Any], width: int | None, height: int | None, *,
+                            frames_explicit: bool) -> None:
+    """Reject at admission what Pika H3 Flex would reject in its pipeline, and report the bucket it renders."""
+    from fastvideo.pipelines.basic.pika_h3_flex.buckets import resolve_canvas, resolve_frames
+
+    if kwargs["fps"] != 24:
+        raise RequestAdaptationError(f"Pika H3 Flex requires fps=24, got {kwargs['fps']}.")
+    requested_num_frames = kwargs.get("num_frames")
+    try:
+        if width is not None or height is not None:
+            snapped_height, snapped_width, _, _ = resolve_canvas(height, width)
+            kwargs["width"], kwargs["height"] = snapped_width, snapped_height
+        aligned_num_frames = None if requested_num_frames is None else resolve_frames(requested_num_frames)
+    except (TypeError, ValueError) as error:
+        raise RequestAdaptationError(str(error)) from error
+    if aligned_num_frames is None:
+        return
+    if frames_explicit and aligned_num_frames != requested_num_frames:
+        raise RequestAdaptationError("Pika H3 Flex num_frames must be on the causal-VAE grid (17 * n + 5); "
+                                     f"got {requested_num_frames}, next valid value is {aligned_num_frames}.")
+    kwargs["num_frames"] = aligned_num_frames
 
 
 def build_generation_request(
@@ -634,6 +692,9 @@ def build_generation_request(
             raise RequestAdaptationError("MiniMax-H3 num_frames must be on the causal-VAE grid (17 * n + 5); "
                                          f"got {requested_num_frames}, next valid value is {aligned_num_frames}.")
         kwargs["num_frames"] = aligned_num_frames
+
+    if model_family == "pika_h3_flex":
+        _validate_pika_geometry(kwargs, width, height, frames_explicit=frames_explicit)
 
     media_dir = "audio" if is_audio else "videos"
     extension = ".wav" if is_audio else ".mp4"
