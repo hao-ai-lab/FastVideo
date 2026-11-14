@@ -27,6 +27,7 @@ import torch
 import fastvideo.envs as envs
 
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetadata, _build_block_mask, _pool_tiles)
+from fastvideo.models.dits.minimax_h3_fusions.prefix_attention import has_dense_fp4_prefix_api
 
 
 def _tile_mask_to_fp4_blocks(api: Any, mask: torch.Tensor, tile: int, valid: torch.Tensor):
@@ -361,8 +362,9 @@ def _valid_key_index(kv_valid: torch.Tensor, half: int, logical: int) -> torch.T
 def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, prefix_rows: int,
                             logical: int, valid_index: torch.Tensor, precision: str,
                             key_is_smoothed: bool = False,
-                            prepared_kv: tuple[torch.Tensor, torch.Tensor] | None = None,
-                            query_is_fp8: bool = False) -> torch.Tensor:
+                            prepared_kv: tuple | None = None,
+                            query_is_fp8: bool = False,
+                            two_level_p: bool | None = None) -> torch.Tensor:
     """Dense attention for the prefix query rows, ``[B, H, prefix_rows, D]``.
 
     VSA gives every prefix (non-video) query tile every key column, so those rows need no
@@ -376,13 +378,38 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     import torch.nn.functional as F
 
     q, k, v = query[:, :prefix_rows], key[:, :logical], value[:, :logical]
+    if prepared_kv is not None and envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get():
+        from fastvideo.models.dits.minimax_h3_fusions.prefix_attention import dense_fp4_prefix_attention
+
+        k8, v8 = prepared_kv[0], prepared_kv[1]
+        dense_k = prepared_kv[2] if len(prepared_kv) > 2 else None
+        dense_v = prepared_kv[3] if len(prepared_kv) > 3 else None
+        dense_q = prepared_kv[4] if len(prepared_kv) > 4 else None
+        dense = dense_fp4_prefix_attention(q.transpose(1, 2),
+                                           None if k8 is None else k8.transpose(1, 2),
+                                           None if v8 is None else v8.transpose(1, 2),
+                                           dense_k, dense_v, dense_q, kv_len=valid_index.numel(),
+                                           single_level_p_quant=_fp4_kernel_kwargs(two_level_p).get(
+                                               "single_level_p_quant", True))
+        if dense is not None:
+            return dense
+        if dense_q is not None:
+            # The query producer skipped the BF16 prefix rows for this kernel.
+            raise RuntimeError("Dense NVFP4 prefix attention declined after the BF16 prefix query was skipped")
+        if k8 is None or v8 is None:
+            # Without the BF16 K/V, fall back to the raw unsmoothed K/V.
+            prepared_kv, key_is_smoothed = None, False
     if not key_is_smoothed:
         k = k - k.mean(dim=1, keepdim=True)
     # Attend only the valid keys. Gathering them keeps SDPA on its unmasked (flash) kernel; a boolean
     # mask over all rows falls back to the memory-efficient kernel, 3-4x slower at OmniRef prefix sizes.
     if prepared_kv is not None:
         q = _fp8_per_token(q) if precision == "fp8" and not query_is_fp8 else q
-        k, v = prepared_kv
+        k, v = prepared_kv[0], prepared_kv[1]
+        # The producer pads the prefix K/V to the FP4 kernel's 128-row block; SDPA sees the valid keys.
+        valid_keys = valid_index.numel()
+        if k.shape[1] != valid_keys:
+            k, v = k[:, :valid_keys], v[:, :valid_keys]
     elif (precision == "fp8" and k.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
             and k.dtype == torch.bfloat16 and v.dtype == k.dtype
             and k.shape[-1] == 128 and k.stride(-1) == 1 and v.stride(-1) == 1
@@ -410,6 +437,11 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
                         prefix_query_is_fp8: bool = False,
                         value_index: torch.Tensor | None = None,
                         prepared_keys: tuple[
+                            tuple[torch.Tensor, torch.Tensor], torch.Tensor | None, torch.Tensor | None,
+                            tuple[torch.Tensor, torch.Tensor] | None,
+                            tuple[torch.Tensor, torch.Tensor] | None,
+                            tuple[torch.Tensor, torch.Tensor] | None,
+                        ] | tuple[
                             tuple[torch.Tensor, torch.Tensor], torch.Tensor, torch.Tensor
                         ] | None = None,
                         ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, int]:
@@ -431,8 +463,11 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
     shared_smoothing = bool(smooth and logical == key.shape[1])
     prepared_key, prepared_kv = None, None
     if prepared_keys is not None:
-        prepared_key, prefix_key, prefix_value = prepared_keys
-        prepared_kv = (prefix_key, prefix_value)
+        prepared_key, prefix_key, prefix_value = prepared_keys[:3]
+        dense_k = prepared_keys[3] if len(prepared_keys) > 3 else None
+        dense_v = prepared_keys[4] if len(prepared_keys) > 4 else None
+        dense_q = prepared_keys[5] if len(prepared_keys) > 5 else None
+        prepared_kv = (prefix_key, prefix_value, dense_k, dense_v, dense_q)
         numerics["smooth_k"] = False
     elif (shared_smoothing and precision == "fp8" and layout is not None and key.is_cuda
             and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
@@ -457,7 +492,8 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
     with STAGES.span("prefix_attention"):
         prefix_out = _prefix_dense_attention(query, key, value, prefix_rows, logical, valid_index, precision,
                                              key_is_smoothed=shared_smoothing, prepared_kv=prepared_kv,
-                                             query_is_fp8=prefix_query_is_fp8)
+                                             query_is_fp8=prefix_query_is_fp8,
+                                             two_level_p=numerics["two_level_p"])
     # A tile-64 prefix can end halfway through a native 128-row block. Keep that whole query block and its
     # original quadrant mask, then discard the overlapping prefix half and trailing padding from its output.
     head = prefix_rows // _BLOCK
@@ -553,6 +589,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
     prefix_mode, prefix_rows = _prefix_settings(attn, meta, layout.n_tiles)
     sim_fp8 = envs.FASTVIDEO_H3_SIM_SP_FP8.get()
     prepared_query, q_pooled = None, None
+    prefix_q_fp4 = None
     prepared_key_mean = None
     prefix_query_is_fp8 = False
     smooth = getattr(attn, "_vsa_fp4_options", {}).get("smooth_k")
@@ -588,7 +625,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
             if prefix_rows:
                 from fastvideo.models.dits.minimax_h3_fusions.query_pool import prepare_pooled_queries
 
-                query, prepared_query, q_pooled = prepare_pooled_queries(
+                query, prepared_query, q_pooled, prefix_q_fp4 = prepare_pooled_queries(
                     query, attn.norm_q.weight, cos, sin, attn.norm_q.eps, input_index,
                     meta.variable_block_sizes, prefix_rows,
                 )
@@ -621,9 +658,18 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
                         and torch.cuda.get_device_capability(query.device) == (12, 1)):
                     from fastvideo.models.dits.minimax_h3_fusions.query_pool import prepare_pooled_queries
 
-                    query, prepared_query, q_pooled = prepare_pooled_queries(
+                    # Emit the dense-prefix FP4 query here (bit-identical to scale_and_quant_fp4) and skip
+                    # its BF16 rows. Only the omni_key_pool path below carries it to the dense kernel,
+                    # so require that path's conditions (smooth_k and the compression gate).
+                    want_prefix_q_fp4 = (
+                        bool(envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get()) and bool(smooth)
+                        and attn.to_gate_compress is not None and attn._gate_active()
+                        and has_dense_fp4_prefix_api(api))
+                    query, prepared_query, q_pooled, prefix_q_fp4 = prepare_pooled_queries(
                         query, attn.norm_q.weight, cos, sin, attn.norm_q.eps, None,
-                        meta.variable_block_sizes, prefix_rows, tile_elems=128, prefix_fp8=True, split_prefix=True,
+                        meta.variable_block_sizes, prefix_rows, tile_elems=128, prefix_fp8=True,
+                        split_prefix=True, prefix_fp4=want_prefix_q_fp4,
+                        skip_prefix_store=want_prefix_q_fp4,
                     )
                     prefix_query_is_fp8 = True
                 else:
@@ -662,18 +708,27 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         if fused_gate and (compact or torch.cuda.get_device_capability(key.device) == (12, 1)):
             from fastvideo.models.dits.minimax_h3_fusions.kv_pool import pool_quantize_prefix_kv
 
+            # Emit the dense-prefix FP4 K/V here (bit-identical to the CUDA quantizers) and skip the BF16 K/V.
+            dense_fp4 = (bool(envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get())
+                         and not sim_fp8 and prefix_rows % 128 == 0
+                         and torch.cuda.get_device_capability(key.device) == (12, 1)
+                         and has_dense_fp4_prefix_api(api))
             key_result, value_result = pool_quantize_prefix_kv(
                 key, value, key_mean, inverse, valid_index.numel(), vbs, input_index,
-                tile_elems=layout.tile,
+                tile_elems=layout.tile, dense_k=dense_fp4, emit_bf16_k=not dense_fp4,
+                dense_v=dense_fp4, emit_bf16_v=not dense_fp4, valid_index=valid_index,
             )
-            packed_key, prefix_key, prefix_value, k_pooled = key_result
-            v_pooled, prepared_value = value_result
+            packed_key, prefix_key, prefix_value, k_pooled, dense_kv = key_result
+            v_pooled, prepared_value, dense_vv = value_result
         else:
             packed_key, prefix_key, prefix_value, k_pooled = pool_quantize_smoothed_keys(
                 key, value, key_mean, inverse, valid_index.numel(), vbs,
                 value_index=input_index, tile_elems=layout.tile,
             )
-        prepared_keys = (packed_key, prefix_key, prefix_value)
+            dense_kv = dense_vv = None
+        prepared_keys = (packed_key, prefix_key, prefix_value, dense_kv, dense_vv, prefix_q_fp4)
+    if prefix_q_fp4 is not None and prepared_keys is None:
+        raise RuntimeError("The dense NVFP4 prefix query was emitted without its prefix K/V preparation")
     with STAGES.span("select_mask"):
         if q_pooled is None:
             q_pooled = _pool_tiles(query[:, :logical], vbs, layout.tile)
