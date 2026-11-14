@@ -30,6 +30,22 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
+def _fp32_fully_shard_targets(name: str, module: nn.Module) -> list[tuple[str, nn.Module]]:
+    """Return modules ``fully_shard`` can wrap for one declared FP32 group.
+
+    ``fully_shard`` rejects containers such as ``ModuleList`` because they do
+    not define ``forward``. A declared group that is only a container has to be
+    replaced by its callable children, or loading the image PDD heads fails.
+    """
+    if type(module).forward is not nn.Module.forward:
+        return [(name, module)] if next(module.parameters(), None) is not None else []
+    targets: list[tuple[str, nn.Module]] = []
+    for child_name, child in module.named_children():
+        child_path = f"{name}.{child_name}" if name else child_name
+        targets.extend(_fp32_fully_shard_targets(child_path, child))
+    return targets
+
+
 def _mixed_precision_module_groups(
     model: nn.Module,
     default_param_dtype: torch.dtype | None,
@@ -63,8 +79,11 @@ def _mixed_precision_module_groups(
                 dtype_selector(_strip_checkpoint_wrapper_prefix(f"{clean_name}.{child_name}"),
                                default_param_dtype) == torch.float32 for child_name, _ in parameters):
             continue
-        groups.append((clean_name, module))
-        covered.update(parameter for _, parameter in parameters)
+        targets = _fp32_fully_shard_targets(clean_name, module)
+        if not targets:
+            continue
+        groups.extend(targets)
+        covered.update(parameter for _, target in targets for parameter in target.parameters())
     return groups, mixed_params - covered
 
 

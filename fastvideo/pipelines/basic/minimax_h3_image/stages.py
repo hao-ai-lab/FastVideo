@@ -236,6 +236,16 @@ def _token_ids(tokenized: Any) -> list[int]:
     return [int(token_id) for token_id in input_ids]
 
 
+def _dit_full_cpu_offload(fastvideo_args: FastVideoArgs) -> bool:
+    """True when the whole DiT should visit the GPU only for the denoising loop.
+
+    FSDP and layerwise offload move parameters themselves. This path is the
+    plain ``dit_cpu_offload`` flag, matching the H3 video sampler.
+    """
+    return (bool(fastvideo_args.dit_cpu_offload) and not bool(fastvideo_args.dit_layerwise_offload)
+            and not bool(fastvideo_args.use_fsdp_inference))
+
+
 class MiniMaxH3ImageSamplingStage(PipelineStage):
     """Encode references, denoise with the per-step PDD head, and decode one image."""
 
@@ -256,11 +266,24 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
             if offload:
                 pinned_offload.unload(self.vae)
 
+    @contextmanager
+    def _transformer_on_device(self, enabled: bool, device: torch.device) -> Iterator[None]:
+        if enabled:
+            self.transformer.to(device)
+        try:
+            yield
+        finally:
+            if enabled:
+                self.transformer.to("cpu")
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if self.vae is None or self.transformer is None or self.scheduler is None:
             raise RuntimeError("MiniMax-H3-Image denoise modules are not loaded.")
-        device = next(self.transformer.parameters()).device
+        full_cpu_offload = _dit_full_cpu_offload(fastvideo_args)
+        device = get_local_torch_device() if full_cpu_offload else next(self.transformer.parameters()).device
+        if full_cpu_offload:
+            self.transformer.to("cpu")
         generator = _request_generator(batch)
         output_height = int(batch.extra[OUTPUT_HEIGHT_KEY])
         output_width = int(batch.extra[OUTPUT_WIDTH_KEY])
@@ -317,33 +340,34 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
         sequence_length = int(image_indices.numel() + text_indices.numel())
         audio_hidden = latents.new_empty((1, 0, 1))
         audio_indices = torch.empty(0, dtype=torch.long, device=device)
-        for step_index, timestep in enumerate(self.scheduler.timesteps):
-            row_timesteps = torch.full((sequence_length, ), float(timestep), dtype=torch.float32, device=device)
-            if num_reference_rows:
-                row_timesteps[image_indices[:num_reference_rows]] = MINIMAX_H3_IMAGE_REFERENCE_NOISE_AUG
-            unique_timesteps, timestep_indices = torch.unique(row_timesteps, sorted=True, return_inverse=True)
-            with set_forward_context(current_timestep=step_index, attn_metadata=None, forward_batch=batch):
-                prediction, _ = self.transformer(
-                    hidden_states=latents.unsqueeze(0),
-                    audio_hidden_states=audio_hidden,
-                    encoder_hidden_states=prompt_embeds,
-                    timestep=unique_timesteps,
-                    timestep_indices=timestep_indices,
-                    token_tags=token_tags,
-                    position_ids=position_ids,
-                    video_indices=image_indices,
-                    audio_indices=audio_indices,
-                    text_indices=text_indices,
-                    pdd_step_index=step_index,
-                )
-            updated = self.scheduler.step(
-                prediction[0, num_reference_rows:].float(),
-                timestep,
-                latents[num_reference_rows:],
-                return_dict=False,
-            )[0]
-            latents = latents.clone()
-            latents[num_reference_rows:] = updated
+        with self._transformer_on_device(full_cpu_offload, device):
+            for step_index, timestep in enumerate(self.scheduler.timesteps):
+                row_timesteps = torch.full((sequence_length, ), float(timestep), dtype=torch.float32, device=device)
+                if num_reference_rows:
+                    row_timesteps[image_indices[:num_reference_rows]] = MINIMAX_H3_IMAGE_REFERENCE_NOISE_AUG
+                unique_timesteps, timestep_indices = torch.unique(row_timesteps, sorted=True, return_inverse=True)
+                with set_forward_context(current_timestep=step_index, attn_metadata=None, forward_batch=batch):
+                    prediction, _ = self.transformer(
+                        hidden_states=latents.unsqueeze(0),
+                        audio_hidden_states=audio_hidden,
+                        encoder_hidden_states=prompt_embeds,
+                        timestep=unique_timesteps,
+                        timestep_indices=timestep_indices,
+                        token_tags=token_tags,
+                        position_ids=position_ids,
+                        video_indices=image_indices,
+                        audio_indices=audio_indices,
+                        text_indices=text_indices,
+                        pdd_step_index=step_index,
+                    )
+                updated = self.scheduler.step(
+                    prediction[0, num_reference_rows:].float(),
+                    timestep,
+                    latents[num_reference_rows:],
+                    return_dict=False,
+                )[0]
+                latents = latents.clone()
+                latents[num_reference_rows:] = updated
 
         with self._vae_on_device(fastvideo_args, device):
             decoded = self._decode(latents[num_reference_rows:], latent_height, latent_width, patch_size, output_height,

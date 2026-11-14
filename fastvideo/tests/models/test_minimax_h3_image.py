@@ -284,3 +284,56 @@ def test_image_tiling_uses_the_video_spatial_helpers() -> None:
     shared = _stitch_spatial_tiles([[left, right]], [], [2])
     assert shared.shape[-1] == 6
     assert torch.equal(video._stitch_tiles([[left, right]], [], [2]), shared)
+
+
+def test_image_pdd_heads_are_separate_fp32_fsdp_groups(distributed_setup) -> None:
+    del distributed_setup
+    from fastvideo.models.loader.fsdp_load import _mixed_precision_module_groups
+
+    image = MiniMaxH3ImageTransformer2DModel(
+        MiniMaxH3ImageConfig(arch_config=_tiny_image_arch(), prefix="minimax_h3"),
+        {},
+    )
+    video = MiniMaxH3Transformer3DModel(MiniMaxH3Config(arch_config=_tiny_dit_arch(), prefix="minimax_h3"), {})
+    image_groups, _image_ignored = _mixed_precision_module_groups(image, torch.bfloat16)
+    video_groups, _video_ignored = _mixed_precision_module_groups(video, torch.bfloat16)
+    image_names = [name for name, _module in image_groups]
+    video_by_name = dict(video_groups)
+    assert "pdd_proj_out" not in image_names
+    assert "pdd_proj_out.0" in image_names and "pdd_proj_out.1" in image_names
+    assert all(not isinstance(module, torch.nn.ModuleList) for _name, module in image_groups)
+    assert video_by_name["proj_out"] is video.proj_out
+    assert video_by_name["time_embedder"] is video.time_embedder
+    for name, _parameter in image.named_parameters():
+        if name.startswith("pdd_proj_out."):
+            assert image._get_parameter_dtype(name, torch.bfloat16) == torch.float32
+
+
+def test_dit_offload_leaves_the_transformer_before_vae_decode() -> None:
+    from types import SimpleNamespace
+
+    from fastvideo.pipelines.basic.minimax_h3_image.stages import (
+        MiniMaxH3ImageSamplingStage,
+        _dit_full_cpu_offload,
+    )
+
+    enabled = SimpleNamespace(dit_cpu_offload=True, dit_layerwise_offload=False, use_fsdp_inference=False)
+    assert _dit_full_cpu_offload(enabled) is True
+    assert _dit_full_cpu_offload(
+        SimpleNamespace(dit_cpu_offload=True, dit_layerwise_offload=True, use_fsdp_inference=False)) is False
+    assert _dit_full_cpu_offload(
+        SimpleNamespace(dit_cpu_offload=True, dit_layerwise_offload=False, use_fsdp_inference=True)) is False
+
+    stage = MiniMaxH3ImageSamplingStage.__new__(MiniMaxH3ImageSamplingStage)
+    module = torch.nn.Linear(1, 1)
+    moves: list[str] = []
+
+    def track(device: object, *args: object, **kwargs: object) -> torch.nn.Linear:
+        moves.append(str(device))
+        return torch.nn.Module.to(module, device, *args, **kwargs)
+
+    module.to = track  # type: ignore[method-assign]
+    stage.transformer = module
+    with stage._transformer_on_device(True, torch.device("cpu")):
+        assert moves == ["cpu"]
+    assert moves == ["cpu", "cpu"]
