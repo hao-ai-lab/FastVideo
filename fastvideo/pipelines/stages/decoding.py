@@ -180,6 +180,8 @@ class DecodingStage(PipelineStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
@@ -249,6 +251,8 @@ class DecodingStage(PipelineStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
+            else:
+                self.vae.disable_tiling()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
             image, cache = self.vae.streaming_decode(latents, cache, is_first_chunk)
