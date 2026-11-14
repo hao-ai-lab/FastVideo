@@ -10,6 +10,7 @@ names the NVFP4 filter already matches.
 from __future__ import annotations
 
 import gc
+import os
 from typing import Any
 
 import torch
@@ -91,6 +92,12 @@ class MiniMaxH3ImageModularPipeline(LoRAPipeline, ComposedPipelineBase):
             raise ValueError(f"{model_path} is missing a Diffusers manifest.")
         return cleaned
 
+    def _component_load_target(self, module_name: str) -> tuple[str, str]:
+        # ``transformer_diffusers`` and ``vae_diffusers`` are folders. The loaders
+        # are registered under the roles ``transformer`` and ``vae``.
+        mapped = self._extra_config_module_map.get(module_name, module_name)
+        return module_name, os.path.join(self.model_path, mapped)
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         area = int(fastvideo_args.pipeline_config.min_generation_area)
         logger.info("MiniMax-H3-Image min_generation_area=%d", area)
@@ -152,6 +159,27 @@ class MiniMaxH3ImageModularPipeline(LoRAPipeline, ComposedPipelineBase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    def _release_denoise_modules(self) -> None:
+        stage = self._stage_name_mapping.get("sampling_stage")
+        if stage is not None:
+            stage.vae = None
+            stage.transformer = None
+            stage.scheduler = None
+        self._sampling_stage_ready = False
+        released = False
+        for name in _DENOISE_MODULE_NAMES:
+            self.trainable_transformer_modules.pop(name, None)
+            module = self.modules.pop(name, None)
+            if module is not None:
+                released = True
+                del module
+        if not released:
+            return
+        logger.info("Released MiniMax-H3-Image DiT and VAE before reloading the text encoder")
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def _ensure_text_encoder(self, fastvideo_args: FastVideoArgs) -> None:
         encoder = self.get_module("text_encoder")
         stage = self._stage_name_mapping.get("conditioning_stage")
@@ -185,17 +213,24 @@ class MiniMaxH3ImageModularPipeline(LoRAPipeline, ComposedPipelineBase):
         )
 
     def _add_sampling_stage(self, fastvideo_args: FastVideoArgs) -> None:
-        if self._sampling_stage_ready:
-            return
-        self.add_stage(
-            "sampling_stage",
-            MiniMaxH3ImageSamplingStage(
-                vae=self.get_module("vae"),
-                transformer=self.get_module("transformer"),
-                scheduler=self.get_module("scheduler"),
-                min_generation_area=int(fastvideo_args.pipeline_config.min_generation_area),
-            ),
-        )
+        vae = self.get_module("vae")
+        transformer = self.get_module("transformer")
+        scheduler = self.get_module("scheduler")
+        stage = self._stage_name_mapping.get("sampling_stage")
+        if stage is None:
+            self.add_stage(
+                "sampling_stage",
+                MiniMaxH3ImageSamplingStage(
+                    vae=vae,
+                    transformer=transformer,
+                    scheduler=scheduler,
+                    min_generation_area=int(fastvideo_args.pipeline_config.min_generation_area),
+                ),
+            )
+        else:
+            stage.vae = vae
+            stage.transformer = transformer
+            stage.scheduler = scheduler
         self._sampling_stage_ready = True
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -216,6 +251,7 @@ class MiniMaxH3ImageModularPipeline(LoRAPipeline, ComposedPipelineBase):
             if not self.post_init_called:
                 self.post_init()
             try:
+                self._release_denoise_modules()
                 self._ensure_text_encoder(fastvideo_args)
                 return self._run_condition_then_denoise(batch, fastvideo_args)
             except BaseException:

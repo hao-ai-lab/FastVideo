@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
+from collections.abc import Iterator
 
 import numpy as np
 import torch
@@ -12,6 +14,8 @@ from torch.distributed.tensor import DTensor
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.models import pinned_offload
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_IMAGE_PAD_TOKEN,
     MINIMAX_H3_VISION_END_TOKEN,
@@ -101,6 +105,8 @@ class MiniMaxH3ImageInputStage(PipelineStage):
             raise ValueError("MiniMax-H3-Image requires one non-empty prompt.")
         if _as_int(batch.num_frames, "num_frames") != 1:
             raise ValueError("MiniMax-H3-Image generates a single frame.")
+        if int(batch.num_videos_per_prompt or 1) != 1:
+            raise ValueError("MiniMax-H3-Image generates one image per request.")
         steps = int(batch.num_inference_steps)
         if steps != MINIMAX_H3_IMAGE_NUM_STEPS:
             raise ValueError(f"MiniMax-H3-Image only supports num_inference_steps="
@@ -239,9 +245,19 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
         self.scheduler = scheduler
         self.min_generation_area = int(min_generation_area)
 
+    @contextmanager
+    def _vae_on_device(self, fastvideo_args: FastVideoArgs, device: torch.device) -> Iterator[None]:
+        offload = bool(fastvideo_args.vae_cpu_offload)
+        if offload:
+            pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        try:
+            yield
+        finally:
+            if offload:
+                pinned_offload.unload(self.vae)
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        del fastvideo_args
         if self.vae is None or self.transformer is None or self.scheduler is None:
             raise RuntimeError("MiniMax-H3-Image denoise modules are not loaded.")
         device = next(self.transformer.parameters()).device
@@ -263,12 +279,13 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
             raise ValueError(f"Canvas {canvas_height}x{canvas_width} is not divisible by the VAE ratio {ratio}.")
         latent_height = canvas_height // ratio
         latent_width = canvas_width // ratio
-        reference_latents = self._encode_references(batch, device, generator, ratio, patch_size)
+        with self._vae_on_device(fastvideo_args, device):
+            reference_latents = self._encode_references(batch, device, generator, ratio, patch_size)
         reference_grids = [(int(latent.shape[-2]), int(latent.shape[-1])) for latent in reference_latents]
 
         text_tags = batch.extra[TEXT_TOKEN_TAGS_KEY]
         position_ids, token_tags, image_indices, text_indices, num_reference_rows = build_image_packed_sequence(
-            text_tags.to(device),
+            text_tags.detach().cpu(),
             reference_grids,
             latent_height,
             latent_width,
@@ -305,19 +322,20 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
             if num_reference_rows:
                 row_timesteps[image_indices[:num_reference_rows]] = MINIMAX_H3_IMAGE_REFERENCE_NOISE_AUG
             unique_timesteps, timestep_indices = torch.unique(row_timesteps, sorted=True, return_inverse=True)
-            prediction, _ = self.transformer(
-                hidden_states=latents.unsqueeze(0),
-                audio_hidden_states=audio_hidden,
-                encoder_hidden_states=prompt_embeds,
-                timestep=unique_timesteps,
-                timestep_indices=timestep_indices,
-                token_tags=token_tags,
-                position_ids=position_ids,
-                video_indices=image_indices,
-                audio_indices=audio_indices,
-                text_indices=text_indices,
-                pdd_step_index=step_index,
-            )
+            with set_forward_context(current_timestep=step_index, attn_metadata=None, forward_batch=batch):
+                prediction, _ = self.transformer(
+                    hidden_states=latents.unsqueeze(0),
+                    audio_hidden_states=audio_hidden,
+                    encoder_hidden_states=prompt_embeds,
+                    timestep=unique_timesteps,
+                    timestep_indices=timestep_indices,
+                    token_tags=token_tags,
+                    position_ids=position_ids,
+                    video_indices=image_indices,
+                    audio_indices=audio_indices,
+                    text_indices=text_indices,
+                    pdd_step_index=step_index,
+                )
             updated = self.scheduler.step(
                 prediction[0, num_reference_rows:].float(),
                 timestep,
@@ -327,8 +345,9 @@ class MiniMaxH3ImageSamplingStage(PipelineStage):
             latents = latents.clone()
             latents[num_reference_rows:] = updated
 
-        decoded = self._decode(latents[num_reference_rows:], latent_height, latent_width, patch_size, output_height,
-                               output_width)
+        with self._vae_on_device(fastvideo_args, device):
+            decoded = self._decode(latents[num_reference_rows:], latent_height, latent_width, patch_size, output_height,
+                                   output_width)
         batch.output = decoded
         return batch
 

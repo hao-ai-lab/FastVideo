@@ -242,3 +242,32 @@ def test_sequential_load_defaults_on_for_the_image_pipeline() -> None:
     )
     assert pipeline._defer_denoise_modules(enabled) is True
     assert pipeline._defer_denoise_modules(disabled) is False
+
+
+def test_diffusers_folders_still_dispatch_to_canonical_loaders() -> None:
+    pipeline = MiniMaxH3ImageModularPipeline.__new__(MiniMaxH3ImageModularPipeline)
+    pipeline.model_path = "/models/custom-export"
+    transformer_name, transformer_path = pipeline._component_load_target("transformer")
+    vae_name, vae_path = pipeline._component_load_target("vae")
+    assert transformer_name == "transformer"
+    assert transformer_path == "/models/custom-export/transformer_diffusers"
+    assert vae_name == "vae"
+    assert vae_path == "/models/custom-export/vae_diffusers"
+
+
+def test_reloading_the_text_encoder_drops_the_denoise_modules() -> None:
+    pipeline = MiniMaxH3ImageModularPipeline.__new__(MiniMaxH3ImageModularPipeline)
+    transformer = torch.nn.Linear(1, 1)
+    vae = torch.nn.Linear(1, 1)
+    stage = type("Stage", (), {"vae": vae, "transformer": transformer, "scheduler": object()})()
+    pipeline._stage_name_mapping = {"sampling_stage": stage}
+    pipeline._sampling_stage_ready = True
+    pipeline.modules = {"transformer": transformer, "vae": vae, "text_encoder": object()}
+    pipeline.trainable_transformer_modules = {"transformer": transformer}
+    pipeline._release_denoise_modules()
+    assert "transformer" not in pipeline.modules
+    assert "vae" not in pipeline.modules
+    assert "text_encoder" in pipeline.modules
+    assert stage.transformer is None
+    assert stage.vae is None
+    assert pipeline._sampling_stage_ready is False

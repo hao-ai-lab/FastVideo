@@ -48,16 +48,23 @@ def _enforce_minimax_h3_image_contract(
     guidance_scale: float | None,
     negative_prompt: str | None,
     true_cfg_scale: float | None = None,
+    num_images: int | None = None,
 ) -> None:
     """Reject requests the distilled image checkpoint cannot run."""
     try:
         model_path = str(getattr(get_server_args(), "model_path", "") or "")
+        from fastvideo.registry import get_model_family
+
+        family = get_model_family(model_path) if model_path else None
     except Exception:
         return
-    from fastvideo.registry import _is_minimax_h3_image
-
-    if not model_path or not _is_minimax_h3_image(model_path):
+    if family != "minimax_h3_image":
         return
+    if num_images not in (None, 1):
+        raise HTTPException(
+            status_code=400,
+            detail="MiniMax-H3-Image generates one image per request.",
+        )
     if num_inference_steps not in (None, 6):
         raise HTTPException(
             status_code=400,
@@ -224,6 +231,7 @@ async def generations(request: ImageGenerationsRequest):
         guidance_scale=request.guidance_scale,
         negative_prompt=request.negative_prompt,
         true_cfg_scale=request.true_cfg_scale,
+        num_images=request.n,
     )
 
     request_id = generate_request_id()
@@ -284,6 +292,7 @@ async def edits(
         guidance_scale=guidance_scale,
         negative_prompt=negative_prompt,
         true_cfg_scale=true_cfg_scale,
+        num_images=n,
     )
 
     request_id = generate_request_id()
