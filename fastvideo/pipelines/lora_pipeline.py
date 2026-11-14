@@ -787,6 +787,7 @@ class LoRAPipeline(ComposedPipelineBase):
                         layer.unmerge_lora_weights()
                         layer.lora_A = None
                         layer.lora_B = None
+                        layer._active_loras.clear()
                     # Repack inside the offload scope, while the block's parameters are resident.
                     repack_scope = [module] if module is not None else list(layers.values())
                     _convert_quantized_weights_after_lora_change(repack_scope,
