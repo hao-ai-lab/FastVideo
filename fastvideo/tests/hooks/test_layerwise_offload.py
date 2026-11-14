@@ -6,9 +6,45 @@ import torch.nn as nn
 
 from fastvideo.hooks.layerwise_offload import (
     LayerwiseOffloadHook,
+    LayerwiseOffloadState,
     enable_layerwise_offload,
 )
 from fastvideo.hooks.hooks import ModuleHookManager
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Placement tracking needs a real CUDA offload stream")
+@pytest.mark.parametrize("offload_buffers", [False, True])
+def test_empty_weight_device_tracks_offload_mutation_and_module_moves(env_overrides, offload_buffers: bool):
+    import fastvideo.envs as envs
+
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(offload_buffers))
+    device = torch.device("cuda", torch.cuda.current_device())
+    module = nn.Linear(16, 16, dtype=torch.bfloat16)
+    module.register_buffer("weight_device", torch.empty(0, dtype=torch.bfloat16), persistent=False)
+    module.register_buffer("packed", torch.ones(1 << 20, dtype=torch.uint8))
+    state = LayerwiseOffloadState(torch.cuda.Stream(), device)
+    hook = LayerwiseOffloadHook(state)
+    manager = ModuleHookManager.get_from_or_default(module)
+    manager.append_forward_hook(hook)
+    try:
+        assert module.weight_device.device == module.weight.device == device
+        assert "weight_device" in state.cpu_named_parameters
+        assert ("packed" in state.cpu_named_parameters) is offload_buffers
+        module.to(device)
+        assert module.weight_device.device == device
+        module.to("cpu")
+        assert module.weight_device.device.type == "cpu"
+        with hook.mutate_params_scope():
+            assert module.weight_device.device == module.weight.device == device
+        state.prefetch_params()
+        state.wait_and_replace_params()
+        assert module.weight_device.device == module.weight.device == device
+        state.release_gpu_params()
+        assert module.weight_device.device == module.weight.device == device
+        assert module.weight_device.untyped_storage().nbytes() == 0
+        assert "weight_device" not in module.state_dict()
+    finally:
+        manager.remove_forward_hook(hook.name())
 
 
 class SimpleBlock(nn.Module):

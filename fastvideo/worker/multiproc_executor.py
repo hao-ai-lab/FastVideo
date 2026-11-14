@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 import faulthandler
 import logging
@@ -28,7 +29,7 @@ from fastvideo.distributed.parallel_state import get_dp_group, get_tp_group
 import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PipelineLoggingInfo
 from fastvideo.utils import (decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip,
                              get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn)
 from fastvideo.worker.executor import Executor
@@ -75,6 +76,33 @@ def _wait_for_processes_to_exit(processes: list[BaseProcess], timeout: float) ->
         remaining = max(0.0, deadline - time.monotonic())
         process.join(timeout=remaining)
     return all(not process.is_alive() for process in processes)
+
+
+def _copy_mps_tensors_to_cpu(value: Any) -> Any:
+    """Copy nested MPS results to CPU without changing the worker's tensors."""
+    if isinstance(value, torch.Tensor):
+        if value.device.type == "mps":
+            return value.detach().cpu()
+        return value
+    if isinstance(value, PipelineLoggingInfo):
+        logging_info = copy.copy(value)
+        logging_info.stages = _copy_mps_tensors_to_cpu(value.stages)
+        return logging_info
+    if is_dataclass(value) and not isinstance(value, type):
+        result = copy.copy(value)
+        for field in fields(value):
+            object.__setattr__(result, field.name, _copy_mps_tensors_to_cpu(getattr(value, field.name)))
+        return result
+    if isinstance(value, dict):
+        mapping = value.copy()
+        mapping.update((key, _copy_mps_tensors_to_cpu(item)) for key, item in value.items())
+        return mapping
+    if isinstance(value, list):
+        return [_copy_mps_tensors_to_cpu(item) for item in value]
+    if isinstance(value, tuple):
+        items = tuple(_copy_mps_tensors_to_cpu(item) for item in value)
+        return type(value)(*items) if hasattr(value, "_fields") else items
+    return value
 
 
 def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
@@ -786,6 +814,8 @@ class WorkerMultiprocProc:
 
     def worker_busy_loop(self) -> None:
         """Main busy loop for Multiprocessing Workers"""
+        from fastvideo.platforms import current_platform
+
         while True:
             logger.info("Worker %d starting event loop...", self.rank)
             try:
@@ -828,13 +858,17 @@ class WorkerMultiprocProc:
                         result = _prepare_worker_output_for_parent(result, fastvideo_args)
                         extra = output_batch.extra or {}
                         extra["peak_memory_mb"] = (torch.cuda.max_memory_allocated() / (1024 * 1024))
-                        self.pipe.send({
+                        response = {
                             "output_batch": result,
                             "logging_info": logging_info,
                             "extra": extra,
                             "trajectory_latents": output_batch.trajectory_latents,
                             "trajectory_timesteps": output_batch.trajectory_timesteps,
-                        })
+                        }
+                        if current_platform.is_mps():
+                            self.pipe.send(_copy_mps_tensors_to_cpu(response))
+                        else:
+                            self.pipe.send(response)
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)
                         self.pipe.send(result)
