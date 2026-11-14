@@ -264,6 +264,7 @@ It does not use frame dropping or spatial upscaling.
 FASTVIDEO_H3_VSA_FP4=1 \
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
 FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
+FASTVIDEO_H3_ADALN_CACHE=1 \
 FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
@@ -349,6 +350,11 @@ attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
 against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
 reference (0.002 for Triton BF16).
 
+The same `12.1a` build also produces `lib_fastvideo_h3_swiglu_gemm.so`, which fuses
+the NVFP4 FFN-in GEMM, SwiGLU and the FFN-out activation quantization. Its output
+is bit-identical to the unfused path (one Spark T2AV, 1.007x). It runs only at the
+measured T2AV and Omni geometries and logs once when it falls back to the unfused path.
+
 The FastH3-QAD-v2 recipes, `basic_fasth3_spark_qad_v2_nvfp4.yaml` and
 `basic_fasth3_spark_pair_qad_v2_nvfp4.yaml`, select
 `FastVideo/FastH3-QAD-v2` explicitly. The older
@@ -387,13 +393,22 @@ off on other GPUs unless a matched benchmark validates the split there.
 
 ### Optional NVFP4 video decoder
 
+The published decoders are in `FastVideo/FastH3-NVFP4-VAE-Decoder`. The
+FastH3-QAD-v2 Spark recipes select the fast 8-layer one:
+
+```bash
+hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./fasth3-nvfp4-vae
+```
+
+On a Spark pair, download it on both machines to the same absolute path;
+each worker loads the decoder from `FASTVIDEO_H3_VAE_NVFP4_DECODER` itself.
+
 `FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
 decoder distilled with quantization-aware training and exported by
 `scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py`. At load the
-INT8 overlay is skipped, the VAE is depth-cut to the decoder's block count
-(the 26-layer light VAE hosts an 8-block decoder; a 36-block decoder needs
-the full `MiniMaxAI/MiniMax-H3` `vae/` in the stack's `vae/` folder), and
-only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
+INT8 overlay is skipped, the VAE uses the exported decoder's block count
+(a complete export can also replace a shallower light decoder when its
+head/width geometry matches), and only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
 2.3 GiB). The decode stage runs bf16 autocast for these decoders, the
 precision they were trained in. The decoder GEMMs use the cuDNN backend on
 GB10; outputs match CUTLASS bit for bit.
@@ -405,6 +420,16 @@ master weights, or pre-packed NVFP4 weights from
 read straight onto the GPU and never materializes the full-precision weights
 of the quantized linears; it decodes bit-identically to packing the bf16 file
 at load.
+
+To quantize the original decoder without replacing it with a distilled export,
+set `generator.pipeline.experimental.h3_vae_nvfp4_quantize_dense: true` and
+`generator.engine.compile.vae_enabled: false`. This experimental option keeps
+every decoder block, quantizes its block linears to NVFP4 with unit activation
+scale during loading, and uses the existing fused BF16 decoder path. It leaves
+the checkpoint files unchanged and skips the INT8 overlay. Clear
+`FASTVIDEO_H3_VAE_NVFP4_DECODER` and `h3_vae_nvfp4_decoder`: exported and runtime
+quantization selections are mutually exclusive. The output is lossy and needs
+quality validation for the selected checkpoint. Blackwell FP4 hardware is required.
 
 V2 at 832x480, 124 frames, seed 1234, one Spark, warm calls:
 

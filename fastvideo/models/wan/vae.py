@@ -15,18 +15,61 @@
 # limitations under the License.
 
 import contextvars
+import functools
+import importlib.util
+import os
+import sys
 from contextlib import contextmanager
+from types import ModuleType
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+import fastvideo.envs as envs
+from fastvideo.distributed.parallel_state import GroupCoordinator, get_sp_group, model_parallel_is_initialized
 from fastvideo.layers.activation import get_act_fn
+from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import (DiagonalGaussianDistribution, ParallelTiledVAE)
 from fastvideo.models.wan.vae_config import WanVAEConfig
 
+logger = init_logger(__name__)
+
 CACHE_T = 2
+# fastvideo-kernel/wan22_vae_decode decodes the Wan2.2-TI2V-5B VAE's latents [1, 48, T, 44, 78] (704 x 1248) on
+# sm_100a (B200 / GB200) and sm_103a (B300).
+_DECODE_KERNEL_LATENT = (48, 44, 78)
+_DECODE_KERNEL_VIDEO = (704, 1248)
+_DECODE_KERNEL_CAPABILITIES = ((10, 0), (10, 3))
+# The group sizes it splits a decode over (decode_kernel_parallel), each checked to decode the same video as one GPU.
+_DECODE_KERNEL_WORLDS = (2, 4, 8)
+
+
+@functools.cache
+def _wan22_vae_decode() -> ModuleType:
+    """The wrapper of fastvideo-kernel/wan22_vae_decode (``FASTVIDEO_WAN22_VAE_DECODE_DIR``, by default this
+    checkout's), loaded once per process as ``wan22_vae_decode``, as its own tests import it. Its extension builds on
+    first use (into ``WAN22_VAE_DECODE_BUILD_DIR``, see the wrapper)."""
+    module = sys.modules.get("wan22_vae_decode")
+    if module is None:
+        root = envs.FASTVIDEO_WAN22_VAE_DECODE_DIR.get() or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            "fastvideo-kernel", "wan22_vae_decode")
+        path = os.path.join(root, "wan22_vae_decode.py")
+        if not os.path.isfile(path):
+            raise RuntimeError(f"decode_kernel needs fastvideo-kernel/wan22_vae_decode; {path} does not exist "
+                               "(FASTVIDEO_WAN22_VAE_DECODE_DIR).")
+        spec = importlib.util.spec_from_file_location("wan22_vae_decode", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["wan22_vae_decode"] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules["wan22_vae_decode"]
+            raise
+    return module
 
 is_first_frame = contextvars.ContextVar("is_first_frame", default=False)
 feat_cache = contextvars.ContextVar("feat_cache", default=None)
@@ -1096,6 +1139,10 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             )
 
         self.use_feature_cache = config.use_feature_cache
+        # The kernel decoders of decode_kernel, one per device and process group (their weights prepared once; None
+        # where the group's ranks could not all build one), and why the kernel cannot run.
+        self._kernel_decoders: dict[tuple[torch.device, tuple[int, ...] | None], object | None] = {}
+        self._kernel_unavailable: str | None = None
 
     def clear_cache(self) -> None:
 
@@ -1187,6 +1234,10 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         return enc
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
+        if getattr(self.config, "decode_kernel", False):
+            video = self._kernel_decode(z)
+            if video is not None:
+                return video
         if self.use_feature_cache:
             self.clear_cache()
             iter_ = z.shape[2]
@@ -1214,6 +1265,80 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             out = ParallelTiledVAE.decode(self, z)
 
         return out
+
+    def _kernel_decode(self, z: torch.Tensor) -> torch.Tensor | None:
+        """``decode`` by fastvideo-kernel's Wan2.2 decoder (``decode_kernel``): bf16 with fp32 accumulation, within the
+        error of a bf16 decode of the fp32 one, or None where it does not apply (other devices, geometries, batches or
+        VAEs), and the decode below runs as before. Every rank of a multi-GPU run returns the whole video, as the
+        decode below does: decoded on its GPU alone, or with ``decode_kernel_parallel`` split over the
+        sequence-parallel group and broadcast from the group's first rank."""
+        # Only what is the same on every rank decides here, so that the ranks of a group take the split together; a
+        # rank whose own build failed still joins the group's agreement (see _kernel_decoder).
+        reason = None
+        if not z.is_cuda:
+            reason = "the latents are not on a GPU"
+        elif torch.cuda.get_device_capability(z.device) not in _DECODE_KERNEL_CAPABILITIES:
+            major, minor = torch.cuda.get_device_capability(z.device)
+            reason = f"the GPU is sm_{major}{minor}, not sm_100 or sm_103"
+        elif z.dim() != 5 or z.shape[0] != 1 or (z.shape[1], *z.shape[3:]) != _DECODE_KERNEL_LATENT:
+            reason = f"latents {tuple(z.shape)} are not [1, 48, T, 44, 78] (a 704 x 1248 video, batch 1)"
+        if reason is not None:
+            logger.warning_once(f"decode_kernel: {reason}; decoding with AutoencoderKLWan.")
+            return None
+        group = self._kernel_group(z)
+        if group is not None and (decoder := self._kernel_decoder(z.device, group)) is not None:
+            logger.info_once(f"decode_kernel: decoding with fastvideo-kernel's Wan2.2 decoder over the "
+                             f"{group.world_size} GPUs of the sequence-parallel group.")
+            video = decoder.decode(z)  # the video on the group's first rank, None on the others
+            if video is None:
+                video = torch.empty((1, 3, 4 * z.shape[2] - 3, *_DECODE_KERNEL_VIDEO), dtype=torch.bfloat16,
+                                    device=z.device)
+            return group.broadcast(video, src=0).float()
+        decoder = self._kernel_decoder(z.device, None)
+        if decoder is None:
+            logger.warning_once(f"decode_kernel: {self._kernel_unavailable}; decoding with AutoencoderKLWan.")
+            return None
+        logger.info_once("decode_kernel: decoding with fastvideo-kernel's Wan2.2 decoder on this GPU.")
+        return decoder.decode(z).float()
+
+    def _kernel_group(self, z: torch.Tensor) -> GroupCoordinator | None:
+        """The sequence-parallel group ``decode_kernel_parallel`` splits the decode of ``z`` over, or None (decode
+        alone): the switch is off, there is no group of a size the kernel splits over, or the video has fewer latent
+        frames than the group has GPUs, where the split's fixed cost (about 50 ms over 4 B300s, 100 ms over 8) exceeds
+        the decode."""
+        if not getattr(self.config, "decode_kernel_parallel", False) or not model_parallel_is_initialized():
+            return None
+        group = get_sp_group()
+        return group if group.world_size in _DECODE_KERNEL_WORLDS and z.shape[2] >= group.world_size else None
+
+    def _kernel_decoder(self, device: torch.device, group: GroupCoordinator | None) -> object | None:
+        """The kernel's decoder on ``device``, alone (``group`` None) or as this rank of ``group``, built on first use
+        (its extension built or loaded, its weights prepared), or None where it cannot be. Over a group every rank
+        builds its own without communicating, then the ranks agree: the split decode needs every one of them, so a
+        rank that could not build makes the whole group decode alone."""
+        key = (device, None if group is None else tuple(group.ranks))
+        if key in self._kernel_decoders:
+            return self._kernel_decoders[key]
+        decoder = None
+        if self._kernel_unavailable is None:
+            try:
+                decoder = _wan22_vae_decode().WanVAEDecoder(self.state_dict(), device=device,
+                                                            pg=None if group is None else group.device_group,
+                                                            local=group is None)
+            except (KeyError, ValueError) as error:  # not the Wan2.2-TI2V-5B VAE's decoder
+                self._kernel_unavailable = f"this VAE's decoder does not fit the kernel ({error})"
+            except Exception as error:  # the kernel failed to load or build; generation goes on without it
+                self._kernel_unavailable = f"the kernel did not load ({type(error).__name__}: {error})"
+        if group is not None:
+            ready = torch.tensor([int(decoder is not None)], dtype=torch.int32)
+            torch.distributed.all_reduce(ready, op=torch.distributed.ReduceOp.MIN, group=group.cpu_group)
+            if not ready.item():
+                if decoder is not None:
+                    logger.warning("decode_kernel_parallel: a rank of the sequence-parallel group could not build "
+                                   "the kernel's decoder; every rank decodes alone.")
+                decoder = None
+        self._kernel_decoders[key] = decoder
+        return decoder
 
     def _decode(self, z: torch.Tensor, first_frame=False) -> torch.Tensor:
         x = self.post_quant_conv(z)
