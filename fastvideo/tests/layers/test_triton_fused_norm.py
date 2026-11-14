@@ -170,19 +170,11 @@ def test_grad_enabled_falls_back_to_eager():
 
 
 @cuda_only
-def test_env_kill_switch(env_overrides):
-    import fastvideo.envs as envs
-    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_FUSED_NORM.override(True))
-    _, fused = _make_modules(elementwise_affine=True)
-    residual, x = _inputs(torch.bfloat16, seed=6)
-    gate = torch.randn(1, 1, H, device="cuda", dtype=torch.float32)
-    with torch.no_grad():
-        out, _ = fused(residual, x, gate, None, None)
-    assert out.dtype == torch.float32  # eager promotion, not the fused bf16
-
-
-@cuda_only
-def test_fused_norm_requires_explicit_opt_in(env_overrides):
+def test_default_tier_is_exact(env_overrides):
+    """Without FASTVIDEO_ENABLE_FUSED_NORM the module runs the bit-exact kernels
+    (fastvideo/layers/triton_exact_modulation.py): eager values after the
+    caller-side cast, and the dtype witness fp32 normalized / bf16 residual that
+    is neither eager (fp32/fp32) nor the fused-norm kernel (bf16/bf16)."""
     env_overrides.enter_context(envs.FASTVIDEO_ENABLE_FUSED_NORM.override(False))
     eager, fused = _make_modules(elementwise_affine=True)
     residual, x = _inputs(torch.bfloat16, seed=6)
@@ -190,8 +182,19 @@ def test_fused_norm_requires_explicit_opt_in(env_overrides):
     with torch.no_grad():
         expected, expected_residual = eager(residual, x, gate, None, None)
         actual, actual_residual = fused(residual, x, gate, None, None)
-    assert actual.dtype == torch.float32
+    assert actual.dtype == torch.float32 and actual_residual.dtype == torch.bfloat16
     assert torch.equal(actual, expected)
+    assert torch.equal(actual_residual, expected_residual.to(torch.bfloat16))
+
+    eager, fused = _make_modules(elementwise_affine=False)
+    residual, x = _inputs(torch.bfloat16, seed=7)
+    shift = torch.randn(1, 1, H, device="cuda", dtype=torch.float32)
+    scale = torch.randn(1, 1, H, device="cuda", dtype=torch.float32)
+    with torch.no_grad():
+        expected, expected_residual = eager(residual, x, 1, shift, scale)
+        actual, actual_residual = fused(residual, x, 1, shift, scale)
+    assert actual.dtype == torch.bfloat16 and actual_residual.dtype == torch.bfloat16
+    assert torch.equal(actual, expected.to(torch.bfloat16))
     assert torch.equal(actual_residual, expected_residual)
 
 
