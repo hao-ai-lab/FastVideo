@@ -52,6 +52,9 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "sr_lr_latent",
         "sr_audio",
         "sr_audio_sample_rate",
+        # MiniMax-H3 draft handoff: the bundle a generator saved, read by Open-H3-Regenerate-2K as its draft
+        # (fastvideo/pipelines/basic/minimax_h3/draft_bundle.py).
+        "h3_draft_bundle_path",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 
