@@ -331,6 +331,67 @@ def test_side_branch_rejects_accumulating_a_second_adapter() -> None:
         layer.set_lora_weights(a, b, accumulate=True)
 
 
+@pytest.mark.parametrize("mode", ["dense", "training", "side_branch"])
+def test_invalid_replacement_keeps_the_current_adapter(mode: str) -> None:
+    training = mode == "training"
+    base = _packed_linear() if mode == "side_branch" else _dense_linear()
+    layer = get_lora_layer(base, lora_rank=RANK, lora_alpha=RANK, training_mode=training)
+    a, b = _factors()
+    layer.set_lora_weights(a, b, lora_alpha=RANK, strength=0.5, training_mode=training)
+    previous_a, previous_b = layer.lora_A, layer.lora_B
+    inputs = _x()
+    output = layer(inputs)[0].detach().clone()
+    assert (layer.cpu_weight is None) == (training or mode == "side_branch")
+
+    invalid = [
+        (a, b, float("nan"), 1.0),
+        (a, b, RANK, float("inf")),
+        (a.unsqueeze(0), b, RANK, 1.0),
+        (a[:0], b[:, :0], RANK, 1.0),
+        (a, b[:, :-1], RANK, 1.0),
+        (a[:, :-1], b, RANK, 1.0),
+        (a, b[:-1], RANK, 1.0),
+    ]
+    for new_a, new_b, alpha, strength in invalid:
+        with pytest.raises(ValueError):
+            layer.set_lora_weights(new_a, new_b, lora_alpha=alpha, strength=strength, training_mode=training)
+        assert layer.lora_A is previous_a and layer.lora_B is previous_b
+        assert layer.lora_strength == 0.5 and layer.lora_alpha == RANK
+        torch.testing.assert_close(layer(inputs)[0], output, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("axis", ["row", "column"])
+def test_parallel_layer_merges_full_factors_into_local_partition(monkeypatch, axis: str) -> None:
+    from fastvideo.layers import linear
+
+    monkeypatch.setattr(linear, "get_tp_world_size", lambda: 2)
+    monkeypatch.setattr(linear, "get_tp_rank", lambda: 1)
+    monkeypatch.setattr(lora_linear, "get_tp_rank", lambda: 1)
+    projection = linear.RowParallelLinear if axis == "row" else linear.ColumnParallelLinear
+    base = projection(IN, OUT, bias=False, params_dtype=torch.float32)
+    base.weight.data.zero_()
+    layer = get_lora_layer(base)
+    a, b = _factors()
+    layer.set_lora_weights(a, b)
+    full_delta = b @ a
+    expected = full_delta[:, IN // 2:] if axis == "row" else full_delta[OUT // 2:, :]
+    torch.testing.assert_close(layer.base_layer.weight, expected)
+
+
+def test_fused_training_layer_accepts_stacked_projection_factors(monkeypatch) -> None:
+    from fastvideo.layers import linear
+
+    monkeypatch.setattr(linear, "get_tp_world_size", lambda: 1)
+    base = linear.MergedColumnParallelLinear(IN, [OUT, OUT], bias=False, params_dtype=torch.bfloat16)
+    layer = get_lora_layer(base, lora_rank=RANK, lora_alpha=RANK, training_mode=True)
+    a, b = _factors()
+    fused_b = torch.stack([b, b * 2])
+    layer.set_lora_weights(a, fused_b, training_mode=True)
+    torch.testing.assert_close(layer.lora_B, fused_b)
+    with pytest.raises(ValueError, match="finite"):
+        layer.set_lora_weights(a, fused_b, strength=float("nan"), training_mode=True)
+
+
 def test_dense_linear_still_merges_and_unmerges_exactly() -> None:
     base = _dense_linear()
     original = base.weight.detach().clone()
@@ -351,28 +412,16 @@ def test_parallel_wrappers_keep_merging() -> None:
     assert not RowParallelLinearWithLoRA.supports_side_branch
 
 
-def _pipeline_over(layer: BaseLayerWithLoRA) -> "SimpleNamespace":
-    from types import SimpleNamespace
-    transformer = torch.nn.Module()
-    transformer.layer = layer
-    layers = SimpleNamespace(lora_layers_by_block=lambda: iter([(None, {"layer": layer})]))
-    return SimpleNamespace(lora_layers={"transformer": layers}, trainable_transformer_modules={"transformer": transformer})
-
-
-def test_packed_nvfp4_layers_behind_a_side_branch_do_not_block_adapter_changes() -> None:
+def test_packed_nvfp4_side_branch_can_skip_repacking() -> None:
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
-    from fastvideo.pipelines.lora_pipeline import _all_side_branch, _has_nvfp4_weights_without_bf16
+    from fastvideo.pipelines.lora_pipeline import _all_side_branch
 
     base = _packed_linear()
     base.quant_method = object.__new__(NVFP4QuantizeMethod)
-    pipeline = _pipeline_over(get_lora_layer(base))
-
-    assert not _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules)
-    assert _all_side_branch([pipeline.lora_layers["transformer"].lora_layers_by_block().__next__()[1]["layer"]])
+    assert _all_side_branch([get_lora_layer(base)])
 
 
 def test_runtime_adapter_on_packed_nvfp4_without_constructor_lora_is_not_blocked() -> None:
-    """Wrapping runs before the NVFP4 check, so packed linears that become side branches do not block it."""
     from types import SimpleNamespace
 
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
@@ -400,7 +449,6 @@ def test_runtime_adapter_on_packed_nvfp4_without_constructor_lora_is_not_blocked
         pipeline.lora_initialized = True
 
     pipeline.convert_to_lora_layers = convert_to_lora_layers
-    # The adapter is unknown and has no path, so the call stops at the lookup that follows the NVFP4 check.
     with pytest.raises(ValueError, match="not found in the pipeline"):
         LoRAPipeline.set_lora_adapter(pipeline, "runtime-adapter")
     assert transformer.layer.side_branch

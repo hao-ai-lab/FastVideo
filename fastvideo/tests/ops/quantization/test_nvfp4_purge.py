@@ -71,11 +71,16 @@ def test_prefix_classification_sanity() -> None:
 
 def test_auto_purges_always_fp4_and_retains_refine_only(caplog) -> None:
     model = _model(retain=None)
+    original_device = model.always_fp4.weight.device
     with caplog.at_level(logging.INFO):
         nv.convert_model_to_nvfp4(model)
     assert model.always_fp4.weight is None
     assert model.refine_only.weight is not None
     assert model.always_fp4._nvfp4_weight is not None
+    assert model.always_fp4.weight_device.device == original_device
+    assert model.always_fp4.weight_device.untyped_storage().nbytes() == 0
+    assert "weight_device" not in model.always_fp4.state_dict()
+    assert not hasattr(model.refine_only, "weight_device")
     receipt = [r.message for r in caplog.records if "NVFP4 weight purge receipt" in r.message]
     assert receipt and "purged 1" in receipt[0] and "retained 1" in receipt[0]
 
@@ -85,6 +90,36 @@ def test_retain_true_keeps_everything() -> None:
     nv.convert_model_to_nvfp4(model)
     assert model.always_fp4.weight is not None
     assert model.refine_only.weight is not None
+    assert not hasattr(model.always_fp4, "weight_device")
+
+
+def test_purged_weight_placement_follows_module_moves() -> None:
+    model = _model(retain=False)
+    nv.convert_model_to_nvfp4(model)
+    model.to("meta")
+    assert model.always_fp4.weight_device.device.type == "meta"
+    assert model.always_fp4.weight_device.numel() == 0
+    model.to_empty(device="cpu")
+    assert model.always_fp4.weight_device.device.type == "cpu"
+    assert model.always_fp4.weight_device.untyped_storage().nbytes() == 0
+    assert "weight_device" not in model.always_fp4.state_dict()
+
+
+@pytest.mark.parametrize("offload_buffers", [False, True])
+def test_empty_weight_device_participates_in_layerwise_offload(env_overrides, offload_buffers: bool) -> None:
+    import fastvideo.envs as envs
+    from fastvideo.hooks.layerwise_offload import _offload_tensors
+
+    model = _model(retain=False)
+    nv.convert_model_to_nvfp4(model)
+    model.register_buffer("large_payload", torch.empty(1 << 20, dtype=torch.uint8))
+    model.register_buffer("small_cache", torch.ones(4))
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(offload_buffers))
+    selected = dict(_offload_tensors(model))
+    assert selected["always_fp4.weight_device"] is model.always_fp4.weight_device
+    assert ("large_payload" in selected) is offload_buffers
+    assert "small_cache" not in selected
+    assert dict(_offload_tensors(model, selected))["always_fp4.weight_device"] is model.always_fp4.weight_device
 
 
 def test_retained_weight_lora_merge_reaches_nvfp4_buffers(monkeypatch) -> None:
