@@ -17,7 +17,6 @@ def test_pooled_key_mean_matches_float64_reference_within_bf16_rounding(tiles, h
     key = (torch.randn((1, sequence, heads, 128), device="cuda") * scale).to(torch.bfloat16)
     counts = torch.randint(0, 65, (tiles,), device="cuda", dtype=torch.int32)
     counts[0] = 0
-    # Irregular holes exercise partial tiles, not only power-of-two counts.
     positions = torch.arange(64, device="cuda")[None, :]
     keep = positions < counts[:, None]
     key.view(1, tiles, 64, heads, 128).masked_fill_(~keep[None, :, :, None, None], 0)
@@ -25,9 +24,6 @@ def test_pooled_key_mean_matches_float64_reference_within_bf16_rounding(tiles, h
         pool = _pool_tiles(key, counts, 64).float()
         actual = key_mean_from_tiles(pool, counts, sequence)
         reference = key.double().mean(dim=1, keepdim=True)
-    # The final BF16 rounding dominates FP32 tile-reduction error. Permit one
-    # BF16 spacing plus a small cancellation allowance, without requiring the
-    # different FP32 reduction trees to select identical final BF16 values.
     error = (actual.double() - reference).abs()
     assert (error <= reference.abs() * 0.008 + scale * 1e-7).all()
     assert actual.shape == (1, 1, heads, 128) and actual.dtype == torch.bfloat16

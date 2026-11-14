@@ -111,8 +111,12 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         The result lives only on this request. The audio stage transfers it
         after video assembly, keeping its normal output ownership and cleanup.
+        Disabled under ``vae_cpu_offload``: overlapping would hold both decoders
+        on the device at once.
         """
         audio_stage, vae = self.audio_stage, self.vae
+        if args.vae_cpu_offload:
+            return None
         if audio_stage is None or vae is None or group.world_size != 2 or batch.raw_latent_shape[0] != 1:
             return None
         _, chunks, _ = vae._temporal_decode_plan(batch.raw_latent_shape[2])

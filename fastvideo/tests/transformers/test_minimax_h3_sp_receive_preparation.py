@@ -9,6 +9,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _native_api():
+    if torch.cuda.get_device_capability()[0] != 12:
+        pytest.skip("attn_qat_infer native kernels are built only for sm_120a/sm_121a")
+    from attn_qat_infer import api
+    return api
+
+
 @pytest.mark.parametrize("world,rows,heads,tiled,start", [
     (1, 73, 2, 128, 0), (2, 121, 7, 384, 128), (3, 83, 3, 384, 0), (2, 7430, 7, 16384, 768),
     (2, 7430, 4, 16384, 768), (2, 7430, 2, 16384, 768), (2, 7430, 1, 16384, 768),
@@ -20,7 +27,7 @@ def test_receive_means_and_native_query_value_quantization_are_byte_exact(
         world, rows, heads, tiled, start, peer_rank, compact_queries, compact_values):
     if peer_rank is not None and world != 2:
         pytest.skip("direct-local payloads require two ranks")
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.attention.backends.video_sparse_attn_h3 import _pool_tiles
     from fastvideo.models.dits.minimax_h3_fusions.sp_receive import unpack_pool_quantize_fp8
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _unpack_seq_fp8
@@ -95,9 +102,7 @@ def test_split_output_pack_matches_concat_gather_and_fp8_rounding(world, rows, h
 @pytest.mark.parametrize("prefix", [0, 64, 128, 192])
 def test_native_attention_does_not_read_omitted_query_suffix(prefix):
     """Exercise the real native kernel with a poisoned raw query suffix."""
-    if torch.cuda.get_device_capability()[0] != 12:
-        pytest.skip("requires consumer Blackwell sparse FP4 attention")
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
     from fastvideo.models.dits.minimax_h3_fusions.sp_receive import unpack_pool_quantize_fp8
 
@@ -134,9 +139,7 @@ def test_native_attention_does_not_read_omitted_query_suffix(prefix):
 @pytest.mark.parametrize("peer_rank", [None, 0, 1])
 def test_native_attention_accepts_direct_prefix_values_with_poisoned_raw_values(prefix, pooled_mean, direct_keys, peer_rank):
     """The real native/prefix attention must not read omitted BF16 values."""
-    if torch.cuda.get_device_capability()[0] != 12:
-        pytest.skip("requires consumer Blackwell sparse FP4 attention")
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
     from fastvideo.models.dits.minimax_h3_fusions.sp_receive import unpack_pool_quantize_fp8
     from fastvideo.models.dits.minimax_h3_fusions.key_quant import quantize_smoothed_keys

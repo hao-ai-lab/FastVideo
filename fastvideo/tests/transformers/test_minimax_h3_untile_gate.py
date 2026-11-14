@@ -29,7 +29,6 @@ def test_resident_adaln_cache_preserves_projection_and_allocation():
 
     torch.manual_seed(319)
     mod = MiniMaxH3AdaLayerNormModulation(16, 12).to(device="cuda", dtype=torch.bfloat16)
-    # ReplicatedLinear leaves initialization to the loader.
     with torch.no_grad():
         mod.linear.weight.normal_()
         mod.linear.bias.normal_()
