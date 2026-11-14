@@ -1,4 +1,5 @@
 # FastH3-QAD-v2 eight-forward video+audio on one DGX Spark.
+# Uses the published fast-8L NVFP4 decoder selected with FASTVIDEO_H3_VAE_NVFP4_DECODER (see spark_performance.md).
 # Download the complete release checkpoint as described in
 # docs/getting_started/installation/spark_performance.md.
 #
@@ -34,7 +35,7 @@ generator:
       lazy_module_load: false
     compile:
       enabled: false
-      vae_enabled: true
+      vae_enabled: false  # Packed NVFP4 decoder has its own fused inference path.
   pipeline:
     workload_type: t2v
     vae_tiling: true
