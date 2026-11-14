@@ -171,6 +171,11 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    # Measured per-role block policies, solved jointly before model loading.
+    activation_memory_budget_gib: float | None = None
+    activation_memory_host_budget_gib: float | None = None
+    activation_memory_profile: str = ""
+    activation_memory_plan_output: str = ""
     # Loader-level regional compile of the repeated DiT blocks.
     enable_torch_compile: bool = False
     # Compile the model adapter's tensor-only training forward. This is
@@ -200,6 +205,19 @@ class ModelTrainingConfig:
     minimax_h3_accumulated_recompile_limit: int = 1024
 
     def __post_init__(self) -> None:
+        if (self.activation_memory_budget_gib is None) != (not self.activation_memory_profile):
+            raise ValueError("Activation memory planning requires both a budget and a measured profile")
+        if self.activation_memory_budget_gib is None and (self.activation_memory_host_budget_gib is not None
+                                                          or self.activation_memory_plan_output):
+            raise ValueError(
+                "Activation memory host budget and plan output require a device budget and measured profile")
+        if self.activation_memory_budget_gib is not None:
+            if self.activation_memory_budget_gib <= 0:
+                raise ValueError("activation_memory_budget_gib must be positive")
+            if self.enable_gradient_checkpointing_type:
+                raise ValueError("Activation memory planning chooses checkpointing policies; remove the manual policy")
+        if self.activation_memory_host_budget_gib is not None and self.activation_memory_host_budget_gib < 0:
+            raise ValueError("activation_memory_host_budget_gib must be non-negative")
         if self.minimax_h3_student_compile not in ("off", "grad_only_full_block"):
             raise ValueError("training.model.minimax_h3_student_compile must be off or grad_only_full_block")
         if type(self.minimax_h3_compile_limit_fallback) is not bool:
