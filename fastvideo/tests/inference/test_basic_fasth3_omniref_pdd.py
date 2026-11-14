@@ -311,7 +311,11 @@ def test_spark_recipe_selects_its_checkpoint_and_fp4(profile, version, monkeypat
     assert args.VSA_tile_size == 64 and args.VSA_sparsity == 0.8
     assert args.sp_size == (2 if profile == "spark_pair" else 1)
     if version == "qad_v2":
-        assert args.h3_vsa_fp4 == {"enabled": True, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
+        expected_fp4 = {"enabled": True, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
+        if profile == "spark_pair":
+            expected_fp4.update(sp_head_chunks=7, sp_pooled_key_mean=True, sp_direct_keys=True,
+                                sp_projection_overlap=True, sp_input_gather=True)
+        assert args.h3_vsa_fp4 == expected_fp4
 
 
 @pytest.mark.parametrize("device", ["spark", "spark_pair", "rtx5090", "rtx_pro6000"])
