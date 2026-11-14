@@ -22,7 +22,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-CACHE_SCHEMA_VERSION = 4
+CACHE_SCHEMA_VERSION = 5
 DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-prebuilt"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
 DEFAULT_BUILD_INFO_OUTPUT = "/opt/fastvideo-kernel-prebuilt/default/metadata.json"
@@ -90,6 +90,31 @@ def _hash_directory(root: Path) -> str:
     return hasher.hexdigest()
 
 
+_SUBMODULE_STATUS_LINE = re.compile(r"^([ +\-U]?)([0-9a-f]{40}) (\S+)")
+
+
+def _submodule_identity(status: str) -> str:
+    """Reduce ``git submodule status`` to the source it describes.
+
+    A fresh CI clone reports the kernel submodules as uninitialized (``-``)
+    while the image build sees them checked out (`` ``); both mean the pinned
+    commit, so they must share a cache key. A moved (``+``) or conflicted
+    (``U``) submodule still changes it. The trailing ``git describe`` text
+    depends on which tags were fetched and is dropped. ``_run`` strips the
+    output, so the first line of a clean checkout arrives without its flag.
+    """
+    entries = []
+    for line in status.splitlines():
+        match = _SUBMODULE_STATUS_LINE.match(line)
+        if match is None:
+            entries.append(line)
+            continue
+        flag, sha, path = match.groups()
+        state = flag if flag in ("+", "U") else " "
+        entries.append(f"{state}{sha} {path}")
+    return "\n".join(entries)
+
+
 def _kernel_source_hash(repo_root: Path) -> dict[str, str]:
     kernel_root = repo_root / KERNEL_RELATIVE_DIR
     try:
@@ -112,7 +137,7 @@ def _kernel_source_hash(repo_root: Path) -> dict[str, str]:
             "tree_hash": tree_hash,
             "diff_hash": _sha256_text(diff) if diff else "",
             "cached_diff_hash": _sha256_text(cached_diff) if cached_diff else "",
-            "submodules_hash": _sha256_text(submodules),
+            "submodules_hash": _sha256_text(_submodule_identity(submodules)),
         }
         descriptor["source_hash"] = _sha256_text(json.dumps(descriptor, sort_keys=True))
         return descriptor
@@ -149,6 +174,8 @@ def _detect_arch_from_torch() -> str:
             return "9.0a"
         if major == 12 and minor == 0:
             return "12.0a"
+        if major == 12 and minor == 1:
+            return "12.1a"
         return f"{major}.{minor}"
     except Exception as error:  # noqa: BLE001 - metadata should explain fallback
         return f"<unavailable: {error}>"

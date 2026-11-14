@@ -161,6 +161,16 @@ references for other GPUs. A successful import alone is insufficient; validate
 an actual FA2 forward, the VMoBA tests, and each lane's complete payload before
 selecting the new image in the host-owned runner configuration.
 
+The Slurm worker installs the kernel that matches the checkout before a lane
+starts. The Spark runner does not, so every Spark-capable lane that loads
+`fastvideo-kernel` sources `.buildkite/scripts/spark_kernel_sync.sh` first. On
+`FASTVIDEO_CI_BACKEND=spark4` it runs `kernel_build_cache.py install`, which
+installs the image's prebuilt GB10 wheel when its source key matches the
+checkout and builds the checkout's kernel otherwise. A stale CI image therefore
+costs a kernel build per lane instead of failing on missing kernel symbols.
+Rebuild the CI image after a kernel or cache-key change reaches `main` so lanes
+return to the prebuilt path.
+
 The host runner must allowlist Spark-capable lane types before allocating the
 GPU. Label each Docker container with its job token and remove it from the
 outer runner on completion or cancellation. Slurm killing the Docker client

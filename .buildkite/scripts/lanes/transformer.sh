@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Canonical Slurm CI selection for the transformer lane.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../spark_kernel_sync.sh"
 
 # The existing block reference records an absent FASTVIDEO_FA4 (FA2). Keep
 # that reference identity; the component lane also selects FA2 explicitly.

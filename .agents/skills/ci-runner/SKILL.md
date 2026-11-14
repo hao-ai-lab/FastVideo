@@ -33,6 +33,11 @@ and the coordination contract with that bundle.
   A Spark runner sets `FASTVIDEO_CI_BACKEND=spark4`; gate cluster-only tests on
   that flag, never on memory heuristics. Keep
   `SPARK_CAPABLE_LANES` in `test_ci_test_collection.py` in sync.
+- Every Spark-capable lane script except DreamVerse sources
+  `.buildkite/scripts/spark_kernel_sync.sh` right after `set -euo pipefail`.
+  The Spark runner installs no kernel of its own, so this keeps
+  `fastvideo-kernel` in step with the checkout. A new Spark-capable lane must
+  do the same; `test_spark_lanes_sync_the_kernel_to_the_checkout` enforces it.
 - The trusted uploader fills `FV_SPARK_BACKEND`: `spark4` for `fastcheck`,
   `merge` and `direct` builds, including unset scope treated as Fastcheck,
   while an agent tagged `queue=ci-runner,backend=spark4` is connected and
