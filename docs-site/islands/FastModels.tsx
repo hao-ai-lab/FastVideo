@@ -50,7 +50,7 @@ export default function FastModels() {
             <h2 id="checkpoint-catalog">Browse checkpoints</h2>
             <p>Pick the checkpoint that matches your runtime.</p>
           </div>
-          <a href="https://huggingface.co/collections/FastVideo/fastvideo-fasth3">
+          <a href="https://huggingface.co/collections/FastVideo/fasth3-v1">
             Earlier FastH3 releases <span aria-hidden="true">↗</span>
           </a>
         </header>

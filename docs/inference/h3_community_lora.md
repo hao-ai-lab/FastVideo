@@ -67,9 +67,9 @@ The FastH3 example scripts take the same options. `basic_fasth3_lora_preview.py`
 `--lora-strength`, and `examples/serving/openai_fasth3_lora.yaml` shows the YAML form.
 
 `lora_strength` multiplies the adapter delta. `1.0` is the published scale and `0` is exactly the model without the
-adapter. Values above `1.0` exaggerate the adapter and usually degrade quality. After construction, you can change
-the strength with `generator.set_lora_adapter(nickname, strength=...)` only when the adapter runs as a side branch, described
-next. Otherwise, create a new generator.
+adapter. Values above `1.0` exaggerate the adapter and usually degrade quality. For a pure low-rank adapter,
+`generator.set_lora_adapter(nickname, strength=...)` changes the strength at runtime. Adapters with dense
+replacement or additive weights require a new generator to change their strength.
 
 ## LoRAs trained on base H3
 
@@ -94,11 +94,13 @@ The extra cost is two small matmuls per adapted linear.
 
 A dense bf16 checkpoint that FastVideo quantizes at load time (for example `transformer_quant: NVFP4` on a bf16
 export) still merges the adapter first and quantizes afterwards, so the quantized weight includes the adapter.
-If quantization retains the original dense weight, adapters continue to merge into that weight and FastVideo
-rebuilds the packed buffers after each adapter change.
+If the NVFP4 layer releases its working weight after packing, its merge-mode LoRA wrapper can restore it from
+the original unsharded CPU snapshot. Changing a pure low-rank adapter rebuilds the packed weights and scales.
+Accumulating another adapter first reapplies the previous contributions in order. Unmerging multiple accumulated
+adapters currently drops earlier contributions from inference ([#2096](https://github.com/hao-ai-lab/FastVideo/issues/2096)).
 
-To make the adapter strength changeable at runtime on a dense checkpoint, set `FASTVIDEO_LORA_SIDE_BRANCH=1`. The
-adapter then runs as a side branch for every layer, at the cost of the extra matmuls. See
+To change strength on a dense checkpoint without remerging, set `FASTVIDEO_LORA_SIDE_BRANCH=1`. The
+adapter then runs as a side branch on supported layers, at the cost of the extra matmuls. See
 [Environment variables](../contributing/env_vars.md).
 
 ## When the whole model does not fit
