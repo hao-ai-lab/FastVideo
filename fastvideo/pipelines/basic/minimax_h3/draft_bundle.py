@@ -26,6 +26,8 @@ BUNDLE_SUFFIX = ".h3draft.pt"
 BUNDLE_MEDIA_TYPE = "application/x-fastvideo-h3-draft"
 BUNDLE_EXTRA_KEY = "open_h3_regenerate_2k_draft_bundle"
 BUNDLE_PATH_EXTRA_KEY = "h3_draft_bundle_path"
+# The built bundle travels back from the output worker in ForwardBatch.extra; the serving process writes it.
+BUNDLE_PAYLOAD_EXTRA_KEY = "h3_draft_bundle_payload"
 # The text token tags kept for the bundle writer: latent preparation consumes and drops the conditioning's copy.
 BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY = "h3_draft_bundle_text_token_tags"
 PROMPT_EMBEDS_POLICIES = ("match", "always", "never")
@@ -85,9 +87,9 @@ def keep_text_token_tags_for_bundle(extra: dict[str, Any], tags: Any) -> None:
         extra[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] = tags
 
 
-def save_draft_bundle(path: str | os.PathLike[str], *, latent: torch.Tensor, prompt_embeds: torch.Tensor | None,
-                      text_token_tags: torch.Tensor | None, prompt: str, text_encoder: str | None) -> None:
-    """Write a bundle atomically (temp file, then rename)."""
+def build_draft_bundle(*, latent: torch.Tensor, prompt_embeds: torch.Tensor | None,
+                       text_token_tags: torch.Tensor | None, prompt: str, text_encoder: str | None) -> dict[str, Any]:
+    """The bundle's contents as CPU tensors, small enough to return from a worker to the serving process."""
     latent = latent.detach()
     if latent.ndim == 5:
         latent = latent[0]
@@ -101,11 +103,28 @@ def save_draft_bundle(path: str | os.PathLike[str], *, latent: torch.Tensor, pro
         "prompt": prompt,
         "text_encoder_fingerprint": text_encoder,
     }
+    return bundle
+
+
+def write_draft_bundle(path: str | os.PathLike[str], bundle: dict[str, Any]) -> None:
+    """Write a bundle atomically (temp file, then rename)."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f".{target.name}.tmp")
     torch.save(bundle, tmp)
     os.replace(tmp, target)
+
+
+def save_draft_bundle(path: str | os.PathLike[str], *, latent: torch.Tensor, prompt_embeds: torch.Tensor | None,
+                      text_token_tags: torch.Tensor | None, prompt: str, text_encoder: str | None) -> None:
+    """Build and write a bundle in one process."""
+    write_draft_bundle(
+        path,
+        build_draft_bundle(latent=latent,
+                           prompt_embeds=prompt_embeds,
+                           text_token_tags=text_token_tags,
+                           prompt=prompt,
+                           text_encoder=text_encoder))
 
 
 def load_draft_bundle(path: str) -> dict[str, Any] | None:
