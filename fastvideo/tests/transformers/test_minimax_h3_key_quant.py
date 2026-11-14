@@ -4,8 +4,8 @@ import pytest
 import torch
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10,
-    reason="requires a Blackwell GPU and the native FP4 attention extension",
+    not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 12,
+    reason="attn_qat_infer native kernels are built only for sm_120a/sm_121a",
 )
 
 
