@@ -638,6 +638,31 @@ if(ENABLE_ATTN_QAT_INFER)
     install(TARGETS fp4quant_cuda LIBRARY DESTINATION .)
 endif()
 
+# MiniMax-H3 fused FFN-up GEMM + SwiGLU + NVFP4 epilogue for GB10 (sm_121a), loaded via ctypes by
+# fastvideo_kernel.h3_swiglu_gemm_binding. Its bit parity with the unfused path depends on BF16
+# subnormals, so it must not use --use_fast_math (which implies -ftz=true).
+set(ENABLE_H3_SWIGLU_GEMM OFF)
+if(ENABLE_ATTN_QAT_INFER AND _FV_HAS_121A)
+    set(ENABLE_H3_SWIGLU_GEMM ON)
+    add_library(fastvideo_h3_swiglu_gemm SHARED csrc/quantization/minimax_h3_swiglu_gemm.cu)
+    target_include_directories(fastvideo_h3_swiglu_gemm PRIVATE
+        ${CMAKE_SOURCE_DIR}/csrc/quantization
+        ${CMAKE_SOURCE_DIR}/include/cutlass/include
+        ${CMAKE_SOURCE_DIR}/include/cutlass/tools/util/include
+    )
+    target_compile_options(fastvideo_h3_swiglu_gemm PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-O3 -ftz=false --expt-relaxed-constexpr --expt-extended-lambda -DNDEBUG>
+    )
+    set_target_properties(fastvideo_h3_swiglu_gemm PROPERTIES
+        OUTPUT_NAME "_fastvideo_h3_swiglu_gemm"
+        CUDA_ARCHITECTURES "121a"
+        CXX_STANDARD 17
+        CUDA_STANDARD 17
+    )
+    target_link_libraries(fastvideo_h3_swiglu_gemm PRIVATE CUDA::cudart)
+    install(TARGETS fastvideo_h3_swiglu_gemm LIBRARY DESTINATION fastvideo_kernel)
+endif()
+
 # One-look answer to "what is this build producing?" — kept last so it is the
 # final thing configure prints. The per-kernel matrix lives in README.md.
 message(STATUS "============== fastvideo-kernel build summary ==============")
@@ -647,5 +672,6 @@ message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnor
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
 message(STATUS "  + Ulysses NCCL-device all-to-all:             ${ENABLE_ULYSSES_A2A}")
 message(STATUS "fp4attn/fp4quant (sm_120a CUDA >= 12.8; sm_121a CUDA >= 13):  ${ENABLE_ATTN_QAT_INFER}")
+message(STATUS "H3 SwiGLU/NVFP4 GEMM (sm_121a):                             ${ENABLE_H3_SWIGLU_GEMM}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")
