@@ -93,12 +93,20 @@ class ScaleResidual(nn.Module):
     Applies gated residual connection.
     """
 
-    def __init__(self, prefix: str = ""):
+    def __init__(self, prefix: str = "", fuse_inference: bool = False):
         super().__init__()
+        # Opt-in exact Triton kernel for the no-grad path. It returns the stream
+        # dtype instead of eager's promoted dtype; see
+        # ScaleResidualLayerNormScaleShift for the contract.
+        self.fuse_inference = fuse_inference
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
         # x.shape: [batch_size, seq_len, inner_dim]
+        if self.fuse_inference:
+            from fastvideo.layers import triton_exact_modulation as exact
+            if exact.supports_gate_residual(residual, x, gate):
+                return exact.gate_residual(residual, x, gate, fp32_copy=False)[0]
         if gate.dim() == 4:
             # gate.shape: [batch_size, num_frames, 1, inner_dim]
             num_frames = gate.shape[1]
@@ -147,11 +155,14 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         fuse_inference: bool = False,
     ):
         super().__init__()
-        # Opt-in Triton fusion for the no-grad path. Off by default: the fused
-        # kernel returns both outputs in the *stream* dtype (so caller-side
-        # .to(orig_dtype) casts become no-ops), which changes the return dtype
-        # contract relative to eager type promotion. Only callers that follow
-        # every call with a cast to the stream dtype (e.g. Wan) should enable.
+        # Opt-in Triton kernels for the no-grad path. Off by default: they
+        # return outputs in the *stream* dtype (so caller-side .to(orig_dtype)
+        # casts become no-ops), which changes the return dtype contract
+        # relative to eager type promotion. Only callers that follow every
+        # call with a cast to the stream dtype (e.g. Wan) should enable. The
+        # default tier (fastvideo/layers/triton_exact_modulation.py) keeps the
+        # norm eager and is bit-exact; FASTVIDEO_ENABLE_FUSED_NORM=1 selects
+        # the fused-norm kernel (fastvideo/layers/triton_fused_norm.py).
         self.fuse_inference = fuse_inference
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
@@ -189,10 +200,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         if (shift is None) != (scale is None):
             raise ValueError("shift and scale must be None together or both be tensors")
 
-        if self.fuse_inference:
+        if self.fuse_inference and not convert_modulation_dtype:
+            from fastvideo.layers import triton_exact_modulation as exact
             from fastvideo.layers.triton_fused_norm import (fused_path_supported, fused_residual_norm_mod)
             if fused_path_supported(residual, x, gate, shift, scale, self.norm):
                 return fused_residual_norm_mod(residual, x, gate, shift, scale, self.norm)
+            if isinstance(self.norm, FP32LayerNorm) and exact.supports_residual_norm(residual, x, gate, shift, scale):
+                return exact.residual_norm_modulate(residual, x, gate, shift, scale, self.norm)
         # x.shape: [batch_size, seq_len, inner_dim]
         # Apply residual connection with gating
         if isinstance(gate, int):
