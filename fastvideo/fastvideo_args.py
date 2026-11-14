@@ -235,6 +235,9 @@ class FastVideoArgs:
     # Exported NVFP4 MiniMax-H3 decoder file (decoder-nvfp4.safetensors or decoder.safetensors) that replaces
     # the VAE decoder at load. Overrides FASTVIDEO_H3_VAE_NVFP4_DECODER. Needs Blackwell FP4 hardware.
     h3_vae_nvfp4_decoder: str | None = None
+    # Quantize the loaded dense decoder in memory, preserving its full depth and original weights file.
+    # Mutually exclusive with an exported NVFP4 decoder; skips the INT8 overlay and uses BF16 decode autocast.
+    h3_vae_nvfp4_quantize_dense: bool = False
 
     # Load each heavy component on first use and free it once the last stage
     # that holds it has run, instead of keeping every component resident from
