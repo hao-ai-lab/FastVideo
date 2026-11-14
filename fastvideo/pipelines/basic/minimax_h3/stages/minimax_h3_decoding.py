@@ -112,7 +112,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         The result lives only on this request. The audio stage transfers it
         after video assembly, keeping its normal output ownership and cleanup.
         Disabled under ``vae_cpu_offload``: overlapping would hold both decoders
-        on the device at once.
+        on the device at once. The callback runs between collective rounds, so
+        it never raises: a failed decode leaves the result ``None`` and the
+        audio stage falls back to its serial decode on the output rank.
         """
         audio_stage, vae = self.audio_stage, self.vae
         if args.vae_cpu_offload:
@@ -129,8 +131,13 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         enabled, dtype = torch.is_autocast_enabled(device.type), torch.get_autocast_dtype(device.type)
 
         def decode_audio() -> None:
-            with torch.autocast(device_type=device.type, enabled=enabled, dtype=dtype):
-                batch.extra[_IDLE_AUDIO_KEY] = audio_stage.decode_audio(batch, args)
+            try:
+                with torch.autocast(device_type=device.type, enabled=enabled, dtype=dtype):
+                    batch.extra[_IDLE_AUDIO_KEY] = audio_stage.decode_audio(batch, args)
+            except Exception:
+                batch.extra[_IDLE_AUDIO_KEY] = None
+                logger.warning("MiniMax-H3 idle-slot audio decode failed; audio decodes after video instead",
+                               exc_info=True)
 
         return decode_audio
 

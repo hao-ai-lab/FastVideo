@@ -3,6 +3,9 @@
 # Uses the published fast-8L NVFP4 decoder on both workers (FASTVIDEO_H3_VAE_NVFP4_DECODER) with parallel temporal chunks.
 # Download the complete release checkpoint as described in
 # docs/getting_started/installation/spark_performance.md.
+# Download the fast-8L decoder the command below selects:
+# hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'fast-8L/decoder-nvfp4.safetensors' --local-dir /path/to/fasth3-nvfp4-vae
+# Run it on both Sparks with the same absolute path: each worker loads the decoder itself.
 #
 # FP4 attention needs fastvideo-kernel built for 12.1a and eager DiT inference.
 # A missing extension is an error. Set h3_vsa_fp4.enabled to false for BF16 VSA.
@@ -12,6 +15,7 @@
 #
 # FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
 # FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
+# FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/fasth3-nvfp4-vae/fast-8L/decoder-nvfp4.safetensors \
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_qad_v2_nvfp4.yaml

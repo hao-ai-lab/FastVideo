@@ -418,8 +418,6 @@ def _mm_fp4(
         raise TypeError(f"Unsupported kwargs for _mm_fp4: {sorted(kwargs)}")
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
-    # Compact H3 FFN-up: direct output slices avoid the concatenation that
-    # otherwise erases cuDNN's gain from these smaller row plans on GB10.
     if (out is None and backend == "cudnn" and block_size == 16 and use_nvfp4 and not use_8x4_sf_layout
             and (a.shape[0], a.shape[1], b.shape[1]) == (14859, 2688, 28672) and a.dtype == torch.uint8
             and a_scale.ndim == 2 and a_scale.shape[0] >= a.shape[0] and a.is_cuda
@@ -471,7 +469,6 @@ def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> li
 
 
 def _mm_fp4_direct_rows(a, b, a_scale, b_scale, alpha, out_dtype, parts: int) -> torch.Tensor:
-    """Run aligned cuDNN row chunks into one contiguous destination, including the final partial tile."""
     _, mm_fp4, _ = _require_flashinfer()
     out = torch.empty((a.shape[0], b.shape[1]), device=a.device, dtype=out_dtype)
     offset = 0
