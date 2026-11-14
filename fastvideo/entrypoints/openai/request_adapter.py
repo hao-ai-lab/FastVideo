@@ -4,11 +4,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import math
 import os
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -51,6 +48,9 @@ class RequestAdaptationError(ValueError):
 OPEN_H3_REGENERATE_2K_FAMILY = "open_h3_regenerate_2k"
 OPEN_H3_REGENERATE_2K_SIZE = (2560, 1440)
 OPEN_H3_REGENERATE_2K_NUM_FRAMES = 124
+# Batch-extra keys the server sets itself. They stay in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS so the in-process batch
+# API can route them, but HTTP `extra_params` must not set them: the value is a server filesystem path.
+_SERVER_OWNED_EXTRA_PARAMS = frozenset({BUNDLE_PATH_EXTRA_KEY})
 
 _MEDIA_SUFFIXES = {
     "video": frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}),
@@ -204,17 +204,27 @@ async def _materialize_draft_bundle(source: str,
             raise RequestAdaptationError(f"Unable to fetch draft_bundle: {error}") from error
         return target, True
     if source[:5].lower() == "data:":
-        header, _, payload = source.partition(",")
-        if header.lower() != f"data:{BUNDLE_MEDIA_TYPE};base64":
-            raise RequestAdaptationError(f"draft_bundle data URLs must be data:{BUNDLE_MEDIA_TYPE};base64,...")
         try:
-            data = base64.b64decode(payload, validate=True)
-        except (binascii.Error, ValueError) as error:
-            raise RequestAdaptationError(f"Unable to decode draft_bundle: {error}") from error
-        if max_bytes is not None and len(data) > max_bytes:
-            raise RequestAdaptationError(f"draft_bundle exceeds the {max_bytes}-byte limit.")
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        await asyncio.to_thread(Path(target).write_bytes, data)
+            media_type = data_url_media_type(source)
+        except MediaPolicyError as error:
+            raise RequestAdaptationError(str(error)) from error
+        if media_type != BUNDLE_MEDIA_TYPE:
+            raise RequestAdaptationError(f"draft_bundle data URLs must be data:{BUNDLE_MEDIA_TYPE};base64,...")
+        limit = get_media_reference_max_bytes() if max_bytes is None else max_bytes
+        decoding = asyncio.ensure_future(asyncio.to_thread(decode_data_url, source, target, max_bytes=limit))
+        try:
+            await asyncio.shield(decoding)
+        except asyncio.CancelledError:
+            # The decoding thread cannot be interrupted; remove its file once it has finished writing.
+            def remove(done: asyncio.Future) -> None:
+                if not done.cancelled():
+                    done.exception()  # mark it retrieved; the request is already gone
+                discard(target)
+
+            decoding.add_done_callback(remove)
+            raise
+        except MediaPolicyError as error:
+            raise RequestAdaptationError(str(error)) from error
         return target, True
     local = _local_media(source, policy)
     if not local.endswith(".pt"):
@@ -479,6 +489,9 @@ def _apply_reference_inputs(
         if normalized_task == "fl2va" and not images:
             raise RequestAdaptationError("MiniMax-H3 task='fl2va' requires one or two image references.")
 
+    if request.draft_bundle is not None and model_family != OPEN_H3_REGENERATE_2K_FAMILY:
+        raise RequestAdaptationError("draft_bundle is only accepted by Open-H3-Regenerate-2K servers.")
+
     if ref2va:
         from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
         from fastvideo.pipelines.basic.minimax_h3.reference import validate_references
@@ -513,8 +526,6 @@ def _apply_reference_inputs(
                                          "and no image or audio references.")
         kwargs["video_path"] = videos[0]
         return
-    if request.draft_bundle is not None:
-        raise RequestAdaptationError("draft_bundle is only accepted by Open-H3-Regenerate-2K servers.")
 
     if model_family == "minimax_h3" and (videos or audios):
         raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
@@ -649,6 +660,9 @@ def build_generation_request(
         unknown_extra_params = sorted(set(request.extra_params) - set(REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS))
         if unknown_extra_params:
             raise RequestAdaptationError("Unsupported extra_params fields: " + ", ".join(unknown_extra_params))
+        server_owned = sorted(set(request.extra_params) & _SERVER_OWNED_EXTRA_PARAMS)
+        if server_owned:
+            raise RequestAdaptationError("extra_params may not set server-owned fields: " + ", ".join(server_owned))
         kwargs.update(request.extra_params)
 
     width = kwargs.get("width")

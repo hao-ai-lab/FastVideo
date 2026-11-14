@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Open-H3-Regenerate-2K draft bundles: latent + prompt conditioning handed over by a paired draft worker."""
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -103,6 +104,20 @@ def test_prompt_embeds_policy(tmp_path):
         bundle_prompt_conditioning(bundle, policy="sometimes")
 
 
+def test_prompt_mismatch_re_encodes_under_match():
+    bundle = _bundle()
+    bundle["text_encoder_fingerprint"] = "abc"
+    assert bundle_prompt_conditioning(bundle, policy="match", text_encoder="abc", prompt="a fox") is not None
+    assert bundle_prompt_conditioning(bundle, policy="match", text_encoder="abc", prompt="a wolf") is None
+    assert bundle_prompt_conditioning(bundle, policy="always", text_encoder="abc", prompt="a wolf") is not None
+
+
+def test_prompt_embeds_policies_match_the_pipeline_config():
+    from fastvideo.configs.pipelines.open_h3_regenerate_2k import PROMPT_EMBEDS_POLICIES as config_policies
+    from fastvideo.pipelines.basic.minimax_h3.draft_bundle import PROMPT_EMBEDS_POLICIES
+    assert config_policies == PROMPT_EMBEDS_POLICIES
+
+
 @torch.no_grad()
 def test_mismatched_encoder_re_encodes_after_the_release_hook(tmp_path):
     path = tmp_path / "clip.pt"
@@ -131,6 +146,25 @@ def test_text_encoder_fingerprint_tracks_files(tmp_path):
     assert text_encoder_fingerprint(tmp_path / "missing") is None
 
 
+def test_text_encoder_fingerprint_uses_only_the_selected_file(tmp_path):
+    folder = tmp_path / "enc"
+    folder.mkdir()
+    selected = folder / "encoder.safetensors"
+    selected.write_bytes(b"aaaa")
+    before = text_encoder_fingerprint(selected)
+    (folder / "sibling.safetensors").write_bytes(b"bbbb")
+    assert text_encoder_fingerprint(selected) == before  # a sibling is not part of a single-file fingerprint
+
+    twin_dir = tmp_path / "twin"
+    twin_dir.mkdir()
+    twin = twin_dir / "encoder.safetensors"
+    twin.write_bytes(b"aaaa")
+    assert text_encoder_fingerprint(twin) == before  # same bytes and name match across folders
+    twin.write_bytes(b"cccc")
+    os.utime(twin, ns=(2, 2))  # force a fresh stat key for the content cache
+    assert text_encoder_fingerprint(twin) != before  # same size, different bytes
+
+
 def test_save_then_load_round_trip(tmp_path):
     target = tmp_path / "out" / "clip.h3draft.pt"
     latent = torch.randn(1, 24, 3, 4, 6)
@@ -154,3 +188,19 @@ def test_text_token_tags_survive_latent_preparation_only_for_bundle_requests():
     assert requested[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] is tags
     keep_text_token_tags_for_bundle(requested, None)
     assert requested[BUNDLE_TEXT_TOKEN_TAGS_EXTRA_KEY] is tags
+
+
+def test_configured_draft_path_beats_a_loaded_bundle(tmp_path):
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.latent_preparation import (
+        Regenerate2KLatentPreparationStage)
+    stage = Regenerate2KLatentPreparationStage.__new__(Regenerate2KLatentPreparationStage)
+    batch = _batch(str(tmp_path / "incoming.pt"))
+    batch.extra[BUNDLE_EXTRA_KEY] = _bundle()
+    stage.draft_latent_path = str(tmp_path / "configured.pt")
+    source = stage._draft_latent_source(batch.video_path)
+    assert source == stage.draft_latent_path
+    assert stage._bundle_for_source(batch, source) is None
+    # With no configured override the request's own bundle is reused.
+    stage.draft_latent_path = None
+    assert stage._draft_latent_source(batch.video_path) == batch.video_path
+    assert stage._bundle_for_source(batch, batch.video_path) is batch.extra[BUNDLE_EXTRA_KEY]

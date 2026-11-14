@@ -60,6 +60,16 @@ def test_draft_bundle_is_refused_by_other_servers(tmp_path):
                                  output_dir=str(tmp_path))
 
 
+def test_extra_params_cannot_set_the_bundle_path(tmp_path):
+    request = VideoGenerationRequest(prompt="a fox",
+                                     size="832x480",
+                                     num_frames=124,
+                                     extra_params={"h3_draft_bundle_path": "/tmp/pwn.h3draft.pt"})
+    with pytest.raises(RequestAdaptationError, match="server-owned"):
+        build_generation_request("video_gen_x", request, _args(H3), served_model_name="minimax-h3",
+                                 output_dir=str(tmp_path))
+
+
 class FileGenerator:
 
     def __init__(self):
@@ -131,6 +141,13 @@ def test_draft_bundle_and_video_reference_conflict(regen):
                            json={"prompt": "a fox", "draft_bundle": str(drafts / "clip.h3draft.pt"),
                                  "video_reference": {"video_url": str(drafts / "draft.mp4")}})
     assert response.status_code == 400 and "either draft_bundle" in response.text
+
+
+def test_return_draft_bundle_is_refused_on_sync(regen):
+    client, generator, _, _ = regen
+    response = client.post("/v1/videos/sync", json={"prompt": "a fox", "return_draft_bundle": True})
+    assert response.status_code == 400 and "sync" in response.text
+    assert not generator.requests
 
 
 def test_the_draft_bundle_route_serves_the_bundle(regen):

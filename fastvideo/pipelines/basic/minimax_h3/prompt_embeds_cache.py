@@ -20,6 +20,7 @@ encoder's own output, bit-identical, so this is an exact-tier optimization.
 from __future__ import annotations
 
 import os
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 
@@ -109,9 +110,13 @@ class PromptEmbedsCache:
         try:
             root.mkdir(parents=True, exist_ok=True)
             target = _entry_path(root, key)
-            tmp = target.with_name(f"{target.name}.tmp")
-            torch.save({"format": FORMAT, "prompt_embeds": entry[0], "text_token_tags": entry[1]}, tmp)
-            os.replace(tmp, target)
+            # Unique per writer: two processes caching the same key must not share a temporary file.
+            tmp = target.with_name(f"{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+            try:
+                torch.save({"format": FORMAT, "prompt_embeds": entry[0], "text_token_tags": entry[1]}, tmp)
+                os.replace(tmp, target)
+            finally:
+                tmp.unlink(missing_ok=True)
         except Exception:
             logger.warning("Could not persist MiniMax-H3 prompt-embeds cache entry %s", key, exc_info=True)
 

@@ -3,6 +3,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 import fastvideo.envs as envs
@@ -12,7 +13,16 @@ from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_latent_cache import (
 )
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages.latent_preparation import (
     Regenerate2KLatentPreparationStage,
+    _parse_encode_tile,
 )
+
+
+def test_encode_tile_override_parses_and_rejects_stalling_specs() -> None:
+    assert _parse_encode_tile(None) is None
+    assert _parse_encode_tile("768,768,128,128") == (768, 768, 128, 128)
+    for spec in ("256,256,256,256", "0,256,32,32", "256,256,-1,32", "256", "256,256,300,32"):
+        with pytest.raises(ValueError):
+            _parse_encode_tile(spec)
 
 
 def test_key_is_content_keyed(tmp_path) -> None:

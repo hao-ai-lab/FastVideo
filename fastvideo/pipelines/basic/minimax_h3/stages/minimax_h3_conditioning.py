@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.distributed.tensor import DTensor
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_tp_world_size, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
@@ -42,7 +42,40 @@ logger = init_logger(__name__)
 _CACHE_FORMAT = 1
 
 
-def prompt_embeds_cache_key(batch: Any, ref2va: bool, model_path: Any, device: Any) -> str | None:
+def _text_encoder_sharded() -> bool:
+    """Whether the Qwen3-VL encoder is tensor-parallel across ranks.
+
+    A per-rank memo hit would let one peer return while another enters the
+    encoder's row-parallel collectives and waits for the missing peer, so the
+    prompt-embeds cache stays off whenever the encoder spans ranks.
+    """
+    if not model_parallel_is_initialized():
+        return False
+    try:
+        return get_tp_world_size() > 1
+    except Exception:  # a probe must never break conditioning
+        return False
+
+
+def text_encoder_cache_settings(fastvideo_args: Any) -> tuple[str, str, str | None]:
+    """The resolved text-encoder identity: checkpoint override, quantization, and configured precision.
+
+    Reads only saved arguments. Touching a deferred conditioner here would materialize Qwen3-VL before the
+    cache lookup, which is the reload the prompt-embeds cache exists to avoid.
+    """
+    override = str(getattr(fastvideo_args, "override_text_encoder_safetensors", None))
+    quant = str(getattr(fastvideo_args, "override_text_encoder_quant", None))
+    pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+    precisions = getattr(pipeline_config, "text_encoder_precisions", None) or ()
+    precision = str(precisions[0]) if precisions else None
+    return override, quant, precision
+
+
+def prompt_embeds_cache_key(batch: Any,
+                            ref2va: bool,
+                            model_path: Any,
+                            device: Any,
+                            encoder_settings: Any = None) -> str | None:
     """Stable digest of everything the conditioning stage consumes.
 
     Returns ``None`` for presentations this cache cannot safely key: a video
@@ -55,6 +88,7 @@ def prompt_embeds_cache_key(batch: Any, ref2va: bool, model_path: Any, device: A
         "ref2va" if ref2va else "fl2va",
         str(model_path),
         str(device),
+        str(encoder_settings),
         str(batch.prompt),
     ]
     anchors = batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, ()) or ()
@@ -321,15 +355,21 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             video_grid_thw=video_grid_thw,
         )
 
+    def _before_text_encoder(self) -> None:
+        """Hook for subclasses: runs once the cache has missed and the encoder is about to be used."""
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
         # Stages built without __init__ (tests, subclasses) have no cache; treat that as off.
         cache = getattr(self, "_prompt_embeds_cache", None)
+        cache_usable = cache is not None and cache.enabled and not _text_encoder_sharded()
         cache_key: str | None = None
-        if cache is not None and cache.enabled:
-            cache_key = prompt_embeds_cache_key(batch, self.ref2va, getattr(fastvideo_args, "model_path", None), device)
+        if cache_usable:
+            settings = text_encoder_cache_settings(fastvideo_args)
+            model_path = getattr(fastvideo_args, "model_path", None)
+            cache_key = prompt_embeds_cache_key(batch, self.ref2va, model_path, device, settings)
             cached = cache.get(cache_key)
             if cached is not None:
                 cached_embeds, cached_tags = cached
@@ -339,6 +379,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 # unmaterialized, so an identical request skips its multi-GiB reload.
                 logger.info("MiniMax-H3 conditioning cache hit (%s); Qwen3-VL stays unmaterialized", cache_key)
                 return batch
+        self._before_text_encoder()
         first_param = next(self.conditioner.parameters(), None)
         moved_for_forward = (getattr(self, "manage_cpu_offload", True) and fastvideo_args.text_encoder_cpu_offload
                              and first_param is not None and not isinstance(first_param, DTensor)
@@ -358,7 +399,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags
-        if cache is not None:
+        if cache_usable:
             cache.put(cache_key, prompt_embeds, text_token_tags)
         return batch
 
@@ -367,4 +408,6 @@ __all__ = [
     "MINIMAX_H3_TEXT_TOKEN_TAGS_KEY",
     "MiniMaxH3ConditioningStage",
     "build_ref2va_presentation",
+    "prompt_embeds_cache_key",
+    "text_encoder_cache_settings",
 ]
