@@ -150,7 +150,11 @@ def timestep_embedding(t: torch.Tensor,
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
+    # Build the frequency table directly on the target device. Creating it on
+    # CPU and copying H2D every call is wasteful and breaks CUDA-graph capture
+    # (H2D copy is illegal mid-capture).
+    freqs = torch.exp(-math.log(max_period) *
+                      torch.arange(start=0, end=half, dtype=dtype, device=t.device) / half)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
