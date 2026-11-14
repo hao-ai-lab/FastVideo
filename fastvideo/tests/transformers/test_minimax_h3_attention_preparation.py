@@ -451,3 +451,27 @@ def test_preconverted_prefix_queries_preserve_dense_attention(batch):
         actual = _prefix_dense_attention(_fp8_per_token(q[:, :128]), k, v, 128, 256, positions, "fp8",
                                           key_is_smoothed=True, prepared_kv=prepared, query_is_fp8=True)
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("two_level_p,single_level", [(True, False), (False, True)])
+def test_dense_fp4_prefix_follows_the_resolved_p_scheme(monkeypatch, two_level_p, single_level):
+    import fastvideo.envs as envs
+    from fastvideo.models.dits import minimax_h3_vsa_fp4
+    from fastvideo.models.dits.minimax_h3_fusions import prefix_attention
+
+    seen = {}
+
+    def fake_dense(q, *args, **kwargs):
+        seen.update(kwargs)
+        return torch.zeros_like(q)
+
+    monkeypatch.setattr(prefix_attention, "dense_fp4_prefix_attention", fake_dense)
+    query = torch.zeros((1, 128, 2, 128), dtype=torch.bfloat16)
+    prepared = (query, query, None, None, None)
+    with envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.override(True), \
+            envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.override(not two_level_p):
+        minimax_h3_vsa_fp4._prefix_dense_attention(query, query, query, 128, 128, torch.arange(128), "fp8",
+                                                   key_is_smoothed=True, prepared_kv=prepared,
+                                                   two_level_p=two_level_p)
+    assert seen["single_level_p_quant"] is single_level
+    assert seen["kv_len"] == 128
