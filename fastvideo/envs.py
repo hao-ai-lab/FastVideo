@@ -667,7 +667,7 @@ FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4 = EnvBool(
     category="performance",
     doc="Run MiniMax-H3 dense prefix attention on the in-tree sm_12x dense NVFP4 SageAttention3 "
     "kernel (attn_qat_infer) instead of bf16 SDPA. Approximate: it quantizes prefix Q/K/V to NVFP4, "
-    "measured 20.5-23.7 dB frames on one-Spark Omni at 1.27x.")
+    "measured 20.5-23.7 dB frames on one-Spark Omni at 1.38x.")
 FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
     0,
     category="performance",

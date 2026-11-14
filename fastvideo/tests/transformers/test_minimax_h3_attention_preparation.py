@@ -417,6 +417,23 @@ def test_combined_kv_preserves_separate_prefix_pool_and_native_bytes(batch, head
                            expected.contiguous().view(torch.uint8))
         assert not padded[:, n_valid:].any()
         assert padded.transpose(1, 2).is_contiguous()
+    if tile != 128 or torch.cuda.get_device_capability() != (12, 1):
+        return  # The dense NVFP4 prefix producers run on the GB10 Omni tile only.
+    api = pytest.importorskip("attn_qat_infer.api")
+    with torch.inference_mode():
+        dense_key, dense_value = pool_quantize_prefix_kv(
+            key, value, mean, inverse, n_valid, valid, source, tile_elems=tile,
+            dense_k=True, emit_bf16_k=False, dense_v=True, emit_bf16_v=False, valid_index=valid_index,
+        )
+        expected_k4 = api.scale_and_quant_fp4_permute(actual_key[1].transpose(1, 2))
+        expected_v4 = api.scale_and_quant_fp4_transpose(actual_key[2].transpose(1, 2))
+    assert dense_key[1] is None and dense_key[2] is None
+    for actual, expected in ((dense_key[0][0], actual_key[0][0]), (dense_key[0][1], actual_key[0][1]),
+                             (dense_key[3], actual_key[3]), (dense_value[0], actual_value[0]),
+                             (dense_value[1][0], actual_value[1][0]), (dense_value[1][1], actual_value[1][1]),
+                             (dense_key[4][0], expected_k4[0]), (dense_key[4][1], expected_k4[1]),
+                             (dense_value[2][0], expected_v4[0]), (dense_value[2][1], expected_v4[1])):
+        assert torch.equal(actual.contiguous().view(torch.uint8), expected.contiguous().view(torch.uint8))
 
 
 @pytest.mark.parametrize("batch", [1, 2])
