@@ -98,11 +98,16 @@ class BaseLayerWithLoRA(nn.Module):
             self.cpu_weight = None
         else:
             self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True)
-        # None disables history; [] starts an eligible layer.
-        self._merged_loras: list[LoRAContribution] | None = [] if self._should_save_merged_loras() else None
-        # Active inference adapters survive unmerge. Keep their factors on the source device;
-        # _merged_loras separately holds CPU copies for rebuilding purged NVFP4 weights.
+        # Immutable CPU replay history must not retain GPU storage in merged mode.
+        # Unmerged inference stages earlier adapters as frozen registered parameters
+        # so module moves and layerwise offloading manage their storage.
         self._active_loras: list[LoRAContribution] = []
+        # NVFP4 replay references the active stack when merged; it does not own a
+        # separately accumulated history. None keeps the existing eligibility policy.
+        self._merged_loras: list[LoRAContribution] | None = (self._active_loras
+                                                             if self._should_save_merged_loras() else None)
+        self._unmerged_lora_A = nn.ParameterList()
+        self._unmerged_lora_B = nn.ParameterList()
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -207,7 +212,11 @@ class BaseLayerWithLoRA(nn.Module):
         # Use live parameters for the current adapter so training retains gradients.
         scale = alpha_over_rank if self.side_branch else float(self.lora_strength) * alpha_over_rank
         current = LoRAContribution(lora_A=self.lora_A, lora_B=self.lora_B, scale=scale)
-        contributions = [*self._active_loras[:-1], current]
+        previous = [
+            LoRAContribution(lora_A=adapter_a, lora_B=adapter_b, scale=saved.scale) for adapter_a, adapter_b, saved in
+            zip(self._unmerged_lora_A, self._unmerged_lora_B, self._active_loras[:-1], strict=True)
+        ]
+        contributions = [*previous, current]
         for contribution in contributions:
             adapter_a, adapter_b = contribution.lora_A, contribution.lora_B
             if isinstance(adapter_b, DTensor):
@@ -282,13 +291,15 @@ class BaseLayerWithLoRA(nn.Module):
             contribution = self._current_lora_contribution()
             self._merge_lora_contribution(contribution)
             self._active_loras.append(contribution)
+            if self._merged_loras is not None:
+                self._merged_loras = self._active_loras
         self.lora_path = lora_path
 
     def _current_lora_contribution(self) -> LoRAContribution:
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-        return LoRAContribution(lora_A=self.lora_A.detach().clone(),
-                                lora_B=self.lora_B.detach().clone(),
+        return LoRAContribution(lora_A=self.lora_A.detach().to("cpu", copy=True),
+                                lora_B=self.lora_B.detach().to("cpu", copy=True),
                                 scale=scale * self.lora_strength)
 
     @torch.no_grad()
@@ -305,14 +316,11 @@ class BaseLayerWithLoRA(nn.Module):
         for contribution in contributions:
             self._merge_lora_contribution(contribution)
         self._active_loras = contributions
+        if self._merged_loras is not None:
+            self._merged_loras = self._active_loras
 
     @torch.no_grad()
     def _merge_lora_contribution(self, contribution: LoRAContribution) -> None:
-        saved_contribution = None
-        if self._merged_loras is not None:
-            saved_contribution = LoRAContribution(lora_A=contribution.lora_A.to("cpu", copy=True),
-                                                  lora_B=contribution.lora_B.to("cpu", copy=True),
-                                                  scale=contribution.scale)
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             unsharded_base_layer = ReplicatedLinear(
@@ -348,8 +356,6 @@ class BaseLayerWithLoRA(nn.Module):
             self.base_layer.weight.data = self._merged_weight(data, contribution).to(current_device, non_blocking=True)
 
         self.merged = True
-        if saved_contribution is not None:
-            self._merged_loras.append(saved_contribution)
 
     def _merged_weight(self, weight: torch.Tensor, contribution: LoRAContribution | None = None) -> torch.Tensor:
         """``weight`` plus the scaled adapter delta, in ``weight``'s dtype.
@@ -398,6 +404,20 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
         self._reset_to_base_weight(preserve_adapters=True)
+        device = self.base_layer.weight.device
+        self._unmerged_lora_A = nn.ParameterList([
+            nn.Parameter(contribution.lora_A.to(device=device, copy=True), requires_grad=False)
+            for contribution in self._active_loras[:-1]
+        ])
+        self._unmerged_lora_B = nn.ParameterList([
+            nn.Parameter(contribution.lora_B.to(device=device, copy=True), requires_grad=False)
+            for contribution in self._active_loras[:-1]
+        ])
+
+    def _clear_lora_history(self) -> None:
+        self._active_loras = []
+        self._unmerged_lora_A = nn.ParameterList()
+        self._unmerged_lora_B = nn.ParameterList()
 
     @torch.no_grad()
     def _reset_to_base_weight(self, *, preserve_adapters: bool = False) -> None:
@@ -405,6 +425,8 @@ class BaseLayerWithLoRA(nn.Module):
         self.merged = False
         if self._merged_loras is not None:
             self._merged_loras = []
+        self._unmerged_lora_A = nn.ParameterList()
+        self._unmerged_lora_B = nn.ParameterList()
         if not preserve_adapters:
             self._active_loras = []
 

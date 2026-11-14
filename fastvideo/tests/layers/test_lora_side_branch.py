@@ -534,3 +534,111 @@ def test_unmerge_after_a_second_merge_restores_the_original_weight() -> None:
     layer.unmerge_lora_weights()
 
     assert torch.equal(layer.base_layer.weight, original)
+
+
+def _accumulated_dense_layer(device="cpu", adapters=2):
+    with torch.no_grad():
+        base = ReplicatedLinear(4, 4, bias=False, params_dtype=torch.bfloat16).to(device)
+        base.weight.fill_(10)
+        layer = get_lora_layer(base)
+        for index, update in enumerate([2, 5, 3, 4][:adapters]):
+            layer.set_lora_weights(torch.ones(1, 4, dtype=torch.bfloat16, device=device),
+                                   torch.full((4, 1), update, dtype=torch.bfloat16, device=device),
+                                   accumulate=index > 0)
+    return layer, torch.ones(2, 4, dtype=torch.bfloat16, device=device)
+
+
+def test_merged_adapter_history_keeps_only_cpu_snapshots() -> None:
+    layer, _ = _accumulated_dense_layer()
+    assert len(layer._active_loras) == 2
+    assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
+    layer.to("meta")
+    assert all(parameter.device.type == "meta" for parameter in layer.parameters())
+    assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+               for tensor in (contribution.lora_A, contribution.lora_B))
+
+
+def test_unmerged_history_follows_module_moves_and_is_visible_to_offloader(env_overrides) -> None:
+    from fastvideo.hooks.layerwise_offload import _offload_tensors
+
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(False))
+    layer, x = _accumulated_dense_layer()
+    layer.unmerge_lora_weights()
+    managed = dict(_offload_tensors(layer))
+    for name in ("_unmerged_lora_A.0", "_unmerged_lora_B.0"):
+        assert name in managed
+        assert not managed[name].requires_grad
+    layer.to(dtype=torch.float64)
+    with torch.no_grad():
+        torch.testing.assert_close(layer(x.double())[0], torch.full((2, 4), 68.0, dtype=torch.float64), rtol=0, atol=0)
+    assert all(parameter.dtype == torch.float64 for parameter in layer._unmerged_lora_A)
+    layer.to("meta")
+    assert all(parameter.device.type == "meta" for parameter in layer.parameters())
+    assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+               for tensor in (contribution.lora_A, contribution.lora_B))
+
+
+def test_unmerged_forward_does_not_transfer_cpu_history_each_call(monkeypatch) -> None:
+    layer, x = _accumulated_dense_layer()
+    layer.unmerge_lora_weights()
+    snapshot_ids = {id(tensor) for contribution in layer._active_loras
+                    for tensor in (contribution.lora_A, contribution.lora_B)}
+    tensor_to = torch.Tensor.to
+
+    def checked_to(tensor, *args, **kwargs):
+        assert id(tensor) not in snapshot_ids, "CPU replay history must be staged before forward"
+        return tensor_to(tensor, *args, **kwargs)
+
+    with monkeypatch.context() as patch, torch.no_grad():
+        patch.setattr(torch.Tensor, "to", checked_to)
+        for _ in range(2):
+            assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+    layer.merge_lora_weights()
+    assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Accumulated adapter offloading requires one CUDA GPU")
+def test_accumulated_adapters_follow_real_layerwise_offload(monkeypatch) -> None:
+    from fastvideo.hooks.hooks import ModuleHookManager
+    from fastvideo.hooks.layerwise_offload import LayerwiseOffloadHook, LayerwiseOffloadState
+
+    device = torch.device("cuda", torch.cuda.current_device())
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: device)
+    layer, x = _accumulated_dense_layer(device)
+    state = LayerwiseOffloadState(torch.cuda.Stream(), device)
+    hook = LayerwiseOffloadHook(state)
+    manager = ModuleHookManager.get_from_or_default(layer)
+    manager.append_forward_hook(hook)
+    try:
+        with hook.mutate_params_scope():
+            layer.unmerge_lora_weights()
+        assert "_unmerged_lora_A.0" in state.cpu_named_parameters
+        assert "_unmerged_lora_B.0" in state.cpu_named_parameters
+        for _ in range(2):
+            with torch.no_grad():
+                assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+            assert not state.gpu_named_parameters
+            assert all(parameter.numel() == 0 for parameter in layer.parameters())
+            assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+                       for tensor in (contribution.lora_A, contribution.lora_B))
+        with hook.mutate_params_scope():
+            layer.merge_lora_weights()
+        assert not any(name.startswith("_unmerged_lora_") for name in state.cpu_named_parameters)
+        with torch.no_grad():
+            assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+    finally:
+        manager.remove_forward_hook(hook.name())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Inductor and CUDA Graph execution require one CUDA GPU")
+@pytest.mark.parametrize("adapters", [1, 2, 4])
+def test_accumulated_adapters_run_with_cuda_inductor(monkeypatch, adapters) -> None:
+    device = torch.device("cuda", torch.cuda.current_device())
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: device)
+    layer, x = _accumulated_dense_layer(device, adapters)
+    layer.unmerge_lora_weights()
+    expected = torch.full_like(x, 4 * (10 + sum([2, 5, 3, 4][:adapters])))
+    with torch.no_grad(), torch._dynamo.config.patch(disable=False):
+        compiled = torch.compile(layer, backend="inductor", fullgraph=True, mode="reduce-overhead")
+        for _ in range(3):
+            assert torch.equal(compiled(x)[0], expected)

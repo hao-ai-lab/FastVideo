@@ -95,6 +95,7 @@ def test_clear_restores_base_weights_after_an_adapter(setup) -> None:
 
     pipeline.set_lora_adapter("a", strength=1.0)
     pipeline.set_lora_adapter("b", strength=1.0, accumulate=True)
+    pipeline.unmerge_lora_weights()
     pipeline.clear_lora_adapter()
 
     for name in ("first", "second"):
@@ -102,6 +103,7 @@ def test_clear_restores_base_weights_after_an_adapter(setup) -> None:
         assert torch.equal(layer.base_layer.weight, original[name])
         assert layer.lora_A is None and not layer.merged
         assert layer._active_loras == []
+        assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
     assert pipeline._runtime_adapter is None and pipeline.cur_adapter_name == ""
     pipeline.set_lora_adapter("b", strength=1.0)
     assert transformer.first.merged and torch.equal(transformer.second.base_layer.weight, original["second"])
