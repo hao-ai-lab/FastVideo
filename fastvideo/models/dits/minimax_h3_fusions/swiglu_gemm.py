@@ -10,14 +10,29 @@ from functools import lru_cache
 
 import torch
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
+
+_VALIDATED_ROWS = (14859, 7430, 29678)  # T2AV one Spark, T2AV per Spark of a pair, Omni one Spark.
+_VALIDATED_WEIGHT = (28672, 2688)
+
 
 @lru_cache(maxsize=1)
 def _backend():
     try:
-        import _fastvideo_h3_swiglu_gemm
-    except ImportError:
+        from fastvideo_kernel import h3_swiglu_gemm_binding
+    except ImportError as exc:
+        logger.info("H3 SwiGLU/NVFP4 GEMM unavailable (%s); using the unfused FFN-up path", exc)
         return None
-    return _fastvideo_h3_swiglu_gemm
+    return h3_swiglu_gemm_binding
+
+
+@lru_cache(maxsize=16)
+def _log_unvalidated_shape(rows: int, k: int, weight: tuple[int, ...]) -> None:
+    logger.info("H3 SwiGLU/NVFP4 GEMM is validated only for rows %s with weight %s; got rows %d, K %d, weight %s. "
+                "Using the unfused FFN-up path.", _VALIDATED_ROWS, _VALIDATED_WEIGHT, rows, k, weight)
 
 
 def pair_weight_columns(weight: torch.Tensor, scales: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -55,8 +70,12 @@ def try_swiglu_gemm(ff, hidden_states: torch.Tensor, pre_quantized) -> torch.Ten
     a_scale = a_scale.reshape(-1, a_scale.shape[-1])
     weight = ff.fc_in._nvfp4_weight
     weight_scales = ff.fc_in._nvfp4_weight_scale
-    if (a.shape not in ((14859, 2688), (7430, 2688), (29678, 2688)) or weight.shape != (28672, 2688)
-            or not ff.fc_out.quant_method.wants_prequantized_input()):
+    if not ff.fc_out.quant_method.wants_prequantized_input():
+        return None
+    if (a.shape[0] not in _VALIDATED_ROWS or a.shape[1] != _VALIDATED_WEIGHT[1]
+            or tuple(weight.shape) != _VALIDATED_WEIGHT):
+        # Exact parity with the cuDNN row-chunk plan is measured per geometry; others keep the unfused path.
+        _log_unvalidated_shape(a.shape[0], a.shape[1], tuple(weight.shape))
         return None
     backend = _backend()
     if backend is None:
@@ -85,7 +104,7 @@ def try_swiglu_gemm(ff, hidden_states: torch.Tensor, pre_quantized) -> torch.Ten
     q = torch.empty((rows, width // 2), device=a.device, dtype=torch.uint8)
     scales = torch.empty(((rows + 127) // 128 * 128, width // 16), device=a.device, dtype=torch.uint8)
     start = 0
-    parts = 8 if rows == 29678 else (2 if rows == 7430 else 4)
+    parts = {29678: 8, 7430: 2, 14859: 4}[rows]
     for chunk, chunk_scale in _mm_fp4_row_chunks(a, a_scale, parts):
         end = start + chunk.shape[0]
         backend.run(chunk, paired_weight, chunk_scale, paired_scales, alpha, output_scale,

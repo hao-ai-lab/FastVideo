@@ -12,7 +12,8 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires 
 def test_epilogue_matches_bf16_and_quantization_boundaries(rows, magnitude):
     if torch.cuda.get_device_capability() != (12, 1):
         pytest.skip("native SM121 epilogue")
-    native = pytest.importorskip('_fastvideo_h3_swiglu_gemm')
+    native = pytest.importorskip('fastvideo_kernel.h3_swiglu_gemm_binding',
+                                 reason='build fastvideo-kernel with TORCH_CUDA_ARCH_LIST=12.1a')
     import flashinfer
     from flashinfer import SfLayout, nvfp4_quantize
     from fastvideo.models.dits.minimax_h3_fusions.swiglu import minimax_h3_swiglu
@@ -52,7 +53,8 @@ def test_epilogue_matches_bf16_and_quantization_boundaries(rows, magnitude):
 def test_omni_eight_chunks_preserve_tail_scales_and_output_guards():
     if torch.cuda.get_device_capability() != (12, 1):
         pytest.skip("native SM121 epilogue")
-    native = pytest.importorskip('_fastvideo_h3_swiglu_gemm')
+    native = pytest.importorskip('fastvideo_kernel.h3_swiglu_gemm_binding',
+                                 reason='build fastvideo-kernel with TORCH_CUDA_ARCH_LIST=12.1a')
     import flashinfer
     from flashinfer import SfLayout, nvfp4_quantize
     from fastvideo.layers.quantization.nvfp4_config import _mm_fp4_row_chunks

@@ -171,6 +171,8 @@ extern "C" int launch_gemm_swiglu(const void* a,const void* b,const void* sa,con
                                  float* amax,void* y,int m,int n,int k,void* workspace,
                                  uint64_t workspace_bytes,int raster,int swizzle,void* raw_stream) {
   using namespace h3_epilogue;
+  // Paired value/gate columns fill whole 128-wide tiles; K must cover whole 128x4 scale atoms.
+  if (m <= 0 || n <= 0 || k <= 0 || n % 128 != 0 || k % 64 != 0) return -2;
   auto stream=static_cast<cudaStream_t>(raw_stream);
   Gemm::Arguments args{};
   args.mode=cutlass::gemm::GemmUniversalMode::kGemm;
