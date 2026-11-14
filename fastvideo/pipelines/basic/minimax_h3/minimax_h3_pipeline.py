@@ -760,10 +760,11 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 audio_scheduler=audio_scheduler,
             ),
         )
-        decoding = MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae)
+        audio_stage = MiniMaxH3AudioDecodingStage(audio_vae=audio_vae)
+        decoding = MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae, audio_stage=audio_stage)
         decoding.text_encoder_fingerprint = self.text_encoder_fingerprint
         self.add_stage("video_decoding_stage", decoding)
-        self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
+        self.add_stage("audio_decoding_stage", audio_stage)
         self._denoise_stages_ready = True
 
     def text_encoder_fingerprint(self) -> str | None:
