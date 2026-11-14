@@ -23,7 +23,7 @@ _BUFFER_OFFLOAD_MIN_BYTES = 1 << 20
 
 
 def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = None):
-    """``(name, tensor)`` for every parameter and, when enabled, every large buffer.
+    """``(name, tensor)`` for parameters, placement markers and optionally large buffers.
 
     ``names`` restricts the walk to the tensors chosen at init: an offloaded buffer is a
     zero-element placeholder afterwards and would fail the size test.
@@ -34,10 +34,12 @@ def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = 
                 yield name, tensor
         return
     yield from module.named_parameters()
-    if envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.get():
-        for name, buf in module.named_buffers():
-            if buf is not None and buf.numel() * buf.element_size() >= _BUFFER_OFFLOAD_MIN_BYTES:
-                yield name, buf
+    offload_buffers = envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.get()
+    for name, buf in module.named_buffers():
+        # Empty placement markers follow weights, even when other buffers stay resident.
+        is_weight_device = name.rsplit(".", 1)[-1] == "weight_device" and buf.numel() == 0
+        if is_weight_device or (offload_buffers and buf.numel() * buf.element_size() >= _BUFFER_OFFLOAD_MIN_BYTES):
+            yield name, buf
 
 
 class LayerwiseOffloadState:
