@@ -2,11 +2,14 @@
 """Native Qwen3-VL conditioner used by MiniMax H3."""
 
 from collections.abc import Iterable
+from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import Any
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.attention.varlen import varlen_attn
 
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import get_tp_world_size
@@ -403,6 +406,39 @@ class MiniMaxH3Qwen3VLVisionMLP(nn.Module):
         return self.linear_fc2(F.gelu(self.linear_fc1(hidden_states), approximate="tanh"))
 
 
+@dataclass(frozen=True)
+class _VisionAttentionMetadata:
+    cu_seqlens: torch.Tensor
+    max_seqlen: int
+
+
+def _vision_attention_metadata(
+    sequence_lengths: list[int], token_count: int, device: torch.device,
+) -> _VisionAttentionMetadata:
+    """Validate packed frame boundaries once for reuse across vision blocks."""
+    if not sequence_lengths or any(length < 1 for length in sequence_lengths):
+        raise ValueError("Vision attention sequence lengths must be nonempty and positive")
+    offsets = [0]
+    for length in sequence_lengths:
+        offsets.append(offsets[-1] + length)
+    if offsets[-1] != token_count:
+        raise ValueError("Vision attention sequence lengths must sum to the token count")
+    if token_count > torch.iinfo(torch.int32).max:
+        raise ValueError("Vision attention token count exceeds int32 offsets")
+    return _VisionAttentionMetadata(
+        torch.tensor(offsets, dtype=torch.int32, device=device), max(sequence_lengths))
+
+
+def _can_use_vision_varlen(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> bool:
+    """Reuse PyTorch's Flash eligibility checks with the native varlen dtype/alignment constraints."""
+    if torch.version.hip is not None or query.dtype not in (torch.float16, torch.bfloat16) or query.shape[-1] % 8:
+        return False
+    params = torch.backends.cuda.SDPAParams(
+        *(tensor.transpose(0, 1).unsqueeze(0) for tensor in (query, key, value)), None, 0.0, False, False)
+    with torch.cuda.device(query.device) if query.is_cuda else nullcontext():
+        return torch.backends.cuda.can_use_flash_attention(params)
+
+
 class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
@@ -418,8 +454,11 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         hidden_states: torch.Tensor,
         sequence_lengths: list[int],
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_metadata: _VisionAttentionMetadata | None = None,
     ) -> torch.Tensor:
         sequence_length = hidden_states.shape[0]
+        if attention_metadata is None:
+            attention_metadata = _vision_attention_metadata(sequence_lengths, sequence_length, hidden_states.device)
         query, key, value = self.qkv(hidden_states).view(sequence_length, 3, self.num_heads, self.head_dim).unbind(1)
         cos, sin = position_embeddings
         query_dtype, key_dtype = query.dtype, key.dtype
@@ -428,21 +467,27 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
         query = (query.float() * cos + _rotate_half(query.float()) * sin).to(query_dtype)
         key = (key.float() * cos + _rotate_half(key.float()) * sin).to(key_dtype)
 
-        query_chunks = query.split(sequence_lengths, dim=0)
-        key_chunks = key.split(sequence_lengths, dim=0)
-        value_chunks = value.split(sequence_lengths, dim=0)
-        outputs = []
-        for query_chunk, key_chunk, value_chunk in zip(query_chunks, key_chunks, value_chunks, strict=True):
-            output = F.scaled_dot_product_attention(
-                query_chunk.transpose(0, 1).unsqueeze(0),
-                key_chunk.transpose(0, 1).unsqueeze(0),
-                value_chunk.transpose(0, 1).unsqueeze(0),
-                dropout_p=0.0,
-                is_causal=False,
-                scale=self.scaling,
-            )
-            outputs.append(output.transpose(1, 2))
-        hidden_states = torch.cat(outputs, dim=1).reshape(sequence_length, -1)
+        if _can_use_vision_varlen(query, key, value):
+            hidden_states = varlen_attn(
+                query, key, value,
+                attention_metadata.cu_seqlens, attention_metadata.cu_seqlens,
+                attention_metadata.max_seqlen, attention_metadata.max_seqlen,
+                scale=self.scaling, window_size=(-1, -1),
+            ).reshape(sequence_length, -1)
+        else:
+            outputs = []
+            offset = 0
+            for length in sequence_lengths:
+                end = offset + length
+                output = F.scaled_dot_product_attention(
+                    query[offset:end].transpose(0, 1).unsqueeze(0),
+                    key[offset:end].transpose(0, 1).unsqueeze(0),
+                    value[offset:end].transpose(0, 1).unsqueeze(0),
+                    dropout_p=0.0, is_causal=False, scale=self.scaling,
+                )
+                outputs.append(output.transpose(1, 2))
+                offset = end
+            hidden_states = torch.cat(outputs, dim=1).reshape(sequence_length, -1)
         return self.proj(hidden_states)
 
 
@@ -460,8 +505,14 @@ class MiniMaxH3Qwen3VLVisionBlock(nn.Module):
         hidden_states: torch.Tensor,
         sequence_lengths: list[int],
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_metadata: _VisionAttentionMetadata | None = None,
     ) -> torch.Tensor:
-        hidden_states = hidden_states + self.attn(self.norm1(hidden_states), sequence_lengths, position_embeddings)
+        hidden_states = hidden_states + self.attn(
+            self.norm1(hidden_states),
+            sequence_lengths,
+            position_embeddings,
+            attention_metadata,
+        )
         return hidden_states + self.mlp(self.norm2(hidden_states))
 
 
@@ -514,17 +565,16 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         )
 
     def forward(self, pixels: torch.Tensor, grid_thw: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        sequence_lengths = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]).tolist()
         hidden_states = self.patch_embed(pixels)
+        attention_metadata = _vision_attention_metadata(sequence_lengths, hidden_states.shape[0], hidden_states.device)
         hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw).to(hidden_states.dtype)
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)
         embedding = torch.cat((rotary, rotary), dim=-1)
         position_embeddings = (embedding.cos(), embedding.sin())
-        sequence_lengths = [
-            int(value) for value in torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
-        ]
         deepstack_features = []
         for layer_index, block in enumerate(self.blocks):
-            hidden_states = block(hidden_states, sequence_lengths, position_embeddings)
+            hidden_states = block(hidden_states, sequence_lengths, position_embeddings, attention_metadata)
             if layer_index in self.deepstack_visual_indexes:
                 merger_index = self.deepstack_visual_indexes.index(layer_index)
                 deepstack_features.append(self.deepstack_merger_list[merger_index](hidden_states))
