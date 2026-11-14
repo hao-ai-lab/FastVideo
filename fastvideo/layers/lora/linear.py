@@ -68,6 +68,19 @@ def _unified_memory_weight(weight: torch.Tensor) -> bool:
         return False
 
 
+def _skips_unmerge_snapshot(base_layer: nn.Module) -> bool:
+    """Whether a unified-memory layer merges without a CPU snapshot.
+
+    NVFP4 layers keep it: they drop their dense weight after packing and rebuild it exactly from the snapshot when
+    an adapter changes, which reversing the delta cannot reproduce.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    if isinstance(getattr(base_layer, "quant_method", None), NVFP4QuantizeMethod):
+        return False
+    return _unified_memory_weight(base_layer.weight)
+
+
 def requires_side_branch(layer: nn.Module) -> bool:
     """Return whether an adapter must run beside ``layer`` instead of being merged into it.
 
@@ -114,7 +127,7 @@ class BaseLayerWithLoRA(nn.Module):
         # memory that host copy is a second allocation in the same physical
         # pool (see _unified_memory_weight), so skip it there and keep only the merge.
         # Such a layer unmerges by reversing the delta, so the adapter factors must survive the merge.
-        keep_snapshot = (not training_mode and not self.side_branch and not _unified_memory_weight(base_layer.weight))
+        keep_snapshot = not training_mode and not self.side_branch and not _skips_unmerge_snapshot(base_layer)
         self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True) if keep_snapshot else None
         # None disables history; [] starts an eligible layer.
         self._merged_loras: list[LoRAContribution] | None = [] if self._should_save_merged_loras() else None
