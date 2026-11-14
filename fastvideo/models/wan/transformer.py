@@ -13,7 +13,7 @@ from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift)
+                                        ScaleResidualLayerNormScaleShift, norm_modulate)
 from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
@@ -480,7 +480,7 @@ class WanTransformerBlock(nn.Module):
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
-        self.mlp_residual = ScaleResidual()
+        self.mlp_residual = ScaleResidual(fuse_inference=True)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
@@ -526,7 +526,8 @@ class WanTransformerBlock(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = norm_modulate(hidden_states, self.norm1, shift_msa, scale_msa, out_dtype=orig_dtype,
+                                           norm_input_fp32=True)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -652,7 +653,7 @@ class WanTransformerBlock_VSA(nn.Module):
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
-        self.mlp_residual = ScaleResidual()
+        self.mlp_residual = ScaleResidual(fuse_inference=True)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
@@ -678,7 +679,8 @@ class WanTransformerBlock_VSA(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = norm_modulate(hidden_states, self.norm1, shift_msa, scale_msa, out_dtype=orig_dtype,
+                                           norm_input_fp32=True)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -838,6 +840,11 @@ class WanTransformer3DModel(BaseDiT):
 
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
+        # The transpose above leaves the residual stream seq-minor, and eager
+        # elementwise ops keep that layout through every block: each LayerNorm
+        # then copies its input, and the Triton residual/modulation kernels
+        # (which need a row-major stream) never run. One copy here fixes both.
+        hidden_states = hidden_states.contiguous()
 
         current_seq_len = hidden_states.shape[1]
         sp_world_size = get_sp_world_size()
