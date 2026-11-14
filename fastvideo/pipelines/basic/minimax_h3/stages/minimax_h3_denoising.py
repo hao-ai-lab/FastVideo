@@ -324,7 +324,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # then its own sparse region keeping that fraction of its tiles.
             # Without one, every conditioning row stays dense.
             vsa_ref_keep_rate = getattr(fastvideo_args.pipeline_config, "vsa_ref_keep_rate", None)
-            if vsa_ref_keep_rate is None:
+            if vsa_ref_keep_rate is None or not layout.reference_segments:
                 vsa_packed_segments = _h3_vsa_single_region_segments(layout, vsa_patch_size)
             else:
                 vsa_packed_segments = _h3_vsa_ref2va_segments(layout, vsa_patch_size)
