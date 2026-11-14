@@ -37,6 +37,8 @@ def _validate(a, b, a_scale, b_scale, alpha, global_scale, q, scales, amax, valu
     if a.dim() != 2 or b.dim() != 2 or b.shape[0] != a.shape[1] or not b.T.is_contiguous():
         raise ValueError(f'H3 SwiGLU GEMM needs a [M, K/2] and b [K/2, N] with a contiguous b.T; got '
                          f'{tuple(a.shape)}, {tuple(b.shape)}')
+    if b_scale.dim() != 2 or not b_scale.T.is_contiguous():
+        raise ValueError('H3 SwiGLU GEMM b_scale must be the transpose of a contiguous 128x4-swizzled scale tensor')
     device, byte = a.device, (torch.uint8, torch.float8_e4m3fn)
     rows, n = a.shape[0], b.shape[1]
     padded_rows = (rows + 127) // 128 * 128

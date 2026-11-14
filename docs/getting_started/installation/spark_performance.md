@@ -393,6 +393,16 @@ off on other GPUs unless a matched benchmark validates the split there.
 
 ### Optional NVFP4 video decoder
 
+The published decoders are in `FastVideo/FastH3-NVFP4-VAE-Decoder`. The
+FastH3-QAD-v2 Spark recipes select the fast 8-layer one:
+
+```bash
+hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./fasth3-nvfp4-vae
+```
+
+On a Spark pair, download it on both machines to the same absolute path;
+each worker loads the decoder from `FASTVIDEO_H3_VAE_NVFP4_DECODER` itself.
+
 `FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
 decoder distilled with quantization-aware training and exported by
 `scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py`. At load the

@@ -140,6 +140,10 @@ def test_misplaced_or_mistyped_outputs_raise_before_launch():
         native.run(qa, paired_w, sa, paired_s, unit, unit, q.T.contiguous().T, scales)
     with pytest.raises(ValueError, match='GEMM alpha '):
         native.run(qa, paired_w, sa, paired_s, unit.double(), unit, q, scales)
+    with pytest.raises(ValueError, match='GEMM b_scale '):
+        native.run(qa, paired_w, sa, paired_s.contiguous(), unit, unit, q, scales)
+    with pytest.raises(ValueError, match='contiguous b.T'):
+        native.run(qa, paired_w.contiguous(), sa, paired_s, unit, unit, q, scales)
 
 
 @torch.inference_mode()
