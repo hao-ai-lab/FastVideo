@@ -9,9 +9,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _native_api():
+    if torch.cuda.get_device_capability()[0] != 12:
+        pytest.skip("attn_qat_infer native kernels are built only for sm_120a/sm_121a")
+    from attn_qat_infer import api
+    return api
+
+
 @pytest.mark.parametrize("batch,heads,seq,start", [(1, 1, 128, 0), (2, 3, 512, 128), (1, 56, 1024, 384)])
 def test_norm_rope_query_codes_and_suffix_scales_are_exact(batch, heads, seq, start):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits.minimax_h3_fusions.qknorm_rope import (
         fused_qknorm_rope, qknorm_rope_quantize_fp4,
     )
@@ -64,7 +71,7 @@ def test_omni_identity_gather_preserves_padded_qk_and_query_packing(batch, heads
 @pytest.mark.parametrize("tile,tiles", [(64, 1), (64, 5), (64, 288), (128, 5), (256, 3)])
 @pytest.mark.parametrize("density", [0.0, 0.5, 1.0])
 def test_native_block_lists_preserve_order_quadrants_and_partial_tiles(tile, tiles, density):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits.minimax_h3_fusions.block_lists import tile_mask_to_fp4_blocks
 
     torch.manual_seed(842)
@@ -83,7 +90,7 @@ def test_native_block_lists_preserve_order_quadrants_and_partial_tiles(tile, til
 @pytest.mark.parametrize("smooth", [False, True])
 @pytest.mark.parametrize("prepared", ["query", "value", "both"])
 def test_prepared_inputs_keep_native_key_permutation_without_prepared_keys(smooth, prepared):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _sparse_fp4_attention
 
     torch.manual_seed(918)
@@ -109,7 +116,7 @@ def test_prepared_inputs_keep_native_key_permutation_without_prepared_keys(smoot
 def test_value_pool_and_native_transposed_quantization_are_bit_exact(
     batch, heads, seq, strided, wide, tile, large_range,
 ):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.attention.backends.video_sparse_attn_h3 import _pool_tiles
     from fastvideo.models.dits.minimax_h3_fusions.value_quant import _pool_and_quantize, pool_quantize_values
 
@@ -194,7 +201,7 @@ def test_compact_projection_consumers_match_zero_padded_inputs(batch, heads, rot
 
 @pytest.mark.parametrize("batch,rows,heads", [(1, 128, 3), (2, 512, 4), (1, 1024, 56)])
 def test_key_only_preparation_matches_separate_bf16_shift_and_native_packing(batch, rows, heads):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits.minimax_h3_fusions.key_quant import quantize_smoothed_keys_only
 
     torch.manual_seed(153)
@@ -208,7 +215,7 @@ def test_key_only_preparation_matches_separate_bf16_shift_and_native_packing(bat
 
 
 def test_fused_key_only_attention_matches_original_native_entrypoint():
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _sparse_fp4_attention
 
     torch.manual_seed(255)
@@ -227,7 +234,7 @@ def test_fused_key_only_attention_matches_original_native_entrypoint():
 @pytest.mark.parametrize("tile", [64, 128])
 @pytest.mark.parametrize("large_range", [False, True])
 def test_key_pool_and_prefix_preparation_preserve_native_bits(batch, heads, seq, strided, tile, large_range):
-    from attn_qat_infer import api
+    api = _native_api()
     from fastvideo.attention.backends.video_sparse_attn_h3 import _pool_tiles
     from fastvideo.models.dits.minimax_h3_fusions.key_quant import pool_quantize_smoothed_keys
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _fp8_per_token
@@ -299,7 +306,6 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
     if not compact:
         inverse = None
         valid = torch.randint(1, tile + 1, (rows // tile,), device="cuda", dtype=torch.int32)
-        # Direct padded inputs must retain all row values, including invalid rows.
         x.copy_(torch.ldexp(x.float(), torch.randint(-20, 9, x.shape, device=x.device)).to(x.dtype))
     weight = torch.randn(128, device="cuda", dtype=x.dtype)
     cos, sin = (torch.randn((rows, rotary_dim), device="cuda", dtype=x.dtype) for _ in range(2))

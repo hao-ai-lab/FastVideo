@@ -27,7 +27,6 @@ def test_fp8_receive_tiles_match_separate_unpack_and_scatter(world, local_rows, 
     untile = torch.randperm(tile_rows, device="cuda")[:sequence_length]
     inverse = torch.full((tile_rows,), -1, device="cuda", dtype=torch.int64)
     inverse[untile] = torch.arange(sequence_length, device="cuda")
-    # Ensure special finite FP8 values and distinct source-rank boundaries are covered.
     payload[:, :, 0, 0, :4] = torch.tensor([0.0, -0.0, 448.0, -448.0], device="cuda").to(payload.dtype)
     expected = torch.zeros((3, tile_rows, heads, dim), device="cuda", dtype=torch.bfloat16)
     expected.index_copy_(1, untile, _unpack_seq_fp8(payload, scales, sequence_length))
@@ -35,7 +34,6 @@ def test_fp8_receive_tiles_match_separate_unpack_and_scatter(world, local_rows, 
     actual = unpack_fp8_tiles(payload, scales, inverse, output)
     assert actual.data_ptr() == output.data_ptr()
     assert torch.equal(actual.view(torch.uint8), expected.view(torch.uint8))
-    # Reuse must overwrite old values as well as all padding rows.
     scales.mul_(0.25)
     expected.zero_().index_copy_(1, untile, _unpack_seq_fp8(payload, scales, sequence_length))
     unpack_fp8_tiles(payload, scales, inverse, output)

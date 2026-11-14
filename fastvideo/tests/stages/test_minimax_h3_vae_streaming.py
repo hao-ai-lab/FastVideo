@@ -504,10 +504,10 @@ def test_idle_audio_preserves_request_and_output_ownership(monkeypatch, rank, us
     for _ in range(2):
         batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4),
                              latents=torch.ones(2, 4), audio_latents=torch.ones(2, 4))
-        callback = video._idle_audio_callback(batch, SimpleNamespace(), group, torch.device("cpu"))
+        args = SimpleNamespace(vae_cpu_offload=False)
+        callback = video._idle_audio_callback(batch, args, group, torch.device("cpu"))
         assert (callback is not None) == (rank == 1)
         if callback is not None and use_idle_slot:
-            # Video's autocast must not change audio's arithmetic.
             with torch.autocast("cpu", dtype=torch.bfloat16):
                 callback()
         assert batch.latents is not None and batch.audio_latents is not None
@@ -521,3 +521,13 @@ def test_idle_audio_preserves_request_and_output_ownership(monkeypatch, rank, us
     if rank == 0:
         assert saved[0].data_ptr() != saved[1].data_ptr()
         torch.testing.assert_close(saved[0], waveform, atol=0, rtol=0)
+
+
+def test_idle_audio_stays_off_under_vae_cpu_offload() -> None:
+    audio = SimpleNamespace(decode_audio=lambda batch, args: pytest.fail("audio must wait for the video unload"))
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    group = SimpleNamespace(world_size=2, rank_in_group=1)
+    batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4))
+    args = SimpleNamespace(vae_cpu_offload=True)
+    assert video._idle_audio_callback(batch, args, group, torch.device("cpu")) is None
+    assert minimax_h3_decoding._IDLE_AUDIO_KEY not in batch.extra
