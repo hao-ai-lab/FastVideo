@@ -645,6 +645,8 @@ surfaces:
 
   openai_video_request:
     kept:
+      return_draft_bundle: "MiniMax-H3 draft handoff: keep the finished draft's latent and conditioning for GET /v1/videos/{id}/draft_bundle."
+      draft_bundle: "MiniMax-H3 draft handoff: a saved draft bundle (URL, media-root path or data URL) that Open-H3-Regenerate-2K refines."
       model: "HTTP adapter model-routing field."
       user: "OpenAI-compatible caller tracking field."
       task: "SGLang-compatible MiniMax-H3 task selector validated against the startup pipeline."

@@ -5,7 +5,7 @@ Diffusion pipelines for fastvideo.
 This package contains diffusion pipelines for generating videos and images.
 """
 
-from typing import cast
+from typing import Any, cast
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -25,7 +25,9 @@ class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
 
 
 def build_pipeline(fastvideo_args: FastVideoArgs,
-                   pipeline_type: PipelineType | str = PipelineType.BASIC) -> PipelineWithLoRA:
+                   pipeline_type: PipelineType | str = PipelineType.BASIC,
+                   *,
+                   loaded_modules: dict[str, Any] | None = None) -> PipelineWithLoRA:
     """
     Only works with valid hf diffusers configs. (model_index.json)
     We want to build a pipeline based on the inference args mode_path:
@@ -56,7 +58,8 @@ def build_pipeline(fastvideo_args: FastVideoArgs,
     logger.info("Model path: %s", model_path)
 
     # instantiate the pipelines
-    pipeline = pipeline_cls(model_path, fastvideo_args)
+    pipeline = (pipeline_cls(model_path, fastvideo_args, loaded_modules=loaded_modules)
+                if loaded_modules else pipeline_cls(model_path, fastvideo_args))
 
     logger.info("Pipelines instantiated")
 

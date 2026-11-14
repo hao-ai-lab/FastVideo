@@ -37,6 +37,7 @@ def test_serve_config_includes_server_and_default_request_defaults() -> None:
         "port": 8000,
         "output_dir": "outputs/",
         "served_model_name": None,
+        "model_catalog": None,
         "media_reference_max_bytes": 2 * 1024**3,
         "media_roots": [],
         "allow_private_media_urls": False,

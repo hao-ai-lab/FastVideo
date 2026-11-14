@@ -14,6 +14,8 @@ class ServerConfig:
     port: int = 8000
     output_dir: str = "outputs/"
     served_model_name: str | None = None
+    # Optional local catalog of serve configurations for single-device model switching.
+    model_catalog: str | None = None
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
     # Directories whose files HTTP callers may reference by local path. Empty rejects local paths.
     media_roots: list[str] = field(default_factory=list)
