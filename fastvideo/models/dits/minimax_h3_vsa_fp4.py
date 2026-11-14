@@ -19,6 +19,7 @@ with one gather before ``to_out``.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -813,12 +814,23 @@ def _apply_gate(out: torch.Tensor, out_c: torch.Tensor, row_tile: torch.Tensor, 
     return out + out_c.index_select(0, row_tile) * gate
 
 
-def _all_to_all(payload: torch.Tensor, scale: torch.Tensor, group: Any) -> tuple[torch.Tensor, torch.Tensor]:
+def _all_to_all(payload: torch.Tensor, scale: torch.Tensor, group: Any,
+                overlap: Callable[[], None] | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     import torch.distributed as dist
     recv = torch.empty_like(payload)
     recv_scale = torch.empty_like(scale)
-    dist.all_to_all_single(recv.view(torch.uint8), payload.view(torch.uint8), group=group)
-    dist.all_to_all_single(recv_scale, scale, group=group)
+    if overlap is None:
+        dist.all_to_all_single(recv.view(torch.uint8), payload.view(torch.uint8), group=group)
+        dist.all_to_all_single(recv_scale, scale, group=group)
+    else:
+        # Keep the current compute stream independent of NCCL until the local
+        # projection has been enqueued. wait() then orders consumers of recv.
+        payload_work = dist.all_to_all_single(recv.view(torch.uint8), payload.view(torch.uint8),
+                                              group=group, async_op=True)
+        scale_work = dist.all_to_all_single(recv_scale, scale, group=group, async_op=True)
+        overlap()
+        payload_work.wait()
+        scale_work.wait()
     return recv, recv_scale
 
 
@@ -836,6 +848,7 @@ class _SPTileLayout(_KeyIndexCache):
         # Rows past the sequence are SP padding; their outputs are discarded.
         self.local_row_tile = row_tile[local.clamp_max(self.seq_len - 1)]
         self._buf: torch.Tensor | None = None
+        self._inverse: torch.Tensor | None = None
 
     def tiles_from(self, qkv: torch.Tensor) -> torch.Tensor:
         """``[3, L, Hs, D]`` packed -> ``[3, rows, Hs, D]`` tile order with zero padding (reused buffer)."""
@@ -844,19 +857,40 @@ class _SPTileLayout(_KeyIndexCache):
             self._buf = qkv.new_zeros(shape)
         return self._buf.index_copy_(1, self.untile, qkv)
 
+    def fp8_buffers(self, payload: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the invariant row map and scratch tensor overwritten by each receive."""
+        if self._inverse is None:
+            self._inverse = torch.full((self.rows,), -1, device=payload.device, dtype=torch.int64)
+            self._inverse[self.untile] = torch.arange(self.seq_len, device=payload.device)
+        shape = (3, self.rows, *payload.shape[3:])
+        if self._buf is None or self._buf.shape != shape:
+            self._buf = torch.empty(shape, dtype=torch.bfloat16, device=payload.device)
+        return self._inverse, self._buf
+
+    def tiles_from_fp8(self, payload: torch.Tensor, scale: torch.Tensor, *, query_start: int | None = None):
+        from fastvideo.models.dits.minimax_h3_fusions.sp_exchange import unpack_fp8_tiles
+
+        inverse, output = self.fp8_buffers(payload)
+        return unpack_fp8_tiles(payload, scale, inverse, output, query_start=query_start)
+
 
 def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, torch.Tensor],
                          meta: MiniMaxH3VSAMetadata, use_fused_rope: bool, sp_group: Any,
                          pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None) -> torch.Tensor:
     """Ulysses-SP attention core on local sequence rows ``[1, rows, C]``; returns pre-``to_out`` ``[1, rows, H*D]``."""
-    if pre_quantized is not None:
-        raise RuntimeError("H3 SP attention does not consume producer-quantized input yet")
     import torch.distributed as dist
 
     api = _api()
     world, rank = sp_group.world_size, sp_group.rank_in_group
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
     local_rows = hidden_states.shape[1]
+    chunks = getattr(attn, "_vsa_fp4_options", {}).get("sp_head_chunks", 1)
+    if heads % (world * chunks):
+        raise ValueError("H3 SP attention heads must divide evenly across ranks and head chunks")
+    if (chunks > 1 and use_fused_rope and hidden_states.is_cuda and hidden_states.dtype == torch.bfloat16
+            and attn.to_gate_compress is not None and attn._gate_active()):
+        from fastvideo.models.dits.minimax_h3_fusions.sp_head_pipeline import attention_pipelined
+        return attention_pipelined(attn, hidden_states, rotary_emb, meta, sp_group, chunks, pre_quantized=pre_quantized)
     layout = getattr(meta, "_h3_fp4_sp_layout", None)
     if layout is None:
         layout = _SPTileLayout(meta, rank, local_rows)
@@ -865,23 +899,57 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
     gate_linear = attn.to_gate_compress if attn.to_gate_compress is not None and attn._gate_active() else None
     projections = (attn.to_q, attn.to_k, attn.to_v) + ((gate_linear, ) if gate_linear is not None else ())
     with STAGES.span("qkv_proj_rope"):
-        query, key, value, *gate_out = _shared_input_projections(projections, hidden_states)
-        query, key, value = (t.unflatten(-1, (heads, dim)) for t in (query, key, value))
+        shared = _shared_qkv_gate_projections(attn, hidden_states, pre_quantized=pre_quantized)
+        gate_out: list[torch.Tensor] = []
+        if shared is None:
+            # Without a shared packed input, the gate still shares FP8/unit-scale preparation with QKV.
+            projected = _shared_input_projections(projections, hidden_states)
+            projected, gate_out = projected[:3], projected[3:]
+            gate_pre = None
+        else:
+            projected, gate_pre = shared
+        query, key, value = (t.unflatten(-1, (heads, dim)) for t in projected)
+        del projected, shared
+        fused_transport = (use_fused_rope and query.is_cuda and query.dtype == torch.bfloat16
+                           and all(t.is_contiguous() for t in (query, key, value)))
         if use_fused_rope:
-            from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
             cos, sin = rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype)
-            query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
-            key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
+            if not fused_transport:
+                from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
+                query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
+                key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
         else:
             query = attn._apply_rotary_emb(attn.norm_q(query), rotary_emb)
             key = attn._apply_rotary_emb(attn.norm_k(key), rotary_emb)
 
+    gate = None
+
+    def project_gate() -> None:
+        nonlocal gate
+        with STAGES.span("gate_proj"):
+            if gate_out:
+                gate = gate_out[0]
+            elif gate_pre is None:
+                gate, _ = attn.to_gate_compress(hidden_states)
+            else:
+                linear = attn.to_gate_compress
+                gate = linear.quant_method.apply(linear, hidden_states, linear.bias, pre_quantized=gate_pre)
+
+    gate_active = attn.to_gate_compress is not None and attn._gate_active()
     with STAGES.span("qkv_pack"):
-        payload, scale = _pack_heads_fp8(query[0], key[0], value[0], world)
+        if fused_transport:
+            from fastvideo.models.dits.minimax_h3_fusions.sp_qkv_pack import pack_normalized_qkv_fp8
+            payload, scale = pack_normalized_qkv_fp8(
+                query[0], key[0], value[0], attn.norm_q.weight, attn.norm_k.weight,
+                cos, sin, attn.norm_q.eps, attn.norm_k.eps, world,
+            )
+        else:
+            payload, scale = _pack_heads_fp8(query[0], key[0], value[0], world)
     with STAGES.span("qkv_all_to_all"):
-        payload, scale = _all_to_all(payload, scale, sp_group.device_group)
+        payload, scale = _all_to_all(payload, scale, sp_group.device_group,
+                                     overlap=project_gate if gate_active else None)
     with STAGES.span("qkv_unpack_tile"):
-        qkv = layout.tiles_from(_unpack_seq_fp8(payload, scale, layout.seq_len))  # [3, R, Hs, D]
+        qkv = layout.tiles_from_fp8(payload, scale)  # [3, R, Hs, D]
     q_t, k_t, v_t = qkv[0:1], qkv[1:2], qkv[2:3]
 
     vbs = meta.variable_block_sizes
@@ -893,27 +961,43 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
         sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
         mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
                                  meta.span_sparsities)
-        q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
+        q2k_idx, q2k_num, kv_valid, q2k_quad = _tile_mask_to_fp4_blocks(api, mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
         out_bhsd = _fp4_fine_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad,
                                        logical=logical, prefix_rows=prefix_rows, precision=prefix_mode,
                                        options=getattr(attn, "_vsa_fp4_options", {}), layout=layout)
 
+    out_c, gathered = None, None
+
+    def compress_gate() -> None:
+        nonlocal out_c, gathered
+        with STAGES.span("gate_compress"):
+            v_pooled = _pool_tiles(v_t[:, :logical], vbs, layout.tile)
+            out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)[0].to(qkv.dtype)  # [Hs, n_tiles, D]
+            gathered = torch.empty((world, *out_c.shape), dtype=out_c.dtype, device=out_c.device)
+
     with STAGES.span("out_pack"):
         payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)
     with STAGES.span("out_all_to_all"):
-        payload, scale = _all_to_all(payload, scale, sp_group.device_group)
-    with STAGES.span("out_unpack"):
-        out = _unpack_heads_fp8(payload, scale)  # [rows, H, D]
-
-    if gate_linear is not None:
-        with STAGES.span("gate_compress"):
-            v_pooled = _pool_tiles(v_t[:, :logical], vbs, layout.tile)
-            out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)[0].to(out.dtype)  # [Hs, n_tiles, D]
-            gathered = torch.empty((world, *out_c.shape), dtype=out_c.dtype, device=out_c.device)
+        payload, scale = _all_to_all(payload, scale, sp_group.device_group,
+                                     overlap=compress_gate if gate_active else None)
+    if gate_active:
+        assert out_c is not None and gathered is not None
         with STAGES.span("gate_all_gather"):
             dist.all_gather_into_tensor(gathered, out_c.contiguous(), group=sp_group.device_group)
         with STAGES.span("gate_apply"):
-            out_c_all = gathered.flatten(0, 1).transpose(0, 1)  # [n_tiles, H, D]
-            out = _apply_gate(out, out_c_all, layout.local_row_tile, gate_out[0][0].unflatten(-1, (heads, dim)))
+            from fastvideo.models.dits.minimax_h3_fusions.sp_exchange import unpack_fp8_gate
+            from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+            assert gate is not None
+            local_gate = gate[0].unflatten(-1, (heads, dim))
+            method = getattr(attn.to_out, "quant_method", None)
+            if (type(method) is NVFP4QuantizeMethod and method.wants_prequantized_input()
+                    and method.uses_unit_activation_scale(attn.to_out) and gate.shape[-1] % 64 == 0):
+                prepared = unpack_fp8_gate(payload, scale, gathered, local_gate, layout.local_row_tile, method.x_global_sf)
+                return gate, prepared
+            out = unpack_fp8_gate(payload, scale, gathered, local_gate, layout.local_row_tile)
+    else:
+        with STAGES.span("out_unpack"):
+            out = _unpack_heads_fp8(payload, scale)  # [rows, H, D]
     return out.flatten(1, 2).unsqueeze(0)

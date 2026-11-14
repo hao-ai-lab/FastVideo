@@ -445,8 +445,7 @@ class MiniMaxH3Attention(nn.Module):
         if (not self._vsa_fp4 or fine_override is not None or rotary_emb is None
                 or torch.is_grad_enabled() or torch.compiler.is_compiling()
                 or not hidden_states.is_cuda or hidden_states.dtype != torch.bfloat16
-                or torch.cuda.get_device_capability(hidden_states.device)[0] < 10
-                or (model_parallel_is_initialized() and get_sp_world_size() > 1)):
+                or torch.cuda.get_device_capability(hidden_states.device)[0] < 10):
             return None
         meta = get_forward_context().attn_metadata
         if not isinstance(meta, MiniMaxH3VSAMetadata) or not meta.exempt or meta.pad_tokens:
