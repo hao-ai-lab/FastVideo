@@ -23,7 +23,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_VISION_START_TOKEN,
 )
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, sample_reference_video_frames
-from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import (MINIMAX_H3_KEYFRAMES_KEY,
+                                                                                      uses_references)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -121,9 +122,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
-        else:
+        if not uses_references(self.ref2va, batch):
             result.add_check("keyframes", batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY), V.is_list)
         return result
 
@@ -287,7 +286,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             # Keep both H3 prompt-presentation modes under one text-encoding
             # range so Nsight Systems exposes their complete conditioning cost.
             with nvtx_range("minimax_h3.text_encoding"):
-                if self.ref2va:
+                if uses_references(self.ref2va, batch):
                     prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
                 else:
                     prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)

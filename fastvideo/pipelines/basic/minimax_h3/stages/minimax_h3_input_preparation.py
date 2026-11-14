@@ -105,6 +105,11 @@ def resolve_target_num_frames(num_frames: object) -> int:
     return aligned
 
 
+def uses_references(ref2va: bool, batch: ForwardBatch) -> bool:
+    """Whether a request runs the Ref2VA layout; a Ref2VA pipeline runs plain T2VA without references."""
+    return ref2va and bool(batch.references)
+
+
 class MiniMaxH3InputPreparationStage(PipelineStage):
     """Prepare FL2VA/T2VA or Ref2VA inputs without a parallel family state object."""
 
@@ -124,8 +129,6 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, lambda value: value == 1)
         result.add_check("latents", batch.latents, V.none_or_tensor)
         result.add_check("audio_latents", batch.audio_latents, V.none_or_tensor)
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -148,7 +151,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY),
             lambda value: isinstance(value, tuple),
         )
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             result.add_check(
                 "prepared_references",
                 batch.references,
@@ -224,7 +227,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         del fastvideo_args
         prepare_common_request(batch)
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             self._prepare_ref2va(batch)
         else:
             self._prepare_fl2va(batch)
