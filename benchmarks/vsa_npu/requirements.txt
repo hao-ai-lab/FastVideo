@@ -1,0 +1,12 @@
+# Additional standalone imports/tests; first provide the NPU runtime in README.
+numpy==1.26.4
+einops==0.8.1
+pytest==8.4.2
+pydantic==2.13.3
+diffusers==0.38.0
+transformers==4.57.6
+omegaconf==2.3.0
+rich==14.2.0
+remote-pdb==2.1.0
+imageio==2.37.0
+ftfy==6.3.1
