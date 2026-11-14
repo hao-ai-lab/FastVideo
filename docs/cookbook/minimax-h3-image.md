@@ -27,7 +27,7 @@ python examples/inference/basic/basic_minimax_h3_image_t2i.py
 
 ## Reference edit
 
-The prompt names references as `<Picture 1>`. The encoder label is `Picture 1: `
+The prompt names references as `<Picture 1>`. The encoder label is `Picture 1:`
 without angle brackets. Up to 16 references.
 
 ```bash
