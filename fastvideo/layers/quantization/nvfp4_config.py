@@ -884,6 +884,10 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
             else:
                 purged_bytes += weight.numel() * weight.element_size()
                 purged += 1
+                # Preserve weight placement after purge.
+                mod.register_buffer("weight_device",
+                                    torch.empty(0, device=weight.device, dtype=weight.dtype),
+                                    persistent=False)
                 mod.register_parameter("weight", None)
 
     if purged or retained:
