@@ -214,27 +214,20 @@ def pool_quantize_prefix_kv(
         raise RuntimeError("Combined KV preparation requires eager inference")
     k4 = torch.empty((batch, heads, rows, 64), device=k.device, dtype=torch.uint8)
     s4 = torch.empty((batch, heads, rows, 8), device=k.device, dtype=torch.float8_e4m3fn)
-    # Pre-pad the dense-prefix BF16 K/V to the FP4 kernel's 128-row block so its
-    # internal F.pad + contiguous copy becomes a no-op (10.75 ms/call at the real
-    # Omni shape).  The valid rows are bit-identical and the zero tail matches what
-    # the kernel would pad with, but the CUDA kernel attends to the full padded
-    # length, so the FP4 output is approximate (REVIEW S49).  The BF16/FP8 SDPA
-    # fallback trims the tail in _prefix_dense_attention and is unchanged.
+    # The dense-prefix K/V are padded with zero rows to the FP4 kernel's 128-row block; the kernel
+    # masks keys past n_valid, and the SDPA fallback trims them.
     padded = ((n_valid + 127) // 128) * 128
-    v8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
-    if padded > n_valid:
-        v8_buf[:, :, n_valid:].zero_()
-    v8 = v8_buf.transpose(1, 2)
+    if emit_bf16_v:
+        v8_buf = torch.empty((batch, heads, padded, 128), device=k.device, dtype=torch.bfloat16)
+        if padded > n_valid:
+            v8_buf[:, :, n_valid:].zero_()
+    else:
+        v8_buf = torch.empty((1, ), device=k.device, dtype=torch.bfloat16)  # Never stored to (EMIT_BF16_V=False).
     k4d = s4d = None
     if dense_k:
-        # Zero only the swizzled tail.  The producer writes only valid destinations,
-        # and both dense layouts permute within a fixed token block (32 rows for the
-        # codes, 64 rows for the 128x4-swizzled scales), so zero whole blocks from the
-        # first block that can hold a tail destination; the kernel then overwrites the
-        # valid slots.  Zeroing natural rows from ``n_valid`` is NOT enough: the tail
-        # destinations of a partial block map to permuted code rows / swizzled scale
-        # slots that can sit below ``n_valid``.  This replaces a full 117 MB memset
-        # per call with <=128 rows (0.633 -> 0.010 ms/call at the real Omni shape).
+        # Zero only the swizzled tail. Both dense layouts permute within a fixed token block (32 rows
+        # for the codes, 64 for the 128x4-swizzled scales), so tail destinations of a partial block
+        # can sit below n_valid: zero whole blocks from the first one that can hold a tail slot.
         k4d = torch.empty((batch, heads, padded, 64), device=k.device, dtype=torch.uint8)
         s4d = torch.empty((batch, heads, padded, 8), device=k.device, dtype=torch.float8_e4m3fn)
         if padded > n_valid:

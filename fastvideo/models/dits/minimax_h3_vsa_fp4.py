@@ -387,12 +387,16 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
         dense = dense_fp4_prefix_attention(q.transpose(1, 2),
                                            None if k8 is None else k8.transpose(1, 2),
                                            None if v8 is None else v8.transpose(1, 2),
-                                           dense_k, dense_v, dense_q)
+                                           dense_k, dense_v, dense_q, kv_len=valid_index.numel(),
+                                           single_level_p_quant=_fp4_kernel_kwargs(None).get(
+                                               "single_level_p_quant", True))
         if dense is not None:
             return dense
+        if dense_q is not None:
+            # The query producer skipped the BF16 prefix rows for this kernel.
+            raise RuntimeError("Dense NVFP4 prefix attention declined after the BF16 prefix query was skipped")
         if k8 is None or v8 is None:
-            # The producer skipped the BF16 K/V when it emitted the dense FP4 K/V; if the
-            # specialized kernel could not run, fall back to the raw unsmoothed K/V.
+            # Without the BF16 K/V, fall back to the raw unsmoothed K/V.
             prepared_kv, key_is_smoothed = None, False
     if not key_is_smoothed:
         k = k - k.mean(dim=1, keepdim=True)
@@ -401,11 +405,7 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     if prepared_kv is not None:
         q = _fp8_per_token(q) if precision == "fp8" and not query_is_fp8 else q
         k, v = prepared_kv[0], prepared_kv[1]
-        # The producer pre-pads the dense-prefix K/V to the FP4 kernel's 128-row
-        # block; trim that zero tail here so the BF16/FP8 SDPA fallback still sees
-        # exactly the n_valid keys.  (The FP4 branch above consumed the padded
-        # tensor: the CUDA kernel attends to the full padded length, so that path
-        # is an approximation, not a bit-identical repro.)
+        # The producer pads the prefix K/V to the FP4 kernel's 128-row block; SDPA sees the valid keys.
         valid_keys = valid_index.numel()
         if k.shape[1] != valid_keys:
             k, v = k[:, :valid_keys], v[:, :valid_keys]
@@ -655,22 +655,17 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
                         and torch.cuda.get_device_capability(query.device) == (12, 1)):
                     from fastvideo.models.dits.minimax_h3_fusions.query_pool import prepare_pooled_queries
 
-                    # The dense sm_12x prefix kernel re-quantized the FP8-roundtripped
-                    # prefix Q with scale_and_quant_fp4 (1.17 ms/call at the real Omni
-                    # shape).  Have the producer emit the same codes/scales when the
-                    # specialized dense path is enabled; bit-identical, verified against
-                    # fp4quant_cuda.scaled_fp4_quant.
+                    # Emit the dense-prefix FP4 query here (bit-identical to scale_and_quant_fp4) and skip
+                    # its BF16 rows. Only the omni_key_pool path below carries it to the dense kernel,
+                    # so require that path's conditions (smooth_k and the compression gate).
                     want_prefix_q_fp4 = (
-                        bool(envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get())
+                        bool(envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get()) and bool(smooth)
                         and attn.to_gate_compress is not None and attn._gate_active()
                         and has_dense_fp4_prefix_api(api))
                     query, prepared_query, q_pooled, prefix_q_fp4 = prepare_pooled_queries(
                         query, attn.norm_q.weight, cos, sin, attn.norm_q.eps, None,
                         meta.variable_block_sizes, prefix_rows, tile_elems=128, prefix_fp8=True,
                         split_prefix=True, prefix_fp4=want_prefix_q_fp4,
-                        # The dense path reads only q.shape when q_prequant is present, so
-                        # the 213 MB/call BF16 prefix store is dead weight under the same
-                        # gate that makes the dense kernel mandatory.
                         skip_prefix_store=want_prefix_q_fp4,
                     )
                     prefix_query_is_fp8 = True
@@ -710,9 +705,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         if fused_gate and (compact or torch.cuda.get_device_capability(key.device) == (12, 1)):
             from fastvideo.models.dits.minimax_h3_fusions.kv_pool import pool_quantize_prefix_kv
 
-            # Emit the dense-prefix FP4 K/V in the producer and skip the BF16 K/V when the
-            # specialized sm_12x kernel is guaranteed to consume them; the FP4 codes are
-            # bit-identical to re-quantizing the BF16 K/V with the shipped CUDA quantizers.
+            # Emit the dense-prefix FP4 K/V here (bit-identical to the CUDA quantizers) and skip the BF16 K/V.
             dense_fp4 = (bool(envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.get())
                          and not sim_fp8 and prefix_rows % 128 == 0
                          and torch.cuda.get_device_capability(key.device) == (12, 1)
@@ -731,6 +724,8 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
             )
             dense_kv = dense_vv = None
         prepared_keys = (packed_key, prefix_key, prefix_value, dense_kv, dense_vv, prefix_q_fp4)
+    if prefix_q_fp4 is not None and prepared_keys is None:
+        raise RuntimeError("The dense NVFP4 prefix query was emitted without its prefix K/V preparation")
     with STAGES.span("select_mask"):
         if q_pooled is None:
             q_pooled = _pool_tiles(query[:, :logical], vbs, layout.tile)
