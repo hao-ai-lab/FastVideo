@@ -363,7 +363,8 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
                             logical: int, valid_index: torch.Tensor, precision: str,
                             key_is_smoothed: bool = False,
                             prepared_kv: tuple | None = None,
-                            query_is_fp8: bool = False) -> torch.Tensor:
+                            query_is_fp8: bool = False,
+                            two_level_p: bool | None = None) -> torch.Tensor:
     """Dense attention for the prefix query rows, ``[B, H, prefix_rows, D]``.
 
     VSA gives every prefix (non-video) query tile every key column, so those rows need no
@@ -388,7 +389,7 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
                                            None if k8 is None else k8.transpose(1, 2),
                                            None if v8 is None else v8.transpose(1, 2),
                                            dense_k, dense_v, dense_q, kv_len=valid_index.numel(),
-                                           single_level_p_quant=_fp4_kernel_kwargs(None).get(
+                                           single_level_p_quant=_fp4_kernel_kwargs(two_level_p).get(
                                                "single_level_p_quant", True))
         if dense is not None:
             return dense
@@ -490,7 +491,8 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
     with STAGES.span("prefix_attention"):
         prefix_out = _prefix_dense_attention(query, key, value, prefix_rows, logical, valid_index, precision,
                                              key_is_smoothed=shared_smoothing, prepared_kv=prepared_kv,
-                                             query_is_fp8=prefix_query_is_fp8)
+                                             query_is_fp8=prefix_query_is_fp8,
+                                             two_level_p=numerics["two_level_p"])
     # A tile-64 prefix can end halfway through a native 128-row block. Keep that whole query block and its
     # original quadrant mask, then discard the overlapping prefix half and trailing padding from its output.
     head = prefix_rows // _BLOCK
