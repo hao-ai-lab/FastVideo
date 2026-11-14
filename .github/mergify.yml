@@ -33,9 +33,7 @@ merge_protections:
 
 pull_request_rules:
 
-  # ============================================================
   # Type labels (from PR title prefix)
-  # ============================================================
 
   - name: "label type: feat"
     conditions:
@@ -117,9 +115,7 @@ pull_request_rules:
       label:
         add: ["type: skill"]
 
-  # ============================================================
   # Scope labels (from changed files)
-  # ============================================================
 
   - name: "label scope: training"
     conditions:
@@ -227,9 +223,7 @@ pull_request_rules:
       label:
         add: ["scope: model"]
 
-  # ============================================================
   # Merge conflict detection
-  # ============================================================
 
   - name: label conflicting PRs
     conditions:
@@ -249,9 +243,7 @@ pull_request_rules:
       label:
         remove: [needs-rebase]
 
-  # ============================================================
   # Auto-merge
-  # ============================================================
 
   - name: auto-merge when ready and all checks pass
     conditions:

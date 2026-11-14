@@ -8,7 +8,6 @@ MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
-# IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(

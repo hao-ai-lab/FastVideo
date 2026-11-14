@@ -14,7 +14,6 @@ def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, dev
     random.seed(42)
     torch.cuda.manual_seed_all(42)
 
-    # Generate sequence lengths for each item in the batch
     if batch_size > 1:
         # Ensure sequence lengths are reasonably distributed
         avg_seqlen = total_seqlen // batch_size
@@ -26,7 +25,6 @@ def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, dev
             seqlens.append(avg_seqlen)
             current_sum = sum(seqlens)
             seqlens[-1] -= (current_sum - total_seqlen)
-        # Ensure all lengths are positive
         seqlens = [max(1, s) for s in seqlens]
         # Final adjustment to match total_seqlen
         seqlens[-1] += total_seqlen - sum(seqlens)
@@ -64,7 +62,6 @@ def test_moba_attn_varlen_forward(batch_size, total_seqlen, num_heads, head_dim,
 
     q, k, v, cu_seqlens, max_seqlen = generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype)
 
-    # Ensure chunk size is not larger than the smallest sequence length
     min_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).min().item()
     if moba_chunk_size > min_seqlen:
         pytest.skip("moba_chunk_size is larger than the minimum sequence length in the batch")

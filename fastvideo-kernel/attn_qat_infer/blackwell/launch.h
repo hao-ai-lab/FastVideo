@@ -79,7 +79,6 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     num_blocks_m = cutlass::ceil_div(num_blocks_m, size<0>(ClusterShape{})) * size<0>(ClusterShape{});
     typename Scheduler::Arguments scheduler_args = {num_blocks_m, params.h, params.b};
     typename Scheduler::Params scheduler_params = Scheduler::to_underlying_arguments(scheduler_args);
-    // Get the ptr to kernel function.
     void *kernel;
     kernel = (void *)flash::compute_attn_ws<Kernel_traits, Is_causal, Scheduler>;
     int smem_size = sizeof(typename Kernel_traits::SharedStorage);

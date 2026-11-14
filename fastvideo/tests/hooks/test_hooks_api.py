@@ -26,13 +26,10 @@ class EventHook(ForwardHook):
 
 def test_hook_execution_order():
     """Test that hooks are executed in the correct order: LIFO for pre-hooks, FIFO for post-hooks."""
-    # Create a simple model
     model = nn.Linear(10, 20)
 
-    # Create event list to track hook execution order
     events = []
 
-    # Create and push hooks in order: A then B
 
     manager = ModuleHookManager.get_from_or_default(model)
 

@@ -22,8 +22,6 @@
 # changing the environment variable `FASTVIDEO_NCCL_SO_PATH`, or the `so_file`
 # variable in the code.
 
-#TODO(will): support FASTVIDEO_NCCL_SO_PATH
-
 import ctypes
 import platform
 from dataclasses import dataclass
@@ -129,7 +127,6 @@ class Function:
 
 class NCCLLibrary:
     exported_functions = [
-        # const char* ncclGetErrorString(ncclResult_t result)
         Function("ncclGetErrorString", ctypes.c_char_p, [ncclResult_t]),
         # ncclResult_t  ncclGetVersion(int *version);
         Function("ncclGetVersion", ncclResult_t, [ctypes.POINTER(ctypes.c_int)]),
@@ -167,10 +164,6 @@ class NCCLLibrary:
         # is a pointer
         Function("ncclReduceScatter", ncclResult_t,
                  [buffer_type, buffer_type, ctypes.c_size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t, cudaStream_t]),
-
-        # ncclResult_t  ncclSend(
-        #   const void* sendbuff, size_t count, ncclDataType_t datatype,
-        #   int dest, ncclComm_t comm, cudaStream_t stream);
         Function("ncclSend", ncclResult_t,
                  [buffer_type, ctypes.c_size_t, ncclDataType_t, ctypes.c_int, ncclComm_t, cudaStream_t]),
 
@@ -195,12 +188,8 @@ class NCCLLibrary:
         Function("ncclCommDestroy", ncclResult_t, [ncclComm_t]),
     ]
 
-    # class attribute to store the mapping from the path to the library
-    # to avoid loading the same library multiple times
     path_to_library_cache: dict[str, Any] = {}
 
-    # class attribute to store the mapping from library path
-    #  to the corresponding dictionary
     path_to_dict_mapping: dict[str, dict[str, Any]] = {}
 
     def __init__(self, so_file: str | None = None):

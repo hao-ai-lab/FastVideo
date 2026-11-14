@@ -23,7 +23,6 @@ nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
 export TOKENIZERS_PARALLELISM=false
 export WANDB_API_KEY=YOUR_WANDB_API_KEY
-# export WANDB_API_KEY='your_wandb_api_key_here'
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -31,23 +30,13 @@ export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # Configs
 NUM_GPUS=8
 
-# Model paths for Self-Forcing DMD distillation with Wan2.2:
-# GENERATOR_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
-# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
-# FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
 GENERATOR_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Updated to Wan2.2
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
 
-# DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
-# DATA_DIR=data/crush-smol_processed_t2v/combined_parquet_dataset
-# DATA_DIR="/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn-upload/latents_i2v/train/"
-# VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/validation_64.json"
 
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
 
 training_args=(
   --tracker_project_name SFwan2.2_t2v_distill_self_forcing_dmd  # Updated for Wan2.2

@@ -338,7 +338,6 @@ async def async_request_image_sglang(
 
     # Check if we need to use multipart (for image edits with input images)
     if input.image_paths and len(input.image_paths) > 0:
-        # Use multipart/form-data for image edits
         data = aiohttp.FormData()
         data.add_field("model", input.model)
         data.add_field("prompt", input.prompt)
@@ -351,7 +350,6 @@ async def async_request_image_sglang(
         for key, value in input.extra_body.items():
             data.add_field(key, str(value))
 
-        # Add image file(s)
         for idx, img_path in enumerate(input.image_paths):
             if os.path.exists(img_path):
                 async with aiofiles.open(img_path, "rb") as f:
@@ -384,7 +382,6 @@ async def async_request_image_sglang(
             output.error = str(e)
             output.success = False
     else:
-        # Use JSON for text-to-image generation
         payload = {
             "model": input.model,
             "prompt": input.prompt,
@@ -432,7 +429,6 @@ async def async_request_video_sglang(
     job_id = None
     # Check if we need to upload images (Multipart) or just send JSON
     if input.image_paths and len(input.image_paths) > 0:
-        # Use multipart/form-data
         data = aiohttp.FormData()
         data.add_field("model", input.model)
         data.add_field("prompt", input.prompt)
@@ -440,7 +436,6 @@ async def async_request_video_sglang(
         if input.width and input.height:
             data.add_field("size", f"{input.width}x{input.height}")
 
-        # Add extra body fields to form data if possible
         if input.extra_body:
             data.add_field("extra_body", json.dumps(input.extra_body))
 
@@ -449,7 +444,6 @@ async def async_request_video_sglang(
         if input.fps:
             data.add_field("fps", str(input.fps))
 
-        # Add image file
         img_path = input.image_paths[0]
         if os.path.exists(img_path):
             async with aiofiles.open(img_path, "rb") as f:
@@ -486,7 +480,6 @@ async def async_request_video_sglang(
             return output
 
     else:
-        # Use JSON
         payload: dict[str, Any] = {
             "model": input.model,
             "prompt": input.prompt,
@@ -635,14 +628,12 @@ async def wait_for_service(base_url: str, timeout: int = 1200) -> None:
 async def benchmark(args: argparse.Namespace) -> None:
     from huggingface_hub import model_info
 
-    # Construct base_url if not provided
     if args.base_url is None:
         args.base_url = f"http://{args.host}:{args.port}"
 
     # Wait for service
     await wait_for_service(args.base_url)
 
-    # Fetch model info
     try:
         async with aiohttp.ClientSession() as session, session.get(
                 f"{args.base_url}/v1/model_info",
@@ -695,7 +686,6 @@ async def benchmark(args: argparse.Namespace) -> None:
     # Limit concurrency
     semaphore = asyncio.Semaphore(args.max_concurrency) if args.max_concurrency is not None else None
 
-    # Run benchmark
     pbar = tqdm(total=len(requests_list), disable=args.disable_tqdm)
 
     async with aiohttp.ClientSession() as session:
@@ -717,17 +707,14 @@ async def benchmark(args: argparse.Namespace) -> None:
 
     pbar.close()
 
-    # Calculate metrics
     metrics = calculate_metrics(outputs, total_duration)
 
     print("\n{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=60, c="="))
 
-    # Section 1: Configuration
     print("{:<40} {:<15}".format("Task:", task_name))
     print("{:<40} {:<15}".format("Model:", args.model))
     print("{:<40} {:<15}".format("Dataset:", args.dataset))
 
-    # Section 2: Execution & Traffic
     print(f"{'-' * 50}")
     print("{:<40} {:<15.2f}".format("Benchmark duration (s):", metrics["duration"]))
     print("{:<40} {:<15}".format("Request rate:", str(args.request_rate)))
@@ -737,7 +724,6 @@ async def benchmark(args: argparse.Namespace) -> None:
     ))
     print("{:<40} {}/{:<15}".format("Successful requests:", metrics["completed_requests"], len(requests_list)))
 
-    # Section 3: Performance Metrics
     print(f"{'-' * 50}")
 
     print("{:<40} {:<15.2f}".format("Request throughput (req/s):", metrics["throughput_qps"]))

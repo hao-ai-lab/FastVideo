@@ -292,7 +292,6 @@ class FluxDenoisingStage(PipelineStage):
         step_extras = self._step_kwargs(self.scheduler.step, batch)
 
         for t in timesteps:
-            # Stop if interrupted
             if getattr(self, "interrupt", False):
                 break
             t_scalar = t

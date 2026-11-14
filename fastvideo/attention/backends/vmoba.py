@@ -148,7 +148,6 @@ class VMOBAAttentionImpl(AttentionImpl):
         """
         batch_size, sequence_length, num_heads, head_dim = query.shape
 
-        # select chunk type according to layer idx:
         loop_layer_num = attn_metadata.temporal_layer + attn_metadata.spatial_layer + attn_metadata.st_layer
         assert self.layer_idx is not None, "VMoBA attention requires layer_idx to be set"
         moba_layer = self.layer_idx - attn_metadata.first_full_layer
@@ -179,7 +178,6 @@ class VMOBAAttentionImpl(AttentionImpl):
         key = rearrange(key, "b s ... -> (b s) ...")
         value = rearrange(value, "b s ... -> (b s) ...")
 
-        # current_timestep=attn_metadata.current_timestep
         hidden_states = moba_attn_varlen(
             query,
             key,

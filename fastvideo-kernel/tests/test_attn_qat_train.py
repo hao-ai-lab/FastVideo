@@ -53,15 +53,12 @@ def attn_qat_train_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=Non
     if sm_scale is None:
         sm_scale = 1.0 / sqrt(q_BLHD.shape[-1])
 
-    # Convert from BLHD to BHLD format
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
 
-    # Call attention with BHLD format
     o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale)
 
-    # Convert back from BHLD to BLHD format
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
@@ -84,7 +81,6 @@ def fused_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None, w
     if sm_scale is None:
         sm_scale = 1.0 / sqrt(q_BLHD.shape[-1])
 
-    # Convert from BLHD to BHLD format
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -93,7 +89,6 @@ def fused_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None, w
     # Note: fused_attention expects inputs in BHLD format and only supports same sequence lengths
     o_BHLD = fused_attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale, warp_specialize)
 
-    # Convert back from BHLD to BLHD format
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
@@ -112,7 +107,6 @@ def cosine_similarity(tensor1, tensor2):
     t1_flat = tensor1.flatten().float()
     t2_flat = tensor2.flatten().float()
 
-    # Compute cosine similarity: (A · B) / (||A|| * ||B||)
     dot_product = torch.dot(t1_flat, t2_flat)
     norm1 = torch.norm(t1_flat)
     norm2 = torch.norm(t2_flat)
@@ -139,7 +133,6 @@ def naive_attention(q, k, v, causal, sm_scale):
     Returns:
         Output tensor of shape (Z, H, N_CTX_Q, HEAD_DIM)
     """
-    # Compute attention scores: QK^T
     scores = torch.matmul(q, k.transpose(-2, -1)) * sm_scale
 
     # Apply causal mask if needed
@@ -156,10 +149,8 @@ def naive_attention(q, k, v, causal, sm_scale):
             # In cross-attention, typically no causal masking is applied
             pass
 
-    # Apply softmax
     attn_weights = torch.softmax(scores, dim=-1)
 
-    # Apply attention weights to values
     out = torch.matmul(attn_weights, v)
 
     return out
@@ -175,7 +166,6 @@ def test_qat_attention_forward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = False
 
-    # Create input tensors in BLHD format (B, L, H, D) = (Z, N_CTX, H, HEAD_DIM)
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
@@ -183,18 +173,15 @@ def test_qat_attention_forward():
     # Test with QAT (using wrapper that does permute/contiguous)
     out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention comparison
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
     out_naive_BHLD = naive_attention(q_BHLD.clone(), k_BHLD.clone(), v_BHLD.clone(), causal, sm_scale)
     out_naive_BLHD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-    # Check that outputs have correct shape
     assert out_qat_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
     assert out_naive_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
 
-    # Check that outputs are finite
     assert torch.isfinite(out_qat_BLHD).all()
     assert torch.isfinite(out_naive_BLHD).all()
 
@@ -206,9 +193,6 @@ def test_qat_attention_forward():
         f"  QAT vs Naive Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM} - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # QAT output should be reasonably close to naive (within tolerance due to quantization)
-    # Using a reasonable tolerance for float16 and quantization effects
-    # assert max_diff < 1.0, f"QAT and naive outputs should be reasonably close, got max_diff={max_diff.item():.6f}"
 
     print("✓ Forward pass test passed.")
 
@@ -223,12 +207,10 @@ def test_qat_attention_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for QAT
     q_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     k_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     v_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for naive (same values, convert to BHLD)
     q_naive_BHLD = q_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     k_naive_BHLD = k_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
@@ -250,7 +232,6 @@ def test_qat_attention_backward():
     # Backward pass for naive
     out_naive_BLHD.backward(dout)
 
-    # Check that gradients are computed
     assert q_qat_BLHD.grad is not None
     assert k_qat_BLHD.grad is not None
     assert v_qat_BLHD.grad is not None
@@ -258,17 +239,14 @@ def test_qat_attention_backward():
     assert k_naive_BHLD.grad is not None
     assert v_naive_BHLD.grad is not None
 
-    # Check that gradients have correct shape
     assert q_qat_BLHD.grad.shape == q_qat_BLHD.shape
     assert k_qat_BLHD.grad.shape == k_qat_BLHD.shape
     assert v_qat_BLHD.grad.shape == v_qat_BLHD.shape
 
-    # Check that gradients are finite
     assert torch.isfinite(q_qat_BLHD.grad).all()
     assert torch.isfinite(k_qat_BLHD.grad).all()
     assert torch.isfinite(v_qat_BLHD.grad).all()
 
-    # Convert naive gradients to BLHD format for comparison
     q_naive_grad_BLHD = q_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     k_naive_grad_BLHD = k_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     v_naive_grad_BLHD = v_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
@@ -292,10 +270,6 @@ def test_qat_attention_backward():
         f"  dV - Max diff: {dv_diff.max().item():.6f}, Mean diff: {dv_diff.mean().item():.6f}, Cosine sim: {dv_cos_sim:.6f}"
     )
 
-    # Gradients should be reasonably close (within tolerance due to quantization)
-    # assert dq_diff.max() < 2.0, f"dQ gradients should be reasonably close, got max_diff={dq_diff.max().item():.6f}"
-    # assert dk_diff.max() < 2.0, f"dK gradients should be reasonably close, got max_diff={dk_diff.max().item():.6f}"
-    # assert dv_diff.max() < 2.0, f"dV gradients should be reasonably close, got max_diff={dv_diff.max().item():.6f}"
 
     print("✓ Backward pass test passed.")
 
@@ -313,7 +287,6 @@ def test_qat_attention_different_shapes():
     causal = True
 
     for Z, H, N_CTX, HEAD_DIM in test_configs:
-        # Create input tensors in BLHD format
         q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
@@ -321,7 +294,6 @@ def test_qat_attention_different_shapes():
         sm_scale = 1.0 / sqrt(HEAD_DIM)
         out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-        # Convert to BHLD for naive attention
         q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
         k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -341,8 +313,6 @@ def test_qat_attention_different_shapes():
             f"  (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
         )
 
-        # Outputs should be reasonably close
-        # assert max_diff < 1.0, f"QAT and naive outputs should be reasonably close for shape (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}), got max_diff={max_diff.item():.6f}"
 
         print(f"✓ Shape test passed for (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM})")
 
@@ -356,14 +326,12 @@ def test_qat_attention_non_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = False
 
-    # Create input tensors in BLHD format
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
 
     out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -383,8 +351,6 @@ def test_qat_attention_non_causal():
         f"  QAT vs Naive (non-causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs should be reasonably close
-    # assert max_diff < 1.0, f"QAT and naive outputs should be reasonably close for non-causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Non-causal test passed.")
 
@@ -398,14 +364,12 @@ def test_qat_attention_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
 
     out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -425,8 +389,6 @@ def test_qat_attention_causal():
         f"  QAT vs Naive (causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs should be reasonably close
-    # assert max_diff < 1.0, f"QAT and naive outputs should be reasonably close for causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Causal test passed.")
 
@@ -440,12 +402,10 @@ def test_qat_attention_causal_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for QAT
     q_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     k_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     v_qat_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for naive (same values, convert to BHLD)
     q_naive_BHLD = q_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     k_naive_BHLD = k_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
@@ -457,7 +417,6 @@ def test_qat_attention_causal_backward():
     out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
     out_naive_BHLD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-    # Create dummy gradient
     dout = torch.randn_like(out_qat_BLHD).contiguous()
 
     # Backward pass for QAT
@@ -466,12 +425,10 @@ def test_qat_attention_causal_backward():
     # Backward pass for naive
     out_naive_BHLD.backward(dout)
 
-    # Check that gradients are computed
     assert q_qat_BLHD.grad is not None
     assert k_qat_BLHD.grad is not None
     assert v_qat_BLHD.grad is not None
 
-    # Convert naive gradients to BLHD format for comparison
     q_naive_grad_BLHD = q_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     k_naive_grad_BLHD = k_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     v_naive_grad_BLHD = v_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
@@ -513,7 +470,6 @@ def test_qat_attention_different_seq_lengths():
     for Z, H, N_CTX_Q, N_CTX_KV, HEAD_DIM, causal in test_configs:
         sm_scale = 1.0 / sqrt(HEAD_DIM)
 
-        # Create input tensors in BLHD format with different sequence lengths
         q_BLHD = torch.randn((Z, N_CTX_Q, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         k_BLHD = torch.randn((Z, N_CTX_KV, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         v_BLHD = torch.randn((Z, N_CTX_KV, H, HEAD_DIM), dtype=dtype, device=DEVICE)
@@ -521,7 +477,6 @@ def test_qat_attention_different_seq_lengths():
         # Test with QAT (using wrapper that does permute/contiguous)
         out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-        # Convert to BHLD for naive attention comparison
         q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
         k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -532,7 +487,6 @@ def test_qat_attention_different_seq_lengths():
         assert out_qat_BLHD.shape == (Z, N_CTX_Q, H, HEAD_DIM)
         assert out_naive_BLHD.shape == (Z, N_CTX_Q, H, HEAD_DIM)
 
-        # Check that outputs are finite
         assert torch.isfinite(out_qat_BLHD).all()
         assert torch.isfinite(out_naive_BLHD).all()
 
@@ -544,8 +498,6 @@ def test_qat_attention_different_seq_lengths():
             f"  (N_CTX_Q={N_CTX_Q}, N_CTX_KV={N_CTX_KV}, causal={causal}) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
         )
 
-        # Outputs should be reasonably close
-        # assert max_diff < 1.0, f"QAT and naive outputs should be reasonably close for (N_CTX_Q={N_CTX_Q}, N_CTX_KV={N_CTX_KV}), got max_diff={max_diff.item():.6f}"
 
         print(f"✓ Different sequence lengths test passed for (N_CTX_Q={N_CTX_Q}, N_CTX_KV={N_CTX_KV})")
 
@@ -564,12 +516,10 @@ def test_qat_attention_different_seq_lengths_backward():
     for Z, H, N_CTX_Q, N_CTX_KV, HEAD_DIM, causal in test_configs:
         sm_scale = 1.0 / sqrt(HEAD_DIM)
 
-        # Create input tensors in BLHD format with different sequence lengths
         q_qat_BLHD = torch.randn((Z, N_CTX_Q, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
         k_qat_BLHD = torch.randn((Z, N_CTX_KV, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
         v_qat_BLHD = torch.randn((Z, N_CTX_KV, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
 
-        # Create input tensors for naive (same values, convert to BHLD)
         q_naive_BHLD = q_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
         k_naive_BHLD = k_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
         v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
@@ -581,7 +531,6 @@ def test_qat_attention_different_seq_lengths_backward():
         out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
         out_naive_BHLD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-        # Create dummy gradient
         dout = torch.randn_like(out_qat_BLHD).contiguous()
 
         # Backward pass for QAT
@@ -590,7 +539,6 @@ def test_qat_attention_different_seq_lengths_backward():
         # Backward pass for naive
         out_naive_BHLD.backward(dout)
 
-        # Check that gradients are computed
         assert q_qat_BLHD.grad is not None
         assert k_qat_BLHD.grad is not None
         assert v_qat_BLHD.grad is not None
@@ -598,17 +546,14 @@ def test_qat_attention_different_seq_lengths_backward():
         assert k_naive_BHLD.grad is not None
         assert v_naive_BHLD.grad is not None
 
-        # Check that gradients have correct shape
         assert q_qat_BLHD.grad.shape == q_qat_BLHD.shape
         assert k_qat_BLHD.grad.shape == k_qat_BLHD.shape
         assert v_qat_BLHD.grad.shape == v_qat_BLHD.shape
 
-        # Check that gradients are finite
         assert torch.isfinite(q_qat_BLHD.grad).all()
         assert torch.isfinite(k_qat_BLHD.grad).all()
         assert torch.isfinite(v_qat_BLHD.grad).all()
 
-        # Convert naive gradients to BLHD format for comparison
         q_naive_grad_BLHD = q_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
         k_naive_grad_BLHD = k_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
         v_naive_grad_BLHD = v_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
@@ -632,10 +577,6 @@ def test_qat_attention_different_seq_lengths_backward():
             f"  (N_CTX_Q={N_CTX_Q}, N_CTX_KV={N_CTX_KV}) - dV: Max diff: {dv_diff.max().item():.6f}, Mean diff: {dv_diff.mean().item():.6f}, Cosine sim: {dv_cos_sim:.6f}"
         )
 
-        # Gradients should be reasonably close (within tolerance due to quantization)
-        # assert dq_diff.max() < 2.0, f"dQ gradients should be reasonably close, got max_diff={dq_diff.max().item():.6f}"
-        # assert dk_diff.max() < 2.0, f"dK gradients should be reasonably close, got max_diff={dk_diff.max().item():.6f}"
-        # assert dv_diff.max() < 2.0, f"dV gradients should be reasonably close, got max_diff={dv_diff.max().item():.6f}"
 
         print(f"✓ Cross-attention backward test passed for (N_CTX_Q={N_CTX_Q}, N_CTX_KV={N_CTX_KV})")
 
@@ -650,7 +591,6 @@ def test_fused_attention_forward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = False
 
-    # Create input tensors in BLHD format (B, L, H, D) = (Z, N_CTX, H, HEAD_DIM)
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
@@ -658,18 +598,15 @@ def test_fused_attention_forward():
     # Test with fused attention (using wrapper that does permute/contiguous)
     out_fused_BLHD = fused_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention comparison
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
     out_naive_BHLD = naive_attention(q_BHLD.clone(), k_BHLD.clone(), v_BHLD.clone(), causal, sm_scale)
     out_naive_BLHD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-    # Check that outputs have correct shape
     assert out_fused_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
     assert out_naive_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
 
-    # Check that outputs are finite
     assert torch.isfinite(out_fused_BLHD).all()
     assert torch.isfinite(out_naive_BLHD).all()
 
@@ -681,8 +618,6 @@ def test_fused_attention_forward():
         f"  Fused vs Naive - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Fused attention should be reasonably close to naive (within tolerance for float16)
-    # assert max_diff < 1e-1, f"Fused and naive outputs should be reasonably close, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused attention forward pass test passed.")
 
@@ -697,12 +632,10 @@ def test_fused_attention_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for fused attention
     q_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     k_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     v_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for naive (same values, convert to BHLD)
     q_naive_BHLD = q_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     k_naive_BHLD = k_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     v_naive_BHLD = v_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
@@ -714,7 +647,6 @@ def test_fused_attention_backward():
     out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
     out_naive_BLHD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-    # Create dummy gradient (same for both, in BLHD format)
     dout = torch.randn_like(out_fused_BLHD).contiguous()
 
     # Backward pass for fused attention
@@ -723,7 +655,6 @@ def test_fused_attention_backward():
     # Backward pass for naive
     out_naive_BLHD.backward(dout)
 
-    # Check that gradients are computed
     assert q_fused_BLHD.grad is not None
     assert k_fused_BLHD.grad is not None
     assert v_fused_BLHD.grad is not None
@@ -731,17 +662,14 @@ def test_fused_attention_backward():
     assert k_naive_BHLD.grad is not None
     assert v_naive_BHLD.grad is not None
 
-    # Check that gradients have correct shape
     assert q_fused_BLHD.grad.shape == q_fused_BLHD.shape
     assert k_fused_BLHD.grad.shape == k_fused_BLHD.shape
     assert v_fused_BLHD.grad.shape == v_fused_BLHD.shape
 
-    # Check that gradients are finite
     assert torch.isfinite(q_fused_BLHD.grad).all()
     assert torch.isfinite(k_fused_BLHD.grad).all()
     assert torch.isfinite(v_fused_BLHD.grad).all()
 
-    # Convert naive gradients to BLHD format for comparison
     q_naive_grad_BLHD = q_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     k_naive_grad_BLHD = k_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     v_naive_grad_BLHD = v_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
@@ -765,10 +693,6 @@ def test_fused_attention_backward():
         f"  dV - Max diff: {dv_diff.max().item():.6f}, Mean diff: {dv_diff.mean().item():.6f}, Cosine sim: {dv_cos_sim:.6f}"
     )
 
-    # Gradients should be reasonably close (within tolerance for float16)
-    # assert dq_diff.max() < 1e-1, f"dQ gradients should be reasonably close, got max_diff={dq_diff.max().item():.6f}"
-    # assert dk_diff.max() < 1e-1, f"dK gradients should be reasonably close, got max_diff={dk_diff.max().item():.6f}"
-    # assert dv_diff.max() < 1e-1, f"dV gradients should be reasonably close, got max_diff={dv_diff.max().item():.6f}"
 
     print("✓ Fused attention backward pass test passed.")
 
@@ -787,7 +711,6 @@ def test_fused_attention_different_shapes():
     causal = True
 
     for Z, H, N_CTX, HEAD_DIM in test_configs:
-        # Create input tensors in BLHD format
         q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
@@ -795,7 +718,6 @@ def test_fused_attention_different_shapes():
         sm_scale = 1.0 / sqrt(HEAD_DIM)
         out_fused_BLHD = fused_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-        # Convert to BHLD for naive attention
         q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
         k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -815,8 +737,6 @@ def test_fused_attention_different_shapes():
             f"  (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
         )
 
-        # Outputs should be reasonably close
-        # assert max_diff < 1e-1, f"Fused and naive outputs should be reasonably close for shape (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}), got max_diff={max_diff.item():.6f}"
 
         print(f"✓ Fused attention shape test passed for (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM})")
 
@@ -830,14 +750,12 @@ def test_fused_attention_non_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = False
 
-    # Create input tensors in BLHD format
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
 
     out_fused_BLHD = fused_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -857,8 +775,6 @@ def test_fused_attention_non_causal():
         f"  Fused vs Naive (non-causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs should be reasonably close
-    # assert max_diff < 1e-1, f"Fused and naive outputs should be reasonably close for non-causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused attention non-causal test passed.")
 
@@ -872,14 +788,12 @@ def test_fused_attention_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
 
     out_fused_BLHD = fused_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -899,8 +813,6 @@ def test_fused_attention_causal():
         f"  Fused vs Naive (causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs should be reasonably close
-    # assert max_diff < 1e-1, f"Fused and naive outputs should be reasonably close for causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused attention causal test passed.")
 
@@ -914,12 +826,10 @@ def test_fused_attention_causal_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for fused attention
     q_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     k_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     v_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for naive (same values, convert to BHLD)
     q_naive_BHLD = q_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     k_naive_BHLD = k_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     v_naive_BHLD = v_fused_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
@@ -931,7 +841,6 @@ def test_fused_attention_causal_backward():
     out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
     out_naive_BHLD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
-    # Create dummy gradient
     dout = torch.randn_like(out_fused_BLHD).contiguous()
 
     # Backward pass for fused attention
@@ -940,12 +849,10 @@ def test_fused_attention_causal_backward():
     # Backward pass for naive
     out_naive_BHLD.backward(dout)
 
-    # Check that gradients are computed
     assert q_fused_BLHD.grad is not None
     assert k_fused_BLHD.grad is not None
     assert v_fused_BLHD.grad is not None
 
-    # Convert naive gradients to BLHD format for comparison
     q_naive_grad_BLHD = q_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     k_naive_grad_BLHD = k_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
     v_naive_grad_BLHD = v_naive_BHLD.grad.permute(0, 2, 1, 3).contiguous()
@@ -996,14 +903,11 @@ def test_fused_vs_qat_attention_forward():
     v_qat_BLHD = v_BLHD.clone().to(torch.bfloat16)
     out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
 
-    # Convert QAT output back to float16 for comparison
     out_qat_BLHD = out_qat_BLHD.to(torch.bfloat16)
 
-    # Check that outputs have correct shape
     assert out_fused_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
     assert out_qat_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
 
-    # Check that outputs are finite
     assert torch.isfinite(out_fused_BLHD).all()
     assert torch.isfinite(out_qat_BLHD).all()
 
@@ -1015,8 +919,6 @@ def test_fused_vs_qat_attention_forward():
         f"  Fused vs QAT - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # They may differ due to quantization in QAT and different implementations
-    # assert max_diff < 1.0, f"Fused and QAT outputs should be reasonably close, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused vs QAT forward pass test passed.")
 
@@ -1030,12 +932,10 @@ def test_fused_vs_qat_attention_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for fused attention (float16)
     q_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
     k_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
     v_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for QAT (float16, same values)
     q_qat_BLHD = q_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
     k_qat_BLHD = k_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
     v_qat_BLHD = v_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
@@ -1046,7 +946,6 @@ def test_fused_vs_qat_attention_backward():
     # Forward pass with QAT
     out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
 
-    # Create dummy gradient (same for both, in BLHD format)
     dout = torch.randn_like(out_fused_BLHD).contiguous()
     dout_qat = dout.to(torch.bfloat16)
 
@@ -1056,7 +955,6 @@ def test_fused_vs_qat_attention_backward():
     # Backward pass for QAT
     out_qat_BLHD.backward(dout_qat)
 
-    # Check that gradients are computed
     assert q_fused_BLHD.grad is not None
     assert k_fused_BLHD.grad is not None
     assert v_fused_BLHD.grad is not None
@@ -1064,17 +962,14 @@ def test_fused_vs_qat_attention_backward():
     assert k_qat_BLHD.grad is not None
     assert v_qat_BLHD.grad is not None
 
-    # Check that gradients have correct shape
     assert q_fused_BLHD.grad.shape == q_fused_BLHD.shape
     assert k_fused_BLHD.grad.shape == k_fused_BLHD.shape
     assert v_fused_BLHD.grad.shape == v_fused_BLHD.shape
 
-    # Check that gradients are finite
     assert torch.isfinite(q_fused_BLHD.grad).all()
     assert torch.isfinite(k_fused_BLHD.grad).all()
     assert torch.isfinite(v_fused_BLHD.grad).all()
 
-    # Convert QAT gradients to float16 for comparison
     q_qat_grad_f16 = q_qat_BLHD.grad.to(torch.bfloat16)
     k_qat_grad_f16 = k_qat_BLHD.grad.to(torch.bfloat16)
     v_qat_grad_f16 = v_qat_BLHD.grad.to(torch.bfloat16)
@@ -1098,10 +993,6 @@ def test_fused_vs_qat_attention_backward():
         f"  dV - Max diff: {dv_diff.max().item():.6f}, Mean diff: {dv_diff.mean().item():.6f}, Cosine sim: {dv_cos_sim:.6f}"
     )
 
-    # Gradients may differ due to quantization in QAT and different implementations
-    # assert dq_diff.max() < 2.0, f"dQ gradients should be reasonably close, got max_diff={dq_diff.max().item():.6f}"
-    # assert dk_diff.max() < 2.0, f"dK gradients should be reasonably close, got max_diff={dk_diff.max().item():.6f}"
-    # assert dv_diff.max() < 2.0, f"dV gradients should be reasonably close, got max_diff={dv_diff.max().item():.6f}"
 
     print("✓ Fused vs QAT backward pass test passed.")
 
@@ -1120,7 +1011,6 @@ def test_fused_vs_qat_attention_different_shapes():
     for Z, H, N_CTX, HEAD_DIM in test_configs:
         sm_scale = 1.0 / sqrt(HEAD_DIM)
 
-        # Create input tensors in BLHD format (float16)
         q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
         k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
         v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
@@ -1148,8 +1038,6 @@ def test_fused_vs_qat_attention_different_shapes():
             f"  (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
         )
 
-        # Outputs may differ due to quantization in QAT
-        # assert max_diff < 1.0, f"Fused and QAT outputs should be reasonably close for shape (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}), got max_diff={max_diff.item():.6f}"
 
         print(f"✓ Fused vs QAT shape test passed for (Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM})")
 
@@ -1162,7 +1050,6 @@ def test_fused_vs_qat_attention_non_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = False
 
-    # Create input tensors in BLHD format (float16)
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
@@ -1190,8 +1077,6 @@ def test_fused_vs_qat_attention_non_causal():
         f"  Fused vs QAT (non-causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs may differ due to quantization in QAT
-    # assert max_diff < 1.0, f"Fused and QAT outputs should be reasonably close for non-causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused vs QAT non-causal test passed.")
 
@@ -1204,7 +1089,6 @@ def test_fused_vs_qat_attention_causal():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format (float16)
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE)
@@ -1232,8 +1116,6 @@ def test_fused_vs_qat_attention_causal():
         f"  Fused vs QAT (causal) - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}"
     )
 
-    # Outputs may differ due to quantization in QAT
-    # assert max_diff < 1.0, f"Fused and QAT outputs should be reasonably close for causal, got max_diff={max_diff.item():.6f}"
 
     print("✓ Fused vs QAT causal test passed.")
 
@@ -1246,12 +1128,10 @@ def test_fused_vs_qat_attention_causal_backward():
     sm_scale = 1.0 / sqrt(HEAD_DIM)
     causal = True
 
-    # Create input tensors in BLHD format for fused attention (float16)
     q_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
     k_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
     v_fused_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
 
-    # Create input tensors for QAT (float16, same values)
     q_qat_BLHD = q_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
     k_qat_BLHD = k_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
     v_qat_BLHD = v_fused_BLHD.clone().to(torch.bfloat16).detach().requires_grad_(True)
@@ -1262,7 +1142,6 @@ def test_fused_vs_qat_attention_causal_backward():
     # Forward pass with QAT
     out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
 
-    # Create dummy gradient
     dout = torch.randn_like(out_fused_BLHD).contiguous()
     dout_qat = dout.to(torch.bfloat16)
 
@@ -1272,7 +1151,6 @@ def test_fused_vs_qat_attention_causal_backward():
     # Backward pass for QAT
     out_qat_BLHD.backward(dout_qat)
 
-    # Check that gradients are computed
     assert q_fused_BLHD.grad is not None
     assert k_fused_BLHD.grad is not None
     assert v_fused_BLHD.grad is not None
@@ -1280,7 +1158,6 @@ def test_fused_vs_qat_attention_causal_backward():
     assert k_qat_BLHD.grad is not None
     assert v_qat_BLHD.grad is not None
 
-    # Convert QAT gradients to float16 for comparison
     q_qat_grad_f16 = q_qat_BLHD.grad.to(torch.bfloat16)
     k_qat_grad_f16 = k_qat_BLHD.grad.to(torch.bfloat16)
     v_qat_grad_f16 = v_qat_BLHD.grad.to(torch.bfloat16)
@@ -1319,7 +1196,6 @@ def test_qat_attention_wan_shape_forward():
 
     print(f"  Testing WAN shape: Z={Z}, H={H}, N_CTX={N_CTX}, HEAD_DIM={HEAD_DIM}")
 
-    # Create input tensors in BLHD format (B, L, H, D) = (Z, N_CTX, H, HEAD_DIM)
     q_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
@@ -1327,7 +1203,6 @@ def test_qat_attention_wan_shape_forward():
     # Test with QAT (using wrapper that does permute/contiguous)
     out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
 
-    # Convert to BHLD for naive attention comparison
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -1338,11 +1213,9 @@ def test_qat_attention_wan_shape_forward():
     print(f"  Expected shape: {(Z, N_CTX, H, HEAD_DIM)}")
     print(f"  out_qat_BLHD shape: {out_qat_BLHD.shape}")
 
-    # Check that outputs have correct shape
     assert out_qat_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
     assert out_naive_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
 
-    # Check that outputs are finite
     assert torch.isfinite(out_qat_BLHD).all()
     assert torch.isfinite(out_naive_BLHD).all()
 
@@ -1393,7 +1266,6 @@ def test_qat_attention_wan_shape_backward():
     # -----------------------------
     out_naive_BHLD = naive_attention(q_BHLD, k_BHLD, v_BHLD, causal, sm_scale)
 
-    # Convert naive output back to BLHD for comparing outputs
     out_naive_BLHD = out_naive_BHLD.permute(0, 2, 1, 3).contiguous()
 
     # -----------------------------
@@ -1597,23 +1469,8 @@ if __name__ == "__main__":
     print("Running Fused attention tests...")
     print()
 
-    # test_fused_attention_forward()
-    # test_fused_attention_backward()
-    # test_fused_attention_different_shapes()
-    # test_fused_attention_non_causal()
-    # test_fused_attention_causal()
-    # test_fused_attention_causal_backward()
 
-    # print()
-    # print("Running Fused vs QAT attention comparison tests...")
-    # print()
 
-    # test_fused_vs_qat_attention_forward()
-    # test_fused_vs_qat_attention_backward()
-    # test_fused_vs_qat_attention_different_shapes()
-    # test_fused_vs_qat_attention_non_causal()
-    # test_fused_vs_qat_attention_causal()
-    # test_fused_vs_qat_attention_causal_backward()
 
     print()
     print("All tests passed! ✓")

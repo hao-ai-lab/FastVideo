@@ -68,7 +68,6 @@ class LTX2AudioDecodingStage(PipelineStage):
             decoded_spec = self.audio_decoder(audio_latents)
             audio_wave = self.vocoder(decoded_spec).squeeze(0).float()
 
-        # Move to CPU for pickling across process boundary
         batch.extra["audio"] = audio_wave.cpu()
         batch.extra["audio_sample_rate"] = _resolve_audio_sample_rate(self.vocoder)
         return batch

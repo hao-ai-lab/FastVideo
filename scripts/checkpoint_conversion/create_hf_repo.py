@@ -81,13 +81,12 @@ def main():
     # Remove existing weights in target component dir to avoid mixing shards/files
     existing_weights = glob.glob(os.path.join(target_component_dir, "*.safetensors")) + \
                        glob.glob(os.path.join(target_component_dir, "*.bin")) + \
-                       glob.glob(os.path.join(target_component_dir, "*.index.json")) # Remove index if present
+                       glob.glob(os.path.join(target_component_dir, "*.index.json"))
 
     for ew in existing_weights:
         print(f"Removing existing weight file: {ew}")
         os.remove(ew)
 
-    # Copy new weights
     for src in source_weights:
         filename = os.path.basename(src)
         dst = os.path.join(target_component_dir, filename)
@@ -108,7 +107,6 @@ def main():
         print(f"Uploading to Hugging Face Hub: {target_repo_id}...")
 
         try:
-            # Ensure the repo exists
             create_repo(target_repo_id, exist_ok=True)
 
             upload_folder(repo_id=target_repo_id, folder_path=args.local_dir, commit_message=args.hub_commit_message)

@@ -119,7 +119,7 @@ struct CollectiveEpilogueFwd{
         auto smem_thr_copy_O = smem_tiled_copy_O.get_thread_slice(thread_idx);
         constexpr int numel = decltype(size(tOrO))::value;
         cutlass::NumericArrayConverter<Element, float, numel> convert_op;
-        // HACK: this requires tensor to be "contiguous"
+        // tOrO must have contiguous storage for the flat-array conversion below.
         auto frag = convert_op(*reinterpret_cast<const cutlass::Array<float, numel> *>(tOrO.data()));
         auto tOrO_out = make_tensor(make_rmem_ptr<Element>(&frag), tOrO.layout());
         Tensor taccOrO = smem_thr_copy_O.retile_S(tOrO_out);        // ((Atom,AtomNum), MMA_M, MMA_N)
@@ -183,7 +183,6 @@ struct CollectiveEpilogueFwd{
         tma_store_wait<0>();
     }
 
-    // Write 0 to output and -inf to LSE
     CUTLASS_DEVICE void
     store_zero(
          Params const& epilogue_params,
@@ -202,9 +201,7 @@ struct CollectiveEpilogueFwd{
         Tensor tOgO = gmem_thr_copy_O.partition_D(gO);
         Tensor tOrO = make_fragment_like(tOgO);
         clear(tOrO);
-        // Construct identity layout for sO
         Tensor cO = cute::make_identity_tensor(select<0, 2>(TileShape_MNK{}));  // (BLK_M,BLK_K) -> (blk_m,blk_k)
-        // Repeat the partitioning with identity layouts
         Tensor tOcO = gmem_thr_copy_O.partition_D(cO);
         Tensor tOpO = make_tensor<bool>(make_shape(size<2>(tOgO)));
         #pragma unroll

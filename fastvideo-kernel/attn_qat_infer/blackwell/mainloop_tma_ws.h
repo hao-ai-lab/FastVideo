@@ -683,7 +683,6 @@ struct CollectiveMainloopFwd {
         Tensor tOrSFP = make_tensor<ElementSF>(LayoutSFP{});
         Tensor tOrSFP_flt = filter_zeros(tOrSFP);
         Tensor tSrDS = make_tensor<float>(make_shape(_8{}, _4{}), make_stride(_1{}, _8{}));
-        // copy qk and sf from smem to rmem
         auto smem_tiled_copy_Q = make_tiled_copy_A(SmemCopyAtomQ{}, tiled_mma_qk);
         auto smem_thr_copy_Q = smem_tiled_copy_Q.get_thread_slice(thread_idx);
         Tensor tSsQ = smem_thr_copy_Q.partition_S(as_position_independent_swizzle_tensor(sQ));

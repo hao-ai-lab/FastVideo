@@ -1,6 +1,5 @@
 from fastvideo import VideoGenerator
 import json
-# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_hy15_1080p"
 
@@ -20,7 +19,6 @@ def main():
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,  # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
-        # image_encoder_cpu_offload=False,
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

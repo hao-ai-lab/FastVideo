@@ -26,10 +26,6 @@ class SageAttentionBackend(AttentionBackend):
     def get_impl_cls() -> type["SageAttentionImpl"]:
         return SageAttentionImpl
 
-    # @staticmethod
-    # def get_metadata_cls() -> Type["AttentionMetadata"]:
-    #     return FlashAttentionMetadata
-
 
 class SageAttentionImpl(AttentionImpl):
 

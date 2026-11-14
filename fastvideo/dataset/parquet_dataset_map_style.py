@@ -98,7 +98,6 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
             if drop_first_row:
                 self.dataset_size -= 1
 
-        # shard the indices to each sp group
         ith_sp_group = self.global_rank // self.sp_world_size
         sp_group_local_indices = global_indices[ith_sp_group::self.num_sp_groups]
         self.sp_group_local_indices = sp_group_local_indices
@@ -1033,7 +1032,6 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int], *,
         return file_names_sorted, lengths_sorted
 
     dataset_root = os.path.realpath(os.path.expanduser(specs[0][0]))
-    # Check if cached info exists
     cache_dir = os.path.join(dataset_root, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
 
@@ -1118,7 +1116,6 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int], *,
             # sort according to file name to ensure all rank has the same order
             file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names, lengths, strict=True), key=lambda x: x[0]),
                                                     strict=True)
-            # Save the cache
             os.makedirs(cache_dir, exist_ok=True)
             with open(cache_file, "wb") as f:
                 pickle.dump((file_names_sorted, lengths_sorted), f)
@@ -1351,10 +1348,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         Returns the processed negative prompt data (latents, embeddings, masks, info).
         """
 
-        # Read first row from first parquet file
         file_path = self.parquet_files[0]
         row_idx = 0
-        # Read the negative prompt data
         row_dict = read_row_from_parquet_file(
             [file_path],
             row_idx,

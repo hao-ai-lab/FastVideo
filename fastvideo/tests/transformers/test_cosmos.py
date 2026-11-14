@@ -76,11 +76,9 @@ def test_cosmos2_transformer():
     weight_mean_diff = abs(weight_mean_model1 - weight_mean_model2)
     logger.info("Weight mean difference: %s", weight_mean_diff)
 
-    # Set both models to eval mode
     model1 = model1.eval()
     model2 = model2.eval()
 
-    # Create identical inputs for both models
     batch_size = 1
     seq_len = 30
 
@@ -107,7 +105,6 @@ def test_cosmos2_transformer():
 
     # padding mask
     padding_mask = hidden_states.new_zeros(1, 1, 32, 32, device=device, dtype=precision)
-    # print(padding_mask.shape)
 
     forward_batch = ForwardBatch(data_type="dummy", )
 
@@ -129,7 +126,6 @@ def test_cosmos2_transformer():
                              timestep=timestep,
                              padding_mask=padding_mask)
 
-    # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
     assert output1.dtype == output2.dtype, f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
 

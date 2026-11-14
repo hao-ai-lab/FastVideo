@@ -420,7 +420,6 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
             dim=-1,
         )
 
-        # Handle the attention logic
         query, key, value = qkv.chunk(3, dim=-1)
 
         query = query.unflatten(-1, (self.heads, -1))
@@ -441,7 +440,6 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
-        # Handle the feedforward (FF) logic
         mlp_hidden_states = self.mlp_act_fn(mlp_hidden_states)
 
         # Concatenate and parallel output projection
@@ -605,7 +603,6 @@ class Flux2TransformerBlock(nn.Module):
 
         attn_output, context_attn_output = attention_outputs
 
-        # Process attention outputs for the image stream (`hidden_states`).
         attn_output = gate_msa * attn_output
         hidden_states = hidden_states + attn_output
 
@@ -615,7 +612,6 @@ class Flux2TransformerBlock(nn.Module):
         ff_output = self.ff(norm_hidden_states)
         hidden_states = hidden_states + gate_mlp * ff_output
 
-        # Process attention outputs for the text stream (`encoder_hidden_states`).
         context_attn_output = c_gate_msa * context_attn_output
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
@@ -685,7 +681,6 @@ class Flux2Modulation(nn.Module):
         if mod.ndim == 2:
             mod = mod.unsqueeze(1)
         mod_params = torch.chunk(mod, 3 * self.mod_param_sets, dim=-1)
-        # Return tuple of 3-tuples of modulation params shift/scale/gate
         return tuple(mod_params[3 * i:3 * (i + 1)] for i in range(self.mod_param_sets))
 
 
@@ -815,7 +810,6 @@ class Flux2Transformer2DModel(BaseDiT):
         self.inner_dim = num_attention_heads * attention_head_dim
         self.guidance_embeds = guidance_embeds
 
-        # Add required BaseDiT attributes
         self.hidden_size = self.inner_dim
         self.num_attention_heads = num_attention_heads
         self.num_channels_latents = self.out_channels
@@ -1006,7 +1000,6 @@ class Flux2Transformer2DModel(BaseDiT):
                 freqs_cis=freqs_cis,
                 joint_attention_kwargs=joint_attention_kwargs,
             )
-        # Remove text tokens from concatenated stream
         hidden_states = hidden_states[:, num_txt_tokens:, ...]
 
         # 6. Output layers

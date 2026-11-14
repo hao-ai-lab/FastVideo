@@ -38,8 +38,6 @@ def main():
     end_time = time.perf_counter()
     gen_time = end_time - start_time
 
-    # Generate another video with a different prompt, without reloading the
-    # model!
     prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
                "glistening under the warm afternoon sun. The tall grass ripples gently in "
                "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "

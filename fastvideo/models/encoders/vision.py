@@ -83,7 +83,6 @@ def resolve_visual_encoder_outputs(
         for layer_idx in feature_sample_layers
     ]
 
-    # Apply post-norm on the final hidden state if we are using it
     uses_last_layer = feature_sample_layers[-1] in (len(hs_pool) - 1, -1)
     if post_layer_norm is not None and uses_last_layer:
         hs_pool[-1] = post_layer_norm(encoder_outputs)

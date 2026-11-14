@@ -187,7 +187,6 @@ class GroupCoordinator:
 
         from fastvideo.platforms import current_platform
 
-        # TODO: fix it for other platforms
         self.device = get_local_torch_device()
 
         self.use_device_communicator = use_device_communicator
@@ -223,8 +222,6 @@ class GroupCoordinator:
 
         from fastvideo.platforms import current_platform
 
-        # TODO(will): check if this is needed
-        # self.use_custom_op_call = current_platform.is_cuda_alike()
         self.use_custom_op_call = False
 
     @property
@@ -284,7 +281,6 @@ class GroupCoordinator:
         else:
             # For non-CUDA platforms (MPS, CPU), just yield the context without stream management
             if graph_capture_context is None:
-                # Create a dummy context for non-CUDA platforms
                 graph_capture_context = GraphCaptureContext(None)
             yield graph_capture_context
 
@@ -475,16 +471,13 @@ class GroupCoordinator:
             async_handles = []
             for tensor in tensor_list:
                 if tensor.numel() == 0:
-                    # Skip broadcasting empty tensors.
                     continue
                 if tensor.is_cpu:
-                    # use metadata_group for CPU tensors
                     handle = torch.distributed.broadcast(tensor,
                                                          src=self.ranks[src],
                                                          group=metadata_group,
                                                          async_op=True)
                 else:
-                    # use group for GPU tensors
                     handle = torch.distributed.broadcast(tensor, src=self.ranks[src], group=group, async_op=True)
                 async_handles.append(handle)
             for async_handle in async_handles:
@@ -498,17 +491,14 @@ class GroupCoordinator:
                 if isinstance(value, TensorMetadata):
                     tensor = torch.empty(value.size, dtype=value.dtype, device=value.device)
                     if tensor.numel() == 0:
-                        # Skip broadcasting empty tensors.
                         tensor_dict[key] = tensor
                         continue
                     if tensor.is_cpu:
-                        # use metadata_group for CPU tensors
                         handle = torch.distributed.broadcast(tensor,
                                                              src=self.ranks[src],
                                                              group=metadata_group,
                                                              async_op=True)
                     else:
-                        # use group for GPU tensors
                         handle = torch.distributed.broadcast(tensor, src=self.ranks[src], group=group, async_op=True)
                     async_handles.append(handle)
                     tensor_dict[key] = tensor
@@ -550,7 +540,6 @@ class GroupCoordinator:
         self.send_object(metadata_list, dst=dst)
         for tensor in tensor_list:
             if tensor.numel() == 0:
-                # Skip sending empty tensors.
                 continue
 
             # send-allgather: send only a slice, then do allgather.
@@ -558,10 +547,8 @@ class GroupCoordinator:
                 tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
 
             if tensor.is_cpu:
-                # use metadata_group for CPU tensors
                 torch.distributed.send(tensor, dst=self.ranks[dst], group=metadata_group)
             else:
-                # use group for GPU tensors
                 torch.distributed.send(tensor, dst=self.ranks[dst], group=group)
         return None
 
@@ -593,7 +580,6 @@ class GroupCoordinator:
             if isinstance(value, TensorMetadata):
                 tensor = torch.empty(value.size, dtype=value.dtype, device=value.device)
                 if tensor.numel() == 0:
-                    # Skip broadcasting empty tensors.
                     tensor_dict[key] = tensor
                     continue
 
@@ -605,10 +591,8 @@ class GroupCoordinator:
                     tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
 
                 if tensor.is_cpu:
-                    # use metadata_group for CPU tensors
                     torch.distributed.recv(tensor, src=self.ranks[src], group=metadata_group)
                 else:
-                    # use group for GPU tensors
                     torch.distributed.recv(tensor, src=self.ranks[src], group=group)
                 if use_all_gather:
                     # do the allgather
@@ -789,7 +773,6 @@ def init_distributed_environment(
     else:
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
-    # Init a group for each node
     if _NODE is None:
         init_node_group(local_rank, backend)
 
@@ -832,7 +815,6 @@ def initialize_model_parallel(
             must still belong to exactly one group.
         dp_group_ranks: explicit DP group layout, same contract.
     """
-    # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
     world_size: int = get_world_size()
     backend = backend or torch.distributed.get_backend(get_world_group().device_group)
@@ -852,7 +834,6 @@ def initialize_model_parallel(
                                     use_message_queue_broadcaster=True,
                                     group_name="tp")
 
-    # Build the sequence model-parallel groups.
     num_sequence_model_parallel_groups: int = (world_size // sequence_model_parallel_size)
     global _SP
     assert _SP is None, ("sequence model parallel group is already initialized")
@@ -868,13 +849,11 @@ def initialize_model_parallel(
     else:
         # Since SP is incompatible with TP and PP, we can use a simpler group creation logic
         for i in range(num_sequence_model_parallel_groups):
-            # Create groups of consecutive ranks
             ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
             group_ranks.append(ranks)
 
     _SP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="sp")
 
-    # Build the data parallel groups.
     num_data_parallel_groups: int = sequence_model_parallel_size
     global _DP
     assert _DP is None, ("data parallel group is already initialized")
@@ -942,7 +921,6 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           sp_group_ranks: list[list[int]] | None = None,
                                                           dp_group_ranks: list[list[int]] | None = None):
     if _WORLD is not None and model_parallel_is_initialized():
-        # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
         ) == tp_size, f"You are trying to initialize model parallel groups with size {tp_size}, but they are already initialized with size {get_tp_world_size()}"
         assert get_sp_world_size(
@@ -968,7 +946,6 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                               sp_group_ranks=sp_group_ranks,
                               dp_group_ranks=dp_group_ranks)
 
-    # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
     if current_platform.is_cuda_alike() or current_platform.is_npu():
         device_type = current_platform.device_type
@@ -1091,7 +1068,6 @@ def get_same_node_ranks(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
         rank = torch.distributed.get_rank(group=pg)
         world_size = torch.distributed.get_world_size(group=pg)
 
-        # global ranks of the processes in the group
         ranks = torch.distributed.get_process_group_ranks(pg)
     else:
         rank = pg.rank
@@ -1107,7 +1083,6 @@ def get_same_node_ranks(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
     try:
         with contextlib.suppress(OSError):
             if rank == source_rank:
-                # create a shared memory segment
                 shm = shared_memory.SharedMemory(create=True, size=128)
                 shm.buf[:len(magic_message)] = magic_message
                 if isinstance(pg, ProcessGroup):
@@ -1141,7 +1116,6 @@ def get_same_node_ranks(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
     else:
         pg.barrier()
 
-    # clean up the shared memory segment
     with contextlib.suppress(OSError):
         if rank == source_rank and shm:
             shm.unlink()
@@ -1201,23 +1175,19 @@ def initialize_tensor_parallel_group(tensor_model_parallel_size: int = 1,
             output1 = model1(input1)
         ```
     """
-    # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size: int = torch.distributed.get_world_size()
     backend = backend or torch.distributed.get_backend(get_world_group().device_group)
 
-    # Ensure the world size is compatible with the parallelism configuration
     assert world_size % tensor_model_parallel_size == 0, \
         f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size})"
 
-    # Build the tensor model-parallel groups.
     num_tensor_model_parallel_groups: int = (world_size // tensor_model_parallel_size)
     tp_group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
         ranks = list(range(i * tensor_model_parallel_size, (i + 1) * tensor_model_parallel_size))
         tp_group_ranks.append(ranks)
 
-    # Create TP group coordinator with a unique name
     group_name = f"tp_{group_name_suffix}" if group_name_suffix else "tp"
     tp_group = init_model_parallel_group(tp_group_ranks,
                                          get_world_group().local_rank,
@@ -1260,25 +1230,20 @@ def initialize_sequence_parallel_group(sequence_model_parallel_size: int = 1,
             output2 = model2(input2)
         ```
     """
-    # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size: int = torch.distributed.get_world_size()
     backend = backend or torch.distributed.get_backend(get_world_group().device_group)
 
-    # Ensure the world size is compatible with the parallelism configuration
     assert world_size % sequence_model_parallel_size == 0, \
         f"World size ({world_size}) must be divisible by sequence_model_parallel_size ({sequence_model_parallel_size})"
 
-    # Build the sequence model-parallel groups.
     num_sequence_model_parallel_groups: int = (world_size // sequence_model_parallel_size)
     sp_group_ranks = []
 
     for i in range(num_sequence_model_parallel_groups):
-        # Create groups of consecutive ranks
         ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
         sp_group_ranks.append(ranks)
 
-    # Create SP group coordinator with a unique name
     group_name = f"sp_{group_name_suffix}" if group_name_suffix else "sp"
     sp_group = init_model_parallel_group(sp_group_ranks, get_world_group().local_rank, backend, group_name=group_name)
 

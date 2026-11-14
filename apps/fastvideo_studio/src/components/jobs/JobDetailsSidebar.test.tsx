@@ -81,7 +81,6 @@ describe('JobDetailsSidebar', () => {
         />,
       );
 
-      // Flush the immediate poll fired on mount.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });

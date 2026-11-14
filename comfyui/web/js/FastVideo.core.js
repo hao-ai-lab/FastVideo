@@ -68,7 +68,6 @@ function drawAutoAnnotated(ctx, node, widget_width, y, H) {
         ctx.fillStyle = litegraph_base.WIDGET_BGCOLOR;
         ctx.fill();
 
-        // Reset fill style for the teeth
         if (isAuto) {
             ctx.fillStyle = litegraph_base.WIDGET_TEXT_COLOR;
         } else {
@@ -200,7 +199,6 @@ function mouseAutoAnnotated(event, [x, y], node) {
             return true;
         }
 
-        // Handle increment/decrement buttons if not in auto mode
         if (delta !== 0 && !this.isAuto) {
             if (this.config[0] === "FVAUTOCOMBO") {
                 const options = this.options.values || [];
@@ -241,7 +239,6 @@ function mouseAutoAnnotated(event, [x, y], node) {
 
                 v += increment;
 
-                // Apply min/max constraints
                 if (this.options.min != null) {
                     v = Math.max(this.options.min, v);
                 }
@@ -272,7 +269,6 @@ function mouseAutoAnnotated(event, [x, y], node) {
             if (this.config[0] === "FVAUTOCOMBO") {
                 const options = this.options.values || [];
 
-                // Create menu items
                 const menuItems = options.map(opt => {
                     const value = typeof opt === 'object' ? opt.value : opt;
                     const label = typeof opt === 'object' ? opt.label : opt.toString();
@@ -323,7 +319,6 @@ function mouseAutoAnnotated(event, [x, y], node) {
                 const d_callback = (v) => {
                     this.value = this.parseValue?.(v) ?? Number(v);
 
-                    // Apply min/max constraints
                     if (this.options.min != null) {
                         this.value = Math.max(this.options.min, this.value);
                     }
@@ -370,7 +365,6 @@ function makeAutoAnnotated(widget, inputData) {
         value: widget.value
     };
 
-    // Add AUTO properties to the widget
     Object.assign(widget, {
         type: "BOOLEAN",
         draw: drawAutoAnnotated,
@@ -381,7 +375,7 @@ function makeAutoAnnotated(widget, inputData) {
         cachedValue: widget.value,
         config: inputData,
         options: Object.assign({}, inputData[1], widget.options),
-        original: original,  // Store original properties for reference
+        original: original,
 
         // Disable other potential mouse handlers with no-op functions
         onClick: function () {
@@ -429,7 +423,6 @@ function makeAutoAnnotated(widget, inputData) {
             return v;
         },
         serializeValue: function () {
-            // Return special value for AUTO mode
             return this.isAuto ? -99999 : this.value;
         },
         deserializeValue: function (data) {
@@ -473,28 +466,22 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeData?.name == "VideoGenerator" || nodeData?.name === "InferenceArgs" || nodeData?.name === "VAEConfig" ||
             nodeData?.name === "TextEncoderConfig" || nodeData?.name === "DITConfig") {
-            // Add serialization support
             chainCallback(nodeType.prototype, "onSerialize", function (info) {
                 if (!this.widgets) {
                     return;
                 }
-                // Ensure widgets_values exists
                 if (!info.widgets_values) {
                     info.widgets_values = {};
                 }
 
-                // Store AUTO widget states in a separate property
                 if (!info.auto_widget_states) {
                     info.auto_widget_states = {};
                 }
 
-                // Handle AUTO widgets specially
                 for (const w of this.widgets) {
                     if (w.type === "BOOLEAN" && w.isAuto !== undefined) {
-                        // Store the serialized value (for Python node)
                         info.widgets_values[w.name] = w.serializeValue();
 
-                        // Store the full state (for UI restoration)
                         info.auto_widget_states[w.name] = {
                             isAuto: w.isAuto,
                             value: w.value,
@@ -504,7 +491,6 @@ app.registerExtension({
                 }
             });
 
-            // Add deserialization support
             chainCallback(nodeType.prototype, "onConfigure", function (info) {
                 if (!this.widgets) {
                     return;
@@ -522,7 +508,6 @@ app.registerExtension({
                     }
                 }
 
-                // Then, restore full state if available
                 if (info.auto_widget_states) {
                     for (const w of this.widgets) {
                         if (w.type === "BOOLEAN" && w.isAuto !== undefined && w.name in info.auto_widget_states) {
@@ -544,7 +529,6 @@ app.registerExtension({
 
             // Override addInput to handle AUTO widgets
             chainCallback(nodeType.prototype, "onNodeCreated", function () {
-                // Convert any existing widgets to AUTO widgets if needed
                 let new_widgets = [];
                 const intWidgetNames = ["sp_size", "tp_size", "height", "width", "num_frames", "num_inference_steps", "flow_shift", "seed", "fps", "scale_factor",
                     "tile_sample_min_height", "tile_sample_min_width", "tile_sample_min_num_frames", "tile_sample_stride_height", "tile_sample_stride_width",

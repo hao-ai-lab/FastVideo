@@ -2,7 +2,6 @@ import os
 import sys
 from pathlib import Path
 
-# Set Python path to current folder
 current_dir = str(Path(__file__).parent.parent.parent.parent.parent)
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -12,7 +11,6 @@ import torch
 import json
 from huggingface_hub import snapshot_download
 import fastvideo.envs as envs
-# Import the training pipeline
 
 from fastvideo.training.runner import main
 from fastvideo.utils import build_parser
@@ -35,10 +33,8 @@ envs.setdefault_external("MASTER_PORT", MASTER_PORT)
 
 def run_worker():
     """Worker function that will be run on each GPU"""
-    # Create and populate args
     parser = build_parser()
 
-    # Set the arguments as they are in finetune_t2v.sh
     args = parser.parse_args([
         "--pipeline_class", "WanTrainingPipeline",
         "--pipeline_module", "fastvideo.training.wan_training_pipeline",
@@ -121,7 +117,6 @@ def run_worker():
         "1"
     ])
     
-    # Call the main training function
     main(args)
 
 
@@ -136,10 +131,8 @@ def test_distributed_training():
                           repo_type="dataset",
                           local_dir_use_symlinks=False)
 
-    # Get the current file path
     current_file = Path(__file__).resolve()
 
-    # Run torchrun command
     cmd = [
         "torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, "--master_port", MASTER_PORT,
         str(current_file)
@@ -165,10 +158,8 @@ def test_distributed_training():
     with summary_file.open() as f:
         wandb_summary = json.load(f)
 
-    # Calculate and print MFU metrics
     device_name = torch.cuda.get_device_name()
     try:
-        # Get actual values from training run (logged from training_batch.raw_latent_shape)
         batch_size = wandb_summary.get("batch_size")
         seq_len = wandb_summary.get("dit_seq_len")
         context_len = wandb_summary.get("context_len")
@@ -213,7 +204,6 @@ def test_distributed_training():
         world_size = int(NUM_GPUS_PER_NODE)
         total_peak_flops = peak_flops_per_gpu * world_size
 
-        # Calculate MFU
         achieved_flops_per_sec = achieved_flops / avg_step_time if avg_step_time > 0 else 0
         mfu = (achieved_flops_per_sec / total_peak_flops * 100) if total_peak_flops > 0 else 0
 

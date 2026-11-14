@@ -302,7 +302,6 @@ export default function CreateJobModal({
     }
   }, [isOpen, workloadType, inferenceWorkload, options, editingJobId]);
 
-  // Load the models available for this workload.
   React.useEffect(() => {
     if (!isOpen) return;
     // Ignore a superseded response so a slow fetch for a previous workload

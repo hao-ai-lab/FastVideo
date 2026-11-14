@@ -1,6 +1,5 @@
 from fastvideo import VideoGenerator
 
-# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_wan2_2_14B_i2v"
 
@@ -18,9 +17,7 @@ def main():
         dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
         pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
     )
 
     prompt = "Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard. The fluffy-furred feline gazes directly at the camera with a relaxed expression. Blurred beach scenery forms the background featuring crystal-clear waters, distant green hills, and a blue sky dotted with white clouds. The cat assumes a naturally relaxed posture, as if savoring the sea breeze and warm sunlight. A close-up shot highlights the feline's intricate details and the refreshing atmosphere of the seaside."

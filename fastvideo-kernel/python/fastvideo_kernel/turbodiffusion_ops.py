@@ -129,21 +129,17 @@ def _rms_norm_fwd_fused(
 
     x = tl.load(x_ptr, mask=mask[None, :], other=0.0).to(tl.float32)
 
-    # Compute variance
     _var = x * x
     var = tl.sum(_var, axis=1) / N
     rstd = 1 / tl.sqrt(var + eps)
 
-    # Write mean / rstd
     tl.store(Rstd + rows, rstd)
     rstd = tl.reshape(rstd, (BLOCK_M, 1))
 
-    # Normalize and apply linear transformation
     w = tl.load(W + cols)
     x_hat = x * rstd
     y = x_hat * w
 
-    # Write output
     y = y.to(Y.type.element_ty)
     tl.store(y_ptr, y, mask=mask[None, :])
 
@@ -181,7 +177,6 @@ def rmsnorm(x, w, eps):
     else:
         BLOCK_M = 1
 
-    # Call the triton kernel
     _rms_norm_fwd_fused[(triton.cdiv(M, BLOCK_M), )](  #
         x,
         y,
@@ -229,20 +224,16 @@ def _layer_norm_param_fwd_fused(
 
     x = tl.load(x_ptr, mask=mask[None, :], other=0.0).to(tl.float32)
 
-    # Compute mean and Variance
     mean = tl.sum(x, axis=1, keep_dims=True) / N
-    # Compute variance
     _var = (x - mean) * (x - mean)
     var = tl.sum(_var, axis=1, keep_dims=True) / N
     rstd = 1 / tl.sqrt(var + eps)
 
-    # Write mean / rstd
     _mean = tl.reshape(mean, (BLOCK_M))
     _rstd = tl.reshape(rstd, (BLOCK_M))
     tl.store(Mean + rows, _mean)
     tl.store(Rstd + rows, _rstd)
 
-    # Normalize and apply linear transformation
     x_hat = (x - mean) * rstd
 
     w = tl.load(W + cols)
@@ -250,7 +241,6 @@ def _layer_norm_param_fwd_fused(
 
     x_hat = x_hat * w + b
 
-    # Write output
     x_hat = x_hat.to(Y.type.element_ty)
     tl.store(y_ptr, x_hat, mask=mask[None, :])
 
@@ -298,9 +288,6 @@ def layernorm_param(x, w, b, eps):
     return y, mean, rstd
 
 
-########################################################
-# Elementwise_affine=False
-########################################################
 
 
 @triton.jit
@@ -327,23 +314,18 @@ def _layer_norm_noparam_fwd_fused(
 
     x = tl.load(x_ptr, mask=mask[None, :], other=0.0).to(tl.float32)
 
-    # Compute mean and Variance
     mean = tl.sum(x, axis=1, keep_dims=True) / N
-    # Compute variance
     _var = (x - mean) * (x - mean)
     var = tl.sum(_var, axis=1, keep_dims=True) / N
     rstd = 1 / tl.sqrt(var + eps)
 
-    # Write mean / rstd
     _mean = tl.reshape(mean, (BLOCK_M))
     _rstd = tl.reshape(rstd, (BLOCK_M))
     tl.store(Mean + rows, _mean)
     tl.store(Rstd + rows, _rstd)
 
-    # Normalize and apply linear transformation
     x_hat = (x - mean) * rstd
 
-    # Write output
     x_hat = x_hat.to(Y.type.element_ty)
     tl.store(y_ptr, x_hat, mask=mask[None, :])
 
@@ -440,7 +422,6 @@ class Int8LinearFunction(torch.autograd.Function):
         grad_bias = None
 
         if ctx.needs_input_grad[0]:
-            # grad_input = grad_output @ W
             w_float = dequantize_weight(w_q, w_s, grad_output.dtype)
             grad_input = torch.matmul(grad_output, w_float)
 
@@ -489,34 +470,15 @@ class RMSNormFunction(torch.autograd.Function):
             grad_output_flat = grad_output
             dx = dx
 
-        # Standard RMSNorm backward
-        # dy = grad_output_flat
-        # x_hat = x * rstd
-        # w * dy
-        # c1 = mean(dy * w * x) * rstd^2
-        # dx = (dy * w - c1 * x) * rstd
 
-        # More precise:
-        # y = x * rstd * w
-        # dy = grad_output
-        # dw = sum(dy * x * rstd, dim=0)
 
         grad_w = None
         if ctx.needs_input_grad[1]:  # w
-            # grad_w = (grad_output_flat * x_flat * rstd).sum(dim=0)
-            # More accurate gradient for weight when considering rstd was computed from x
-            # Actually, for Affine part (w), it is just sum(dL/dy * x_hat).
-            # y = x_hat * w
-            # dL/dw = sum(dL/dy * x_hat)
             x_hat = x_flat * rstd
             grad_w = (grad_output_flat * x_hat).sum(dim=0)
 
         grad_input = None
         if ctx.needs_input_grad[0]:  # x
-            # x_hat = x * rstd
-            # dx = rstd * (w * dy - mean(w * dy * x_hat) * x_hat)
-            # but for RMSNorm:
-            # dx = rstd * (w * dy - (x * rstd^2) * mean(w * dy * x)) -> check formula
 
             # Using PyTorch autograd for reference logic:
             # y = x / sqrt(mean(x^2) + eps) * w
@@ -530,8 +492,6 @@ class RMSNormFunction(torch.autograd.Function):
 
             # Let's compute:
             dy_w = grad_output_flat * w
-            # term2 = (dy_w * x_flat).sum(dim=-1, keepdim=True) / N # mean(dy*w*x)
-            # grad_input = rstd * (dy_w - x_flat * (rstd ** 2) * term2)
 
             # Re-derivation:
             # x_hat = x * rstd
@@ -586,10 +546,6 @@ class LayerNormFunction(torch.autograd.Function):
         else:
             w_eff = w
 
-        # dx calculation
-        # x_hat = (x - mean) * rstd
-        # y = x_hat * w + b
-        # dL/dx_hat = dL/dy * w
 
         dy = grad_output_flat
         dx_hat = dy * w_eff

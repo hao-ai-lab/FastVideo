@@ -79,7 +79,6 @@ if n % 128 != 0:
 else:
     q_padded = q
 
-# use torch transpose + scaled_fp4_quant to get the ground truth
 q_padded = q_padded.transpose(2, 3).reshape(b, h, n_padded, d).contiguous()
 o_gt = torch.empty((b, h, n_padded, d // 2), dtype=torch.uint8, device='cuda')
 o_s_gt = torch.empty((b, h, n_padded, d // 16), dtype=torch.float8_e4m3fn, device='cuda')

@@ -59,31 +59,24 @@ class InputValidationStage(PipelineStage):
 
         self._generate_seeds(batch, fastvideo_args)
 
-        # Ensure prompt is properly formatted
         if batch.prompt is None and batch.prompt_embeds is None:
             raise ValueError("Either `prompt` or `prompt_embeds` must be provided")
 
-        # Ensure negative prompt is properly formatted if using classifier-free guidance
         if (batch.do_classifier_free_guidance and batch.negative_prompt is None and not batch.negative_prompt_embeds):
             raise ValueError("For classifier-free guidance, either `negative_prompt` or "
                              "`negative_prompt_embeds` must be provided")
 
-        # Validate height and width
         if batch.height is None or batch.width is None:
             raise ValueError("Height and width must be provided. Please set `height` and `width`.")
         if batch.height % 8 != 0 or batch.width % 8 != 0:
             raise ValueError(f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}.")
 
-        # Validate number of inference steps
         if batch.num_inference_steps <= 0:
             raise ValueError(f"Number of inference steps must be positive, but got {batch.num_inference_steps}")
 
-        # Validate guidance scale if using classifier-free guidance
         if batch.do_classifier_free_guidance and batch.guidance_scale <= 0:
             raise ValueError(f"Guidance scale must be positive, but got {batch.guidance_scale}")
 
-        # for i2v, get image from image_path
-        # @TODO(Wei) hard-coded for wan2.2 5b ti2v for now. Should put this in image_encoding stage
         if batch.image_path is not None:
             if batch.image_path.endswith(".mp4"):
                 image = load_video(batch.image_path)[0]
@@ -132,7 +125,6 @@ class InputValidationStage(PipelineStage):
             pil_images, original_fps = load_video(batch.video_path, return_fps=True)
             logger.info("Loaded video with %s frames, original FPS: %s", len(pil_images), original_fps)
 
-            # Get target parameters from batch
             target_fps = batch.fps
             target_num_frames = batch.num_frames
             target_height = batch.height
@@ -157,7 +149,6 @@ class InputValidationStage(PipelineStage):
                 resized_img = resize(pil_img, target_height, target_width, resize_mode="default", resample="lanczos")
                 resized_images.append(resized_img)
 
-            # Convert PIL images to numpy array
             video_numpy = pil_to_numpy(resized_images)
             video_numpy = normalize(video_numpy)
             video_tensor = numpy_to_pt(video_numpy)
@@ -167,7 +158,6 @@ class InputValidationStage(PipelineStage):
 
             batch.video_latent = input_video
 
-        # Validate action control inputs (Matrix-Game)
         if batch.mouse_cond is not None:
             if batch.mouse_cond.dim() != 3 or batch.mouse_cond.shape[-1] != 2:
                 raise ValueError(f"mouse_cond must have shape (B, T, 2), but got {batch.mouse_cond.shape}")

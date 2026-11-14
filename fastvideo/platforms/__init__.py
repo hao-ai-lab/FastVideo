@@ -7,7 +7,6 @@ import traceback
 from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
-# imported by other files, do not remove
 from fastvideo.platforms.interface import AttentionBackendEnum  # noqa: F401
 from fastvideo.platforms.interface import Platform, PlatformEnum
 from fastvideo.utils import resolve_obj_by_qualname
@@ -151,8 +150,6 @@ builtin_platform_plugins = {
 
 
 def resolve_current_platform_cls_qualname() -> str:
-    # TODO(will): if we need to support other platforms, we should consider if
-    # vLLM's plugin architecture is suitable for our needs.
 
     # Try MPS first on macOS
     platform_cls_qualname = mps_platform_plugin()

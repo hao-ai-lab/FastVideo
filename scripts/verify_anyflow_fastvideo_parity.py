@@ -54,10 +54,8 @@ def banner(msg: str) -> None:
     print("=" * 80)
 
 
-# ---------------------------------------------------------------------------
 # Distributed bootstrap (single-rank). Required by WanTransformer3DModel
 # which calls get_sp_world_size() and uses ReplicatedLinear.
-# ---------------------------------------------------------------------------
 
 
 def init_single_rank() -> None:
@@ -79,10 +77,8 @@ def init_single_rank() -> None:
     print("  single-rank distributed environment + TP/SP/DP groups initialized")
 
 
-# ---------------------------------------------------------------------------
 # Translate AnyFlow HF safetensor keys onto FastVideo's WanTransformer3DModel
 # internal layout, applying the regex from WanVideoArchConfig.param_names_mapping.
-# ---------------------------------------------------------------------------
 
 
 def translate_keys(
@@ -99,9 +95,6 @@ def translate_keys(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Build FastVideo WanTransformer3DModel with AnyFlow weights loaded.
-# ---------------------------------------------------------------------------
 
 
 def build_fastvideo_transformer():
@@ -133,7 +126,6 @@ def build_fastvideo_transformer():
     print(f"  Wan transformer built in {time.time() - t0:.1f}s; "
           f"params: {sum(p.numel() for p in model.parameters())/1e9:.2f}B")
 
-    # Load AnyFlow checkpoint.
     af_path = ANYFLOW_LOCAL / "transformer" / "diffusion_pytorch_model.safetensors"
     af_raw = load_file(str(af_path), device="cpu")
     print(f"  AnyFlow checkpoint: {len(af_raw)} tensors")
@@ -146,9 +138,6 @@ def build_fastvideo_transformer():
     return model, len(miss), len(unex)
 
 
-# ---------------------------------------------------------------------------
-# Build AnyFlow reference net.
-# ---------------------------------------------------------------------------
 
 
 def build_anyflow_reference():
@@ -166,9 +155,6 @@ def build_anyflow_reference():
     return af_net
 
 
-# ---------------------------------------------------------------------------
-# Forward parity test.
-# ---------------------------------------------------------------------------
 
 
 def forward_compare(fv_model, af_net):
@@ -232,9 +218,6 @@ def forward_compare(fv_model, af_net):
     return ok
 
 
-# ---------------------------------------------------------------------------
-# Any-step sampling smoke via FlowMapEulerDiscreteScheduler.
-# ---------------------------------------------------------------------------
 
 
 def sample_anystep(fv_model):

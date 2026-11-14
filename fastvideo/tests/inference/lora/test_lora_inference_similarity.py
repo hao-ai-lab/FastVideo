@@ -58,24 +58,6 @@ LORA_CONFIGS = [{
     "bad quality video,色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
     "ssim_threshold": 0.79
 }
-                # TODO: Add a LoRA with lora_alpha values to test alpha scaling
-                #
-                # Context: Some LoRAs use an alpha value that is two times smaller than their rank.
-                # This fix ensures that LoRA weights are correctly scaled by the alpha/rank ratio when merged.
-                #
-                # Issue: Currently, we cannot add a test for LoRA adapters with alpha values because:
-                # - The existing public LoRAs for Wan-AI/Wan2.1-T2V-1.3B-Diffusers don't store lora_alpha
-                # - No publicly available LoRA for this model includes lora_alpha tensors in their weights
-                # - This is why the alpha/rank scaling bug wasn't caught by existing tests
-                #
-                # The fix has been validated with:
-                # - A distilled LoRA that includes alpha values
-                # - Manual testing shows correct alpha/rank scaling behavior
-                # - Backward compatibility confirmed with LoRAs without alpha values
-                #
-                # Future work:
-                # - Add a synthetic LoRA test fixture with alpha values when feasible
-                # - Or wait for public Wan LoRAs with alpha to become available
                 ]
 
 MODEL_TO_PARAMS = {
@@ -209,7 +191,7 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id, env_overrides):
 
             # Try match with unsanitized prefix (for legacy reference videos)
             # Remove .mp4 and compare the base names after sanitization
-            base_filename = filename[:-4]  # Remove .mp4
+            base_filename = filename[:-4]
             if _sanitize_filename_component(base_filename) == output_video_name:
                 reference_video_name = filename
                 break

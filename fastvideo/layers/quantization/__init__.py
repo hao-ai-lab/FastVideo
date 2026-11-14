@@ -76,7 +76,6 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
         "nvfp4_qat_train": NVFP4QATTrainConfig,
         "fp8_qat_train": FP8QATTrainConfig,
     }
-    # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
 
     return method_to_config[quantization]

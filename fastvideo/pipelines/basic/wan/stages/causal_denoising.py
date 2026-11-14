@@ -148,7 +148,6 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         patch_ratio = self.transformer.config.arch_config.patch_size[
             -1] * self.transformer.config.arch_config.patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
-        # TODO(will): make this a parameter once we add i2v support
         independent_first_frame = self.transformer.independent_first_frame if hasattr(
             self.transformer, 'independent_first_frame') else False
         # Timesteps for DMD
@@ -183,11 +182,9 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
-        # Initialize or reset caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0], dtype=target_dtype, device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
-            # Initialize the low noise kv cache
             kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
                                                   dtype=target_dtype,
                                                   device=latents.device)
@@ -216,7 +213,6 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         block_sizes = [self.num_frames_per_block] * num_blocks
         start_index = 0
 
-        # For now hardcode the first block to be 1 frame assuming the model is Wan2.2-MoE
         if boundary_timestep is not None:
             block_sizes[0] = 1
 
@@ -269,21 +265,18 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
-                    # Stop if interrupted
                     if getattr(self, "interrupt", False):
                         break
                     if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
                     else:
                         current_model = self.transformer
-                    # Copy for pred conversion
                     noise_latents = noise_latents_btchw.clone()
                     latent_model_input = current_latents.to(target_dtype)
 
                     if batch.image_latent is not None and independent_first_frame and start_index == 0:
                         latent_model_input = torch.cat([latent_model_input, batch.image_latent.to(target_dtype)], dim=2)
 
-                    # Prepare inputs
                     t_expand = t_cur.repeat(latent_model_input.shape[0])
 
                     # Attention metadata if needed
@@ -310,7 +303,6 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                         set_forward_context(current_timestep=i,
                                             attn_metadata=attn_metadata,
                                             forward_batch=batch):
-                        # Run transformer; follow DMD stage pattern
                         t_expanded_noise = t_cur * torch.ones(
                             (latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
                         pred_noise_btchw = current_model(
@@ -325,7 +317,6 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
-                    # Convert pred noise to pred video with FM Euler scheduler utilities
                     if boundary_timestep is not None and t_cur >= boundary_timestep:
                         pred_video_btchw = pred_noise_to_x_bound(
                             pred_noise=pred_noise_btchw.flatten(0, 1),
@@ -367,7 +358,6 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                     if progress_bar is not None:
                         progress_bar.update()
 
-                # Write back and advance
                 latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
 
                 # Re-run with context timestep to update KV cache using clean context
@@ -455,7 +445,6 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
 
         num_inference_steps = batch.num_inference_steps
 
-        # Initialize caches
         kv_cache = self._initialize_kv_cache(
             batch_size=b,
             dtype=target_dtype,
@@ -502,7 +491,6 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                 timesteps = self.scheduler.timesteps
 
                 for i, t_cur in enumerate(timesteps):
-                    # Stop if interrupted
                     if getattr(self, "interrupt", False):
                         break
                     latent_model_input = current_latents.to(target_dtype)
@@ -554,7 +542,6 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                     if progress_bar is not None:
                         progress_bar.update()
 
-                # Write denoised block back
                 latents[
                     :,
                     :,
@@ -563,7 +550,6 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                     :,
                 ] = current_latents
 
-                # Update KV cache with clean context
                 t_context = torch.ones(
                     [b],
                     device=latents.device,

@@ -128,9 +128,6 @@ class Resample(nn.Module):
                 else:
 
                     cache_x = x[:, :, -1:, :, :].clone()
-                    # if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx]!='Rep':
-                    #     # cache last frame of last two chunk
-                    #     cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
 
                     x = self.time_conv(torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2))
                     feat_cache[idx] = cache_x
@@ -154,7 +151,6 @@ class Resample(nn.Module):
         nn.init.zeros_(conv_weight)
         c1, c2, t, h, w = conv_weight.size()
         init_matrix = torch.eye(c1 // 2, c2)
-        #init_matrix = repeat(init_matrix, 'o ... -> (o 2) ...').permute(1,0,2).contiguous().reshape(c1,c2)
         conv_weight[:c1 // 2, :, -1, 0, 0] = init_matrix
         conv_weight[c1 // 2:, :, -1, 0, 0] = init_matrix
         conv.weight.data.copy_(conv_weight)
@@ -215,10 +211,8 @@ class AttentionBlock(nn.Module):
         b, c, t, h, w = x.size()
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.norm(x)
-        # compute query, key, value
         q, k, v = self.to_qkv(x).reshape(b * t, 1, c * 3, -1).permute(0, 1, 3, 2).contiguous().chunk(3, dim=-1)
 
-        # apply attention
         x = F.scaled_dot_product_attention(
             q,
             k,
@@ -254,7 +248,6 @@ class Encoder3d(nn.Module):
         dims = [dim * u for u in [1] + dim_mult]
         scale = 1.0
 
-        # init block
         self.conv1 = CausalConv3d(3, dims[0], 3, padding=1)
 
         # downsample blocks
@@ -348,7 +341,6 @@ class Decoder3d(nn.Module):
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
         scale = 1.0 / 2**(len(dim_mult) - 2)
 
-        # init block
         self.conv1 = CausalConv3d(z_dim, dims[0], 3, padding=1)
 
         # middle blocks
@@ -539,11 +531,9 @@ def _video_vae(pretrained_path=None, z_dim=None, device='cpu', **kwargs):
                dropout=0.0)
     cfg.update(**kwargs)
 
-    # init model
     with torch.device('meta'):
         model = WanVAE_(**cfg)
 
-    # load checkpoint
     logging.info(f'loading {pretrained_path}')
     model.load_state_dict(torch.load(pretrained_path, map_location=device), assign=True)
 
@@ -568,7 +558,6 @@ class Wan2_1_VAE:
         self.std = torch.tensor(std, dtype=dtype, device=device)
         self.scale = [self.mean, 1.0 / self.std]
 
-        # init model
         self.model = _video_vae(
             pretrained_path=vae_pth,
             z_dim=z_dim,

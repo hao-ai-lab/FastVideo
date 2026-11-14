@@ -7,9 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
-# ---------------------------------------------------------------------------
 # Edit the DDP run here. Do not launch while another job owns the same GPUs.
-# ---------------------------------------------------------------------------
 FEATURE_DIR="/mnt/lustre/vlm-kai/datasets/VGGSound/mmaudio_features_torio/train"
 VALIDATION_FEATURE_DIR="/mnt/lustre/vlm-kai/datasets/VGGSound/mmaudio_features_torio/val"
 EMPTY_STRING_FEATURES="${REPO_ROOT}/official_weights/mmaudio/raw/ext_weights/empty_string.pth"

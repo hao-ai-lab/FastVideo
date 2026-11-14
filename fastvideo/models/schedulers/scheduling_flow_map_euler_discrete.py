@@ -52,8 +52,6 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         self.sigmas: torch.Tensor = torch.empty(0)
         super().__init__()
 
-    # ------------------------------------------------------------------
-    # BaseScheduler abstract surface
 
     def set_shift(self, shift: float) -> None:
         self.shift = float(shift)
@@ -67,7 +65,6 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         del timestep
         return sample
 
-    # ------------------------------------------------------------------
     # Public helpers used by the AnyFlow pretrain method.
 
     def apply_shift(
@@ -120,7 +117,6 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         denom = w.sum().clamp_min(1e-8)
         return w * (float(self.num_train_timesteps) / denom)
 
-    # ------------------------------------------------------------------
 
     def set_timesteps(
         self,

@@ -97,7 +97,6 @@ def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Ten
                          "the file is missing, empty, or not readable by OpenCV.")
 
     if len(frames) < num_frames:
-        # Repeat last frame to fill
         while len(frames) < num_frames:
             frames.append(frames[-1])
 
@@ -281,10 +280,8 @@ def main() -> None:
         }
         records.append(record)
 
-    # Clean up encoders
     del qwen_enc, qwen_tok, clip_enc, clip_tok, vae
 
-    # Write parquet
     table = pa.table(
         {k: [r[k] for r in records]
          for k in records[0]},

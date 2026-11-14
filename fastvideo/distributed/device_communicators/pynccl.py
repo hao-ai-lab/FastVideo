@@ -68,10 +68,8 @@ class PyNcclCommunicator:
         logger.info("FastVideo is using nccl==%s", self.nccl.ncclGetVersion())
 
         if self.rank == 0:
-            # get the unique id from NCCL
             self.unique_id = self.nccl.ncclGetUniqueId()
         else:
-            # construct an empty unique id
             self.unique_id = ncclUniqueId()
 
         if not isinstance(group, StatelessProcessGroup):
@@ -88,7 +86,6 @@ class PyNcclCommunicator:
             device = torch.device(f"cuda:{device}")
         elif isinstance(device, str):
             device = torch.device(device)
-        # now `device` is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
         # nccl communicator and stream will use this device

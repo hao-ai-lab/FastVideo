@@ -85,7 +85,6 @@ class ComposedPipelineBase(ABC):
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, Any] = {}
-    # do not need to include moe related transformers
     trainable_transformer_names: list[str] = ["transformer"]
     trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
@@ -128,7 +127,6 @@ class ComposedPipelineBase(ABC):
             *(f"{component_dir}/**" for component_dir in component_dirs),
         ]
 
-    # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
                  fastvideo_args: FastVideoArgs | TrainingArgs,
@@ -168,7 +166,6 @@ class ComposedPipelineBase(ABC):
 
         self.local_rank = get_world_group().local_rank
 
-        # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         with self.profiler_controller.region("profiler_region_model_loading"):
             self.modules = self.load_modules(fastvideo_args, loaded_modules)
@@ -438,7 +435,6 @@ class ComposedPipelineBase(ABC):
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
-            # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
             for key, value in kwargs.items():
                 setattr(fastvideo_args, key, value)
@@ -481,7 +477,6 @@ class ComposedPipelineBase(ABC):
             allow_patterns=self.get_hf_download_allow_patterns(),
         )
         self.model_path = model_path
-        # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(
             model_path,
@@ -555,7 +550,6 @@ class ComposedPipelineBase(ABC):
         model_index = self._load_config(self.model_path)
         logger.info("Loading pipeline modules from config: %s", model_index)
 
-        # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
         model_index.pop("_name_or_path", None)
@@ -658,7 +652,6 @@ class ComposedPipelineBase(ABC):
                 logger.warning("Overwriting module %s", module_name)
             modules[module_name] = module
 
-        # Check if all required modules were loaded
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:
                 raise ValueError(
@@ -764,7 +757,6 @@ class ComposedPipelineBase(ABC):
                          stage_name)
             self._install_lazy_release_hooks()
 
-    # TODO(will): don't hardcode no_grad
     @torch.no_grad()
     def forward(
         self,
@@ -785,7 +777,6 @@ class ComposedPipelineBase(ABC):
 
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
-        # logger.info("Batch: %s", batch)
         try:
             for stage in self.stages:
                 batch = stage(batch, fastvideo_args)
@@ -798,7 +789,6 @@ class ComposedPipelineBase(ABC):
             self._release_all_lazy_modules()
             raise
 
-        # Return the output
         return batch
 
     def train(self) -> None:

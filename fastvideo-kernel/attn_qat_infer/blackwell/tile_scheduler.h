@@ -65,7 +65,6 @@ public:
     // MSVC requires protecting use of CUDA-specific nonstandard syntax,
     // like blockIdx and gridDim, with __CUDA_ARCH__.
 #if defined(__CUDA_ARCH__)
-    // current_work_linear_idx_ = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     current_work_linear_idx_ = blockIdx.x;
 #else
     CUTLASS_ASSERT(false && "This line should never be reached");

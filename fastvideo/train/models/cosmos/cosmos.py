@@ -71,10 +71,6 @@ class CosmosModel(WanModel):
             transformer_override_safetensor=(transformer_override_safetensor),
         )
 
-    # ------------------------------------------------------------------
-    # Overrides
-    # ------------------------------------------------------------------
-
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
@@ -187,7 +183,6 @@ class CosmosModel(WanModel):
         # layout Cosmos's transformer expects.
         noisy_latents = noisy_latents.permute(0, 2, 1, 3, 4)
 
-        # ----------------------------------------------------------
         # Cosmos 2.5: velocity prediction, no preconditioning.
         #
         # Noise schedule (EDM):  x_t = x_0 + sigma * eps
@@ -199,7 +194,6 @@ class CosmosModel(WanModel):
         #   pred_x0 = x_t - pred * sigma
         # Since v ≈ noise, this gives:
         #   pred_x0 = (x_0 + sigma*eps) - eps*sigma = x_0  ✓
-        # ----------------------------------------------------------
         assert batch.sigmas is not None
         sigma_1d = batch.sigmas.flatten()[:noisy_latents.shape[0]]
 

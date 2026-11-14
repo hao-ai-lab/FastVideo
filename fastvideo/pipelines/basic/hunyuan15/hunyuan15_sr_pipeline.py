@@ -16,8 +16,6 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, Denois
                                         Hy15ImageEncodingStage, SRDenoisingStage)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 
-# TODO(will): move PRECISION_TO_TYPE to better place
-
 logger = init_logger(__name__)
 
 
@@ -88,7 +86,6 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
 
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
-        # logger.info("Batch: %s", batch)
         self.get_module("transformer").to(get_local_torch_device())
         batch = self.input_validation_stage(batch, fastvideo_args)
         batch = self.prompt_encoding_stage_primary(batch, fastvideo_args)
@@ -114,7 +111,6 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
         end_time = time.time()
         logger.info("Decoding time: %s seconds", end_time - start_time)
 
-        # Return the output
         return batch
 
 

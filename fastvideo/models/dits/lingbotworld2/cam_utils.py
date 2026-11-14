@@ -65,7 +65,6 @@ def compute_relative_poses(
     # ensure identity matrix for 1st frame
     relative_poses[0] = torch.eye(4, device=c2ws_mat.device, dtype=c2ws_mat.dtype)
     if framewise:
-        # compute pose between i and i+1
         relative_poses_framewise = torch.bmm(SE3_inverse(relative_poses[:-1]), relative_poses[1:])
         relative_poses[1:] = relative_poses_framewise
     if normalize_trans:  # note refer to camctrl2: "we scale the coordinate inputs to roughly 1 standard deviation to simplify model learning."
@@ -183,7 +182,7 @@ def prepare_camera_embedding(
         height_final=height,
         width_final=width,
     )
-    Ks = Ks[0]  # use first frame
+    Ks = Ks[0]
 
     len_c2ws = len(c2ws)
     num_latent_frames = (len_c2ws - 1) // 4 + 1

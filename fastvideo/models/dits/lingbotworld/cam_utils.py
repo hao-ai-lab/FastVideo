@@ -67,7 +67,6 @@ def compute_relative_poses(
     # ensure identity matrix for 1st frame
     relative_poses[0] = torch.eye(4, device=c2ws_mat.device, dtype=c2ws_mat.dtype)
     if framewise:
-        # compute pose between i and i+1
         relative_poses_framewise = torch.bmm(SE3_inverse(relative_poses[:-1]), relative_poses[1:])
         relative_poses[1:] = relative_poses_framewise
     if normalize_trans:  # note refer to camctrl2: "we scale the coordinate inputs to roughly 1 standard deviation to simplify model learning."
@@ -116,8 +115,6 @@ def get_plucker_embeddings(
     rays_d = directions @ c2ws_mat[:, :3, :3].transpose(-1, -2)  # [f, h*w, 3]
     rays_o = c2ws_mat[:, :3, 3]  # [f, 3]
     rays_o = rays_o[:, None, :].expand_as(rays_d)  # [f, h*w, 3]
-    # rays_dxo = torch.cross(rays_o, rays_d, dim=-1) # [f, h*w, 3]
-    # note refer to: apt2
     plucker_embeddings = torch.cat([rays_o, rays_d], dim=-1)  # [f, h*w, 6]
     plucker_embeddings = plucker_embeddings.view([n_frames, height, width, 6])  # [f*h*w, 6]
     return plucker_embeddings
@@ -182,7 +179,7 @@ def prepare_camera_embedding(
         height_final=height,
         width_final=width,
     )
-    Ks = Ks[0]  # use first frame
+    Ks = Ks[0]
 
     len_c2ws = len(c2ws)
     num_latent_frames = (len_c2ws - 1) // 4 + 1

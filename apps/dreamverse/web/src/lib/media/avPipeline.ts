@@ -270,7 +270,6 @@ export function createAvPipeline({
       return;
     }
     stallRecoveryTimerId = setInterval(() => {
-      // Stop polling once playback is running normally.
       if (initialPlaybackStarted && !playbackResumePending) {
         clearStallRecovery();
         return;

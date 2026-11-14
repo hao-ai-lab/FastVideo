@@ -24,7 +24,7 @@ models:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
     trainable: true
-  teacher:                          # remove once cache is complete
+  teacher:
     _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false

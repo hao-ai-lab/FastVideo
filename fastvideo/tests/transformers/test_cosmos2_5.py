@@ -9,7 +9,6 @@ import sys
 import pytest
 import torch
 
-# Add cosmos-predict2.5 to Python path for loading reference model
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
 COSMOS_PREDICT2_5_PATH = os.path.join(TEST_DIR, '..', '..', '..', '..', 'cosmos-predict2.5')
@@ -22,7 +21,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model
-# Use Cosmos 2.5 specific config
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
@@ -97,12 +95,10 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
 
         model = MinimalV1LVGDiT(**model_config)
 
-        # Load checkpoint if path exists
         if os.path.exists(checkpoint_path):
             logger.info(f"Loading reference model from {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
-            # Extract state dict
             if 'state_dict' in checkpoint:
                 checkpoint_state = checkpoint['state_dict']
             elif 'model' in checkpoint:
@@ -126,7 +122,6 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
                 # Strip 'net.' prefix
                 new_key = key[4:] if key.startswith('net.') else key  # Strip 'net.' prefix
 
-                # Add '_checkpoint_wrapped_module' if needed
                 if needs_checkpoint_wrapper and new_key.startswith('blocks.'):
                     # Pattern: 'blocks.N.something' -> 'blocks.N._checkpoint_wrapped_module.something'
                     parts = new_key.split('.', 2)
@@ -135,7 +130,6 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
 
                 transformed_state[new_key] = value
 
-            # Load with strict=False to handle any remaining mismatches
             missing_keys, unexpected_keys = model.load_state_dict(transformed_state, strict=False)
 
             if missing_keys:
@@ -182,7 +176,6 @@ def test_cosmos25_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
 
-    # Create COSMOS 2.5 specific config
     from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25ArchConfig
 
     arch_config = Cosmos25ArchConfig(
@@ -207,11 +200,9 @@ def test_cosmos25_transformer():
 
     cosmos25_config = Cosmos25VideoConfig(arch_config=arch_config)
 
-    # Create FastVideo model directly (Cosmos 2.5 is not in diffusers format)
     logger.info("Creating FastVideo COSMOS 2.5 model...")
     from fastvideo.models.dits.cosmos2_5 import Cosmos25Transformer3DModel
 
-    # Get hf_config from the arch_config for model initialization
     hf_config = {
         'in_channels': arch_config.in_channels,
         'out_channels': arch_config.out_channels,
@@ -236,7 +227,6 @@ def test_cosmos25_transformer():
     fastvideo_model = fastvideo_model.to(device, dtype=precision)
     fastvideo_model.eval()
 
-    # Construct checkpoint path using relative paths
     checkpoint_file = os.path.join(MODEL_PATH, CHECKPOINT_SUBDIR, CHECKPOINT_FILENAME)
 
     if not os.path.exists(checkpoint_file):
@@ -244,14 +234,12 @@ def test_cosmos25_transformer():
         logger.info("Will test architecture without loading checkpoint weights")
         checkpoint_file = None
 
-    # Load checkpoint into FastVideo model using param_names_mapping
     if checkpoint_file:
         logger.info(f"Loading checkpoint into FastVideo model from {checkpoint_file}")
         from fastvideo.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 
         checkpoint = torch.load(checkpoint_file, map_location='cpu')
 
-        # Extract state dict (checkpoint might have 'state_dict', 'model', or be the dict itself)
         if 'state_dict' in checkpoint:
             checkpoint_state = checkpoint['state_dict']
         elif 'model' in checkpoint:
@@ -262,7 +250,6 @@ def test_cosmos25_transformer():
         # Filter to only model parameters (remove training metadata like accum_*)
         model_state = {k: v for k, v in checkpoint_state.items() if k.startswith('net.') and 'accum_' not in k}
 
-        # Convert checkpoint keys to FastVideo format using param_names_mapping
         param_names_mapping_fn = get_param_names_mapping(cosmos25_config.arch_config.param_names_mapping)
         custom_state_dict, reverse_mapping = hf_to_custom_state_dict(model_state, param_names_mapping_fn)
 
@@ -273,7 +260,6 @@ def test_cosmos25_transformer():
             for k, v in custom_state_dict.items() if k in model_param_names
         }
 
-        # Load into FastVideo model
         missing_keys, unexpected_keys = fastvideo_model.load_state_dict(filtered_state_dict, strict=False)
 
         if missing_keys:
@@ -292,12 +278,10 @@ def test_cosmos25_transformer():
     logger.info("Loading reference COSMOS 2.5 model...")
     reference_model = load_reference_cosmos25_model(checkpoint_file, device, precision) if checkpoint_file else None
 
-    # Set models to eval mode
     fastvideo_model = fastvideo_model.eval()
     if reference_model is not None:
         reference_model = reference_model.eval()
 
-    # Create test inputs
     batch_size = 1
     seq_len = 77  # Typical T5 sequence length
 
@@ -343,7 +327,7 @@ def test_cosmos25_transformer():
                     forward_batch=forward_batch,
             ):
                 # FastVideo expects padding_mask in [B, 1, H, W] format
-                padding_mask_fv = padding_mask.unsqueeze(1)  # Add channel dimension for FastVideo
+                padding_mask_fv = padding_mask.unsqueeze(1)
                 # FastVideo supports both [B] and [B, T] formats - use [B, T] to match official model
                 # This ensures each frame gets its own timestep embedding (even if values are the same)
                 timestep_fv = timestep  # Already in [B, T] format
@@ -359,7 +343,6 @@ def test_cosmos25_transformer():
 
             # Reference model (if available)
             if reference_model is not None:
-                # Prepare input for reference model
                 # MinimalV1LVGDiT adds condition mask internally, so pass them separately
                 from cosmos_predict2._src.predict2.conditioner import DataType
 
@@ -384,7 +367,6 @@ def test_cosmos25_transformer():
                     data_type=ref_data_type,
                 )
 
-    # Check FastVideo output shape and dtype
     logger.info(f"FastVideo output shape: {output_fv.shape}")
     logger.info(f"FastVideo output dtype: {output_fv.dtype}")
     assert output_fv.shape[0] == batch_size, "Batch size mismatch"
@@ -395,13 +377,11 @@ def test_cosmos25_transformer():
     if reference_model is not None:
         logger.info(f"Reference output shape: {output_ref.shape}")
 
-        # Check if outputs have the same shape
         assert output_fv.shape == output_ref.shape, \
             f"Output shapes don't match: {output_fv.shape} vs {output_ref.shape}"
         assert output_fv.dtype == output_ref.dtype, \
             f"Output dtype don't match: {output_fv.dtype} vs {output_ref.dtype}"
 
-        # Check if outputs are similar
         max_diff = torch.max(torch.abs(output_fv - output_ref))
         mean_diff = torch.mean(torch.abs(output_fv - output_ref))
         relative_diff = mean_diff / (torch.mean(torch.abs(output_ref)) + 1e-8)
@@ -426,7 +406,6 @@ def test_cosmos25_transformer_video():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
 
-    # Create COSMOS 2.5 specific config
     from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25ArchConfig
 
     arch_config = Cosmos25ArchConfig(
@@ -451,11 +430,9 @@ def test_cosmos25_transformer_video():
 
     cosmos25_config = Cosmos25VideoConfig(arch_config=arch_config)
 
-    # Create FastVideo model directly (Cosmos 2.5 is not in diffusers format)
     logger.info("Creating FastVideo COSMOS 2.5 model for video test...")
     from fastvideo.models.dits.cosmos2_5 import Cosmos25Transformer3DModel
 
-    # Get hf_config from the arch_config for model initialization
     hf_config = {
         'in_channels': arch_config.in_channels,
         'out_channels': arch_config.out_channels,
@@ -480,7 +457,6 @@ def test_cosmos25_transformer_video():
     model = model.to(device, dtype=precision)
     model.eval()
 
-    # Create video input with multiple frames
     batch_size = 1
     num_frames = 16  # Video with 16 frames
     seq_len = 77
@@ -495,7 +471,6 @@ def test_cosmos25_transformer_video():
         dtype=precision)
 
     condition_mask = torch.zeros(batch_size, 1, num_frames, 64, 64, device=device, dtype=precision)
-    # Set first 2 frames as conditioning
     condition_mask[:, :, :2, :, :] = 1.0
 
     encoder_hidden_states = torch.randn(
@@ -534,7 +509,6 @@ def test_cosmos25_transformer_video():
     logger.info(f"Video output shape: {output.shape}")
     logger.info(f"Video output dtype: {output.dtype}")
 
-    # Check output shape
     assert output.shape[0] == batch_size, "Batch size mismatch"
     assert output.shape[1] == 16, "Output channels should be 16"
     assert output.shape[2] == num_frames, "Number of frames mismatch"
@@ -544,6 +518,5 @@ def test_cosmos25_transformer_video():
 
 
 if __name__ == "__main__":
-    # Run tests directly
     test_cosmos25_transformer()
     test_cosmos25_transformer_video()

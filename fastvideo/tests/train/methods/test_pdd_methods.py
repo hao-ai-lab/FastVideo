@@ -261,9 +261,6 @@ def _raw_batch(seed: int = 0) -> dict[str, Any]:
     return {"latent": torch.randn(1, _NUMEL, generator=generator), "prompt": f"prompt-{seed}"}
 
 
-# ----------------------------------------------------------------------------
-# Config parsing
-# ----------------------------------------------------------------------------
 
 
 def test_parse_pdd_config_defaults_and_validation() -> None:
@@ -294,9 +291,6 @@ def test_parse_pdd_config_defaults_and_validation() -> None:
         parse_pdd_config({"pdd_loss_weight": -1.0})
 
 
-# ----------------------------------------------------------------------------
-# Standalone PDD
-# ----------------------------------------------------------------------------
 
 
 def test_pdd_data_latent_step_trains_the_student_from_aligned_block_starts() -> None:
@@ -470,9 +464,6 @@ def test_pdd_teacher_guidance_runs_both_forwards_and_mixes_in_decoding_precision
     assert out.dtype == torch.float32
 
 
-# ----------------------------------------------------------------------------
-# DMPDD
-# ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("rollout_mode", ["simulate", "data_latent"])
@@ -494,9 +485,6 @@ def test_dmpdd_rejects_negative_fake_score_weight_decay() -> None:
         _build(DMPDDMethod, _dmd_method_config(fake_score_weight_decay=-0.01))
 
 
-# ----------------------------------------------------------------------------
-# DMPDD
-# ----------------------------------------------------------------------------
 
 
 def test_dmpdd_student_step_uses_the_full_tail_and_carries_one_block() -> None:

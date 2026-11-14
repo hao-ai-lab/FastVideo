@@ -34,10 +34,6 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# ============================================================================
-# SLA Utility functions (moved from sla_kernels/utils.py)
-# ============================================================================
-
 
 @triton.jit
 def compress_kernel(
@@ -108,11 +104,6 @@ def get_block_map(
     sparse_map = torch.zeros_like(pooled_score, dtype=torch.int8)
     sparse_map.scatter_(-1, lut, 1)
     return sparse_map, lut, topk
-
-
-# ============================================================================
-# SLA Backend classes
-# ============================================================================
 
 
 class SLAAttentionBackend(AttentionBackend):
@@ -286,20 +277,16 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         """
         original_dtype = query.dtype
 
-        # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
         k = key.transpose(1, 2).contiguous()
         v = value.transpose(1, 2).contiguous()
 
-        # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
         if hasattr(attn_metadata, 'topk_ratio'):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
-        # Compute block-sparse attention pattern
         sparse_map, lut, real_topk = get_block_map(q, k, topk_ratio=topk_ratio, BLKQ=self.BLKQ, BLKK=self.BLKK)
 
-        # Convert to compute dtype
         q = q.to(self.dtype)
         k = k.to(self.dtype)
         v = v.to(self.dtype)
@@ -322,13 +309,11 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         # Combine sparse and linear outputs
         output = (o_s + o_l).to(original_dtype)
 
-        # Convert back to FastVideo format (B, L, H, D)
         output = output.transpose(1, 2)
 
         return output
 
 
-# Check if spas_sage_attn is available for SageSLA
 SAGESLA_ENABLED = True
 try:
     import spas_sage_attn._qattn as qattn
@@ -482,12 +467,10 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         """
         original_dtype = query.dtype
 
-        # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
         k = key.transpose(1, 2).contiguous()
         v = value.transpose(1, 2).contiguous()
 
-        # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
         if hasattr(attn_metadata, 'topk_ratio'):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
@@ -499,10 +482,8 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         else:
             BLKQ, BLKK = 128, 64
 
-        # Compute block-sparse attention pattern
         sparse_map, lut, real_topk = get_block_map(q, k, topk_ratio=topk_ratio, BLKQ=BLKQ, BLKK=BLKK)
 
-        # Convert to compute dtype
         q = q.to(self.dtype)
         k = k.to(self.dtype)
         v = v.to(self.dtype)
@@ -555,7 +536,6 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         # Combine sparse and linear outputs
         output = (o_s + o_l).to(original_dtype)
 
-        # Convert back to FastVideo format (B, L, H, D)
         output = output.transpose(1, 2)
 
         return output

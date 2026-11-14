@@ -1,6 +1,5 @@
 from fastvideo import VideoGenerator
 
-# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_wan2_2_14B_t2v"
 
@@ -18,9 +17,7 @@ def main():
         dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
         pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
@@ -36,10 +33,7 @@ def main():
                                  height=720,
                                  width=1280,
                                  num_frames=81)
-    # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
-    # Generate another video with a different prompt, without reloading the
-    # model!
     prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
                "glistening under the warm afternoon sun. The tall grass ripples gently in "
                "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "

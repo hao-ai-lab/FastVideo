@@ -32,7 +32,6 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 export WANDB_API_KEY=your_wandb_api_key
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
@@ -45,8 +44,6 @@ FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DIR=your_validation_path  #(example:validation_64.json)
 OUTPUT_DIR="checkpoints/wan_t2v_finetune"
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(

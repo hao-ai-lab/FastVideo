@@ -316,7 +316,6 @@ def load_upstream_dit(base_shard_dir, device=None, dtype=None, local_attn_layers
 
     model = DiTModel(model_config=model_config)
 
-    # Load all base shards into a single state dict.
     base_shard_dir = Path(base_shard_dir)
     shard_paths = sorted(base_shard_dir.glob("*.safetensors"))
     state = {}

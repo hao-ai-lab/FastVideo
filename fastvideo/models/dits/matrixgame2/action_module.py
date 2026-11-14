@@ -35,7 +35,6 @@ def _get_nd_rotary_pos_embed_matrixgame2(
         theta_rescale_factor=theta_rescale_factor,
         dtype=torch.float32,
     )
-    # convert from [S, D/2] to [S, D] format
     cos = cos.repeat_interleave(2, dim=1)
     sin = sin.repeat_interleave(2, dim=1)
     return cos, sin
@@ -54,11 +53,9 @@ def _apply_rotary_emb_qk(
     cos = freqs_cos[start_offset:start_offset + seq_len]  # [S, D]
     sin = freqs_sin[start_offset:start_offset + seq_len]  # [S, D]
 
-    # Move to device
     cos = cos.to(xq.device)
     sin = sin.to(xq.device)
 
-    # Convert from [S, D] (interleaved) back to [S, D/2]
     cos_half = cos[:, ::2]  # [S, D/2]
     sin_half = sin[:, ::2]  # [S, D/2]
 
@@ -160,15 +157,12 @@ def _update_kv_cache_and_attend(
             :,
             sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens,
         ].clone())
-        # Calculate indices with eviction adjustment
         local_end_index = (original_local_end_index + current_end - original_global_end_index - num_evicted_tokens)
         local_start_index = local_end_index - num_new_tokens
     else:
-        # Calculate indices without eviction
         local_end_index = (original_local_end_index + current_end - original_global_end_index)
         local_start_index = local_end_index - num_new_tokens
 
-    # Store new k, v in cache
     if store_first_only:
         kv_cache["k"][:, local_start_index:local_end_index] = k[:kv_cache["k"].shape[0]]
         kv_cache["v"][:, local_start_index:local_end_index] = v[:kv_cache["v"].shape[0]]
@@ -189,7 +183,6 @@ def _update_kv_cache_and_attend(
 
     attn = attn_layer(q, cached_k, cached_v)
 
-    # Update indices
     if isinstance(kv_cache["global_end_index"], torch.Tensor):
         kv_cache["global_end_index"].fill_(current_end)
     else:
@@ -231,7 +224,6 @@ class ActionModule(nn.Module):
         blocks: list | None = None,
     ):
         super().__init__()
-        # Initialize mutable defaults
         patch_size = patch_size if patch_size is not None else [1, 2, 2]
         rope_dim_list = (rope_dim_list if rope_dim_list is not None else [8, 28, 28])
         mouse_qk_dim_list = (mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28])
@@ -369,7 +361,6 @@ class ActionModule(nn.Module):
         if rope_dim_list is None:
             rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
         assert sum(rope_dim_list) == head_dim, ("sum(rope_dim_list) should equal to head_dim of attention layer")
-        # Use Matrix-Game wrapper for FastVideo's function
         freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame2(
             rope_dim_list,
             rope_sizes,
@@ -427,7 +418,7 @@ class ActionModule(nn.Module):
             ]
 
         group_mouse = torch.stack(group_mouse, dim=1)
-        actual_num_frames = group_mouse.shape[1]  # Use actual stacked frame count
+        actual_num_frames = group_mouse.shape[1]
 
         S = th * tw
         group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)
@@ -442,7 +433,6 @@ class ActionModule(nn.Module):
         k = self.img_attn_k_norm(k).to(v)
         # rope embd
 
-        # freqs_cis = (self.freqs_cos, self.freqs_sin)
 
         q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
         ## TODO: adding cache here
@@ -474,8 +464,6 @@ class ActionModule(nn.Module):
                 )
         else:
             attn = self.mouse_attn_layer(q, k, v)
-        # Compute cu_squlens and max_seqlen for flash attention
-        # qk norm
         attn = rearrange(attn, "(b S) T h d -> b (T S) (h d)", b=B)
         attn, _ = self.proj_mouse(attn)
         return attn
@@ -529,7 +517,6 @@ class ActionModule(nn.Module):
             ]
         group_keyboard = torch.stack(group_keyboard, dim=1)  # B F RW C
         group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1))
-        # apply cross attn
         mouse_q, _ = self.mouse_attn_q(hidden_states)
         keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
 
@@ -540,14 +527,10 @@ class ActionModule(nn.Module):
         B, L, KHD = keyboard_kv.shape
         k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(2, 0, 1, 3, 4)
 
-        # Compute cu_squlens and max_seqlen for flash attention
-        # qk norm
 
         q = self.key_attn_q_norm(q).to(v)
         k = self.key_attn_k_norm(k).to(v)
         S = th * tw
-        # assert S == 880
-        # position embed
         if use_rope_keyboard:
             B, TS, H, D = q.shape
             T_ = TS // S

@@ -28,7 +28,6 @@ from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.wan.transformer import WanSelfAttention
 from fastvideo.platforms import AttentionBackendEnum
 
-# Import ActionModule
 from .action_module import MatrixGame3ActionModule
 
 logger = init_logger(__name__)
@@ -348,7 +347,6 @@ class MatrixGame3TransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
         grid_frames, grid_height, grid_width = grid_sizes
 
         if memory_length > 0:
@@ -447,7 +445,6 @@ class MatrixGame3TransformerBlock(nn.Module):
 
             norm_hidden_states = self.cross_attn_residual_norm.norm(hidden_states.float())
             norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
-        # =================================================
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states.to(self.ffn.fc_in.weight.dtype))

@@ -122,7 +122,6 @@ class HYWorldArchConfig(DiTArchConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        # Convert HY-WorldPlay naming to FastVideo naming conventions
         self.num_attention_heads: int = self.heads_num
         self.attention_head_dim: int = self.hidden_size // self.heads_num
         self.num_layers: int = self.mm_double_blocks_depth
@@ -145,7 +144,6 @@ class HYWorldArchConfig(DiTArchConfig):
             else:
                 self.in_channels = self.in_channels * 2 + 1  # 32 * 2 + 1 = 65
 
-        # Handle patch_size (can be list/tuple or int)
         if isinstance(self.patch_size, list | tuple):
             self.patch_size_t: int = self.patch_size[0]
             # assume square patch size for height and width
@@ -154,7 +152,6 @@ class HYWorldArchConfig(DiTArchConfig):
         else:
             self.patch_size_t = 1
 
-        # Convert qk_norm to string format
         if isinstance(self.qk_norm, bool):
             if self.qk_norm:
                 self.qk_norm = "rms_norm" if self.qk_norm_type == "rms" else self.qk_norm_type

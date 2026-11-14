@@ -153,7 +153,6 @@ class ParquetDatasetWriter:
         first_index = _next_chunk_index(self.out_dir)
         if remainder_table is not None and len(remainder_table) > 0:
             if write_remainder:
-                # Write the remainder as a final small file (worker_0)
                 worker_dir = os.path.join(self.out_dir, "worker_0")
                 os.makedirs(worker_dir, exist_ok=True)
                 remainder_path = os.path.join(worker_dir, f"data_chunk_{first_index + total_chunks}.parquet")

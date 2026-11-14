@@ -213,7 +213,6 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             raise ValueError(f"Gate type {type(gate)} not supported")
         # residual_output.shape: [batch_size, seq_len, inner_dim]
 
-        # Apply normalization
         normalized = self.norm(residual_output)
 
         # Identity modulation: skip the scale/shift passes entirely.
@@ -224,7 +223,6 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             scale = scale.to(normalized.dtype)
             shift = shift.to(normalized.dtype)
 
-        # Apply scale and shift
         if isinstance(scale, torch.Tensor) and scale.dim() == 4:
             # scale.shape: [batch_size, num_frames, 1, inner_dim]
             # shift.shape: [batch_size, num_frames, 1, inner_dim]

@@ -49,7 +49,6 @@ JOB_NAME="${JOB_NAME:-${CONFIG_NAME}}"
 OUTPUT_DIR="${OUTPUT_DIR:-logs/slurm}"
 mkdir -p "${OUTPUT_DIR}"
 
-# ── Build sbatch args ─────────────────────────────────────────────
 # Forward the exported W&B API key through Slurm's environment so the generated
 # job script and its xtrace output do not contain the credential value.
 SBATCH_ARGS=(
@@ -70,7 +69,6 @@ SBATCH_ARGS=(
 if [[ -n "${EXCLUDE}" ]]; then
     SBATCH_ARGS+=(--exclude="${EXCLUDE}")
 fi
-# Apply hardware and wall-clock requirements selected by an experiment launcher.
 if [[ -n "${SBATCH_CONSTRAINT}" ]]; then
     SBATCH_ARGS+=(--constraint="${SBATCH_CONSTRAINT}")
 fi

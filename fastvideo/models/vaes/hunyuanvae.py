@@ -53,7 +53,6 @@ class HunyuanVAEAttention(nn.Module):
 
         inner_dim = heads * dim_head
 
-        # Define the projection layers
         self.to_q = nn.Linear(in_channels, inner_dim, bias=bias)
         self.to_k = nn.Linear(in_channels, inner_dim, bias=bias)
         self.to_v = nn.Linear(in_channels, inner_dim, bias=bias)
@@ -696,8 +695,6 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         nn.Module.__init__(self)
         ParallelTiledVAE.__init__(self, config)
 
-        # TODO(will): only pass in config. We do this by manually defining a
-        # config for hunyuan vae
         self.block_out_channels = config.block_out_channels
 
         if config.load_encoder:

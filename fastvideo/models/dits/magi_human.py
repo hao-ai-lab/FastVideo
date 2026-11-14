@@ -59,9 +59,6 @@ from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
 
 
 class Modality(IntEnum):
@@ -70,9 +67,6 @@ class Modality(IntEnum):
     TEXT = 2
 
 
-# ---------------------------------------------------------------------------
-# Activations
-# ---------------------------------------------------------------------------
 
 
 def swiglu7(x: torch.Tensor, alpha: float = 1.702, limit: float = 7.0) -> torch.Tensor:
@@ -92,9 +86,6 @@ def gelu7(x: torch.Tensor, alpha: float = 1.702, limit: float = 7.0) -> torch.Te
     return (x * torch.sigmoid(alpha * x)).to(in_dtype)
 
 
-# ---------------------------------------------------------------------------
-# Modality dispatcher
-# ---------------------------------------------------------------------------
 
 
 class ModalityDispatcher:
@@ -130,9 +121,6 @@ class ModalityDispatcher:
         return x[inv_permute_mapping]
 
 
-# ---------------------------------------------------------------------------
-# Norms, rotary embed
-# ---------------------------------------------------------------------------
 
 
 class MultiModalityRMSNorm(nn.Module):
@@ -218,9 +206,6 @@ class ElementWiseFourierEmbed(nn.Module):
         return torch.cat((sin_proj, cos_proj), dim=1).flatten(1)
 
 
-# ---------------------------------------------------------------------------
-# Packed-expert linear
-# ---------------------------------------------------------------------------
 
 
 class PackedExpertLinear(nn.Module):
@@ -277,9 +262,6 @@ class PackedExpertLinear(nn.Module):
         return modality_dispatcher.undispatch(*parts)
 
 
-# ---------------------------------------------------------------------------
-# Attention & MLP
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -620,9 +602,6 @@ class MagiTransformerLayer(nn.Module):
         return hidden_states + mlp_out
 
 
-# ---------------------------------------------------------------------------
-# Adapter (per-modality embedders + Fourier RoPE producer)
-# ---------------------------------------------------------------------------
 
 
 class MagiAdapter(nn.Module):
@@ -691,9 +670,6 @@ class MagiAdapter(nn.Module):
         return out, rope
 
 
-# ---------------------------------------------------------------------------
-# Top-level DiT
-# ---------------------------------------------------------------------------
 
 
 class _TransformerBlock(nn.Module):

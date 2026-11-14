@@ -5,7 +5,6 @@ from fastvideo import VideoGenerator
 
 
 def main():
-    # set the attention backend
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
     start_time = time.perf_counter()

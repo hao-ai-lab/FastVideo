@@ -1,5 +1,4 @@
 from huggingface_hub import save_torch_state_dict, load_state_dict_from_file
-# from safetensors import safetensors
 from safetensors.torch import save_file
 import torch
 import re
@@ -82,9 +81,8 @@ for k, v in state_dict.items():
     for pattern, replacement in _self_forcing_to_diffusers_param_names_mapping.items():
         if re.match(pattern, k):
             new_key = re.sub(pattern, replacement, k)
-            break  # Stop at the first match
+            break
     else:
-        # print(f"No match found for {k}")
         raise ValueError(f"No match found for {k}")
     new_state_dict[new_key] = v
     if "norm_added_k" in new_key:

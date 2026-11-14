@@ -491,11 +491,9 @@ class LTX2GenerationBackend:
 
         audio_lps = (DEFAULT_LTX2_AUDIO_SAMPLE_RATE / DEFAULT_LTX2_AUDIO_HOP_LENGTH / DEFAULT_LTX2_AUDIO_DOWNSAMPLE)
 
-        # Phase 1: seed kwargs with prior-segment conditioning.
         self.continuation.apply_video(request_kwargs, segment_idx)
         self.continuation.apply_audio(request_kwargs, segment_idx, audio_lps)
 
-        # Phase 2: generate.
         t0 = time.perf_counter()
         result = self.generator.generate_video(**request_kwargs)
         torch.cuda.synchronize()
@@ -516,7 +514,6 @@ class LTX2GenerationBackend:
 
         timings["generation_time_ms"] = result.get("generation_time", 0.0) * 1000
 
-        # Phase 3: snapshot continuation state for the next segment.
         t_save_start = time.perf_counter()
         self.continuation.clear()
         self.continuation.save_video(frames)

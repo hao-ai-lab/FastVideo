@@ -16,9 +16,6 @@ import torch
 
 from fastvideo.train.callbacks.ema import EMACallback
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 class _Student:
@@ -54,9 +51,6 @@ def _tiny_transformer(*, fill: float = 0.0) -> torch.nn.Module:
     return m
 
 
-# ---------------------------------------------------------------------------
-# A. on_train_start
-# ---------------------------------------------------------------------------
 
 
 class TestOnTrainStart:
@@ -78,9 +72,6 @@ class TestOnTrainStart:
             cb.on_train_start(_Method(transformer=None), iteration=0)
 
 
-# ---------------------------------------------------------------------------
-# B. on_training_step_end (decay math + start_iter gating)
-# ---------------------------------------------------------------------------
 
 
 class TestOnTrainingStepEnd:
@@ -156,9 +147,6 @@ class TestOnTrainingStepEnd:
         assert any(payload.get("ema/decay") == 0.99 and step == 0 for payload, step in tracker.entries)
 
 
-# ---------------------------------------------------------------------------
-# C. ema_context
-# ---------------------------------------------------------------------------
 
 
 class TestEmaContext:
@@ -190,9 +178,6 @@ class TestEmaContext:
         assert torch.allclose(transformer.weight, torch.full((2, 4), 9.0))
 
 
-# ---------------------------------------------------------------------------
-# D. State dict round-trip
-# ---------------------------------------------------------------------------
 
 
 class TestStateDict:
@@ -212,7 +197,6 @@ class TestStateDict:
         assert "student_ema" in state
         assert state["ema_started"] is True
 
-        # Build a fresh callback and load.
         fresh = EMACallback(decay=0.5, start_iter=0)
         fresh.on_train_start(_Method(_tiny_transformer(fill=0.0)), iteration=0)
         # Sanity: fresh shadow != saved shadow before load.

@@ -106,13 +106,11 @@ def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
         return None
 
     try:
-        # Remove data URL prefix if present
         if image_data.startswith('data:image/'):
             image_data = image_data.split(',')[1]
 
         image_bytes = base64.b64decode(image_data)
 
-        # Save to temporary file
         os.makedirs(output_dir, exist_ok=True)
         temp_image_path = os.path.join(output_dir, f"temp_input_{int(time.time() * 1000)}.png")
 
@@ -127,10 +125,6 @@ def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
 
 
 def setup_model_environment(model_path: str) -> None:
-    # if "fullattn" in model_path.lower():
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-    # else:
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
@@ -193,8 +187,8 @@ class BaseModelDeployment:
             num_gpus=1,
             use_fsdp_inference=True,
             text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],  # TODO: hardocde for I2V
-            dit_precision="fp32",  # TODO: hardocde for I2V
+            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],
+            dit_precision="fp32",
             dit_cpu_offload=config["dit_cpu_offload"],
             vae_cpu_offload=config["vae_cpu_offload"],
             VSA_sparsity=config["VSA_sparsity"],
@@ -211,7 +205,6 @@ class BaseModelDeployment:
 
         params = prepare_sampling_params(video_request, self.default_params)
 
-        # Save image if provided (for I2V)
         image_path = None
         if video_request.image_data:
             image_path = save_image_from_base64(video_request.image_data, self.output_path)
@@ -241,7 +234,6 @@ class BaseModelDeployment:
 
         total_time = time.time() - total_start_time
 
-        # Clean up temporary image file
         if image_path and os.path.exists(image_path):
             try:
                 os.remove(image_path)
@@ -309,7 +301,6 @@ class FastVideoAPI:
         self.i2v_deployments = i2v_deployments or {}
         self.all_deployments = {**self.t2v_deployments, **self.i2v_deployments}
 
-        # Initialize Prometheus metrics
         self.request_count = Counter('fastvideo_requests_total', 'Total FastVideo requests', ['model_type', 'status'])
         self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration',
                                           ['model_type'])
@@ -394,26 +385,21 @@ def start_ray_serve(
     if not ray.is_initialized():
         ray.init()
 
-    # Parse T2V models
     t2v_paths = [p.strip() for p in t2v_model_paths.split(",") if p.strip()]
     t2v_reps = [int(r.strip()) for r in t2v_model_replicas.split(",") if r.strip()] if t2v_model_replicas else []
 
-    # Parse I2V models
     i2v_paths = [p.strip() for p in i2v_model_paths.split(",") if p.strip()]
     i2v_reps = [int(r.strip()) for r in i2v_model_replicas.split(",") if r.strip()] if i2v_model_replicas else []
 
-    # Validate configurations
     all_paths = t2v_paths + i2v_paths
     all_replicas = t2v_reps + i2v_reps
     validate_configuration(all_paths, all_replicas)
 
-    # Create T2V deployments
     t2v_deps = {}
     for model_path, replica_count in zip(t2v_paths, t2v_reps):
         t2v_dep = T2VModelDeployment.options(num_replicas=replica_count).bind(model_path, output_path)
         t2v_deps[model_path] = t2v_dep
 
-    # Create I2V deployments
     i2v_deps = {}
     for model_path, replica_count in zip(i2v_paths, i2v_reps):
         i2v_dep = I2VModelDeployment.options(num_replicas=replica_count).bind(model_path, output_path)
@@ -462,7 +448,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Parse and validate all models
     t2v_paths = [p.strip() for p in args.t2v_model_paths.split(",") if p.strip()]
     t2v_reps = [int(r.strip()) for r in args.t2v_model_replicas.split(",")
                 if r.strip()] if args.t2v_model_replicas else []

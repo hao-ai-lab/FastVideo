@@ -105,7 +105,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.seed = training_args.seed
         self.set_schemas()
 
-        # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
@@ -120,7 +119,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
-        # Parse betas from string format "beta1,beta2"
         betas_str = training_args.betas
         betas = tuple(float(x.strip()) for x in betas_str.split(","))
 
@@ -194,7 +192,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_args.train_sp_batch_size)
         self.num_train_epochs = math.ceil(training_args.max_train_steps / self.num_update_steps_per_epoch)
 
-        # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0
 
         trackers = list(training_args.trackers)
@@ -235,9 +232,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
-                # Reset iterator for next epoch
                 self.train_loader_iter = iter(self.train_dataloader)
-                # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
             latents = batch['vae_latent']
@@ -266,7 +261,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
-        # TODO(will): support other models
         with self.tracker.timed("timing/normalize_input"):
             training_batch.latents = normalize_dit_input(
                 'wan',
@@ -334,10 +328,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         boundary_ratio = self.training_args.boundary_ratio
         if self.train_transformer_2:
             u = (1 - boundary_ratio) + u * boundary_ratio  # min: 1 - boundary_ratio, max: 1
-        # elif self.transformer_2 is not None:
-        #     u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
-        # else:  # patch for now to align with non-MoE timestep logic
-        #     pass
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
@@ -396,11 +386,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             assert training_batch.attn_metadata is None
         input_kwargs = training_batch.input_kwargs
 
-        # if 'hunyuan' in self.training_args.model_type:
-        #     input_kwargs["guidance"] = torch.tensor(
-        #         [1000.0],
-        #         device=training_batch.noisy_model_input.device,
-        #         dtype=torch.bfloat16)
         current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
 
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
@@ -436,9 +421,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
         max_grad_norm = self.training_args.max_grad_norm
 
-        # TODO(will): perhaps move this into transformer api so that we can do
-        # the following:
-        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
         if max_grad_norm is not None:
             with self.tracker.timed("timing/clip_grad_norm"):
                 # Only clip gradients for the model that is currently training
@@ -469,17 +451,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
-            # Normalize DIT input
             training_batch = self._normalize_dit_input(training_batch)
-            # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
 
             # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
             training_batch.latents = training_batch.latents[:, :, :self.training_args.num_latent_t]
-            # shard noisy_model_input to match
             training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :self.training_args.num_latent_t]
-            # shard noise to match latents
             training_batch.noise = training_batch.noise[:, :, :self.training_args.num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
@@ -528,7 +506,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             logger.info("Transformer 2: Starting training with %s B trainable parameters",
                         round(num_trainable_params / 1e9, 3))
 
-        # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(self.seed + self.global_rank)
         self.noise_gen_cuda = torch.Generator(device=current_platform.device_name).manual_seed(self.seed +
                                                                                                self.global_rank)
@@ -564,7 +541,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)
                 current_vsa_sparsity = current_decay_times * vsa_decay_rate
             elif vmoba_available:
-                #TODO: add vmoba sparsity scheduling here
                 current_vsa_sparsity = 0.0
             else:
                 current_vsa_sparsity = 0.0
@@ -714,10 +690,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         logger.info("Starting validation")
 
-        # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
-        # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
                     self.global_rank,
                     training_args.validation_dataset_file,
@@ -736,7 +710,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         world_group = get_world_group()
         num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-        # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
             logger.info("rank: %s: num_inference_steps: %s",
                         self.global_rank,
@@ -762,7 +735,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 step_captions.append(batch.prompt)
                 step_ref_videos.append(validation_batch.get("ref_video"))
 
-                # Run validation inference
                 output_batch = self.validation_pipeline.forward(batch, training_args)
                 samples = output_batch.output.cpu()
 
@@ -779,7 +751,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 if self.rank_in_sp_group != 0:
                     continue
 
-                # Process outputs
                 video = rearrange(samples, "b c t h w -> t b c h w")
                 frames = []
                 for x in video:
@@ -792,7 +763,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # results to global rank 0
             if self.rank_in_sp_group == 0 and self.global_rank == 0:
                 # Global rank 0 collects results from all sp_group leaders
-                all_videos = step_videos  # Start with own results
+                all_videos = step_videos
                 all_captions = step_captions
                 all_ref_videos = step_ref_videos
                 all_audios = step_audio
@@ -904,21 +875,17 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 out_path = os.path.join(tmpdir, "muxed.mp4")
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
-                # Write audio to WAV file
                 with wave.open(wav_path, "wb") as wav_file:
                     wav_file.setnchannels(num_channels)
                     wav_file.setsampwidth(2)
                     wav_file.setframerate(sample_rate)
                     wav_file.writeframes(audio_int16.tobytes())
 
-                # Open input video and audio
                 input_video = av.open(video_path)
                 input_audio = av.open(wav_path)
 
-                # Create output with both streams
                 output = av.open(out_path, mode="w")
 
-                # Add video stream (copy codec from input)
                 in_video_stream = input_video.streams.video[0]
                 out_video_stream = output.add_stream(
                     codec_name=in_video_stream.codec_context.name,
@@ -928,7 +895,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 out_video_stream.height = in_video_stream.height
                 out_video_stream.pix_fmt = in_video_stream.pix_fmt
 
-                # Add audio stream (AAC)
                 out_audio_stream = output.add_stream("aac", rate=sample_rate)
                 out_audio_stream.layout = layout
 

@@ -9,7 +9,6 @@ from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits import HunyuanVideoConfig
 from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
-# TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed, TimestepEmbedder, unpatchify)
@@ -198,9 +197,7 @@ class MMDoubleStreamBlock(nn.Module):
             txt_mlp_gate,
         ) = torch.chunk(txt_mod_outputs, 6, dim=-1)
 
-        # Prepare image for attention using fused operation
         img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale)
-        # Get QKV for image
         img_qkv, _ = self.img_attn_qkv(img_attn_input)
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
 
@@ -208,15 +205,12 @@ class MMDoubleStreamBlock(nn.Module):
         img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
 
-        # Apply QK-Norm if needed
 
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
-        # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
 
-        # Get QKV for text
         txt_qkv, _ = self.txt_attn_qkv(txt_attn_input)
         batch_size, text_seq_len = txt_qkv.shape[0], txt_qkv.shape[1]
 
@@ -224,29 +218,22 @@ class MMDoubleStreamBlock(nn.Module):
         txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.num_attention_heads, -1)
         txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :, 2]
 
-        # Apply QK-Norm if needed
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
-        # Run distributed attention
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
         img_attn_out, _ = self.img_attn_proj(img_attn.reshape(batch_size, image_seq_len, -1))
-        # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(img, img_attn_out, img_attn_gate, img_mlp_shift,
                                                                       img_mlp_scale)
 
-        # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
-        # Process text attention output
         txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
 
-        # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(txt, txt_attn_out, txt_attn_gate, txt_mlp_shift,
                                                                       txt_mlp_scale)
 
-        # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
         txt = self.txt_mlp_residual(txt_residual, txt_mlp_out, txt_mlp_gate)
 
@@ -329,24 +316,19 @@ class MMSingleStreamBlock(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int | None = None,
     ) -> torch.Tensor:
-        # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).unsqueeze(1).chunk(3, dim=-1)
 
-        # Apply pre-norm and modulation using fused operation
         x_mod = self.input_norm_scale_shift(x, mod_shift, mod_scale)
 
-        # Get combined projections
         linear1_out, _ = self.linear1(x_mod)
 
         # Split into QKV and MLP parts
         qkv, mlp = torch.split(linear1_out, [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
-        # Process QKV
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
 
-        # Apply QK-Norm
         q = self.q_norm(q).to(v.dtype)
         k = self.k_norm(k).to(v.dtype)
 
@@ -355,7 +337,6 @@ class MMSingleStreamBlock(nn.Module):
         img_k, txt_k = k[:, :-txt_len], k[:, -txt_len:]
         img_v, txt_v = v[:, :-txt_len], v[:, -txt_len:]
 
-        # Run distributed attention
         img_attn_output, txt_attn_output = self.attn(img_q,
                                                      img_k,
                                                      img_v,
@@ -365,7 +346,6 @@ class MMSingleStreamBlock(nn.Module):
                                                      txt_v,
                                                      freqs_cis=freqs_cis)
         attn_output = torch.cat((img_attn_output, txt_attn_output), dim=1).view(batch_size, seq_len, -1)
-        # Process MLP activation
         mlp_output = self.mlp_act(mlp)
 
         # Combine attention and MLP outputs
@@ -374,7 +354,6 @@ class MMSingleStreamBlock(nn.Module):
         # Final projection
         output, _ = self.linear2(combined)
 
-        # Apply residual connection with gating using fused operation
         return self.output_residual(x, output, mod_gate)
 
 
@@ -391,7 +370,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     """
     # PY: we make the input args the same as HF config
 
-    # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = HunyuanVideoConfig()._compile_conditions
     _supported_attention_backends = HunyuanVideoConfig()._supported_attention_backends
@@ -412,7 +390,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         self.rope_theta = config.rope_theta
         self.text_states_dim = config.text_embed_dim
         self.text_states_dim_2 = config.pooled_projection_dim
-        # TODO(will): hack?
         self.dtype = config.dtype
 
         pe_dim = config.hidden_size // config.num_attention_heads
@@ -485,8 +462,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
         self.__post_init__()
 
-    # TODO: change the input the FORWAD_BACTCH Dict
-    # TODO: change output to a dict
     def forward(self,
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
@@ -521,7 +496,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             txt = encoder_hidden_states[0]
             text_states_2 = encoder_hidden_states[1]
 
-        # Get spatial dimensions
         _, _, ot, oh, ow = x.shape  # codespell:ignore
         tt, th, tw = (
             ot // self.patch_size[0],  # codespell:ignore
@@ -529,18 +503,14 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             ow // self.patch_size[2],
         )
 
-        # Get rotary embeddings
         freqs_cos, freqs_sin = get_rotary_pos_embed((tt, th, tw), self.hidden_size, self.num_attention_heads,
                                                     self.rope_dim_list, self.rope_theta)
         freqs_cos = freqs_cos.to(x.device)
         freqs_sin = freqs_sin.to(x.device)
-        # Prepare modulation vectors
         vec = self.time_in(t)
 
-        # Add text modulation
         vec = vec + self.vector_in(text_states_2)
 
-        # Add guidance modulation if needed
         if self.guidance_in and guidance is not None:
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
@@ -552,14 +522,12 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
-        # Process through double stream blocks
         for index, block in enumerate(self.double_blocks):
             double_block_args = [img, txt, vec, freqs_cis, original_seq_len]
             img, txt = block(*double_block_args)
         # Merge txt and img to pass through single stream blocks
         x = torch.cat((img, txt), 1)
 
-        # Process through single stream blocks
         if len(self.single_blocks) > 0:
             for index, block in enumerate(self.single_blocks):
                 single_block_args = [
@@ -571,7 +539,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 ]
                 x = block(*single_block_args)
 
-        # Extract image features
         img = x[:, :img_seq_len, ...]
 
         # Final layer processing
@@ -631,10 +598,8 @@ class SingleTokenRefiner(nn.Module):
         ])
 
     def forward(self, x, t):
-        # Get timestep embeddings
         timestep_aware_representations = self.t_embedder(t)
 
-        # Get context-aware representations
 
         context_aware_representations = torch.mean(x, dim=1)
 
@@ -642,7 +607,6 @@ class SingleTokenRefiner(nn.Module):
         c = timestep_aware_representations + context_aware_representations
         # Project input
         x, _ = self.input_embedder(x)
-        # Process through refiner blocks
         for block in self.refiner_blocks:
             x = block(x, c)
         return x
@@ -696,12 +660,10 @@ class IndividualTokenRefinerBlock(nn.Module):
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
-            # TODO: remove hardcode
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
         )
 
     def forward(self, x, c):
-        # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
         # Self-attention
         norm_x = self.norm1(x)
@@ -711,7 +673,6 @@ class IndividualTokenRefinerBlock(nn.Module):
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
 
-        # Run scaled dot product attention
         attn_output = self.attn(q, k, v)  # [B, L, H, D]
         attn_output = attn_output.reshape(batch_size, seq_len, -1)  # [B, L, H*D]
 

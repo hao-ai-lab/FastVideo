@@ -246,7 +246,6 @@ class VocabParallelEmbedding(torch.nn.Module):
             org_vocab_size_padded, tp_rank, tp_size))
         padded_added_vocab_start_index, padded_added_vocab_end_index = (vocab_range_from_global_vocab_size(
             num_added_embeddings_padded, tp_rank, tp_size, offset=org_vocab_size))
-        # remove padding
         org_vocab_start_index = min(padded_org_vocab_start_index, org_vocab_size)
         org_vocab_end_index = min(padded_org_vocab_end_index, org_vocab_size)
         added_vocab_start_index = min(padded_added_vocab_start_index, vocab_size)
@@ -316,7 +315,6 @@ class VocabParallelEmbedding(torch.nn.Module):
             param.data.copy_(loaded_weight)
             return
 
-        # Shard indexes for loading the weight
         start_idx = self.shard_indices.org_vocab_start_index
         shard_size = self.shard_indices.org_vocab_end_index - start_idx
 
@@ -330,7 +328,6 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             assert loaded_weight.shape[output_dim] == self.org_vocab_size
 
-        # Copy the data. Select chunk corresponding to current shard.
         loaded_weight = loaded_weight.narrow(output_dim, start_idx, shard_size)
 
         param[:loaded_weight.shape[0]].data.copy_(loaded_weight)
@@ -338,7 +335,6 @@ class VocabParallelEmbedding(torch.nn.Module):
 
     def forward(self, input_):
         if self.tp_size > 1:
-            # Build the mask.
             masked_input, input_mask = get_masked_input_and_mask(input_, self.shard_indices.org_vocab_start_index,
                                                                  self.shard_indices.org_vocab_end_index,
                                                                  self.shard_indices.num_org_vocab_padding,
@@ -346,7 +342,6 @@ class VocabParallelEmbedding(torch.nn.Module):
                                                                  self.shard_indices.added_vocab_end_index)
         else:
             masked_input = input_
-        # Get the embeddings.
         output_parallel = self.quant_method.embedding(self, masked_input.long())
         # Mask the output embedding.
         if self.tp_size > 1:

@@ -18,7 +18,6 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,  # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
-        # image_encoder_cpu_offload=False,
     )
 
     # I2V is triggered just by passing in an image_path argument
@@ -26,8 +25,6 @@ def main():
     image_path = "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/wan_i2v_input.JPG"
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, image_path=image_path)
 
-    # Generate another video with a different prompt, without reloading the
-    # model!
 
     # T2V mode
     prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "

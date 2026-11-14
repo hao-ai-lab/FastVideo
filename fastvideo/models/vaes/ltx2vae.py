@@ -20,9 +20,6 @@ import fastvideo.envs as envs
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
 
 
-# =============================================================================
-# Enums
-# =============================================================================
 
 
 class NormLayerType(Enum):
@@ -44,9 +41,6 @@ class PaddingModeType(Enum):
     CIRCULAR = "circular"
 
 
-# =============================================================================
-# Tiling Data Structures
-# =============================================================================
 
 
 @dataclass(frozen=True)
@@ -183,9 +177,6 @@ class Tile(NamedTuple):
         return combined_mask
 
 
-# =============================================================================
-# Tiling Helper Functions
-# =============================================================================
 
 
 def compute_trapezoidal_mask_1d(
@@ -349,9 +340,6 @@ def create_tiles(
     return create_tiles_from_intervals_and_mappers(latent_intervals, mappers)
 
 
-# =============================================================================
-# Utility Functions
-# =============================================================================
 
 
 def patchify(x: torch.Tensor, patch_size_hw: int, patch_size_t: int = 1) -> torch.Tensor:
@@ -409,9 +397,6 @@ def unpatchify(x: torch.Tensor, patch_size_hw: int, patch_size_t: int = 1) -> to
     return x
 
 
-# =============================================================================
-# Normalization Layers
-# =============================================================================
 
 
 class PixelNorm(nn.Module):
@@ -430,9 +415,6 @@ class PixelNorm(nn.Module):
         return x / torch.sqrt(mean_sq + self.eps)
 
 
-# =============================================================================
-# Per-Channel Statistics for Latent Normalization
-# =============================================================================
 
 
 class PerChannelStatistics(nn.Module):
@@ -460,9 +442,6 @@ class PerChannelStatistics(nn.Module):
         return (x - mean) / std
 
 
-# =============================================================================
-# Causal 3D Convolution
-# =============================================================================
 
 
 class CausalConv3d(nn.Module):
@@ -591,9 +570,6 @@ def make_linear_nd(
         raise ValueError(f"unsupported dimensions: {dims}")
 
 
-# =============================================================================
-# ResNet Blocks
-# =============================================================================
 
 
 class ResnetBlock3D(nn.Module):
@@ -814,9 +790,6 @@ class UNetMidBlock3D(nn.Module):
         return hidden_states
 
 
-# =============================================================================
-# Timestep Embedding (simplified version for decoder conditioning)
-# =============================================================================
 
 
 class PixArtAlphaCombinedTimestepSizeEmbeddings(nn.Module):
@@ -870,9 +843,6 @@ class TimestepEmbedding(nn.Module):
         return sample
 
 
-# =============================================================================
-# Sampling Blocks (Downsampling / Upsampling)
-# =============================================================================
 
 
 class SpaceToDepthDownsample(nn.Module):
@@ -982,9 +952,6 @@ class DepthToSpaceUpsample(nn.Module):
         return x
 
 
-# =============================================================================
-# Block Factory Functions
-# =============================================================================
 
 
 def _make_encoder_block(
@@ -1178,9 +1145,6 @@ def _make_decoder_block(
     return block, out_channels
 
 
-# =============================================================================
-# Video Encoder
-# =============================================================================
 
 
 class VideoEncoder(nn.Module):
@@ -1304,9 +1268,6 @@ class VideoEncoder(nn.Module):
         return self.per_channel_statistics.normalize(means)
 
 
-# =============================================================================
-# Video Decoder
-# =============================================================================
 
 
 class VideoDecoder(nn.Module):
@@ -1475,9 +1436,6 @@ class VideoDecoder(nn.Module):
         return sample
 
 
-# =============================================================================
-# Configurators (for loading from config dict)
-# =============================================================================
 
 
 class VideoEncoderConfigurator:
@@ -1538,9 +1496,6 @@ class VideoDecoderConfigurator:
         )
 
 
-# =============================================================================
-# Public API (Wrapper Classes)
-# =============================================================================
 
 
 class LTX2VideoEncoder(nn.Module):
@@ -1797,7 +1752,6 @@ class LTX2CausalVideoAutoencoder(nn.Module):
                 yield_len = curr_temporal_slice.start - previous_temporal_slice.start
                 yield (previous_chunk / previous_weights)[:, :, :yield_len, :, :]
 
-            # Update state for next iteration
             previous_chunk = buffer
             previous_weights = curr_weights
             previous_temporal_slice = curr_temporal_slice

@@ -14,9 +14,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# =============================================================================
-# Enums
-# =============================================================================
 
 
 class NormType(Enum):
@@ -40,9 +37,6 @@ class CausalityAxis(Enum):
     WIDTH_COMPATIBILITY = "width-compatibility"
 
 
-# =============================================================================
-# Audio Latent Shape
-# =============================================================================
 
 
 class AudioLatentShape(NamedTuple):
@@ -65,16 +59,10 @@ class AudioLatentShape(NamedTuple):
         )
 
 
-# =============================================================================
-# Constants
-# =============================================================================
 
 LATENT_DOWNSAMPLE_FACTOR = 4
 LRELU_SLOPE = 0.1
 
-# =============================================================================
-# Normalization Layers
-# =============================================================================
 
 
 class PixelNorm(nn.Module):
@@ -107,9 +95,6 @@ def build_normalization_layer(
     raise ValueError(f"Invalid normalization type: {normtype}")
 
 
-# =============================================================================
-# Per-Channel Statistics
-# =============================================================================
 
 
 class PerChannelStatistics(nn.Module):
@@ -129,9 +114,6 @@ class PerChannelStatistics(nn.Module):
         return (x - self.get_buffer("mean-of-means").to(x)) / self.get_buffer("std-of-means").to(x)
 
 
-# =============================================================================
-# Audio Patchifier
-# =============================================================================
 
 
 class AudioPatchifier:
@@ -165,9 +147,6 @@ class AudioPatchifier:
         )
 
 
-# =============================================================================
-# Causal 2D Convolution
-# =============================================================================
 
 
 class CausalConv2d(nn.Module):
@@ -191,11 +170,9 @@ class CausalConv2d(nn.Module):
 
         self.causality_axis = causality_axis
 
-        # Ensure kernel_size and dilation are tuples
         kernel_size = nn.modules.utils._pair(kernel_size)
         dilation = nn.modules.utils._pair(dilation)
 
-        # Calculate padding dimensions
         pad_h = (kernel_size[0] - 1) * dilation[0]
         pad_w = (kernel_size[1] - 1) * dilation[1]
 
@@ -255,9 +232,6 @@ def make_conv2d(
         )
 
 
-# =============================================================================
-# Attention Blocks
-# =============================================================================
 
 
 class AttnBlock(nn.Module):
@@ -284,7 +258,6 @@ class AttnBlock(nn.Module):
         k = self.k(h_)
         v = self.v(h_)
 
-        # Compute attention
         b, c, h, w = q.shape
         q = q.reshape(b, c, h * w).contiguous()
         q = q.permute(0, 2, 1).contiguous()  # b, hw, c
@@ -320,9 +293,6 @@ def make_attn(
         raise ValueError(f"Unknown attention type: {attn_type}")
 
 
-# =============================================================================
-# ResNet Blocks (2D for Audio VAE)
-# =============================================================================
 
 
 class ResnetBlock(nn.Module):
@@ -396,9 +366,6 @@ class ResnetBlock(nn.Module):
         return x + h
 
 
-# =============================================================================
-# Vocoder ResBlocks (1D)
-# =============================================================================
 
 
 class ResBlock1(nn.Module):
@@ -455,9 +422,6 @@ class ResBlock2(nn.Module):
         return x
 
 
-# =============================================================================
-# BigVGAN v2 / BWE helpers
-# =============================================================================
 
 
 def get_padding(kernel_size: int, dilation: int = 1) -> int:
@@ -737,9 +701,6 @@ class AMPBlock1(nn.Module):
         return x
 
 
-# =============================================================================
-# Downsampling
-# =============================================================================
 
 
 class Downsample(nn.Module):
@@ -835,9 +796,6 @@ def build_downsampling_path(
     return down_modules, block_in
 
 
-# =============================================================================
-# Upsampling
-# =============================================================================
 
 
 class Upsample(nn.Module):
@@ -924,9 +882,6 @@ def build_upsampling_path(
     return up_modules, block_in
 
 
-# =============================================================================
-# Mid Block
-# =============================================================================
 
 
 def build_mid_block(
@@ -967,9 +922,6 @@ def run_mid_block(mid: nn.Module, features: torch.Tensor) -> torch.Tensor:
     return mid.block_2(features, temb=None)
 
 
-# =============================================================================
-# Audio Encoder
-# =============================================================================
 
 
 class AudioEncoder(nn.Module):
@@ -1125,9 +1077,6 @@ class AudioEncoder(nn.Module):
         return self.patchifier.unpatchify(latent_normalized, latent_shape)
 
 
-# =============================================================================
-# Audio Decoder
-# =============================================================================
 
 
 class AudioDecoder(nn.Module):
@@ -1290,11 +1239,9 @@ class AudioDecoder(nn.Module):
         decoded_output = decoded_output[:, :target_channels, :min(current_time, target_time
                                                                   ), :min(current_freq, target_freq)]
 
-        # Calculate padding needed
         time_padding_needed = target_time - decoded_output.shape[2]
         freq_padding_needed = target_freq - decoded_output.shape[3]
 
-        # Apply padding if needed
         if time_padding_needed > 0 or freq_padding_needed > 0:
             padding = (
                 0,
@@ -1332,9 +1279,6 @@ class AudioDecoder(nn.Module):
         return torch.tanh(h) if self.tanh_out else h
 
 
-# =============================================================================
-# Vocoder
-# =============================================================================
 
 
 class Vocoder(nn.Module):
@@ -1359,7 +1303,6 @@ class Vocoder(nn.Module):
     ):
         super().__init__()
 
-        # Initialize default values
         if resblock_kernel_sizes is None:
             resblock_kernel_sizes = [3, 7, 11]
         if upsample_rates is None:
@@ -1459,9 +1402,6 @@ class Vocoder(nn.Module):
         return x
 
 
-# =============================================================================
-# BWE STFT / MelSTFT / VocoderWithBWE
-# =============================================================================
 
 
 def _build_stft_basis(filter_length: int, win_length: int) -> torch.Tensor:
@@ -1645,9 +1585,6 @@ class VocoderWithBWE(nn.Module):
         return torch.clamp(residual + skip, -1, 1)[..., :output_length]
 
 
-# =============================================================================
-# Configurators
-# =============================================================================
 
 
 class AudioEncoderConfigurator:
@@ -1804,9 +1741,6 @@ class VocoderConfigurator:
         )
 
 
-# =============================================================================
-# Public API Wrappers
-# =============================================================================
 
 
 class LTX2AudioEncoder(nn.Module):

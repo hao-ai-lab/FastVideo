@@ -127,7 +127,6 @@ def _predict_depth_core(
     resized = cv2.resize(input_image_rgb, (depth_pred_w, depth_pred_h))
     img_tensor = torch.tensor(resized / 255.0, dtype=torch.float32, device=device).permute(2, 0, 1)
 
-    # Run MoGe inference
     moge_output = moge_model.infer(img_tensor)
     depth_hw = moge_output["depth"]
     intrinsics_norm = moge_output["intrinsics"]
@@ -136,14 +135,12 @@ def _predict_depth_core(
     # Replace invalid depth with large value
     depth_hw = torch.where(mask_hw == 0, torch.tensor(1000.0, device=depth_hw.device), depth_hw)
 
-    # Convert normalized intrinsics to pixel coordinates
     intrinsics_pixel = intrinsics_norm.clone()
     intrinsics_pixel[0, 0] *= depth_pred_w  # fx
     intrinsics_pixel[1, 1] *= depth_pred_h  # fy
     intrinsics_pixel[0, 2] *= depth_pred_w  # cx
     intrinsics_pixel[1, 2] *= depth_pred_h  # cy
 
-    # Scale to target resolution
     h_scale = target_h / depth_pred_h
     w_scale = target_w / depth_pred_w
 
@@ -159,7 +156,6 @@ def _predict_depth_core(
     img_target = F.interpolate(img_tensor.unsqueeze(0), size=(target_h, target_w), mode='bilinear',
                                align_corners=False).squeeze(0)
 
-    # Scale intrinsics for target resolution
     intrinsics_target = intrinsics_pixel.clone()
     intrinsics_target[0, 0] *= w_scale  # fx
     intrinsics_target[0, 2] *= w_scale  # cx

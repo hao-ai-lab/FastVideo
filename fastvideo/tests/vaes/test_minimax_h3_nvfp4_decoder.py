@@ -499,7 +499,7 @@ def _load_h3_vae(vae_dir, cpu: bool = True, decoder: str | None = None, quantize
         pipeline_config=pipeline_config or PipelineConfig(vae_config=MiniMaxH3VideoVAEConfig(), vae_precision="fp32"),
         h3_vae_nvfp4_decoder=decoder,
         h3_vae_nvfp4_quantize_dense=quantize_dense)
-    args.vae_cpu_offload = cpu  # load on CPU
+    args.vae_cpu_offload = cpu
     return VAELoader().load(str(vae_dir), args)
 
 

@@ -321,7 +321,6 @@ def _run_in_subprocess(fn: Callable[[], _T]) -> _T:
         try:
             returned.check_returncode()
         except Exception as e:
-            # wrap raised exception to provide more information
             raise RuntimeError(f"Error raised in subprocess:\n"
                                f"{returned.stderr.decode()}") from e
 

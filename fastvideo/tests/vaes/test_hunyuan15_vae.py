@@ -10,8 +10,6 @@ from diffusers import AutoencoderKLHunyuanVideo15
 import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.logger import init_logger
-# from fastvideo.models.vaes.hunyuanvae import (
-#     AutoencoderKLHunyuanVideo as MyHunyuanVAE)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig

@@ -95,7 +95,6 @@ class PipelineStage(ABC):
         if not verification_result.is_valid():
             failed_fields = verification_result.get_failed_fields()
             if failed_fields:
-                # Get detailed failure information
                 detailed_summary = verification_result.get_failure_summary()
 
                 failed_fields_str = ", ".join(failed_fields)
@@ -138,7 +137,6 @@ class PipelineStage(ABC):
         stage_key = getattr(self, "_pipeline_stage_name", stage_class_name)
         stage_name = f"{stage_key}|{stage_class_name}"
 
-        # Check if verification is enabled (simple approach for prototype)
         enable_verification = getattr(fastvideo_args, 'enable_stage_verification', False)
 
         if enable_verification:

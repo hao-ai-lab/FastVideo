@@ -243,7 +243,6 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         if self.solver_p:
             self.solver_p.set_timesteps(self.num_inference_steps, device=device)
 
-        # add an index counter for schedulers that allow duplicated timesteps
         self._step_index = None
         self._begin_index = None
         self.sigmas = self.sigmas.to("cpu")  # to avoid too much CPU/GPU communication
@@ -750,7 +749,6 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         noise: torch.Tensor,
         timesteps: torch.IntTensor,
     ) -> torch.Tensor:
-        # Make sure sigmas and timesteps have the same device and dtype as original_samples
         sigmas = self.sigmas.to(device=original_samples.device, dtype=original_samples.dtype)
         if original_samples.device.type == "mps" and torch.is_floating_point(timesteps):
             # mps does not support float64

@@ -154,23 +154,18 @@ def collate_latents_embs_masks(batch_to_process,
     primary-encoder-only: the secondary ByT5 embedding (``text_embedding_2``)
     and its mask are not read even when the parquet rows contain them.
     """
-    # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
     all_masks = []
     caption_text = []
-    # Process each row individually
     for i, row in enumerate(batch_to_process):
-        # Get tensors from row
         data = get_torch_tensors_from_row_dict(row, keys, cfg_rate, rng)
         latents, emb = data["vae_latent"], data["text_embedding"]
 
         padded_emb, mask = pad(emb, text_padding_length)
-        # Store in batch tensors
         all_latents.append(latents)
         all_embs.append(padded_emb)
         all_masks.append(mask)
-        # TODO(py): remove this once we fix preprocess
         try:
             caption_text.append(row["prompt"])
         except KeyError:
@@ -262,10 +257,8 @@ def collate_rows_from_parquet_schema(rows,
         # callers, including their configured text encoder length.
         effective_text_padding_length = text_padding_length
 
-    # Initialize containers for different data types
     batch_data: dict[str, Any] = {}
 
-    # Get tensor and metadata field names from schema (fields ending with '_bytes')
     tensor_fields = []
     metadata_fields = []
     for field in parquet_schema.names:
@@ -297,7 +290,6 @@ def collate_rows_from_parquet_schema(rows,
                 row_drops[row_idx] = ((rng.random() if rng else random.random()) < cfg_rate)
         return row_drops[row_idx]
 
-    # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
         shape_key = f"{tensor_name}_shape"
@@ -322,7 +314,6 @@ def collate_rows_from_parquet_schema(rows,
                                  "text_embedding_bytes and text_embedding_shape.")
 
         for row_idx, row in enumerate(rows):
-            # Get tensor data from row using the existing helper function pattern
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
@@ -343,19 +334,13 @@ def collate_rows_from_parquet_schema(rows,
                         row.get(dtype_key, "float32"),
                         zero=drop,
                     )
-                    # if len(data.shape) == 3:
-                    #     B, L, D = tensor.shape
-                    #     assert B == 1, "Batch size must be 1"
-                    #     tensor = tensor.squeeze(0)
 
                 tensor_list.append(tensor)
             else:
-                # Handle missing tensor data
                 tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
         if tensor_name in _TEXT_STREAM_MASKS:
-            # Handle text embeddings with padding
             padded_tensors = []
             attention_masks = []
             # Empty entries have to stack against the real ones, so follow
@@ -373,7 +358,6 @@ def collate_rows_from_parquet_schema(rows,
                     padded_tensors.append(padded_tensor)
                     attention_masks.append(mask)
                 else:
-                    # Handle empty embeddings - assume default embedding dimension
                     width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
                     padded_tensors.append(torch.zeros(effective_text_padding_length, width, dtype=empty_dtype))
                     attention_masks.append(torch.zeros(effective_text_padding_length))
@@ -411,7 +395,6 @@ def collate_rows_from_parquet_schema(rows,
                                  f"All tensors in a batch must have compatible shapes. "
                                  f"Original error: {e}") from e
 
-    # Process metadata fields into info_list
     info_list = []
     for row in rows:
         info = {}

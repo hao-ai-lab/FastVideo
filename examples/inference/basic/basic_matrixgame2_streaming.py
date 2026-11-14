@@ -63,9 +63,7 @@ async def main():
         dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
         pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
     )
 
     max_blocks = 50
@@ -99,7 +97,6 @@ async def main():
         if (await asyncio.to_thread(input, "\nContinue? (y/n): ")).lower() == 'n':
             break
 
-    # Save final video
     generator.finalize()
     generator.shutdown()
 

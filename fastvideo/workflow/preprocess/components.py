@@ -155,14 +155,12 @@ class ParquetDatasetSaver:
         assert isinstance(batch.prompt_embeds, list)
         assert isinstance(batch.prompt_attention_mask, list)
 
-        # Process non-padded embeddings (if needed)
         if batch.prompt_attention_mask is not None:
             batch.prompt_embeds = self._process_non_padded_embeddings(batch.prompt_embeds[0],
                                                                       batch.prompt_attention_mask[0])
         else:
             raise ValueError("prompt_attention_mask is None")
 
-        # Prepare batch data for Parquet dataset
         batch_data: list[dict[str, Any]] = []
 
         for key in dataclasses.fields(batch):
@@ -175,7 +173,6 @@ class ParquetDatasetSaver:
                 value = value.cpu().numpy()
                 setattr(batch, key.name, value)
 
-        # Create record for Parquet dataset
         records = self.create_records_from_batch(batch)
         batch_data.extend(records)
 
@@ -199,12 +196,10 @@ class ParquetDatasetSaver:
         assert isinstance(prompt_attention_mask, torch.Tensor)
         assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
 
-        # Get sequence lengths from attention masks (number of 1s)
         seq_lens = prompt_attention_mask.sum(dim=1)
 
         non_padded_embeds = []
 
-        # Process each item in the batch
         for i in range(prompt_embeds.size(0)):
             seq_len = seq_lens[i].item()
             # Slice the embeddings and masks to keep only non-padding parts
@@ -224,7 +219,6 @@ class ParquetDatasetSaver:
         if self._writer is None:
             return
         _ = self._writer.flush(write_remainder=write_remainder)
-        # Reset processed sample count modulo samples_per_file
         remainder = self.num_processed_samples % self.samples_per_file
         self.num_processed_samples = 0 if write_remainder else remainder
 
@@ -259,7 +253,6 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str, validator: Ca
         dataset = dataset.filter(validator)
         dataset = dataset.shard(num_shards=get_world_size(), index=get_world_rank())
 
-        # add video column
         def add_video_column(item: dict[str, Any]) -> dict[str, Any]:
             item["video"] = os.path.join(video_folder, item["name"])
             return item

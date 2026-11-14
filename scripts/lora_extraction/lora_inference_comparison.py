@@ -72,7 +72,6 @@ def _validate_adapter(adapter: Optional[str]) -> Optional[str]:
         if p.stat().st_size == 0:
             raise ValueError(f"Adapter file is empty: {p}")
     elif p.is_dir():
-        # Check if directory contains at least one .safetensors file
         safetensors_files = list(p.glob("*.safetensors"))
         if not safetensors_files:
             raise ValueError(f"Adapter directory contains no .safetensors files: {p}")
@@ -172,11 +171,9 @@ def compute_metrics(output_dir: str, ft_video: str, other_video: str, num_infere
 
             loss_fn = lpips.LPIPS(net='alex')
 
-            # Load videos
             vid1, _, _ = tv_io.read_video(ft_video, pts_unit='sec')
             vid2, _, _ = tv_io.read_video(other_video, pts_unit='sec')
 
-            # Normalize to [-1, 1]
             vid1 = (vid1.float() / 127.5 - 1.0).permute(0, 3, 1, 2)  # (T, C, H, W)
             vid2 = (vid2.float() / 127.5 - 1.0).permute(0, 3, 1, 2)
 
@@ -188,7 +185,6 @@ def compute_metrics(output_dir: str, ft_video: str, other_video: str, num_infere
 
             results["mean_lpips"] = sum(lpips_scores) / len(lpips_scores)
 
-            # Write LPIPS results
             import json
             lpips_file = Path(output_dir) / f"steps{num_inference_steps}_{prompt.replace(' ', '_')[:30]}_lpips.json"
             with open(lpips_file, 'w') as f:

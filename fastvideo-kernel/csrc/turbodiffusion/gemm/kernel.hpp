@@ -295,7 +295,6 @@ struct GemmKernel {
       SmemLayoutB{}
     );
 
-    // register
     TiledMma tiled_mma;
     auto thr_mma = tiled_mma.get_slice(t_idx);
     auto tCrA = thr_mma.partition_fragment_A(gA(_, _, 0));
@@ -314,7 +313,6 @@ struct GemmKernel {
     clear(tDrD);
 
 
-    // global to shared copy
     G2STiledCopyA g2s_tiled_copy_a;
     auto g2s_thr_copy_a = g2s_tiled_copy_a.get_slice(t_idx);
     auto tAgA = g2s_thr_copy_a.partition_S(gA);
@@ -371,7 +369,6 @@ struct GemmKernel {
     int32_t fallbackA_load = 0;
     int32_t fallbackA_mma = 0;
 
-    // copy first Stage - 1 tile
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0, _i = min(Stage - 1, ntile); i < _i; ++i) {
       if (g2s_b_tile < ntile) {
@@ -410,8 +407,6 @@ struct GemmKernel {
       // a s2r increase anyway
       s2r_a_smem = (s2r_a_smem + 1) % Stage;
 
-      // get next s2r b tile int64_t
-        // end of a block
 
         // dequant first
       dequant<AccumulatorDtype, TileM * TileN / ThreadNum, FastInt2Float>(
@@ -425,7 +420,6 @@ struct GemmKernel {
       mma_block_a = mma_block_b;
       if (mma_block_a < size<1>(AS)) scale_a = AS(blk_m_coord, mma_block_a);
 
-      // load next stage
       if (g2s_b_tile < ntile) {
         g2s_tile_in_block = (g2s_tile_in_block + 1) % NumTilePerBlock;
         copy_AB<IsEvenM>(g2s_tiled_copy_a, tAgA, tAsA, tAcA, g2s_a_tile, g2s_a_smem, m_limit);

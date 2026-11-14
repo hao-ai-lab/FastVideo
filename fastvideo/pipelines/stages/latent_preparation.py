@@ -79,7 +79,6 @@ class LatentPreparationStage(PipelineStage):
         # Adjust batch size for number of videos per prompt
         batch_size *= batch.num_videos_per_prompt
 
-        # Get required parameters
         if not batch.prompt_embeds:
             # Create a dummy zero-length text embedding to satisfy downstream checks.
             # Matrix-Game models have text_dim=0 and ignore encoder_hidden_states.
@@ -101,11 +100,9 @@ class LatentPreparationStage(PipelineStage):
         height = batch.height
         width = batch.width
 
-        # TODO(will): remove this once we add input/output validation for stages
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
-        # Calculate latent shape
         bcthw_shape: tuple[int, ...] | None = None
         if self.use_btchw_layout:
             shape = (
@@ -126,12 +123,10 @@ class LatentPreparationStage(PipelineStage):
             )
             bcthw_shape = shape
 
-        # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
-        # Generate or use provided latents
         if latents is None:
             latents = randn_tensor(
                 shape,
@@ -146,7 +141,6 @@ class LatentPreparationStage(PipelineStage):
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 
-        # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = bcthw_shape
 
@@ -206,7 +200,6 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Adjust batch size for number of videos per prompt
         batch_size *= batch.num_videos_per_prompt
 
-        # Get required parameters
         # Force float32 for latent preparation
         dtype = torch.float32
         device = get_local_torch_device()
@@ -245,12 +238,10 @@ class CosmosLatentPreparationStage(PipelineStage):
 
             processed_image = image_processor.preprocess(batch.pil_image, height, width)
 
-            # Add time dimension
             video = processed_image.unsqueeze(2)
 
             video = video.to(device=device, dtype=torch.bfloat16)
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
-            # Convert preprocessed image to video format
             if isinstance(batch.preprocessed_image, torch.Tensor):
                 if batch.preprocessed_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
                     video = batch.preprocessed_image.unsqueeze(2)
@@ -306,7 +297,6 @@ class CosmosLatentPreparationStage(PipelineStage):
 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
 
-                # Apply latent normalization
                 if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
                     latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1,
                                                                                    1).to(device, dtype)
@@ -321,9 +311,7 @@ class CosmosLatentPreparationStage(PipelineStage):
         else:
             num_cond_latent_frames = 0
 
-        # Generate or use provided latents
         if latents is None:
-            # Use float32 for randn_tensor
             latents = randn_tensor(shape,
                                    generator=torch.Generator(device="cpu").manual_seed(200),
                                    device=device,

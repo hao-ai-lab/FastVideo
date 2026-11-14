@@ -136,7 +136,6 @@ __forceinline__ __device__ __half2 half_exp(__half2 x) {
     return out;
 }
 
-// Apply the exp to all the elements.
 template <bool zero_init=false, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
 __forceinline__ __device__ void max_scale_exp2_sum(Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> &max, Tensor<Engine1, Layout1> &sum, const float scale) {
     static_assert(Layout0::rank == 2, "Only support 2D Tensor"); static_assert(Layout1::rank == 1, "Only support 1D Tensor"); CUTE_STATIC_ASSERT_V(size<0>(max) == size<0>(tensor));
@@ -164,7 +163,6 @@ __forceinline__ __device__ void max_scale_exp2_sum(Tensor<Engine0, Layout0> &ten
     }
 }
 
-// Apply the exp to all the elements.
 template <bool Scale_max=true, bool Check_inf=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
 __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> const &max, const float scale) {
     static_assert(Layout0::rank == 2, "Only support 2D Tensor");

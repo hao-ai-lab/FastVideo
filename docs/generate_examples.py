@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
-GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
+GITHUB_REPO = "hao-ai-lab/FastVideo"
 COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
 COOKBOOK_CLIENTS = {
     "python": ("video.py", "python -m pip install openai==3.6.0"),
@@ -365,11 +365,8 @@ class Index:
         content = f"# {self.title}\n\n{self.description}\n\n"
         if self.caption:
             content += f"## {self.caption}\n\n"
-        # Generate a simple list of documentation links
         for doc in self.documents:
-            # Convert document path to proper link
             doc_link = doc.replace("\\", "/")
-            # Get just the filename for the link text
             doc_title = fix_case(Path(doc).stem.replace("_", " ").title())
             content += f"- [{doc_title}]({doc_link}.md)\n"
         content += "\n"
@@ -460,12 +457,10 @@ class Example:
         return fix_case(self.path.stem.replace("_", " ").title())
 
     def generate(self) -> str:
-        # Create GitHub link to source
         github_path = str(self.path.relative_to(ROOT_DIR)).replace("\\", "/")
         github_url = f"https://github.com/{GITHUB_REPO}/blob/main/{github_path}"
         content = f"**Source:** [{github_path}]({github_url})\n\n"
 
-        # Add title for code files
         if self.main_file.suffix != ".md":
             content += f"# {self.title}\n\n"
 
@@ -485,19 +480,16 @@ class Example:
             return content
 
         content += "## Additional Files\n\n"
-        # Define binary/non-text file extensions to skip
         binary_extensions = {
             '.mp4', '.avi', '.mov', '.mkv', '.gif', '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.pdf', '.zip', '.tar',
             '.gz', '.mp3', '.wav'
         }
 
         for file in sorted(self.other_files):
-            # Skip binary files
             if file.suffix.lower() in binary_extensions:
                 continue
 
             file_rel_path = file.relative_to(self.path)
-            # Use collapsible admonitions, normalized by the site preparation
             content += f"??? note \"{file_rel_path}\"\n\n"
 
             try:
@@ -518,7 +510,6 @@ class Example:
                     content += "    ```\n"
                 content += "\n"
             except UnicodeDecodeError:
-                # Skip files that can't be decoded as UTF-8
                 continue
 
         return content
@@ -581,7 +572,6 @@ def create_category_indices() -> dict[str, Index]:
         ),
     }
 
-    # Ensure all category doc directories exist
     for index in category_indices.values():
         if not index.path.parent.exists():
             index.path.parent.mkdir(parents=True)
@@ -605,7 +595,6 @@ def find_examples(category_indices: dict[str, Index], generate_main_index: bool)
         dir_name = category_dir_mapping.get(category, category)
         category_dir = EXAMPLE_DIR / dir_name
 
-        # Skip if directory doesn't exist
         if not category_dir.exists():
             continue
 
@@ -623,7 +612,6 @@ def find_examples(category_indices: dict[str, Index], generate_main_index: bool)
             examples.append(Example(path))
         # Find examples in subdirectories
         for path in EXAMPLE_DIR.glob("*/*.md"):
-            # Skip categorised examples
             if path.parent.name in category_indices:
                 continue
             examples.append(Example(path.parent))
@@ -644,7 +632,6 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
         if example.category not in ["training", "distillation"]:
             continue
 
-        # Use mapped directory name if available
         dir_name = category_dir_mapping.get(example.category, example.category)
         category_dir = EXAMPLE_DIR / dir_name
         relative_path = example.path.relative_to(category_dir)
@@ -657,7 +644,6 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
                 model = path_parts[1]  # e.g., "wan_i2v_14b_480p"
                 dataset = path_parts[2]  # e.g., "crush_smol"
 
-                # Initialize nested structure
                 if example.category not in nested_structures:
                     nested_structures[example.category] = {}
                 if method not in nested_structures[example.category]:
@@ -665,7 +651,6 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
                 if model not in nested_structures[example.category][method]:
                     nested_structures[example.category][method][model] = {}
 
-                # Store the nested structure
                 nested_structures[example.category][method][model][dataset] = NestedStructure(category=example.category,
                                                                                               method=method,
                                                                                               model=model,
@@ -678,7 +663,6 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
             dataset = path_parts[1]  # e.g., "Wan-Syn-Data-480P"
             method = "DMD"  # Default method for distillation
 
-            # Initialize nested structure
             if example.category not in nested_structures:
                 nested_structures[example.category] = {}
             if method not in nested_structures[example.category]:
@@ -686,7 +670,6 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
             if model not in nested_structures[example.category][method]:
                 nested_structures[example.category][method][model] = {}
 
-            # Store the nested structure
             nested_structures[example.category][method][model][dataset] = NestedStructure(category=example.category,
                                                                                           method=method,
                                                                                           model=model,
@@ -701,7 +684,7 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
     """Generate documentation for flat structure examples (inference, etc.)."""
     for example in examples:
         if example.category in ["training", "distillation"]:
-            continue  # Skip nested structure examples
+            continue
 
         # Determine which index to use for this example
         if example.category is not None and example.category in category_indices:
@@ -712,7 +695,6 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
         else:
             continue
 
-        # Generate the example documentation
         doc_path = index.path.parent / f"{example.path.stem}.md"
         with open(doc_path, "w+", encoding="utf-8") as f:
             f.write(example.generate())
@@ -730,7 +712,6 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
         category_base_dir = category_index.path.parent
 
         for method, models in nested_structures[category_name].items():
-            # Create method-level index
             method_index = Index(path=category_base_dir / f"{method}.md",
                                  title=fix_case(method),
                                  description=f"Examples using {method}.",
@@ -738,35 +719,28 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                                  maxdepth=2)
 
             for model, datasets in models.items():
-                # Generate dataset examples using the Example class
                 for dataset, nested_struct in datasets.items():
                     doc_path = category_base_dir / f"{nested_struct.filename}.md"
                     with open(doc_path, "w+", encoding="utf-8") as f:
                         f.write(nested_struct.example.generate())
 
-                # Create model-level index
                 model_index = Index(path=category_base_dir / f"{model}.md",
                                     title=fix_case(model.replace('_', ' ')),
                                     description=f"Examples for the {model} model.",
                                     caption=f"{fix_case(model.replace('_', ' '))} Datasets",
                                     maxdepth=1)
 
-                # Add dataset indices to model index
                 for dataset, nested_struct in datasets.items():
                     model_index.documents.append(nested_struct.filename)
 
-                # Write model index
                 with open(model_index.path, "w+", encoding="utf-8") as f:
                     f.write(model_index.generate())
 
-                # Add model to method index
                 method_index.documents.append(model)
 
-            # Write method index
             with open(method_index.path, "w+", encoding="utf-8") as f:
                 f.write(method_index.generate())
 
-            # Add method to main category index
             category_index.documents.append(method)
 
 
@@ -778,7 +752,6 @@ def generate_examples(generate_main_index: bool = False) -> None:
         generate_main_index (bool): Whether to generate the main examples index.
             If False, only category-specific indices will be generated.
     """
-    # Create category indices
     category_indices = create_category_indices()
 
     # Create the main examples index only if requested
@@ -797,29 +770,22 @@ def generate_examples(generate_main_index: bool = False) -> None:
     # Find all examples
     examples = find_examples(category_indices, generate_main_index)
 
-    # Create nested structures for training and distillation
     nested_structures = create_nested_structures(examples)
 
-    # Generate flat structure examples (inference, etc.)
     generate_flat_examples(examples, category_indices, examples_index, generate_main_index)
 
-    # Generate nested structure examples (training, distillation)
     generate_nested_examples(nested_structures, category_indices)
 
-    # Generate the index files for categories
     for category_index in category_indices.values():
         if category_index.documents:
-            # Add to main index if it exists
             if generate_main_index and examples_index:
                 main_index_dir = examples_index.path.parent
                 rel_path = os.path.relpath(category_index.path, start=main_index_dir)
                 examples_index.documents.insert(0, str(rel_path).replace("\\", "/").replace(".md", ""))
 
-            # Write the category index file
             with open(category_index.path, "w+", encoding="utf-8") as f:
                 f.write(category_index.generate())
 
-    # Write the main index file if requested
     if generate_main_index and examples_index:
         with open(examples_index.path, "w+", encoding="utf-8") as f:
             f.write(examples_index.generate())

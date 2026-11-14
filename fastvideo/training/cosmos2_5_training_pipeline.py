@@ -60,10 +60,6 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
         )
         self.validation_pipeline = validation_pipeline
 
-    # ------------------------------------------------------------------
-    # Cosmos 2.5-specific overrides
-    # ------------------------------------------------------------------
-
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Skip: Cosmos25WanVAEWrapper normalises latents during encoding.
 
@@ -128,10 +124,6 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
         }
         return training_batch
 
-
-# ---------------------------------------------------------------------------
-# Entry point (mirrors wan_training_pipeline.py)
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     logger.warning("\n"

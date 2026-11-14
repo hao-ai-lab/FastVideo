@@ -262,11 +262,6 @@ def samples_from_manifest(
     return samples
 
 
-# ------------------------------------------------------------------
-# Internal helpers
-# ------------------------------------------------------------------
-
-
 def _expand(spec: PathSpec, exts: tuple[str, ...]) -> list[Path]:
     """Resolve a path-style input into a sorted list of file paths.
 
@@ -340,7 +335,6 @@ def _attach_extracted_audio(
     else:
         out_dir = Path(tempfile.mkdtemp(prefix="fv_extracted_audio_"))
 
-    # Build the work list — (sample_idx, dest_audio_key, source_path)
     work: list[tuple[int, str, str]] = []
     for i, s in enumerate(samples):
         for vkey, akey in (
