@@ -318,6 +318,83 @@ def test_zero_count_rows(block):
         f"rc={proc.returncode}\nstdout: {proc.stdout[-2000:]}\nstderr: {proc.stderr[-2000:]}")
 
 
+# ---------------------------------------------------------------------------
+# Softmax row max. On sm_103a a tile whose keys are all valid takes its row max
+# from tcgen05.ld.red (one partial max per 32-column load); a tile with padded
+# keys keeps the masked reduction. The max only shifts the exponent, so with
+# small random logits a wrong max cancels out. These cases use logits large
+# enough that it does not: a max that misses the largest score overflows exp2
+# (non-finite output), and a max taken over a padded key underflows every valid
+# score (zero output).
+# ---------------------------------------------------------------------------
+
+
+def make_aligned_case(block, num_blocks=16, heads=4, align=4.0, seed=0):
+    """Dense selection; every query has the same component `align` along the
+    unit vector u, so a key c * u scores c * align for every query."""
+    torch.manual_seed(seed)
+    S = num_blocks * block
+    shape = (1, heads, S, HEAD_DIM) if vsa.BHSD else (1, S, heads, HEAD_DIM)
+    u = torch.full((HEAD_DIM, ), HEAD_DIM**-0.5, device="cuda")
+    r = torch.randn(shape, device="cuda")
+    q = (r - (r @ u)[..., None] * u + align * u).to(torch.bfloat16)
+    k, v = (torch.randn(shape, device="cuda", dtype=torch.bfloat16) for _ in range(2))
+    rows = heads * num_blocks
+    idx = torch.arange(num_blocks, dtype=torch.int32, device="cuda").repeat(rows, 1).contiguous()
+    num = torch.full((rows, ), num_blocks, dtype=torch.int32, device="cuda")
+    return q, k, v, u, idx, num
+
+
+def set_keys(k, tokens, value):
+    if vsa.BHSD:
+        k[:, :, tokens, :] = value.to(k.dtype)
+    else:
+        k[:, tokens, :, :] = value.to(k.dtype)
+
+
+def assert_matches_reference(q, k, v, idx, num, vbs, block):
+    assert vsa.is_supported(q, vbs)
+    got, got_lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
+    ref, ref_lse = reference(q, k, v, idx, num, vbs, block)
+    got_o = (got if vsa.BHSD else got.transpose(1, 2)).float()
+    assert torch.isfinite(got_o).all() and torch.isfinite(got_lse).all(), "non-finite output"
+    diff = (got_o - ref).abs().max().item()
+    assert diff < 0.02, f"out: max |diff| = {diff:.5f}"
+    lse_diff = (got_lse.float() - ref_lse).abs().max().item()
+    assert lse_diff < 0.05, f"lse: max |diff| = {lse_diff:.5f}"
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_row_max_covers_every_column_of_a_full_tile(block):
+    """All keys valid (the sm_103a ld.red path). Each 128-key S tile holds one
+    spike key scoring 1200 above the previous tile's spike, at a column that
+    moves across the tile's four 32-column loads. A row max that misses the
+    spike leaves an exponent of >= 1200 * scale * log2(e) (~150) and the
+    output overflows."""
+    q, k, v, u, idx, num = make_aligned_case(block)
+    S = idx.shape[1] * block
+    for t in range(S // 128):
+        set_keys(k, t * 128 + (37 * t + 5) % 128, 300.0 * (t + 1) * u)
+    vbs = torch.full((S // block, ), block, dtype=torch.int32, device="cuda")
+    assert_matches_reference(q, k, v, idx, num, vbs, block)
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_padded_keys_never_set_the_row_max(block):
+    """Blocks of mixed length (full, one padded key, about half padded), so S
+    tiles mix full and partial blocks. Every padded key scores 8000 for every
+    query: the reference masks it, while a row max taken over it (ld.red on a
+    tile with padded keys) underflows every valid score and zeroes the output."""
+    q, k, v, u, idx, num = make_aligned_case(block)
+    nb = idx.shape[1]
+    lengths = [block, block - 1, block, block // 2 + 3, block, block, block - 17, block // 2]
+    vbs = torch.tensor([lengths[j % len(lengths)] for j in range(nb)], dtype=torch.int32,
+                       device="cuda")
+    token = torch.arange(nb * block, device="cuda")
+    set_keys(k, (token % block) >= vbs.long()[token // block], 2000.0 * u)
+    assert_matches_reference(q, k, v, idx, num, vbs, block)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--zero-count-case":
         _zero_count_case_main(int(sys.argv[2]))
