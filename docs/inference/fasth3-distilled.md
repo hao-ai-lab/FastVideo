@@ -198,6 +198,33 @@ forwards. With the DiT sharded, peak allocated memory is about 66 GiB per GPU
 (about 95 GiB in use), against 83 GiB (103 GiB) with a full DiT copy on each
 GPU; the output is identical. Model loading and decoding come on top of this.
 
+## Optional Gluon sparse forward on SM120
+
+Set `FASTVIDEO_H3_VSA_GLUON=1` to enable the Gluon block-sparse attention
+forward on SM120 (compute capability 12.0). It is disabled by default and
+supports BF16, head dimension 128, 64-token tiles and eager inference only.
+Backward, DiT compilation and conflicting fine-attention overrides are rejected.
+It preserves VSA tile selection and compression but is not bit-exact with
+native Triton.
+
+Measured on one RTX PRO 6000 Blackwell Server Edition (96 GB), with PyTorch
+2.12.0+cu130 and Triton 3.7.0. FastH3-8-Step-V2 used BF16, 1344x768,
+362 frames at 24 FPS and eight DiT forwards:
+
+| Measurement | Native Triton | Gluon | Latency reduction |
+| --- | ---: | ---: | ---: |
+| Sparse forward median | 346.87 ms | 247.04 ms | 28.78% |
+| DiT median | 282.72 s | 244.05 s | 13.68% |
+| E2E median | 314.45 s | 276.73 s | 12.00% |
+
+Model times are medians of three generations after one excluded warmup,
+using identical AdaLN cache and CPU-offload settings. E2E includes transfers,
+decoding and saving, excluding initial generator construction. The synthetic
+kernel benchmark excludes mask/index creation and layout conversion.
+
+See the [benchmark guide](../../scripts/benchmarks/minimax_h3_sm120/README.md)
+for reproduction commands and tests.
+
 ## Token reduction
 
 `--token-reduction` is an opt-in, training-free speed mode that follows the

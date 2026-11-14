@@ -718,9 +718,18 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # logical tile-ordered rows. Quantization-aware training installs its
         # FP4 emulator here; it is also the only grad-capable tile-128 route.
         self.fine_attention_override: Any = fine_attention_from_env()
+        self._use_gluon = envs.FASTVIDEO_H3_VSA_GLUON.get()
+        if self._use_gluon:
+            if causal or head_size != 128:
+                raise ValueError("SM120 VSA requires non-causal attention with head dimension 128")
+            if (self.fine_attention_override is not None or self._sm89_kernel != "original"
+                    or envs.FASTVIDEO_VSA_PTX_BLACKWELL.get() or envs.FASTVIDEO_H3_VSA_FP4.get()):
+                raise ValueError("FASTVIDEO_H3_VSA_GLUON cannot be combined with another fine-attention override")
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
+        if self._use_gluon:
+            raise RuntimeError("SM120 VSA requires eager execution; disable both DiT compilation switches")
         self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
         if self.fine_attention_override is not None:
             # forward() cannot run the emulator inside a traced graph, and logging there
@@ -889,6 +898,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         attn_metadata: MiniMaxH3VSAMetadata,
     ) -> torch.Tensor:
         compiling = torch.compiler.is_compiling()
+        if self._use_gluon and (compiling or attn_metadata.tile_elems != 64):
+            raise RuntimeError("SM120 VSA supports eager tile-64 inference only")
         regional_compiling = compiling and self._regional_compile_ptx_blackwell_enabled is True
 
         tile_elems = attn_metadata.tile_elems
@@ -978,7 +989,22 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # preserves the eager dense-layer contract without a Python branch.
             mask = mask | force_dense
 
-        if self.fine_attention_override is not None and not compiling:
+        if self._use_gluon:
+            from fastvideo_kernel.block_sparse_attn import block_sparse_attn_gluon_fwd
+
+            if map_to_index is None:
+                raise RuntimeError("SM120 VSA requires fastvideo_kernel.triton_kernels.index")
+            q_bhsd, k_bhsd, v_bhsd = (t.transpose(1, 2).contiguous()
+                                      for t in (logical_query, logical_key, logical_value))
+            q2k_idx, q2k_num = map_to_index(mask)
+            out_bhsd, _ = block_sparse_attn_gluon_fwd(q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num,
+                                                      attn_metadata.variable_block_sizes)
+            # Reuse dead layout-copy storage for the full-size BSHD output.
+            del q_bhsd, k_bhsd, v_bhsd, q2k_idx, q2k_num
+            out = out_bhsd.transpose(1, 2).contiguous()
+            logger.info_once("VSA-H3 fine attention: SM120 BF16 tile-64 async_overlap2 (eager, non-bit-exact)")
+            del out_bhsd
+        elif self.fine_attention_override is not None and not compiling:
             out = self.fine_attention_override(logical_query, logical_key, logical_value, mask, attn_metadata)
         elif tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
             # Native 64/128-token path: the block map is already at the
@@ -1158,10 +1184,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     )
             if has_ptx_blackwell_pair and use_ptx_blackwell:
                 out_bhsd = out_bhsd[:, :, :logical_seq_len]
+            # In no-grad inference the temporary layout copies are dead here;
+            # in training the autograd node retains any inputs its backward needs.
+            del q_bhsd, k_bhsd, v_bhsd
             out = out_bhsd.transpose(1, 2).contiguous()
-            # Fine attention is complete. Release its layout copies before the
-            # gated compression merge creates full-sequence temporaries.
-            del q_bhsd, k_bhsd, v_bhsd, out_bhsd
+            del out_bhsd
         else:
             out, _ = block_sparse_attn_256_bshd(
                 logical_query,
