@@ -53,7 +53,9 @@ CI is not one monolithic job:
 
 The old files under `fastvideo/tests/modal/` are retained as dormant manual
 rollback code. `.buildkite/scripts/pr_test.sh` rejects Buildkite invocations,
-and no pipeline or slash-command route calls Modal.
+and no pipeline or slash-command route calls Modal. The exception is
+`fastvideo/tests/modal/kernel_build_cache.py`: the image build records its
+kernel keys, and Spark lanes call it to install a matching kernel.
 
 Three Buildkite entry pipelines share the validated graph:
 
@@ -644,8 +646,9 @@ through checks, commit statuses, or labels instead of PR/issue comments.
 | `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |
 | `.buildkite/pipeline.yml` | Static 20-lane Slurm Buildkite graph |
 | `.buildkite/scripts/unit_test.sh`, `.buildkite/scripts/lanes/*.sh` | Active Slurm lane payloads |
+| `.buildkite/scripts/spark_kernel_sync.sh`, `fastvideo/tests/modal/kernel_build_cache.py` | Spark lane kernel sync; image kernel keys |
 | `fastvideo/tests/ssim/ci_runner.py` | Four-GPU Slurm SSIM scheduler |
-| `.buildkite/scripts/pr_test.sh`, `fastvideo/tests/modal/*.py` | Dormant manual Modal rollback path (disabled in Buildkite) |
+| `.buildkite/scripts/pr_test.sh`, other `fastvideo/tests/modal/*.py` | Dormant manual Modal rollback path (disabled in Buildkite) |
 | `.buildkite/performance-benchmarks/tests/*.json` | Performance benchmark configs and thresholds |
 | `.github/workflows/infra-docs.yml` | Docs build and GitHub Pages deploy |
 | `.github/workflows/infra-build-image.yml` | CUDA matrix, CI runner image, and manual Docker image builds |

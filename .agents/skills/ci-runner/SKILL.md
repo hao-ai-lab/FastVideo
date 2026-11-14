@@ -13,7 +13,9 @@ isolated Docker containers. Both execute the immutable PR SHA.
 
 The files under `fastvideo/tests/modal/` and `.buildkite/scripts/pr_test.sh`
 are dormant rollback code. Never add an active Buildkite or slash-command
-route to them. `pr_test.sh` must continue to reject Buildkite invocations.
+route to them. The one exception is `kernel_build_cache.py`, which the image
+build and the Spark lanes' `spark_kernel_sync.sh` call to install a matching
+kernel. `pr_test.sh` must continue to reject Buildkite invocations.
 
 The private operator bundle is deliberately outside this repository because
 it contains site paths and credentials. See
