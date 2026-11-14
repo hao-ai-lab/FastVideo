@@ -79,3 +79,20 @@ def test_model_info_exposes_output_constraints_without_generation(monkeypatch):
     capabilities = response.json()["video_output_capabilities"]
     assert capabilities["duration_seconds"]["max"] == 15
     assert capabilities["recommended_frame_sizes"]["16:9"]["768p"] == [1344, 768]
+
+
+@pytest.mark.parametrize(("family", "pipeline", "tasks"), [
+    ("minimax_h3", None, ["t2va", "i2va", "fl2va"]),
+    ("minimax_h3", "MiniMaxH3Ref2VAModularPipeline", ["t2va", "ref2va"]),
+    ("pika_h3_flex", None, ["t2va", "i2va", "fl2va"]),
+    ("pika_h3_flex", "PikaH3FlexRef2VAModularPipeline", ["ref2va"]),
+])
+def test_discovery_reports_the_tasks_of_the_loaded_pipeline(monkeypatch, family, pipeline, tasks):
+    _family(monkeypatch, family)
+    result = video_output_capabilities(SimpleNamespace(model_path="local-model", override_pipeline_cls_name=pipeline))
+    assert [entry["task"] for entry in result["tasks"]] == tasks
+    if pipeline is None:
+        assert "reference_limits" not in result
+    else:
+        assert result["reference_limits"]["images"] == 9
+        assert result["reference_limits"]["continuation_video"] is (family == "minimax_h3")
