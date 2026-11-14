@@ -159,13 +159,6 @@ def bench_kineto(fn,
     return tuple(kernel_times) if is_tupled else kernel_times[0]
 
 
-def calc_diff(x, y):
-    x, y = x.double(), y.double()
-    denominator = (x * x + y * y).sum()
-    sim = 2 * (x * y).sum() / denominator
-    return 1 - sim
-
-
 def count_bytes(tensors):
     total = 0
     for t in tensors:

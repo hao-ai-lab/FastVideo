@@ -168,29 +168,6 @@ def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
     raise RuntimeError(f"Invalid {name}: {normalized!r}. Expected one of {allowed_values}.")
 
 
-def _env_csv(name: str, default: str) -> list[str]:
-    raw = os.getenv(name, default)
-    values = [item.strip() for item in raw.split(",")]
-    unique_values: list[str] = []
-    for value in values:
-        if not value or value in unique_values:
-            continue
-        unique_values.append(value)
-    return unique_values
-
-
-def _required_env(*names: str) -> str:
-    for name in names:
-        value = os.getenv(name)
-        if not isinstance(value, str):
-            continue
-        normalized = value.strip()
-        if normalized:
-            return normalized
-    joined_names = ", ".join(names)
-    raise RuntimeError(f"Missing required environment variable: one of {joined_names}")
-
-
 def _optional_env(*names: str) -> str | None:
     for name in names:
         value = os.getenv(name)

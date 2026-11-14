@@ -17,7 +17,6 @@ so it cannot end up in a shell history.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 from pathlib import Path
 

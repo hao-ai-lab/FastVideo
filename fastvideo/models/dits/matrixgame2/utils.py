@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 
 import numpy as np
 import torch
-from PIL import Image
 
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.utils import logger
@@ -393,13 +391,6 @@ def get_current_action(mode="universal"):
 
 async def get_current_action_async(mode="universal"):
     return await asyncio.to_thread(get_current_action, mode)
-
-
-def load_initial_image(image_path: str = None) -> Image.Image:
-    if image_path and os.path.exists(image_path):
-        return Image.open(image_path).convert("RGB")
-    logger.warning("No image provided, creating placeholder...")
-    return Image.new("RGB", (640, 352), (128, 128, 128))
 
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = None):

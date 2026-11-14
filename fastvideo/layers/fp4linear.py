@@ -105,11 +105,3 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
 
         # None for the three extra forward args
         return grad_x, grad_w, grad_b, None, None, None
-
-
-def fp4_linear_forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
-    # pass config **positionally**; autograd.Function.apply ignores kwargs
-    bias = self.bias if not self.skip_bias_add else None
-    output = _LinearFWD4BWD16Fn.apply(x, self.weight, bias, "cutlass", 16, True)
-    output_bias = self.bias if self.skip_bias_add else None
-    return output, output_bias

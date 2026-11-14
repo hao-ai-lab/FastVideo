@@ -8,11 +8,6 @@ def is_cuda():
     return triton.runtime.driver.active.get_current_target().backend == "cuda"
 
 
-def is_hip():
-    target = triton.runtime.driver.active.get_current_target()
-    return target.backend == 'hip'
-
-
 def is_cdna3_cdna4():
     target = triton.runtime.driver.active.get_current_target()
     return (target.arch == 'gfx1201' or target.arch == 'gfx1101' or target.arch == 'gfx1100'

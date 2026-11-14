@@ -11,7 +11,6 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from .config import (
     DEFAULT_FPS,
     DEFAULT_HEIGHT,
-    DEFAULT_NEGATIVE_PROMPT,
     DEFAULT_NUM_FRAMES,
     DEFAULT_NUM_INFERENCE_STEPS,
     DEFAULT_WIDTH,

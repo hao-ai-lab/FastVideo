@@ -1,6 +1,5 @@
 from huggingface_hub import save_torch_state_dict, load_state_dict_from_file
 # from safetensors import safetensors
-from safetensors.torch import save_file
 import torch
 import re
 from collections import OrderedDict

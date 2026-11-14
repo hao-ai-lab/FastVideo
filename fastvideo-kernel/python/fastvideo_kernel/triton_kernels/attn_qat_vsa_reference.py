@@ -193,12 +193,6 @@ def invert_block_lists(q2k_idx: torch.Tensor, q2k_num: torch.Tensor,
     return k2q_idx[..., :n_qblocks].contiguous(), k2q_slot[..., :n_qblocks].contiguous(), k2q_num.contiguous()
 
 
-def visit_order(q2k_idx: torch.Tensor, q2k_num: torch.Tensor, b: int, h: int, m: int) -> list[int]:
-    """Blocks query block ``m`` visits, in kernel order (last list entry first)."""
-    count = int(q2k_num[b, h, m])
-    return [int(block) for block in q2k_idx[b, h, m, :count].flip(0)]
-
-
 @torch.no_grad()
 def fp4_vsa_attention_reference(q: torch.Tensor,
                                 k: torch.Tensor,
