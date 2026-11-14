@@ -83,6 +83,11 @@ def _generation_tasks(args: Any, family: str) -> dict[str, Any]:
                     "anchors": ["first"]
                 },
                 {
+                    "task": "l2va",
+                    "image_references": 1,
+                    "anchors": ["last"]
+                },
+                {
                     "task": "fl2va",
                     "image_references": 2,
                     "anchors": ["first", "last"]

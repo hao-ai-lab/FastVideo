@@ -179,6 +179,7 @@ aliases of `t2va` and `i2va`:
 
 - `t2va` uses text only.
 - `i2va` takes exactly one image reference, the first frame.
+- `l2va` takes exactly one image reference, the last frame.
 - `fl2va` takes one or two image references, the first and last frames.
 - `ref2va` takes ordered image, video, and audio references and requires a
   server started with the Ref2VA pipeline (`MiniMaxH3Ref2VAModularPipeline` or
@@ -186,7 +187,7 @@ aliases of `t2va` and `i2va`:
 
 A FastH3 Ref2VA server (Omni) also serves `t2va`: a request with no reference
 media runs the T2VA layout through the same transformer. A Pika H3 Flex server
-loads one adapter, so `t2va`, `i2va` and `fl2va` come from the FL2VA model and
+loads one adapter, so `t2va`, `i2va`, `l2va` and `fl2va` come from the FL2VA model and
 `ref2va` from a separately served Ref2VA model.
 
 `aspect_ratio` with `short_edge` 480 or 768 (768 when omitted) selects the 480p

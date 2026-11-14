@@ -82,9 +82,9 @@ def test_model_info_exposes_output_constraints_without_generation(monkeypatch):
 
 
 @pytest.mark.parametrize(("family", "pipeline", "tasks"), [
-    ("minimax_h3", None, ["t2va", "i2va", "fl2va"]),
+    ("minimax_h3", None, ["t2va", "i2va", "l2va", "fl2va"]),
     ("minimax_h3", "MiniMaxH3Ref2VAModularPipeline", ["t2va", "ref2va"]),
-    ("pika_h3_flex", None, ["t2va", "i2va", "fl2va"]),
+    ("pika_h3_flex", None, ["t2va", "i2va", "l2va", "fl2va"]),
     ("pika_h3_flex", "PikaH3FlexRef2VAModularPipeline", ["ref2va"]),
 ])
 def test_discovery_reports_the_tasks_of_the_loaded_pipeline(monkeypatch, family, pipeline, tasks):

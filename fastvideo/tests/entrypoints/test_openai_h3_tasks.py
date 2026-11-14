@@ -47,6 +47,13 @@ def test_i2va_takes_one_first_frame(tmp_path, model_path, task):
 
 
 @pytest.mark.parametrize("model_path", [FASTH3, PIKA])
+def test_l2va_takes_one_last_frame(tmp_path, model_path):
+    adapted = _adapt(tmp_path, model_path, task="l2va", image_reference=[{"image_url": _image(tmp_path)}])
+    assert adapted.inputs.image_path is None
+    assert adapted.inputs.last_image is not None
+
+
+@pytest.mark.parametrize("model_path", [FASTH3, PIKA])
 def test_i2va_rejects_a_second_frame(tmp_path, model_path):
     images = [{"image_url": _image(tmp_path, "a.png")}, {"image_url": _image(tmp_path, "b.png")}]
     with pytest.raises(RequestAdaptationError, match="exactly one image reference"):
@@ -66,7 +73,7 @@ def test_omni_serves_text_only_requests_as_t2va(tmp_path, task):
     assert adapted.inputs.image_path is None
 
 
-@pytest.mark.parametrize("task", ["i2va", "fl2va"])
+@pytest.mark.parametrize("task", ["i2va", "l2va", "fl2va"])
 def test_omni_rejects_keyframe_tasks(tmp_path, task):
     with pytest.raises(RequestAdaptationError, match="configured for MiniMax-H3 Ref2VA"):
         _adapt(tmp_path, FASTH3, H3_REF2VA, task=task, image_reference=[{"image_url": _image(tmp_path)}])

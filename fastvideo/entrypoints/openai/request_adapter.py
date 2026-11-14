@@ -423,25 +423,28 @@ def is_ref2va_server(args: FastVideoArgs, model_family: str | None) -> bool:
                                                              or "").lower()
 
 
-def _check_task(task: str, model_family: str | None, ref2va: bool, *, images: list[str], media: bool) -> None:
+def _check_task(task: str, model_family: str | None, ref2va: bool, *, images: list[str], media: bool) -> str:
     if model_family not in H3_TASK_FAMILIES:
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 and Pika H3 Flex servers.")
     name = H3_TASK_FAMILIES[model_family]
     normalized = H3_TASK_ALIASES.get(task.lower(), task.lower())
-    if normalized not in {"t2va", "i2va", "fl2va", "ref2va"}:
-        raise RequestAdaptationError(f"{name} task must be one of t2va, i2va, fl2va or ref2va.")
+    if normalized not in {"t2va", "i2va", "l2va", "fl2va", "ref2va"}:
+        raise RequestAdaptationError(f"{name} task must be one of t2va, i2va, l2va, fl2va or ref2va.")
     if normalized == "t2va" and media:
         raise RequestAdaptationError(f"{name} task='t2va' does not accept reference media.")
     if ref2va:
         if normalized == "ref2va" or (normalized == "t2va" and model_family == "minimax_h3"):
-            return
+            return normalized
         raise RequestAdaptationError(f"This server is configured for {name} Ref2VA, not task={normalized!r}.")
     if normalized == "ref2va":
         raise RequestAdaptationError(f"{name} task='ref2va' requires its Ref2VA pipeline at server startup.")
-    if normalized == "i2va" and len(images) != 1:
-        raise RequestAdaptationError(f"{name} task='i2va' requires exactly one image reference (the first frame).")
+    if normalized in ("i2va", "l2va") and len(images) != 1:
+        frame = "first" if normalized == "i2va" else "last"
+        raise RequestAdaptationError(
+            f"{name} task={normalized!r} requires exactly one image reference (the {frame} frame).")
     if normalized == "fl2va" and not images:
         raise RequestAdaptationError(f"{name} task='fl2va' requires one or two image references.")
+    return normalized
 
 
 def _apply_reference_inputs(
@@ -456,7 +459,9 @@ def _apply_reference_inputs(
     audios = _audio_sources(request)
     ref2va = is_ref2va_server(args, model_family)
     if request.task is not None:
-        _check_task(request.task, model_family, ref2va, images=images, media=bool(images or videos or audios))
+        task = _check_task(request.task, model_family, ref2va, images=images, media=bool(images or videos or audios))
+    else:
+        task = None
 
     if ref2va:
         from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
@@ -495,7 +500,9 @@ def _apply_reference_inputs(
                                      "configured with its Ref2VA pipeline (override_pipeline_cls_name).")
     if len(images) > 2:
         raise RequestAdaptationError("The loaded pipeline accepts at most first and last image references.")
-    if images:
+    if task == "l2va":
+        kwargs["last_image"] = load_image(images[0])
+    elif images:
         kwargs["image_path"] = images[0]
     if len(images) == 2:
         kwargs["last_image"] = load_image(images[1])
