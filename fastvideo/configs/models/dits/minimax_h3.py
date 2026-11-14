@@ -66,6 +66,12 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     # ``None`` is the released single-head transformer. A PDD export records
     # the key in its transformer ``config.json``.
     pdd_steps: int | None = None
+    # Video checkpoints keep the audio stream. MiniMax-H3-Image sets
+    # ``num_pdd_heads`` and drops audio; ``__post_init__`` enforces that.
+    # ``num_pdd_heads`` is the split ``pdd_proj_out.*`` layout published with
+    # the image checkpoint, separate from the widened ``pdd_steps`` export.
+    audio_enabled: bool = True
+    num_pdd_heads: int = 0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -76,6 +82,12 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         self.out_channels = self.in_channels
         if self.pdd_steps is not None:
             validate_pdd_steps(self.pdd_steps, "MiniMax H3 pdd_steps")
+        if self.num_pdd_heads < 0:
+            raise ValueError(f"MiniMax H3 num_pdd_heads must be >= 0, got {self.num_pdd_heads}.")
+        if self.pdd_steps is not None and self.num_pdd_heads > 0:
+            raise ValueError("MiniMax H3 pdd_steps and num_pdd_heads cannot both be set.")
+        if self.num_pdd_heads > 0:
+            self.audio_enabled = False
         if self.adaln_rank is not None and not 0 < self.adaln_rank <= self.time_embed_dim:
             raise ValueError(f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], "
                              f"got {self.adaln_rank}.")
@@ -95,3 +107,29 @@ class MiniMaxH3Config(DiTConfig):
     # parameter dtype, while H3 inference keeps boundary projections in FP32.
     uniform_parameter_dtype: bool = False
     vsa_fp4: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MiniMaxH3ImageArchConfig(MiniMaxH3ArchConfig):
+    """H3 DiT without audio, with one FP32 output head per distilled step.
+
+    Attention backends stay on the dense and FP4 kernels. Video sparse
+    attention tiles the video geometry and is not a valid image backend.
+    FFN module names stay ``transformer_blocks.*.ff.fc_in/fc_out`` so the
+    NVFP4 prefix filter already on main still selects them.
+    """
+
+    audio_enabled: bool = False
+    num_pdd_heads: int = 6
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
+        AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+    )
+
+
+@dataclass
+class MiniMaxH3ImageConfig(MiniMaxH3Config):
+    """FastVideo component configuration for the MiniMax-H3-Image DiT."""
+
+    arch_config: MiniMaxH3ImageArchConfig = field(default_factory=MiniMaxH3ImageArchConfig)

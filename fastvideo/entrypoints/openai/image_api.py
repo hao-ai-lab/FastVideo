@@ -41,6 +41,45 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/images", tags=["images"])
 
+
+def _enforce_minimax_h3_image_contract(
+    *,
+    num_inference_steps: int | None,
+    guidance_scale: float | None,
+    negative_prompt: str | None,
+    true_cfg_scale: float | None = None,
+) -> None:
+    """Reject requests the distilled image checkpoint cannot run."""
+    try:
+        model_path = str(getattr(get_server_args(), "model_path", "") or "")
+    except Exception:
+        return
+    from fastvideo.registry import _is_minimax_h3_image
+
+    if not model_path or not _is_minimax_h3_image(model_path):
+        return
+    if num_inference_steps not in (None, 6):
+        raise HTTPException(
+            status_code=400,
+            detail="MiniMax-H3-Image only supports num_inference_steps=6.",
+        )
+    if guidance_scale not in (None, 1, 1.0):
+        raise HTTPException(
+            status_code=400,
+            detail="MiniMax-H3-Image only supports guidance_scale=1.",
+        )
+    if true_cfg_scale not in (None, 1, 1.0):
+        raise HTTPException(
+            status_code=400,
+            detail="MiniMax-H3-Image does not use classifier-free guidance.",
+        )
+    if negative_prompt is not None and negative_prompt.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="MiniMax-H3-Image does not accept a negative prompt.",
+        )
+
+
 _SUPPORTED_RESPONSE_FORMATS = frozenset({"b64_json", "url"})
 
 
@@ -180,6 +219,12 @@ async def _build_image_response(request_id: str,
 async def generations(request: ImageGenerationsRequest):
     resp_format = _normalize_response_format(request.response_format)
     _validate_request_model(request.model)
+    _enforce_minimax_h3_image_contract(
+        num_inference_steps=request.num_inference_steps,
+        guidance_scale=request.guidance_scale,
+        negative_prompt=request.negative_prompt,
+        true_cfg_scale=request.true_cfg_scale,
+    )
 
     request_id = generate_request_id()
     engine = get_serving_engine()
@@ -234,6 +279,12 @@ async def edits(
 ):
     resp_format = _normalize_response_format(response_format)
     _validate_request_model(model)
+    _enforce_minimax_h3_image_contract(
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        negative_prompt=negative_prompt,
+        true_cfg_scale=true_cfg_scale,
+    )
 
     request_id = generate_request_id()
     engine = get_serving_engine()

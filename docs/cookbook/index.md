@@ -9,6 +9,7 @@ The interactive catalog groups models by family and generates YAML for supported
 - [PAN 2](pan.md)
 - [FLUX](flux.md)
 - [Qwen-Image-2.1](qwen-image21.md)
+- [MiniMax-H3-Image](minimax-h3-image.md)
 - [Stable Diffusion](stable-diffusion.md)
 - [Stable Audio](stable-audio.md)
 - [MMAudio](mmaudio.md)

@@ -43,6 +43,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.minimax_h3_image import MiniMaxH3ImagePipelineConfig
 from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
 from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
 from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
@@ -350,6 +351,32 @@ def _register_wan_configs(definitions: tuple[WanModelDefinition, ...]) -> None:
             model_family="wan",
             default_preset=definition.preset,
         )
+
+
+def _is_minimax_h3_image(path: str) -> bool:
+    """True for the image release, including its Diffusers class name.
+
+    ``minimax-h3`` is a substring of ``minimax-h3-image``, so the video
+    detector must consult this first. The optional prompt-expander repo
+    (``MiniMax-H3-Image-PE``) is not this pipeline.
+    """
+    lowered = path.lower().replace("_", "-")
+    compact = lowered.replace("-", "")
+    if "h3-image-pe" in lowered or "minimaxh3imagepe" in compact:
+        return False
+    return "h3-image" in lowered or "minimaxh3image" in compact
+
+
+def _is_minimax_h3_video(path: str) -> bool:
+    if _is_minimax_h3_image(path):
+        return False
+    return any(token in path.lower() for token in (
+        "minimax-h3",
+        "minimax_h3",
+        "fasth3",
+        "minimaxh3modularpipeline",
+        "minimaxh3ref2vamodularpipeline",
+    ))
 
 
 def _register_configs() -> None:
@@ -1203,6 +1230,19 @@ def _register_configs() -> None:
         pipeline_cls_name="OpenH3Regenerate2KPipeline",
     )
 
+    # MiniMax-H3-Image must register before the video detector: "minimax-h3"
+    # is a substring of "minimax-h3-image".
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MiniMaxH3ImagePipelineConfig,
+        workload_types=(WorkloadType.T2I, WorkloadType.I2I),
+        hf_model_paths=["MiniMaxAI/MiniMax-H3-Image"],
+        model_detectors=[_is_minimax_h3_image],
+        model_family="minimax_h3_image",
+        default_preset="minimax_h3_image_t2i",
+        pipeline_cls_name="MiniMaxH3ImageModularPipeline",
+    )
+
     # MiniMax H3
     register_configs(
         sampling_param_cls=None,
@@ -1213,15 +1253,7 @@ def _register_configs() -> None:
             "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
             "FastVideo/FastVideo-FastH3-8-Step-V2",
         ],
-        model_detectors=[
-            lambda path: any(token in path.lower() for token in (
-                "minimax-h3",
-                "minimax_h3",
-                "fasth3",
-                "minimaxh3modularpipeline",
-                "minimaxh3ref2vamodularpipeline",
-            )),
-        ],
+        model_detectors=[_is_minimax_h3_video],
         model_family="minimax_h3",
         default_preset="minimax_h3_t2va",
         # FastH3 full checkpoints need not carry a Diffusers model_index.json;
@@ -1416,6 +1448,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
     from fastvideo.pipelines.basic.minimax_h3.presets import (
         ALL_PRESETS as MINIMAX_H3_PRESETS, )
+    from fastvideo.pipelines.basic.minimax_h3_image.presets import (
+        ALL_PRESETS as MINIMAX_H3_IMAGE_PRESETS, )
     from fastvideo.pipelines.basic.pika_h3_flex.presets import (
         ALL_PRESETS as PIKA_H3_FLEX_PRESETS, )
     from fastvideo.pipelines.basic.open_h3_regenerate_2k.presets import (
@@ -1455,6 +1489,7 @@ def _register_presets() -> None:
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
+        MINIMAX_H3_IMAGE_PRESETS,
         PIKA_H3_FLEX_PRESETS,
         OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,

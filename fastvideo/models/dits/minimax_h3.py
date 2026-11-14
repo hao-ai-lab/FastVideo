@@ -20,7 +20,7 @@ from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetada
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
 from fastvideo.attention.utils.nvfp4_qk_precondition import parse_block_indices
-from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config, MiniMaxH3ImageArchConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
@@ -989,6 +989,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         "time_embedder",
         "proj_out",
         "audio_proj_out",
+        "pdd_proj_out",
         "rope",
     })
 
@@ -1049,6 +1050,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         self.patch_size = tuple(int(value) for value in arch.patch_size)
         video_patch_dim = arch.in_channels * math.prod(arch.patch_size)
 
+        self.audio_enabled = bool(getattr(arch, "audio_enabled", True))
         self.proj_in = ReplicatedLinear(
             video_patch_dim,
             arch.hidden_size,
@@ -1056,13 +1058,15 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             quant_config=config.quant_config,
             prefix=f"{config.prefix}.proj_in",
         )
+        # Image checkpoints have no audio stream. Leaving the modules in place
+        # would fail a strict load of transformer_diffusers/.
         self.audio_proj_in = ReplicatedLinear(
             arch.audio_in_channels,
             arch.hidden_size,
             bias=True,
             quant_config=config.quant_config,
             prefix=f"{config.prefix}.audio_proj_in",
-        )
+        ) if self.audio_enabled else None
         self.context_embedder = ReplicatedLinear(
             arch.text_dim,
             arch.hidden_size,
@@ -1165,9 +1169,27 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         # time grid. The sampler fuses one block of heads per forward
         # (``fuse_pdd_block``), so the fused output keeps the released width.
         self.pdd_steps: int | None = arch.pdd_steps
-        self.proj_out = self._output_projection(arch.hidden_size, video_patch_dim, config, "proj_out")
-        self.audio_proj_out = self._output_projection(arch.hidden_size, arch.audio_in_channels, config,
-                                                      "audio_proj_out")
+        self.num_pdd_heads = int(getattr(arch, "num_pdd_heads", 0))
+        if self.num_pdd_heads > 0:
+            # Split FP32 heads from transformer_diffusers/ ``pdd_proj_out.*``.
+            # The prefix is outside the NVFP4 FFN filter. This is not the
+            # widened ``pdd_steps`` export used by video PDD students.
+            self.proj_out = None
+            self.audio_proj_out = None
+            self.pdd_proj_out = nn.ModuleList([
+                ReplicatedLinear(
+                    arch.hidden_size,
+                    video_patch_dim,
+                    bias=True,
+                    quant_config=config.quant_config,
+                    prefix=f"{config.prefix}.pdd_proj_out.{index}",
+                ) for index in range(self.num_pdd_heads)
+            ])
+        else:
+            self.pdd_proj_out = None
+            self.proj_out = self._output_projection(arch.hidden_size, video_patch_dim, config, "proj_out")
+            self.audio_proj_out = (self._output_projection(arch.hidden_size, arch.audio_in_channels, config,
+                                                           "audio_proj_out") if self.audio_enabled else None)
         self.__post_init__()
 
     def _output_projection(self, hidden_size: int, output_size: int, config: MiniMaxH3Config,
@@ -1516,6 +1538,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_indices: torch.Tensor,
         text_attn_metadata: AttentionMetadata | None = None,
         token_reduction: MiniMaxH3TokenReduction | None = None,
+        pdd_step_index: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout.
 
@@ -1548,8 +1571,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 raise ValueError(f"Token reduction blocks {token_reduction.begin}:{token_reduction.end} must lie in "
                                  f"0:{len(self.transformer_blocks)}.")
 
+        if not self.audio_enabled and audio_indices.numel() != 0:
+            raise ValueError("This MiniMax-H3 transformer has audio disabled.")
+
         video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
-        audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
+        audio_embeds = None
+        if self.audio_enabled:
+            assert self.audio_proj_in is not None
+            audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
         text_embeds = self._refined_text(encoder_hidden_states, text_attn_metadata=text_attn_metadata)
         rotary_emb = self._rotary_for(position_ids, text_embeds.dtype)
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
@@ -1574,7 +1603,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         packed_hidden_states.index_copy_(1, text_indices, text_embeds)
         packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
-        packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))
+        if audio_embeds is not None:
+            packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))
 
         temb = self.time_proj(timestep)
         temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
@@ -1683,18 +1713,31 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             if forward_context is not None:
                 forward_context.attn_metadata = full_attn_metadata
 
+        if self.pdd_proj_out is not None:
+            if pdd_step_index is None or not 0 <= int(pdd_step_index) < self.num_pdd_heads:
+                raise ValueError(f"pdd_step_index must be in [0, {self.num_pdd_heads}), got {pdd_step_index}.")
+            output_proj = self.pdd_proj_out[int(pdd_step_index)]
+        else:
+            assert self.proj_out is not None
+            output_proj = self.proj_out
         packed_hidden_states = self.norm_out(
             packed_hidden_states,
             temb,
             local_timestep_indices,
-        ).to(self.proj_out.weight.dtype)
-        video_output, _ = self.proj_out(packed_hidden_states)
-        audio_output, _ = self.audio_proj_out(packed_hidden_states)
+        ).to(output_proj.weight.dtype)
+        video_output, _ = output_proj(packed_hidden_states)
+        if self.audio_enabled:
+            assert self.audio_proj_out is not None
+            audio_output, _ = self.audio_proj_out(packed_hidden_states.to(self.audio_proj_out.weight.dtype))
+        else:
+            audio_output = video_output.new_empty((video_output.shape[0], 0, 0))
         if sp_world_size > 1:
             video_output = sequence_model_parallel_all_gather_with_unpad(video_output, original_seq_len, dim=1)
-            audio_output = sequence_model_parallel_all_gather_with_unpad(audio_output, original_seq_len, dim=1)
+            if self.audio_enabled:
+                audio_output = sequence_model_parallel_all_gather_with_unpad(audio_output, original_seq_len, dim=1)
         video_output = video_output.index_select(1, video_indices)
-        audio_output = audio_output.index_select(1, audio_indices)
+        if self.audio_enabled:
+            audio_output = audio_output.index_select(1, audio_indices)
 
         if getattr(self, "_adaln_host_cache", False):
             self._maybe_dump_adaln_tables()
@@ -1705,4 +1748,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         return video_output, audio_output
 
 
-EntryClass = MiniMaxH3Transformer3DModel
+class MiniMaxH3ImageTransformer2DModel(MiniMaxH3Transformer3DModel):
+    """MiniMax-H3-Image DiT: the video stack with split PDD heads and no audio.
+
+    The class name matches ``transformer_diffusers/config.json``. Block names
+    are unchanged, so NVFP4, LoRA targets, and the H3 fusions still apply.
+    """
+
+    _supported_attention_backends = MiniMaxH3ImageArchConfig._supported_attention_backends
+
+
+EntryClass = [MiniMaxH3Transformer3DModel, MiniMaxH3ImageTransformer2DModel]
