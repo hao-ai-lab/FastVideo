@@ -45,10 +45,16 @@ def tile_to_bhsd(
     heads: int,
     head_dim: int,
 ) -> torch.Tensor:
-    """Scatter-tile ``x`` [B, S, H, D] into ``out`` [B, H, padded_S, D] in BHSD order."""
-    block = 1024
-    grid = (triton.cdiv(padded_sequence * head_dim, block), x.shape[0] * heads)
-    _tile_to_bhsd_kernel[grid](
+    """Scatter-tile ``x`` [B, S, H, D] into ``out`` [B, H, padded_S, D].
+
+    ``source_index`` maps each padded position to an input token; -1 marks
+    padding, which is written as zero. Input strides may be noncontiguous,
+    while ``out`` must be contiguous in BHSD order. Every output slot is
+    overwritten, and the returned tensor aliases ``out``.
+    """
+    elements_per_program = 1024
+    launch_grid = (triton.cdiv(padded_sequence * head_dim, elements_per_program), x.shape[0] * heads)
+    _tile_to_bhsd_kernel[launch_grid](
         x,
         source_index,
         out,
@@ -60,7 +66,7 @@ def tile_to_bhsd(
         x.stride(1),
         x.stride(2),
         x.stride(3),
-        block,
+        elements_per_program,
         num_warps=4,
     )
     return out

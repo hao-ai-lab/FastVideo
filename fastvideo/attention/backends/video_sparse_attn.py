@@ -158,6 +158,8 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     # can release the large tiled QKVG scratch tensor after each attention call.
     tile_buf: torch.Tensor | None = None
     cache_tile_buf: bool = True
+    # Maps padded tile positions to input tokens; -1 marks padding. The map
+    # shares this metadata's fixed partition and device across layer calls.
     fused_tile_source_index: torch.Tensor | None = None
     fused_layout_active: bool = False
 
@@ -213,15 +215,17 @@ def _get_tile_to_bhsd() -> Callable[..., Any] | None:
 
 
 def _can_fuse_vsa64_layout(x: torch.Tensor, metadata: VideoSparseAttentionMetadata) -> bool:
-    """Restrict the fused layout to the validated SM100 BF16 inference route."""
+    """Restrict the fused layout to validated SM100 and GB10 BF16 inference routes."""
     if envs.FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT.get():
         return False
     if _get_tile_to_bhsd() is None:
         return False
-    return (math.prod(VSA_TILE_SIZE) == 64 and metadata.cache_tile_buf and not torch.is_grad_enabled()
-            and not x.requires_grad and x.is_cuda and x.dtype == torch.bfloat16 and x.ndim == 4
-            and x.shape[1] == metadata.total_seq_length and x.shape[-1] == 128
-            and torch.cuda.get_device_capability(x.device) == (10, 0))
+    if math.prod(VSA_TILE_SIZE) != 64 or not metadata.cache_tile_buf:
+        return False
+    if torch.is_grad_enabled() or x.requires_grad:
+        return False
+    return (x.is_cuda and x.dtype == torch.bfloat16 and x.ndim == 4 and x.shape[1] == metadata.total_seq_length
+            and x.shape[-1] == 128 and torch.cuda.get_device_capability(x.device) in ((10, 0), (12, 1)))
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -295,7 +299,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         result before invoking another VSA layer with the same metadata.
         The default 64-token path materializes q/k/v copies in ``forward()``
         and consumes its transposed gate view synchronously in the coarse/sparse
-        combine before returning. The SM100 inference path instead writes BHSD
+        combine before returning. The SM100 and GB10 inference paths instead write BHSD
         directly to this buffer. Both paths consume the result before the next
         layer reuses it; future callers must preserve this contract.
         """
@@ -337,24 +341,28 @@ class VideoSparseAttentionImpl(AttentionImpl):
         tile_to_bhsd = _get_tile_to_bhsd()
         assert tile_to_bhsd is not None
 
-        padded_sequence = attn_metadata.variable_block_sizes.numel() * math.prod(VSA_TILE_SIZE)
+        batch_size, sequence_length, num_heads, head_dim = qkv.shape
+        padded_sequence_length = attn_metadata.variable_block_sizes.numel() * math.prod(VSA_TILE_SIZE)
         if attn_metadata.fused_tile_source_index is None:
-            source_index = torch.full((padded_sequence, ), -1, device=qkv.device, dtype=torch.int32)
+            source_index = torch.full((padded_sequence_length, ), -1, device=qkv.device, dtype=torch.int32)
             source_index[attn_metadata.non_pad_index] = attn_metadata.tile_partition_indices.to(torch.int32)
             attn_metadata.fused_tile_source_index = source_index
-        target_shape = (qkv.shape[0], qkv.shape[2], padded_sequence, qkv.shape[3])
+
+        target_shape = (batch_size, num_heads, padded_sequence_length, head_dim)
         buffer = attn_metadata.tile_buf
         if buffer is None or buffer.shape != target_shape or buffer.dtype != qkv.dtype or buffer.device != qkv.device:
             buffer = torch.empty(target_shape, device=qkv.device, dtype=qkv.dtype)
             attn_metadata.tile_buf = buffer
+        # The fused kernel overwrites every output slot, including zero padding,
+        # so both new and reused buffers need no separate initialization.
         tile_to_bhsd(
             qkv,
             attn_metadata.fused_tile_source_index,
             buffer,
-            qkv.shape[1],
-            padded_sequence,
-            qkv.shape[2],
-            qkv.shape[3],
+            sequence_length,
+            padded_sequence_length,
+            num_heads,
+            head_dim,
         )
         return buffer
 
@@ -390,7 +398,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        # The SM100 inference preprocessing path already emits BHSD. Other
+        # The SM100 and GB10 inference preprocessing paths already emit BHSD. Other
         # shapes, architectures, training, and the benchmark disable switch
         # retain the original BSHD scatter/transpose path.
         padded_sequence = attn_metadata.variable_block_sizes.numel() * block_elements
