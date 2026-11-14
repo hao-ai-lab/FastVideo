@@ -90,3 +90,53 @@ def test_int_and_tensor_offsets_are_equivalent(single_rank_sp):
     assert cache_int["local_end_index"] == SEQ_LEN
     assert int(cache_tensor["global_end_index"].item()) == SEQ_LEN
     assert int(cache_tensor["local_end_index"].item()) == SEQ_LEN
+
+
+@pytest.mark.parametrize("window,chunk,sink", [(3, 1, 0), (3, 1, 1), (6, 3, 0), (9, 3, 1)])
+@pytest.mark.parametrize("tensor_counters", [False, True])
+@pytest.mark.parametrize("explicit_chunk_start", [False, True])
+def test_cache_rollout_matches_independent_rolling_window(window, chunk, sink, tensor_counters, explicit_chunk_start):
+    """Check contents, old offset expressions and sink preservation over 32 chunks."""
+    capacity, tokens, sink_tokens = window * 2, chunk * 2, sink * 2
+    cache = {"k": torch.zeros(1, capacity, 1, 1), "v": torch.zeros(1, capacity, 1, 1),
+             "global_end_index": torch.tensor([0]) if tensor_counters else 0,
+             "local_end_index": torch.tensor([0]) if tensor_counters else 0}
+    expected = []
+    for block in range(32):
+        current_end = (block + 1) * tokens
+        for step in range(3):
+            values = list(range((block * 3 + step) * tokens + 1, (block * 3 + step + 1) * tokens + 1))
+            key = torch.tensor(values, dtype=torch.float32).reshape(1, tokens, 1, 1)
+            global_end = int(cache["global_end_index"])
+            local_end = int(cache["local_end_index"])
+            evicts = current_end > global_end and tokens + local_end > capacity
+            old_end = local_end + current_end - global_end - (tokens + local_end - capacity if evicts else 0)
+            if step == 0:
+                expected += values
+                if len(expected) > capacity:
+                    expected = expected[:sink_tokens] + expected[-(capacity - sink_tokens):]
+            else:
+                expected[-tokens:] = values
+            flag = step == 0 if explicit_chunk_start else None
+            if evicts:
+                start, end = CausalWanSelfAttention._evict_and_write(
+                    cache, key, -key, current_end=current_end, global_end_index=global_end,
+                    local_end_index_prev=local_end, sink_tokens=sink_tokens)
+            else:
+                start, end = CausalWanSelfAttention._write_in_place(
+                    cache, key, -key, current_end=current_end, global_end_index=global_end,
+                    local_end_index_prev=local_end, is_chunk_start=flag)
+            assert (start, end) == (old_end - tokens, old_end)
+            CausalWanSelfAttention._update_cache_counters(cache, current_end, end)
+            torch.testing.assert_close(cache["k"][0, :end, 0, 0], torch.tensor(expected, dtype=torch.float32),
+                                       atol=0, rtol=0)
+            assert torch.equal(cache["v"], -cache["k"])
+            assert int(cache["global_end_index"]) == current_end
+            assert int(cache["local_end_index"]) == min((block + 1) * tokens, capacity)
+
+
+def test_eviction_preserves_pre_refactor_offset_for_noncontiguous_progress():
+    cache = {"k": torch.arange(12.).reshape(1, 12, 1, 1), "v": torch.arange(12.).reshape(1, 12, 1, 1)}
+    key = torch.ones(1, 4, 1, 1)
+    assert CausalWanSelfAttention._evict_and_write(
+        cache, key, key, current_end=14, global_end_index=12, local_end_index_prev=12, sink_tokens=2) == (6, 10)

@@ -1,0 +1,25 @@
+generator:
+  model_path: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
+  engine:
+    num_gpus: 1
+    enable_causal_cuda_graph: true
+    offload:
+      dit: false
+      dit_layerwise: false
+  pipeline:
+    experimental:
+      pipeline_config:
+        causal_local_attn_size: 9
+        causal_rope_cache_policy: relativistic
+request:
+  prompt: A fox walks through a sunlit forest.
+  sampling:
+    num_frames: 81
+    height: 480
+    width: 832
+    num_inference_steps: 4
+    seed: 1024
+  output:
+    save_video: true
+    output_path: outputs/
+    output_video_name: causal_cuda_graph
