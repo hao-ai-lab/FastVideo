@@ -627,6 +627,76 @@ def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
     return name == "decoder" and isinstance(submodule, MiniMaxH3VideoViTDecoder3d)
 
 
+def _split_spatial_tiles(
+    length: int,
+    tile_size: int,
+    min_overlap: int,
+    spatial_compression_ratio: int,
+) -> tuple[list[int], list[int], list[int]]:
+    """Split one spatial axis into overlapping tiles aligned to the VAE ratio.
+
+    Shared by the video and image VAEs. Both operate on the last two tensor
+    dimensions, so the axis math does not depend on the decoder being 2D or 3D.
+    """
+    if tile_size >= length:
+        return [0], [length], []
+    num_tiles = math.ceil(length / tile_size)
+    while tile_size * num_tiles - min_overlap * (num_tiles - 1) - length < 0:
+        num_tiles += 1
+    overlaps = [min_overlap] * (num_tiles - 1)
+    remaining = tile_size * num_tiles - sum(overlaps) - length
+    for index in range(remaining // spatial_compression_ratio):
+        overlaps[index % (num_tiles - 1)] += spatial_compression_ratio
+    tile_start_indices = [0]
+    for index in range(num_tiles - 1):
+        tile_start_indices.append(tile_start_indices[-1] + tile_size - overlaps[index])
+    return tile_start_indices, [tile_size] * num_tiles, overlaps
+
+
+def _blend_spatial_tiles(a: torch.Tensor, b: torch.Tensor, blend_extent: int, dim: int) -> torch.Tensor:
+    """Linearly blend ``blend_extent`` positions of ``b`` over the end of ``a`` along ``dim``."""
+    blend_extent = min(a.shape[dim], b.shape[dim], blend_extent)
+    positions = torch.arange(blend_extent, device=b.device, dtype=b.dtype)
+    shape = [1] * a.ndim
+    shape[dim] = blend_extent
+    weight_a = (1 - positions / blend_extent).view(shape)
+    weight_b = (positions / blend_extent).view(shape)
+    slice_a = [slice(None)] * a.ndim
+    slice_a[dim] = slice(-blend_extent, None)
+    slice_b = [slice(None)] * b.ndim
+    slice_b[dim] = slice(0, blend_extent)
+    blended = a[tuple(slice_a)] * weight_a + b[tuple(slice_b)] * weight_b
+    if blend_extent == b.shape[dim]:
+        return blended
+    slice_rest = [slice(None)] * b.ndim
+    slice_rest[dim] = slice(blend_extent, None)
+    return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
+
+
+def _stitch_spatial_tiles(
+    tiles: list[list[torch.Tensor]],
+    height_overlaps: list[int],
+    width_overlaps: list[int],
+) -> torch.Tensor:
+    """Blend decoded tile overlaps and concatenate the spatial canvas."""
+    result_rows = []
+    for row_index, row in enumerate(tiles):
+        result_row = []
+        for column_index, tile in enumerate(row):
+            if row_index > 0:
+                tile = _blend_spatial_tiles(tiles[row_index - 1][column_index], tile, height_overlaps[row_index - 1],
+                                             -2)
+            if column_index > 0:
+                tile = _blend_spatial_tiles(row[column_index - 1], tile, width_overlaps[column_index - 1], -1)
+            if row_index < len(tiles) - 1:
+                tile = tile[..., :-height_overlaps[row_index], :]
+            if column_index < len(row) - 1:
+                tile = tile[..., :, :-width_overlaps[column_index]]
+            result_row.append(tile)
+        result_rows.append(torch.cat(result_row, dim=-1))
+    return torch.cat(result_rows, dim=-2)
+
+
 class AutoencoderKLMiniMaxH3(nn.Module):
     """MiniMax-H3 causal encoder and ViT decoder with exact release geometry."""
 
@@ -772,38 +842,11 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         self.use_tiling = False
 
     def _split_tiles(self, length: int, tile_size: int, min_overlap: int) -> tuple[list[int], list[int], list[int]]:
-        if tile_size >= length:
-            return [0], [length], []
-        num_tiles = math.ceil(length / tile_size)
-        while tile_size * num_tiles - min_overlap * (num_tiles - 1) - length < 0:
-            num_tiles += 1
-        overlaps = [min_overlap] * (num_tiles - 1)
-        remaining = tile_size * num_tiles - sum(overlaps) - length
-        for index in range(remaining // self.spatial_compression_ratio):
-            overlaps[index % (num_tiles - 1)] += self.spatial_compression_ratio
-        tile_start_indices = [0]
-        for index in range(num_tiles - 1):
-            tile_start_indices.append(tile_start_indices[-1] + tile_size - overlaps[index])
-        return tile_start_indices, [tile_size] * num_tiles, overlaps
+        return _split_spatial_tiles(length, tile_size, min_overlap, self.spatial_compression_ratio)
 
     @staticmethod
     def _blend(a: torch.Tensor, b: torch.Tensor, blend_extent: int, dim: int) -> torch.Tensor:
-        blend_extent = min(a.shape[dim], b.shape[dim], blend_extent)
-        positions = torch.arange(blend_extent, device=b.device, dtype=b.dtype)
-        shape = [1] * a.ndim
-        shape[dim] = blend_extent
-        weight_a = (1 - positions / blend_extent).view(shape)
-        weight_b = (positions / blend_extent).view(shape)
-        slice_a = [slice(None)] * a.ndim
-        slice_a[dim] = slice(-blend_extent, None)
-        slice_b = [slice(None)] * b.ndim
-        slice_b[dim] = slice(0, blend_extent)
-        blended = a[tuple(slice_a)] * weight_a + b[tuple(slice_b)] * weight_b
-        if blend_extent == b.shape[dim]:
-            return blended
-        slice_rest = [slice(None)] * b.ndim
-        slice_rest[dim] = slice(blend_extent, None)
-        return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
+        return _blend_spatial_tiles(a, b, blend_extent, dim)
 
     def prepare_for_compile(self) -> None:
         """Compile the fixed-shape tile helpers for the opt-in VAE compile path.
@@ -839,21 +882,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         width_overlaps: list[int],
     ) -> torch.Tensor:
         """Blend decoded tile overlaps and concatenate the spatial canvas."""
-        result_rows = []
-        for row_index, row in enumerate(tiles):
-            result_row = []
-            for column_index, tile in enumerate(row):
-                if row_index > 0:
-                    tile = self._blend(tiles[row_index - 1][column_index], tile, height_overlaps[row_index - 1], -2)
-                if column_index > 0:
-                    tile = self._blend(row[column_index - 1], tile, width_overlaps[column_index - 1], -1)
-                if row_index < len(tiles) - 1:
-                    tile = tile[..., :-height_overlaps[row_index], :]
-                if column_index < len(row) - 1:
-                    tile = tile[..., :, :-width_overlaps[column_index]]
-                result_row.append(tile)
-            result_rows.append(torch.cat(result_row, dim=-1))
-        return torch.cat(result_rows, dim=-2)
+        return _stitch_spatial_tiles(tiles, height_overlaps, width_overlaps)
 
     def _project_decoder_tile(self, tile: torch.Tensor) -> torch.Tensor:
         """Project one spatial latent tile into the decoder input channels."""

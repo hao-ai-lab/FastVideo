@@ -25,6 +25,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization.nvfp4_config import is_minimax_h3_nvfp4_linear_prefix
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3ImageTransformer2DModel, MiniMaxH3Transformer3DModel
 from fastvideo.models.vaes.minimax_h3_image import AutoencoderKLMiniMaxH3Image
+from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3, _split_spatial_tiles, _stitch_spatial_tiles
 from fastvideo.pipelines.basic.minimax_h3_image.minimax_h3_image_pipeline import MiniMaxH3ImageModularPipeline
 from fastvideo.pipelines.basic.minimax_h3_image.packing import (
     MINIMAX_H3_IMAGE_SAMPLE_SIGMAS,
@@ -271,3 +272,15 @@ def test_reloading_the_text_encoder_drops_the_denoise_modules() -> None:
     assert stage.transformer is None
     assert stage.vae is None
     assert pipeline._sampling_stage_ready is False
+
+
+def test_image_tiling_uses_the_video_spatial_helpers() -> None:
+    assert not hasattr(AutoencoderKLMiniMaxH3Image, "_split_tiles")
+    video = AutoencoderKLMiniMaxH3.__new__(AutoencoderKLMiniMaxH3)
+    video.spatial_compression_ratio = 16
+    assert video._split_tiles(400, 256, 64) == _split_spatial_tiles(400, 256, 64, 16)
+    left = torch.arange(8, dtype=torch.float32).view(1, 1, 2, 4)
+    right = torch.arange(8, 16, dtype=torch.float32).view(1, 1, 2, 4)
+    shared = _stitch_spatial_tiles([[left, right]], [], [2])
+    assert shared.shape[-1] == 6
+    assert torch.equal(video._stitch_tiles([[left, right]], [], [2]), shared)

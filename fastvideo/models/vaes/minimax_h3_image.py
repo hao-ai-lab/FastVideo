@@ -17,6 +17,8 @@ from fastvideo.models.vaes.minimax_h3_video import (
     MiniMaxH3VideoEncoder3d,
     MiniMaxH3VideoRotaryPosEmbed,
     MiniMaxH3VideoTransformerBlock,
+    _split_spatial_tiles,
+    _stitch_spatial_tiles,
 )
 
 _PIXEL_MEAN = (0.485, 0.456, 0.406)
@@ -218,75 +220,21 @@ class AutoencoderKLMiniMaxH3Image(nn.Module):
     def disable_tiling(self) -> None:
         self.use_tiling = False
 
-    def _split_tiles(self, length: int, tile_size: int, min_overlap: int) -> tuple[list[int], list[int], list[int]]:
-        if tile_size >= length:
-            return [0], [length], []
-        num_tiles = math.ceil(length / tile_size)
-        while tile_size * num_tiles - min_overlap * (num_tiles - 1) - length < 0:
-            num_tiles += 1
-        overlaps = [min_overlap] * (num_tiles - 1)
-        remaining = tile_size * num_tiles - sum(overlaps) - length
-        for index in range(remaining // self.spatial_compression_ratio):
-            overlaps[index % (num_tiles - 1)] += self.spatial_compression_ratio
-        starts = [0]
-        for index in range(num_tiles - 1):
-            starts.append(starts[-1] + tile_size - overlaps[index])
-        return starts, [tile_size] * num_tiles, overlaps
-
-    @staticmethod
-    def _blend(first: torch.Tensor, second: torch.Tensor, blend_extent: int, dim: int) -> torch.Tensor:
-        blend_extent = min(first.shape[dim], second.shape[dim], blend_extent)
-        positions = torch.arange(blend_extent, device=second.device, dtype=second.dtype)
-        shape = [1] * first.ndim
-        shape[dim] = blend_extent
-        weight_first = (1 - positions / blend_extent).view(shape)
-        weight_second = (positions / blend_extent).view(shape)
-        slice_first = [slice(None)] * first.ndim
-        slice_first[dim] = slice(-blend_extent, None)
-        slice_second = [slice(None)] * second.ndim
-        slice_second[dim] = slice(0, blend_extent)
-        blended = first[tuple(slice_first)] * weight_first + second[tuple(slice_second)] * weight_second
-        if blend_extent == second.shape[dim]:
-            return blended
-        rest = [slice(None)] * second.ndim
-        rest[dim] = slice(blend_extent, None)
-        return torch.cat([blended, second[tuple(rest)]], dim=dim)
-
-    def _stitch_tiles(
-        self,
-        tiles: list[list[torch.Tensor]],
-        height_overlaps: list[int],
-        width_overlaps: list[int],
-    ) -> torch.Tensor:
-        result_rows = []
-        for row_index, row in enumerate(tiles):
-            result_row = []
-            for col_index, tile in enumerate(row):
-                if row_index > 0:
-                    tile = self._blend(tiles[row_index - 1][col_index], tile, height_overlaps[row_index - 1], dim=-2)
-                if col_index > 0:
-                    tile = self._blend(row[col_index - 1], tile, width_overlaps[col_index - 1], dim=-1)
-                if row_index < len(tiles) - 1:
-                    tile = tile[..., :-height_overlaps[row_index], :]
-                if col_index < len(row) - 1:
-                    tile = tile[..., :, :-width_overlaps[col_index]]
-                result_row.append(tile)
-            result_rows.append(torch.cat(result_row, dim=-1))
-        return torch.cat(result_rows, dim=-2)
-
     def _encode(self, pixels: torch.Tensor) -> torch.Tensor:
         if not self.use_tiling:
             return self.quant_conv(self.encoder(pixels[:, :, None]))[:, :, -1]
         height, width = pixels.shape[-2], pixels.shape[-1]
-        y_indices, y_lengths, y_overlaps = self._split_tiles(
+        y_indices, y_lengths, y_overlaps = _split_spatial_tiles(
             height,
             self.tile_sample_min_height,
             self.tile_sample_min_overlap_height,
+            self.spatial_compression_ratio,
         )
-        x_indices, x_lengths, x_overlaps = self._split_tiles(
+        x_indices, x_lengths, x_overlaps = _split_spatial_tiles(
             width,
             self.tile_sample_min_width,
             self.tile_sample_min_overlap_width,
+            self.spatial_compression_ratio,
         )
         rows = []
         for y_pos, y_len in zip(y_indices, y_lengths, strict=True):
@@ -296,7 +244,7 @@ class AutoencoderKLMiniMaxH3Image(nn.Module):
                 row.append(self.quant_conv(self.encoder(tile[:, :, None]))[:, :, -1])
             rows.append(row)
         ratio = self.spatial_compression_ratio
-        return self._stitch_tiles(
+        return _stitch_spatial_tiles(
             rows,
             [overlap // ratio for overlap in y_overlaps],
             [overlap // ratio for overlap in x_overlaps],
@@ -308,15 +256,17 @@ class AutoencoderKLMiniMaxH3Image(nn.Module):
         ratio = self.spatial_compression_ratio
         height = latents.shape[-2] * ratio
         width = latents.shape[-1] * ratio
-        y_indices, y_lengths, y_overlaps = self._split_tiles(
+        y_indices, y_lengths, y_overlaps = _split_spatial_tiles(
             height,
             self.tile_sample_min_height,
             self.tile_sample_min_overlap_height,
+            self.spatial_compression_ratio,
         )
-        x_indices, x_lengths, x_overlaps = self._split_tiles(
+        x_indices, x_lengths, x_overlaps = _split_spatial_tiles(
             width,
             self.tile_sample_min_width,
             self.tile_sample_min_overlap_width,
+            self.spatial_compression_ratio,
         )
         rows = []
         for y_pos, y_len in zip(y_indices, y_lengths, strict=True):
@@ -326,7 +276,7 @@ class AutoencoderKLMiniMaxH3Image(nn.Module):
                                x_pos // ratio:x_pos // ratio + x_len // ratio]
                 row.append(self.decoder(self.post_quant_conv(tile)))
             rows.append(row)
-        return self._stitch_tiles(rows, y_overlaps, x_overlaps)
+        return _stitch_spatial_tiles(rows, y_overlaps, x_overlaps)
 
     def encode(self, pixels: torch.Tensor, return_dict: bool = True) -> AutoencoderKLOutput | tuple:
         pixels = pixels.to(dtype=torch.float32)

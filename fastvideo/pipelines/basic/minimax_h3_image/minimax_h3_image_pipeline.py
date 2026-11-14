@@ -247,6 +247,8 @@ class MiniMaxH3ImageModularPipeline(LoRAPipeline, ComposedPipelineBase):
         return self._stage_name_mapping["sampling_stage"](batch, fastvideo_args)
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if int(batch.num_videos_per_prompt or 1) != 1:
+            raise ValueError("MiniMax-H3-Image generates one image per request.")
         if self._defer_denoise_modules(fastvideo_args):
             if not self.post_init_called:
                 self.post_init()
