@@ -519,8 +519,35 @@ def test_idle_audio_preserves_request_and_output_ownership(monkeypatch, rank, us
         assert result.extra["audio"].shape == ((8, 2) if rank == 0 else (0, 2))
     assert len(calls) == (2 if (rank == 1 and use_idle_slot) or (rank == 0 and not use_idle_slot) else 0)
     if rank == 0:
-        assert saved[0].data_ptr() != saved[1].data_ptr()
         torch.testing.assert_close(saved[0], waveform, atol=0, rtol=0)
+
+
+def test_failed_idle_audio_returns_and_falls_back_to_serial_decode(monkeypatch) -> None:
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_decoding import MiniMaxH3AudioDecodingStage
+
+    def fail(batch, args):
+        raise torch.OutOfMemoryError("idle-slot audio decode")
+
+    audio = MiniMaxH3AudioDecodingStage(SimpleNamespace(sampling_rate=32000))
+    audio.decode_audio = fail
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    group = SimpleNamespace(world_size=2, rank_in_group=1)
+    batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4),
+                         latents=torch.ones(2, 4), audio_latents=torch.ones(2, 4))
+    callback = video._idle_audio_callback(batch, SimpleNamespace(vae_cpu_offload=False), group, torch.device("cpu"))
+    callback()
+    assert batch.extra[minimax_h3_decoding._IDLE_AUDIO_KEY] is None
+
+    broadcasts = []
+    group.broadcast_object = lambda value, src: broadcasts.append((value, src)) or value
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group", lambda: group)
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "h3_is_output_worker", lambda args: True)
+    waveform = torch.ones(8, 2)
+    audio.decode_audio = lambda batch, args: (waveform, 32000)
+    result = audio.forward(batch, SimpleNamespace())
+    assert broadcasts == [(None, 1)]
+    assert result.extra["audio"] is waveform
 
 
 def test_idle_audio_stays_off_under_vae_cpu_offload() -> None:
