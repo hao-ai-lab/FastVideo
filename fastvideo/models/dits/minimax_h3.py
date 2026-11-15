@@ -169,15 +169,22 @@ def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, val
     the rows keep their single-GPU order and the sink rows stay first.
     """
     if not model_parallel_is_initialized() or get_sp_world_size() == 1:
-        return _sol_attention(query, key, value, step)
+        with STAGES.span("sp_sol"):
+            return _sol_attention(query, key, value, step)
     batch = query.shape[0]
-    qkv = sequence_model_parallel_all_to_all_4D(torch.cat([query, key, value], dim=0), scatter_dim=2, gather_dim=1)
+    with STAGES.span("sp_qkv_cat"):
+        qkv_local = torch.cat([query, key, value], dim=0)
+    with STAGES.span("sp_a2a_qkv"):
+        qkv = sequence_model_parallel_all_to_all_4D(qkv_local, scatter_dim=2, gather_dim=1)
     seq_len = original_seq_len or qkv.shape[1]
     pad = qkv.shape[1] - seq_len
     qkv = qkv[:, :seq_len]
-    output = _sol_attention(qkv[:batch], qkv[batch:2 * batch], qkv[2 * batch:], step)
-    output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
-    return sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
+    with STAGES.span("sp_sol"):
+        output = _sol_attention(qkv[:batch], qkv[batch:2 * batch], qkv[2 * batch:], step)
+    with STAGES.span("sp_pad"):
+        output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
+    with STAGES.span("sp_a2a_out"):
+        return sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
 
 class MiniMaxH3FeedForward(nn.Module):
@@ -1619,8 +1626,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 raise ValueError(f"Token reduction blocks {token_reduction.begin}:{token_reduction.end} must lie in "
                                  f"0:{len(self.transformer_blocks)}.")
 
-        video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
-        audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
+        with STAGES.span("head_proj"):
+            video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
+            audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
         text_embeds = self._refined_text(encoder_hidden_states, text_attn_metadata=text_attn_metadata)
         rotary_emb = self._rotary_for(position_ids, text_embeds.dtype)
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
@@ -1643,15 +1651,16 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         else:
             packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
-        packed_hidden_states.index_copy_(1, text_indices, text_embeds)
-        packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
-        packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))
+        with STAGES.span("head_pack"):
+            packed_hidden_states.index_copy_(1, text_indices, text_embeds)
+            packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
+            packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))
 
-        temb = self.time_proj(timestep)
-        temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
-        if self.adaln_basis is not None:
-            temb, _ = self.adaln_basis(F.silu(temb).to(self.adaln_basis.weight.dtype))
-        adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
+            temb = self.time_proj(timestep)
+            temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
+            if self.adaln_basis is not None:
+                temb, _ = self.adaln_basis(F.silu(temb).to(self.adaln_basis.weight.dtype))
+            adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
         local_timestep_indices = timestep_indices
         original_seq_len = sequence_length
         reduced_rotary_emb = reduced_adaln_indices = None
@@ -1754,18 +1763,20 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             if forward_context is not None:
                 forward_context.attn_metadata = full_attn_metadata
 
-        packed_hidden_states = self.norm_out(
-            packed_hidden_states,
-            temb,
-            local_timestep_indices,
-        ).to(self.proj_out.weight.dtype)
-        video_output, _ = self.proj_out(packed_hidden_states)
-        audio_output, _ = self.audio_proj_out(packed_hidden_states)
-        if sp_world_size > 1:
-            video_output = sequence_model_parallel_all_gather_with_unpad(video_output, original_seq_len, dim=1)
-            audio_output = sequence_model_parallel_all_gather_with_unpad(audio_output, original_seq_len, dim=1)
-        video_output = video_output.index_select(1, video_indices)
-        audio_output = audio_output.index_select(1, audio_indices)
+        with STAGES.span("tail_norm_out"):
+            packed_hidden_states = self.norm_out(
+                packed_hidden_states,
+                temb,
+                local_timestep_indices,
+            ).to(self.proj_out.weight.dtype)
+            video_output, _ = self.proj_out(packed_hidden_states)
+            audio_output, _ = self.audio_proj_out(packed_hidden_states)
+        with STAGES.span("tail_gather"):
+            if sp_world_size > 1:
+                video_output = sequence_model_parallel_all_gather_with_unpad(video_output, original_seq_len, dim=1)
+                audio_output = sequence_model_parallel_all_gather_with_unpad(audio_output, original_seq_len, dim=1)
+            video_output = video_output.index_select(1, video_indices)
+            audio_output = audio_output.index_select(1, audio_indices)
 
         if getattr(self, "_adaln_host_cache", False):
             self._maybe_dump_adaln_tables()
