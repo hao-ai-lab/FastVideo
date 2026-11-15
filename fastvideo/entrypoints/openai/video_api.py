@@ -417,7 +417,7 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
     if request.return_draft_bundle:
         raise HTTPException(status_code=400,
                             detail="return_draft_bundle is not supported on /v1/videos/sync; submit POST /v1/videos "
-                                   "and download GET /v1/videos/{id}/draft_bundle.")
+                            "and download GET /v1/videos/{id}/draft_bundle.")
     request_id = f"video_sync-{generate_request_id()}"
     generation_request, materialized_media, lora = await _adapt_request(request_id, request)
     started = time.perf_counter()
