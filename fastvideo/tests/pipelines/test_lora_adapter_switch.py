@@ -113,7 +113,7 @@ def test_clear_restores_base_weights_after_a_change_that_failed_part_way(setup) 
     pipeline.lora_adapters["b"] = {**_adapter(["first"], 2), "second.lora_A": torch.randn(RANK, DIM + 1),
                                    "second.lora_B": torch.randn(DIM, RANK)}
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError, match="factor dimensions"):
         pipeline.set_lora_adapter("b", strength=1.0)
     pipeline.clear_lora_adapter()
 
@@ -158,7 +158,7 @@ def test_clear_after_a_partial_failure_in_a_block_mixing_side_branch_and_merged_
     pipe._convert_one_transformer = convert_one  # type: ignore[method-assign]
     pipe.set_lora_adapter("a", strength=1.0)
     assert transformer.packed.side_branch and transformer.dense.merged
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError, match="factor dimensions"):
         pipe.set_lora_adapter("b", strength=1.0)
 
     pipe.clear_lora_adapter()

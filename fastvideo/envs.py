@@ -662,6 +662,12 @@ FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
     category="attention",
     doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
     "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4 = EnvBool(
+    False,
+    category="performance",
+    doc="Run MiniMax-H3 dense prefix attention on the in-tree sm_12x dense NVFP4 SageAttention3 "
+    "kernel (attn_qat_infer) instead of bf16 SDPA. Approximate: it quantizes prefix Q/K/V to NVFP4, "
+    "measured 20.5-23.7 dB frames on one-Spark Omni at 1.38x.")
 FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
     0,
     category="performance",
@@ -677,6 +683,12 @@ FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
     "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
     "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
+FASTVIDEO_WAN22_VAE_DECODE_DIR = EnvPath("",
+                                         category="performance",
+                                         doc="Directory of the Wan2.2 VAE decoder kernels "
+                                         "(fastvideo-kernel/wan22_vae_decode) that AutoencoderKLWan loads, and builds "
+                                         "on first use, when its config sets decode_kernel. Empty takes the copy in "
+                                         "this checkout.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -993,6 +1005,10 @@ FASTVIDEO_TEST_SD35_MODEL_DIR = EnvStr("stabilityai/stable-diffusion-3.5-medium"
                                        category="test",
                                        doc="Model for the Stable Diffusion 3.5 SSIM test.",
                                        deprecated_names=("SD35_MODEL_DIR", ))
+FASTVIDEO_TEST_PAN2_MODEL_DIR = EnvPath(None,
+                                        category="test",
+                                        doc="PAN2 checkpoint root (with vae/) for the Wan2.2 VAE decode-kernel GPU "
+                                        "tests; unset skips them.")
 FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",

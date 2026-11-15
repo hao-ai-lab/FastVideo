@@ -10,6 +10,7 @@ import {
   stopJob,
 } from '@/lib/api';
 import type { Job } from '@/lib/types';
+import { downloadBlob } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 import { makeJob as makeBaseJob } from '@/test/factories';
 
@@ -115,16 +116,26 @@ describe('JobCard', () => {
     expect(deleteJob).not.toHaveBeenCalled();
   });
 
-  it('downloads the video for a completed inference job', async () => {
+  it.each([
+    ['/server/out/portrait.png', 'portrait.png'],
+    ['/server/out/portrait.jpg', 'portrait.jpg'],
+    ['/server/out/portrait.jpeg', 'portrait.jpeg'],
+    ['/server/out/portrait.WEBP', 'portrait.WEBP'],
+    ['/server/out/clip.mp4', 'clip.mp4'],
+    ['C:\\server\\out\\portrait.JPEG', 'portrait.JPEG'],
+  ])('downloads %s with its actual filename', async (outputPath, filename) => {
+    const blob = new Blob(['generated output']);
+    vi.mocked(downloadJobVideo).mockResolvedValue(blob);
     render(
       <JobCard
-        job={makeJob({ status: 'completed', output_path: '/out/video.mp4' })}
+        job={makeJob({ status: 'completed', output_path: outputPath })}
       />,
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Download Video' }),
+      screen.getByRole('button', { name: 'Download' }),
     );
     await waitFor(() => expect(downloadJobVideo).toHaveBeenCalledWith('job-1'));
+    expect(downloadBlob).toHaveBeenCalledWith(blob, filename);
   });
 
   it('selects the job when the card body is clicked', async () => {

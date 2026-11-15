@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -44,6 +45,7 @@ from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
 from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
+from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
     MMAudioLarge44kV2AConfig,
@@ -265,7 +267,8 @@ def _get_config_info(
     elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
     else:
-        return None
+        # Offline resolution still matches the path-name detectors; only the model index is unavailable.
+        config = {}
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")
@@ -1227,6 +1230,22 @@ def _register_configs() -> None:
         pipeline_cls_name="MiniMaxH3ModularPipeline",
     )
 
+    # PAN2: one pipeline runs text-to-video, and image-to-video when the request carries a first frame.
+    def _is_pan2(name: str) -> bool:
+        name = name.lower()
+        return "pan2modularpipeline" in name or re.search(r"(^|[/_-])pan-?2([/_.-]|$)", name) is not None
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=PAN2PipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["IFM/PAN2"],
+        model_detectors=[_is_pan2],
+        model_family="pan2",
+        default_preset="pan2_t2v",
+        pipeline_cls_name="PAN2ModularPipeline",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -1404,6 +1423,8 @@ def _register_presets() -> None:
         ALL_PRESETS as OPEN_H3_REGENERATE_2K_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
+    from fastvideo.pipelines.basic.pan2.presets import (
+        ALL_PRESETS as PAN2_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1438,6 +1459,7 @@ def _register_presets() -> None:
         PIKA_H3_FLEX_PRESETS,
         OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,
+        PAN2_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         WAN_PRESETS,
@@ -1467,14 +1489,17 @@ def get_default_preset(model_path: str) -> str | None:
     return config_info.default_preset
 
 
-def get_preset_selection(model_path: str) -> tuple[str | None, str | None]:
+def get_preset_selection(model_path: str, *, allow_remote: bool = True) -> tuple[str | None, str | None]:
     """Return ``(default_preset, model_family)`` for a model path.
 
     Single-lookup variant of :func:`get_default_preset` +
     :func:`get_model_family`; callers that need both should prefer this
-    to avoid walking the registry twice.
+    to avoid walking the registry twice. With ``allow_remote=False`` the
+    family comes only from the registry and local directories, so an
+    unresolved path returns ``(None, None)`` instead of downloading a Hub
+    manifest.
     """
-    config_info = _get_config_info(model_path, raise_on_missing=False)
+    config_info = _get_config_info(model_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         return None, None
     return config_info.default_preset, config_info.model_family

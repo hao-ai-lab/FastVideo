@@ -90,6 +90,7 @@ surfaces:
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
       h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; represented as ComponentConfig.h3_vae_nvfp4_decoder."
+      h3_vae_nvfp4_quantize_dense: "Quantize the loaded MiniMax-H3 decoder to NVFP4 in memory without changing its depth; carried through generator.pipeline.experimental."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
@@ -296,6 +297,33 @@ surfaces:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
           - fastvideo.configs.pipelines.hyworld.HYWorldConfig
           - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      text_system_prompt:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_encoder_skip_layers:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_max_sequence_length:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      i2v_skip_first_latent_cfg:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel_parallel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      dit_fused_kernels:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      enable_guardrails:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      offload_guardrail_models:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
