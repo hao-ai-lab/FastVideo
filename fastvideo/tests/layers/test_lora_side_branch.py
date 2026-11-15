@@ -9,6 +9,8 @@ parameter and a populated ``_nvfp4_weight`` buffer.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -567,6 +569,9 @@ def test_unmerged_history_follows_module_moves_and_is_visible_to_offloader(env_o
     managed = dict(_offload_tensors(layer))
     for name in ("_unmerged_lora_A.0", "_unmerged_lora_B.0"):
         assert name in managed
+        assert name in dict(layer.named_buffers())
+        assert name not in dict(layer.named_parameters())
+        assert name not in layer.state_dict()
         assert not managed[name].requires_grad
     layer.to(dtype=torch.float64)
     with torch.no_grad():
@@ -574,8 +579,73 @@ def test_unmerged_history_follows_module_moves_and_is_visible_to_offloader(env_o
     assert all(parameter.dtype == torch.float64 for parameter in layer._unmerged_lora_A)
     layer.to("meta")
     assert all(parameter.device.type == "meta" for parameter in layer.parameters())
+    assert all(buffer.device.type == "meta" for buffer in layer.buffers())
     assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
                for tensor in (contribution.lora_A, contribution.lora_B))
+
+
+@pytest.mark.parametrize("adapters", [1, 2, 4])
+def test_checkpoint_tensor_keys_do_not_depend_on_unmerged_staging(adapters) -> None:
+    layer, _ = _accumulated_dense_layer(adapters=adapters)
+    expected = {"base_layer.weight", "lora_A", "lora_B"}
+    assert set(layer.state_dict()) == expected
+    layer.unmerge_lora_weights()
+    assert set(layer.state_dict()) == expected
+    layer.merge_lora_weights()
+    assert set(layer.state_dict()) == expected
+
+
+@pytest.mark.parametrize("unmerged", [False, True])
+def test_checkpoint_reload_with_same_base_and_adapter_configuration(unmerged) -> None:
+    source, x = _accumulated_dense_layer()
+    target, _ = _accumulated_dense_layer()
+    with torch.no_grad():
+        source.lora_B.fill_(6)
+        source.merge_lora_weights()
+        if unmerged:
+            source.unmerge_lora_weights()
+            target.unmerge_lora_weights()
+        # Loading restores tensor values; base model, adapter stack and mode were
+        # configured through the runtime APIs above, not inferred from a checkpoint.
+        checkpoint = io.BytesIO()
+        torch.save(source.state_dict(), checkpoint)
+        checkpoint.seek(0)
+        target.load_state_dict(torch.load(checkpoint, weights_only=True), strict=True)
+        expected = source(x)[0]
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+        target.unmerge_lora_weights()
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+        target.merge_lora_weights()
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+
+
+def test_unmerged_checkpoint_load_does_not_require_staged_target_buffers() -> None:
+    source, x = _accumulated_dense_layer()
+    source.unmerge_lora_weights()
+    target, _ = _accumulated_dense_layer()
+    target.load_state_dict(source.state_dict(), strict=True)
+    # The caller reconstructs merge mode through the runtime API.
+    target.unmerge_lora_weights()
+    with torch.no_grad():
+        torch.testing.assert_close(target(x)[0], source(x)[0], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("offload_buffers", [False, True])
+def test_runtime_buffer_lists_offload_without_changing_ordinary_buffer_policy(offload_buffers) -> None:
+    from fastvideo.hooks.layerwise_offload import OffloadableBufferList, _offload_tensors
+
+    module = torch.nn.Module()
+    module.nested = torch.nn.Module()
+    module.nested.history = OffloadableBufferList([torch.ones(1)])
+    module.register_buffer("ordinary", torch.ones(1), persistent=False)
+    module.register_buffer("ordinary_large", torch.ones(1 << 20, dtype=torch.uint8), persistent=False)
+    with envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(offload_buffers):
+        managed = dict(_offload_tensors(module))
+        expected = {"nested.history.0", "ordinary_large"} if offload_buffers else {"nested.history.0"}
+        assert set(managed) == expected
+        assert not module.state_dict()
+        module.nested.history.get_buffer("0").data = torch.empty(0)
+        assert set(dict(_offload_tensors(module, managed))) == expected
 
 
 def test_unmerged_forward_does_not_transfer_cpu_history_each_call(monkeypatch) -> None:
@@ -619,6 +689,7 @@ def test_accumulated_adapters_follow_real_layerwise_offload(monkeypatch) -> None
                 assert torch.equal(layer(x)[0], torch.full_like(x, 68))
             assert not state.gpu_named_parameters
             assert all(parameter.numel() == 0 for parameter in layer.parameters())
+            assert all(buffer.numel() == 0 for buffer in layer.buffers())
             assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
                        for tensor in (contribution.lora_A, contribution.lora_B))
         with hook.mutate_params_scope():

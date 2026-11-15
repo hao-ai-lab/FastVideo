@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from collections.abc import Iterable, Iterator
 from itertools import chain
 from typing import Any
 import torch
@@ -22,8 +23,28 @@ def _tensor_placeholder(tensor: torch.Tensor, device: torch.device) -> torch.Ten
 _BUFFER_OFFLOAD_MIN_BYTES = 1 << 20
 
 
+class OffloadableBufferList(nn.Module):
+    """Transient tensors that move with a module and always participate in offloading.
+
+    Unlike parameters, these derived runtime tensors are excluded from checkpoints.
+    """
+
+    def __init__(self, tensors: Iterable[torch.Tensor] = ()) -> None:
+        super().__init__()
+        for index, tensor in enumerate(tensors):
+            self.register_buffer(str(index), tensor, persistent=False)
+
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        for tensor in self._buffers.values():
+            if tensor is not None:
+                yield tensor
+
+    def __len__(self) -> int:
+        return len(self._buffers)
+
+
 def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = None):
-    """``(name, tensor)`` for parameters, placement markers and optionally large buffers.
+    """Parameters, runtime buffer lists, placement markers and optionally large buffers.
 
     ``names`` restricts the walk to the tensors chosen at init: an offloaded buffer is a
     zero-element placeholder afterwards and would fail the size test.
@@ -34,11 +55,17 @@ def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = 
                 yield name, tensor
         return
     yield from module.named_parameters()
+    runtime_buffers = {
+        f"{prefix}.{name}" if prefix else name
+        for prefix, child in module.named_modules() if isinstance(child, OffloadableBufferList)
+        for name, _ in child.named_buffers(recurse=False)
+    }
     offload_buffers = envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.get()
     for name, buf in module.named_buffers():
         # Empty placement markers follow weights, even when other buffers stay resident.
         is_weight_device = name.rsplit(".", 1)[-1] == "weight_device" and buf.numel() == 0
-        if is_weight_device or (offload_buffers and buf.numel() * buf.element_size() >= _BUFFER_OFFLOAD_MIN_BYTES):
+        if (name in runtime_buffers or is_weight_device
+                or (offload_buffers and buf.numel() * buf.element_size() >= _BUFFER_OFFLOAD_MIN_BYTES)):
             yield name, buf
 
 

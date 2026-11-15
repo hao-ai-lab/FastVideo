@@ -10,6 +10,7 @@ from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
 from torch.distributed.tensor import DTensor
 
 import fastvideo.envs as envs
+from fastvideo.hooks.layerwise_offload import OffloadableBufferList
 from fastvideo.distributed import (get_local_torch_device, get_tp_rank, split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
 from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase, MergedColumnParallelLinear, QKVParallelLinear,
@@ -99,15 +100,15 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True)
         # Immutable CPU replay history must not retain GPU storage in merged mode.
-        # Unmerged inference stages earlier adapters as frozen registered parameters
+        # Unmerged inference stages earlier adapters as non-persistent buffers
         # so module moves and layerwise offloading manage their storage.
         self._active_loras: list[LoRAContribution] = []
         # NVFP4 replay references the active stack when merged; it does not own a
         # separately accumulated history. None keeps the existing eligibility policy.
         self._merged_loras: list[LoRAContribution] | None = (self._active_loras
                                                              if self._should_save_merged_loras() else None)
-        self._unmerged_lora_A = nn.ParameterList()
-        self._unmerged_lora_B = nn.ParameterList()
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -405,19 +406,15 @@ class BaseLayerWithLoRA(nn.Module):
 
         self._reset_to_base_weight(preserve_adapters=True)
         device = self.base_layer.weight.device
-        self._unmerged_lora_A = nn.ParameterList([
-            nn.Parameter(contribution.lora_A.to(device=device, copy=True), requires_grad=False)
-            for contribution in self._active_loras[:-1]
-        ])
-        self._unmerged_lora_B = nn.ParameterList([
-            nn.Parameter(contribution.lora_B.to(device=device, copy=True), requires_grad=False)
-            for contribution in self._active_loras[:-1]
-        ])
+        self._unmerged_lora_A = OffloadableBufferList(
+            [contribution.lora_A.to(device=device, copy=True) for contribution in self._active_loras[:-1]])
+        self._unmerged_lora_B = OffloadableBufferList(
+            [contribution.lora_B.to(device=device, copy=True) for contribution in self._active_loras[:-1]])
 
     def _clear_lora_history(self) -> None:
         self._active_loras = []
-        self._unmerged_lora_A = nn.ParameterList()
-        self._unmerged_lora_B = nn.ParameterList()
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
 
     @torch.no_grad()
     def _reset_to_base_weight(self, *, preserve_adapters: bool = False) -> None:
@@ -425,8 +422,8 @@ class BaseLayerWithLoRA(nn.Module):
         self.merged = False
         if self._merged_loras is not None:
             self._merged_loras = []
-        self._unmerged_lora_A = nn.ParameterList()
-        self._unmerged_lora_B = nn.ParameterList()
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
         if not preserve_adapters:
             self._active_loras = []
 
