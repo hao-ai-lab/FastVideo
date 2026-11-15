@@ -161,6 +161,24 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
         return freqs.cos(), freqs.sin()
 
 
+_PEER_EXCHANGE_CACHE: dict[tuple[Any, ...], torch.Tensor] = {}
+
+
+def _peer_exchange_buffer(shape: tuple[int, ...], like: torch.Tensor, tag: str) -> torch.Tensor:
+    """One reusable transport buffer per ``(tag, shape, dtype)``.
+
+    A ``P2POp`` keeps its tensor referenced on the NCCL high-priority stream, so allocating a fresh
+    send/receive tensor per block grows the allocator by the whole exchange every layer. Reusing the same
+    storage bounds the resident transport memory; each exchange still waits before the next overwrite.
+    """
+    key = (tag, shape, like.dtype)
+    buffer = _PEER_EXCHANGE_CACHE.get(key)
+    if buffer is None or buffer.device != like.device:
+        buffer = torch.empty(shape, dtype=like.dtype, device=like.device)
+        _PEER_EXCHANGE_CACHE[key] = buffer
+    return buffer
+
+
 def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
                                           original_seq_len: int | None) -> torch.Tensor | None:
     """Two-rank Sol-Attn exchange that moves only the peer's attention-head slice.
@@ -183,9 +201,14 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
     peer_heads = slice((1 - rank) * heads_per_rank, (2 - rank) * heads_per_rank)
     peer = sp_group.ranks[1 - rank]
     group = sp_group.device_group
+    batch, shard = query.shape[0], query.shape[1]
+    tensors = (query, key, value)
     with STAGES.span("sp_qkv_pack"):
-        sends = [tensor[:, :, peer_heads, :].contiguous() for tensor in (query, key, value)]
-        recvs = [torch.empty_like(send) for send in sends]
+        sends = [_peer_exchange_buffer(tuple(t.shape[:2]) + (heads_per_rank, dim), t, f"send{i}")
+                 for i, t in enumerate(tensors)]
+        for buffer, tensor in zip(sends, tensors):
+            buffer.copy_(tensor[:, :, peer_heads, :])
+        recvs = [_peer_exchange_buffer(send.shape, send, f"recv{i}") for i, send in enumerate(sends)]
     with STAGES.span("sp_a2a_qkv"):
         works = dist.batch_isend_irecv([
             op for recv, send in zip(recvs, sends)
@@ -193,11 +216,10 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
         ])
         for work in works:
             work.wait()
-    shard = query.shape[1]
     seq_len = original_seq_len or shard * world
     pad = shard * world - seq_len
     parts = []
-    for tensor, recv in zip((query, key, value), recvs):
+    for tensor, recv in zip(tensors, recvs):
         own = tensor[:, :, self_heads, :]
         parts.append(torch.cat([recv, own] if rank else [own, recv], dim=1)[:, :seq_len])
     with STAGES.span("sp_sol"):
@@ -206,18 +228,19 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
         if pad:
             output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
     out_shard = output.shape[1] // world
-    own_output = output[:, rank * out_shard:(rank + 1) * out_shard, :, :]
-    peer_output = torch.empty_like(own_output)
+    own_send = _peer_exchange_buffer((batch, out_shard, heads_per_rank, dim), output, "out_send")
+    own_send.copy_(output[:, rank * out_shard:(rank + 1) * out_shard, :, :])
+    peer_recv = _peer_exchange_buffer(own_send.shape, output, "out_recv")
     with STAGES.span("sp_a2a_out"):
         works = dist.batch_isend_irecv([
-            dist.P2POp(dist.irecv, peer_output, peer, group),
-            dist.P2POp(dist.isend, own_output, peer, group),
+            dist.P2POp(dist.irecv, peer_recv, peer, group),
+            dist.P2POp(dist.isend, own_send, peer, group),
         ])
         for work in works:
             work.wait()
     if rank:
-        return torch.cat([peer_output, own_output], dim=2)
-    return torch.cat([own_output, peer_output], dim=2)
+        return torch.cat([peer_recv, own_send], dim=2)
+    return torch.cat([own_send, peer_recv], dim=2)
 
 
 def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
