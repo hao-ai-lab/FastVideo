@@ -323,3 +323,4 @@ Install is in the
 [MLX install guide](../getting_started/installation/mlx.md). Generation and
 serving are in the [MiniMax H3 cookbook](../cookbook/minimax-h3.md) and the
 [H3 server guide](../cookbook/openai-api.md).
+Note: main's own prompt-embeds reuse (blake2b-keyed) supersedes parts of this opt-in cache; keep both only if the token-budgeted LRU remains needed.
