@@ -510,6 +510,13 @@ FASTVIDEO_H3_SOLSP_QKV_CHUNKS = EnvInt(
     "piece's QKV batch_isend_irecv as soon as its projection finishes, so the NCCL high-priority stream drains "
     "chunk c while the compute stream runs chunk c+1's projection. 1 keeps the monolithic peer path. Exact tier: "
     "same BF16 projection/norm/RoPE values and the same exchange; only the launch order changes.")
+FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, compute the Q/K/V projections one at a time and post each tensor's "
+    "batch_isend_irecv as soon as it is ready, so the Q exchange drains while K/V still project. Unlike a sequence "
+    "split this keeps the full GEMM M dimension. Exact tier: same BF16 projection/norm/RoPE values and the same "
+    "exchange; only the launch order changes.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",
