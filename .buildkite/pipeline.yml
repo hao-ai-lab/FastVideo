@@ -25,6 +25,8 @@ notify:
 # no active pipeline or slash-command route invokes it.
 # Agent tag `backend` routes a lane: Spark-capable lanes default to slurm and move to a
 # DGX Spark runner when FV_SPARK_BACKEND=spark4; the rest are pinned to slurm.
+# No automatic retries anywhere: a check that needs a retry has a bug to fix, not to re-run,
+# and a silent re-run can hide a real failure. Infra failures surface as red.
 # Buildkite hands jobs to free agents in the order they appear here. Golden-gate comes first
 # because every later merge lane waits for it; the fastcheck lanes follow from longest to
 # shortest measured runtime, so the longest lane never starts last and stretches the build.
@@ -41,12 +43,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "golden_gate_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -65,12 +61,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "unit_test_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -89,12 +79,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "kernel_tests_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -113,12 +97,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "dreamverse_app_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -137,12 +115,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "encoder_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -161,12 +133,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "vae_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -185,12 +151,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "transformer_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -211,14 +171,6 @@ steps:
     concurrency_group: "fastvideo/slinky/whole-tray"
     env:
       TEST_TYPE: "ssim_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-        - exit_status: 1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -236,12 +188,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "inference_lora_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -259,12 +205,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "lora_extraction_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -284,12 +224,6 @@ steps:
     concurrency_group: "fastvideo/slinky/whole-tray"
     env:
       TEST_TYPE: "training_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -307,12 +241,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "distillation_dmd_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -330,12 +258,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "self_forcing_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -353,14 +275,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "training_lora_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-        - exit_status: 1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -378,14 +292,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "training_vsa_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-        - exit_status: 1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -403,12 +309,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "inference_vmoba_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -426,12 +326,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "performance_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "slurm"
@@ -449,12 +343,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "api_server_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -472,12 +360,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "train_framework_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
@@ -495,12 +377,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "eval_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
     agents:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
