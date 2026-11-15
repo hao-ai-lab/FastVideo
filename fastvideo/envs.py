@@ -539,6 +539,13 @@ FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK = EnvBool(
     "the softmax denominator; the maskless output times exp(lse)/(exp(lse)-n_invalid) equals the masked output. On "
     "sm_121 the bool mask forces the sm_80 memory-efficient kernel (2.3x slower than flash at the decoder's window "
     "shape). Exact tier: same math at bf16 rounding. Requires FASTVIDEO_H3_FAST_VAE_COMPILE for the full gain.")
+FASTVIDEO_H3_FAST_VAE_TOKEN_CHUNK = EnvInt(
+    0,
+    category="performance",
+    doc="Token chunk for the FASTVIDEO_H3_FAST_VAE_DECODER feed-forward and final output projection. 0 keeps the "
+    "layer whole, which on GB10 holds the decoder at its ~35 GiB peak; a positive value (e.g. 32768) runs the same "
+    "linears on flat token slices, which is exact (row-independent) and cuts the 2K decode peak enough to fit next "
+    "to a resident DiT under the unified-memory watchdog.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",
