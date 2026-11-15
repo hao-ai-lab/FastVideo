@@ -218,8 +218,6 @@ def test_default_module_never_fuses():
 
 
 class _Tanh(torch.nn.Module):
-    """Sub-layer stand-in: the Kandinsky tests only exercise the norm wiring."""
-
     def forward(self, x, **kwargs):
         return torch.tanh(x)
 
@@ -227,12 +225,6 @@ class _Tanh(torch.nn.Module):
 @cuda_only
 @pytest.mark.parametrize("decoder", [False, True], ids=["encoder", "decoder"])
 def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
-    """Every post-residual norm of a Kandinsky-5 block takes the fused path, and the block
-    output stays within 8 bf16 steps of the residual stream of main's unfused forward.
-
-    The only change from main is that each LayerNorm reads the fp32 residual instead of its
-    bf16 rounding (at most 2^-8 relative). LayerNorm, modulation and the gate amplify that to
-    a few bf16 steps of the stream (measured <= 4.5); a miswired gate is off by thousands."""
     import fastvideo.layers.triton_fused_norm as tfn
     from fastvideo.models.dits import kandinsky5 as k5
     from fastvideo.platforms import AttentionBackendEnum
