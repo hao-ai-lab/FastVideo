@@ -14,7 +14,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import 
     MINIMAX_H3_TEXT_TOKEN_TAGS_KEY,
     MiniMaxH3ConditioningStage,
 )
-from fastvideo.pipelines.basic.open_h3_regenerate_2k.draft_bundle import (
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (
     BUNDLE_EXTRA_KEY,
     bundle_prompt_conditioning,
     is_bundle_path,
@@ -34,6 +34,9 @@ class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
     """
 
     before_encode: Callable[[], None] | None = None
+    # Set by the pipeline: how to treat a bundle's prompt embeddings, and our own text-encoder fingerprint.
+    prompt_embeds_policy: str = "match"
+    text_encoder_fingerprint: Callable[[], str | None] | None = None
 
     def _before_text_encoder(self) -> None:
         if self.before_encode is not None:
@@ -45,13 +48,21 @@ class Regenerate2KConditioningStage(MiniMaxH3ConditioningStage):
             bundle = load_draft_bundle(str(batch.video_path))
             if bundle is not None:
                 batch.extra[BUNDLE_EXTRA_KEY] = bundle
-                conditioning = bundle_prompt_conditioning(bundle)
+                ours = (self.text_encoder_fingerprint()
+                        if self.prompt_embeds_policy == "match" and self.text_encoder_fingerprint is not None else None)
+                conditioning = bundle_prompt_conditioning(bundle,
+                                                          policy=self.prompt_embeds_policy,
+                                                          text_encoder=ours,
+                                                          prompt=batch.prompt)
                 if conditioning is not None:
                     embeds, tags = conditioning
                     batch.prompt_embeds = [embeds.to(device=get_local_torch_device())]
                     batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = tags
                     logger.info("Open-H3-Regenerate-2K: prompt embeddings from the draft bundle; text encoder skipped")
                     return batch
+                logger.info(
+                    "Open-H3-Regenerate-2K: re-encoding the prompt (draft bundle embeddings not reused, policy=%s)",
+                    self.prompt_embeds_policy)
         return super().forward(batch, fastvideo_args)
 
 
