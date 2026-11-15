@@ -565,8 +565,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
         visual_out = self.cross_attention(visual_out, encoder_hidden_states=text_embed)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        visual_out, visual_embed = _residual_norm(self.feed_forward_norm, visual_embed, visual_out, cross_gate, ff_shift,
-                                                  ff_scale)
+        visual_out, visual_embed = _residual_norm(self.feed_forward_norm, visual_embed, visual_out, cross_gate,
+                                                  ff_shift, ff_scale)
         visual_out = self.feed_forward(visual_out)
         visual_embed = (visual_embed.float() + ff_gate.float() * visual_out.float()).type_as(visual_embed)
 

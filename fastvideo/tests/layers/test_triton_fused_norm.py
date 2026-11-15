@@ -218,6 +218,7 @@ def test_default_module_never_fuses():
 
 
 class _Tanh(torch.nn.Module):
+
     def forward(self, x, **kwargs):
         return torch.tanh(x)
 
@@ -264,5 +265,5 @@ def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
     assert torch.equal(unfused, ref)
 
     assert spy.call_count == len(params) - 1
-    diff = (actual.float() - ref.float()).abs()
-    assert (diff <= 8 * 2**-7 * stream).all(),         f"max diff is {(diff / (2**-7 * stream)).max().item():.1f} bf16 steps of the residual stream"
+    steps = ((actual.float() - ref.float()).abs() / (2**-7 * stream)).max().item()
+    assert steps <= 8, f"max diff is {steps:.1f} bf16 steps of the residual stream"
