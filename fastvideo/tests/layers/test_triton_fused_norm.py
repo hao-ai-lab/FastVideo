@@ -266,6 +266,10 @@ def test_kandinsky5_block_matches_unfused_forward(distributed_setup, decoder):
 
         with patch.object(tfn, "fused_residual_norm_mod", wraps=tfn.fused_residual_norm_mod) as spy:
             actual = block(x, x, t, None, None) if decoder else block(x, t, None)
+        with envs.FASTVIDEO_ENABLE_FUSED_NORM.override(False):
+            unfused = block(x, x, t, None, None) if decoder else block(x, t, None)
+
+    assert torch.equal(unfused, ref)
 
     assert spy.call_count == len(params) - 1
     diff = (actual.float() - ref.float()).abs()
