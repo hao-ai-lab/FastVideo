@@ -228,19 +228,22 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
         if pad:
             output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
     out_shard = output.shape[1] // world
-    own_send = _peer_exchange_buffer((batch, out_shard, heads_per_rank, dim), output, "out_send")
-    own_send.copy_(output[:, rank * out_shard:(rank + 1) * out_shard, :, :])
-    peer_recv = _peer_exchange_buffer(own_send.shape, output, "out_recv")
+    # Keep my own sequence rows for the head-ordered recombination, but send the peer its rows: the legacy
+    # all-to-all delivers each rank the source's output at the destination's shard, not the source's own.
+    own_rows = output[:, rank * out_shard:(rank + 1) * out_shard, :, :]
+    peer_send = _peer_exchange_buffer((batch, out_shard, heads_per_rank, dim), output, "out_send")
+    peer_send.copy_(output[:, (1 - rank) * out_shard:(2 - rank) * out_shard, :, :])
+    peer_recv = _peer_exchange_buffer(peer_send.shape, output, "out_recv")
     with STAGES.span("sp_a2a_out"):
         works = dist.batch_isend_irecv([
             dist.P2POp(dist.irecv, peer_recv, peer, group),
-            dist.P2POp(dist.isend, own_send, peer, group),
+            dist.P2POp(dist.isend, peer_send, peer, group),
         ])
         for work in works:
             work.wait()
     if rank:
-        return torch.cat([peer_recv, own_send], dim=2)
-    return torch.cat([own_send, peer_recv], dim=2)
+        return torch.cat([peer_recv, own_rows], dim=2)
+    return torch.cat([own_rows, peer_recv], dim=2)
 
 
 def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
