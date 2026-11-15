@@ -23,6 +23,7 @@ from fastvideo.attention.utils.nvfp4_qk_precondition import parse_block_indices
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
+    sequence_model_parallel_all_to_all_4D,
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size,
@@ -158,6 +159,25 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
         freqs = torch.cat((freqs_t, freqs_h, freqs_w), dim=-1)
         freqs = torch.cat((freqs, freqs), dim=-1)
         return freqs.cos(), freqs.sin()
+
+
+def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
+                                     original_seq_len: int | None) -> torch.Tensor:
+    """Sol-Attn over ``[B, S, H, D]``; under sequence parallel each rank attends the full sequence for its heads.
+
+    The packed sequence is sharded contiguously with transport padding at the end, so after the head all-to-all
+    the rows keep their single-GPU order and the sink rows stay first.
+    """
+    if not model_parallel_is_initialized() or get_sp_world_size() == 1:
+        return _sol_attention(query, key, value, step)
+    batch = query.shape[0]
+    qkv = sequence_model_parallel_all_to_all_4D(torch.cat([query, key, value], dim=0), scatter_dim=2, gather_dim=1)
+    seq_len = original_seq_len or qkv.shape[1]
+    pad = qkv.shape[1] - seq_len
+    qkv = qkv[:, :seq_len]
+    output = _sol_attention(qkv[:batch], qkv[batch:2 * batch], qkv[2 * batch:], step)
+    output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
+    return sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
 
 class MiniMaxH3FeedForward(nn.Module):
@@ -484,12 +504,11 @@ class MiniMaxH3Attention(nn.Module):
         pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
-        # Sol-Attn (opt-in) replaces the whole-sequence attention of a refine step; it needs the full sequence on
-        # this rank, so sequence-parallel runs keep the dense path.
+        # Sol-Attn (opt-in) replaces the whole-sequence attention of a refine step. Under sequence parallel it runs
+        # on the full sequence for this rank's heads, after the same all-to-all DistributedAttention uses.
         sol_step = None
         if (_sol_attn_mode() is not None and rotary_emb is not None and not torch.is_grad_enabled()
-                and not torch.compiler.is_compiling()
-                and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
+                and not torch.compiler.is_compiling()):
             sol_step = get_forward_context().current_timestep
         sol_sparse = (sol_step is not None and _sol_sink_tokens() < (original_seq_len or 0)
                       and _sol_sparse_step(int(sol_step)))
@@ -574,7 +593,7 @@ class MiniMaxH3Attention(nn.Module):
 
         if sol_sparse:
             with STAGES.span("attention"):
-                hidden_states = _sol_attention(query, key, value, int(sol_step))
+                hidden_states = _sequence_parallel_sol_attention(query, key, value, int(sol_step), original_seq_len)
             hidden_states = hidden_states.flatten(2, 3).type_as(query)
             with STAGES.span("out_proj"):
                 hidden_states, _ = self.to_out(hidden_states)

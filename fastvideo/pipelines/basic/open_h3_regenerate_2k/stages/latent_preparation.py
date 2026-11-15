@@ -9,11 +9,12 @@ from typing import Any
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models import pinned_offload
 from fastvideo.models.upsamplers.minimax_h3_latent_upscaler import MiniMaxH3LatentUpscaler, upscale_latent
+from fastvideo.models.vaes.minimax_h3_parallel import encode_pixels_parallel
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
     MINIMAX_H3_FPS,
@@ -95,8 +96,15 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         previous_overlap_width = vae.tile_sample_min_overlap_width
         if overridden:
             vae.enable_tiling(*tile_override)
+        parallel_group = None
+        if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized() and get_sp_group().world_size > 1:
+            # Each rank encodes a subset of the draft's clips; the all-gather leaves the full posterior everywhere.
+            parallel_group = get_sp_group()
         try:
-            posterior = vae.encode_pixels(pixels).latent_dist
+            if parallel_group is not None:
+                posterior = encode_pixels_parallel(vae, pixels, parallel_group).latent_dist
+            else:
+                posterior = vae.encode_pixels(pixels).latent_dist
             sample = posterior.sample(generator=torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED))
             return vae.normalize_latents(sample.float())[0].to(device)
         finally:
