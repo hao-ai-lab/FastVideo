@@ -3,6 +3,7 @@ from typing import Any
 # (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/common_api.py)
 
 import time
+from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import ORJSONResponse
@@ -138,9 +139,14 @@ async def model_info(model: str | None = None, task: str | None = None):
             profile = manager.catalog.resolve(model, task)
         except ValueError as error:
             raise HTTPException(404, str(error)) from error
+        generator = profile.config.generator
+        profile_args = SimpleNamespace(
+            model_path=generator.model_path,
+            override_pipeline_cls_name=generator.pipeline.components.override_pipeline_cls_name)
         return {
-            "model_path": profile.config.generator.model_path,
+            "model_path": generator.model_path,
             "served_model_name": profile.model,
+            "video_output_capabilities": video_output_capabilities(profile_args),
             "lora": None,
             "installed": profile.installed,
             "loaded": manager.active is not None and manager.active.path == profile.path
