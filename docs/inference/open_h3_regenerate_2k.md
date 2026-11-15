@@ -7,7 +7,8 @@ and the output is a silent 2K MP4. FastVideo ports NVlabs'
 ([project page](https://nvlabs.github.io/Sana/Open-H3-Regenerate-2K/),
 [reference code](https://github.com/NVlabs/Sana/tree/sol-engine/models/Open-H3-Regenerate-2K)); the dense BF16
 `standard_fwd` path of that repo is the parity reference. The accelerated `sol_engine_fwd` path (Sol-Attn, MXFP8, CUDA
-graphs) and the fast 24-layer VAE decoder are not ported.
+graphs) and the fast 24-layer VAE decoder are ported as opt-ins; the dense `standard_fwd` path stays the default (see
+[DGX Spark opt-ins](#dgx-spark-opt-ins)).
 
 ```text
 draft video -> H3 VAE encode -> latent upscaler (2x, 3D conv) -> 3 Euler refine steps -> H3 VAE decode -> 2560x1440
@@ -89,6 +90,26 @@ The response headers carry `X-Request-Id`, `X-Model`, `X-Inference-Time-S` and `
 - `num_inference_steps` is 3 (default) or 2; `seed` sets the refine noise.
 - Serve with `attention_backend: TORCH_SDPA`: the refine stage selects cuDNN attention, which at about 133k tokens is
   about 3x faster than PyTorch's default flash dispatch. The `FLASH_ATTN` backend bypasses that selection.
+
+## DGX Spark opt-ins
+
+The accelerated `sol_engine_fwd` tiers are opt-in and off by default, so the dense `standard_fwd` refine stays the
+reference. On a GB10 (unified memory) the DiT and the Qwen3-VL text encoder cannot stay resident together, so components
+are released between stages and a later request pays a host-to-device reload.
+
+| Variable | Effect |
+|---|---|
+| `FASTVIDEO_H3_SOL_ATTN` | Route the refine attention through NVlabs' Sol-Attn block-sparse kernel (`sol_engine`, `sol_engine_fast`, `sol_engine_tau0`, `sol_engine_fast_tau0`). Approximate tier; `off` keeps dense attention. Needs the optional `sol_attn` package. |
+| `FASTVIDEO_H3_FAST_VAE_DECODER=<weights>` | Replace the released 36-block decoder with NVlabs' fast 24-layer non-causal decoder (approximate tier, 33.9 dB on a 2K clip). `FASTVIDEO_H3_FAST_VAE_LAYERS` selects a pruned subset. |
+| `FASTVIDEO_H3_VAE_ENCODE_TILE="H,W,OH,OW"` | Fewer, larger draft-encode tiles. Changes the encode at fp32 rounding level; an overlap at least as large as its tile is rejected. |
+| `FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH` | Spatial tiles per encoder call; changes only the reduction order. |
+| `FASTVIDEO_H3_VAE_COMPILE_ENCODER` | One fixed-shape `torch.compile` graph for the encoder tile. |
+| `FASTVIDEO_H3_KEEP_DIT_RESIDENT` | Keep the transformer materialized across requests instead of releasing it after denoising. Costs the transformer's ~45 GiB during the other stages; it only fits when the text encoder is not also resident. |
+| `FASTVIDEO_H3_KEEP_VAE_RESIDENT` | Keep the video VAE materialized across requests. The default schedule frees 9.7 GiB after every request and the next request pays a ~76 s host-to-device reload before the draft encode; residency costs that 9.7 GiB during the refine, and the load is byte-identical. |
+
+`FASTVIDEO_H3_PROMPT_EMBEDS_CACHE` and `FASTVIDEO_H3_DRAFT_LATENT_CACHE` reuse the text-encoder output and the draft VAE
+encode across identical requests. The prompt-embeds cache is disabled when the text encoder is tensor-parallel, so a
+per-rank hit cannot make one rank skip the encoder while its peers wait in the encoder's collectives.
 
 ## NVFP4 video decoder
 
@@ -232,6 +253,31 @@ to 7 s (82 s on the first call of a process) with no visible metric change. Agai
 (PSNR 19-22 dB at 768P: the refine regenerates texture, so pixel agreement stays low for base and FastH3 drafts alike) and
 raises Laplacian variance 1.7-3.3x with a 1.3-1.5x flicker ratio for every draft model. FastH3 drafts are sharper than base
 drafts before the regen, so their absolute PSNR against the draft is about 2 dB lower.
+
+## Handing a draft over between servers
+
+A MiniMax-H3 server can keep the finished draft as a *draft bundle* (its normalized latent plus the prompt embeddings
+it was conditioned on), and an Open-H3-Regenerate-2K server takes that bundle as its draft. That skips the draft's
+decode and VAE re-encode, and, when both servers load the same text encoder files, the 2K server's text encoder too.
+The two servers can share a machine or sit on different machines.
+
+```bash
+# generator (any MiniMax-H3 server): keep the bundle
+curl -sS -X POST http://generator:8000/v1/videos -H 'Content-Type: application/json' \
+  -d '{"prompt": "...", "size": "832x480", "num_frames": 124, "return_draft_bundle": true}'
+curl -sS http://generator:8000/v1/videos/<id>/draft_bundle -o draft.h3draft.pt
+
+# 2K server: regenerate from the bundle (an http(s) URL, a path under server.media_roots, or a data: URL)
+curl -sS -X POST http://upscaler:8000/v1/videos/sync -H 'Content-Type: application/json' \
+  -d '{"prompt": "...", "draft_bundle": "data:application/x-fastvideo-h3-draft;base64,..."}' -o regen_2k.mp4
+```
+
+The bundle records a fingerprint of the generator's text encoder files. The 2K server reuses its embeddings according to
+`pipeline.experimental.draft_bundle_prompt_embeds`: `match` (default) only when the fingerprints agree, `always` for any
+bundle (a generator with a different text encoder, such as a FastH3 checkpoint with its own encoder weights, then
+conditions the 2K model with its embeddings), `never` to always re-encode. On a unified-memory machine,
+`FASTVIDEO_H3_KEEP_DIT_RESIDENT=1` keeps the 2K DiT loaded between bundle requests; a request that still needs the text
+encoder releases it first.
 
 ## Parity with the reference
 
