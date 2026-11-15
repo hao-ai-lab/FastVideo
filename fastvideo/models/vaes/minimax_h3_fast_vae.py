@@ -147,7 +147,11 @@ class FastH3VaeDecoder(nn.Module):
         """``(B, T, C, H, W)`` normalized latents -> ``(B, 3, F, 16H, 16W)`` pixels in [0, 1]."""
         with torch.autocast("cuda", dtype=self.decode_autocast_dtype):
             pixels = self._forward(z.float()).float()
-        return (pixels * self.pixel_std + self.pixel_mean).clamp_(0, 1)
+        # In-place denormalization: the naive ``(pixels * std + mean)`` materializes two more
+        # 8.5 GiB fp32 tensors at 2K, which is the whole stage's memory peak on a Spark and is
+        # what made a resident DiT + decode not fit. Same ops, same order, same values.
+        pixels.mul_(self.pixel_std).add_(self.pixel_mean).clamp_(0, 1)
+        return pixels
 
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
         """Decode into a caller-owned CPU buffer, like ``AutoencoderKLMiniMaxH3.decode_to_pixels``."""
