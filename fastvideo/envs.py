@@ -520,7 +520,7 @@ FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE = EnvBool(
 FASTVIDEO_H3_SOLSP_OUT_PAD_M = EnvInt(
     0,
     category="performance",
-    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, pad the attention output's M dimension up to at least this many rows "
+    doc="On the peer Sol-Attn exchange paths, pad the attention output's M dimension up to at least this many rows "
     "before to_out. On sm_121 F.scaled_mm selects a ~3x slower tile for the H3 to_out shape (K=7168, N=5376) when M "
     "is below ~80000, so padding to 80000 makes the fast tile run and the extra rows are dropped. Row-independent, "
     "so exact up to the tile's K-reduction order. 0 disables the pad.")
@@ -977,8 +977,8 @@ FASTVIDEO_H3_RELEASE_LORA_ADAPTER = EnvBool(
     "Open-H3-Regenerate-2K 12.4 GB adapter). On unified memory the factors are a second resident copy of the "
     "delta beside the packed weights; an inference server that keeps the DiT resident never unmerges, so "
     "releasing them gives the 2K fast-decoder decode the headroom to coexist with "
-    "FASTVIDEO_H3_KEEP_DIT_RESIDENT. Exact tier: the merged weights are already baked into the packed buffers; "
-    "a later rematerialize reloads the adapter from lora_path because the path cache is cleared.")
+    "FASTVIDEO_H3_KEEP_DIT_RESIDENT. Exact tier: the merged weights are already baked into the packed buffers. "
+    "Released layers cannot unmerge or switch adapters (that raises), so use it only for a fixed-adapter server.")
 FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
     "",
     category="performance",

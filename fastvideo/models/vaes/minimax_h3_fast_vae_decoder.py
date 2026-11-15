@@ -307,8 +307,9 @@ class NonCausalViTDecoder(nn.Module):
         position = 0
         for t0 in range(0, T, t_chunk):
             t1 = min(t0 + t_chunk, T)
+            out = self.norm_out(x[:, t0:t1])
             with torch.autocast("cuda", enabled=False):
-                out = self.proj_out(self.norm_out(x[:, t0:t1]).float())
+                out = self.proj_out(out.float())
             out = out.view(B, t1 - t0, H, W, OUT_CH, PATCH_T, PATCH, PATCH).permute(0, 4, 1, 5, 2, 6, 3, 7)
             out = out.reshape(B, OUT_CH, (t1 - t0) * PATCH_T, H * PATCH, W * PATCH)
             if result is None:

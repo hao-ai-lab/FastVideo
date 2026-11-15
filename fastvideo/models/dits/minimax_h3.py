@@ -165,15 +165,17 @@ _PEER_EXCHANGE_CACHE: dict[tuple[Any, ...], torch.Tensor] = {}
 
 
 def _peer_exchange_buffer(shape: tuple[int, ...], like: torch.Tensor, tag: str) -> torch.Tensor:
-    """One reusable transport buffer per ``(tag, shape, dtype)``.
+    """One reusable transport buffer per ``(tag, dtype)``, reallocated when the shape changes.
 
     A ``P2POp`` keeps its tensor referenced on the NCCL high-priority stream, so allocating a fresh
     send/receive tensor per block grows the allocator by the whole exchange every layer. Reusing the same
     storage bounds the resident transport memory; each exchange still waits before the next overwrite.
+    Keying without the shape keeps one buffer per tag, so a new sequence length replaces the old buffer
+    instead of pinning another set on a unified-memory machine.
     """
-    key = (tag, shape, like.dtype)
+    key = (tag, like.dtype)
     buffer = _PEER_EXCHANGE_CACHE.get(key)
-    if buffer is None or buffer.device != like.device:
+    if buffer is None or buffer.device != like.device or tuple(buffer.shape) != shape:
         buffer = torch.empty(shape, dtype=like.dtype, device=like.device)
         _PEER_EXCHANGE_CACHE[key] = buffer
     return buffer
@@ -363,7 +365,7 @@ def _sequence_parallel_sol_attention_peer_tensor_pipe(attn: MiniMaxH3Attention, 
     exchange layout are identical to the monolithic peer path; ``None`` means an unsupported state.
     """
     import torch.distributed as dist
-    from fastvideo.models.dits.minimax_h3_vsa_fp4 import _lora_delta_pending
+    from fastvideo.models.dits.minimax_h3_vsa_fp4 import _lora_delta_pending, _prequantized_input_key
 
     sp_group = get_sp_group()
     world, rank = sp_group.world_size, sp_group.rank_in_group
@@ -378,6 +380,11 @@ def _sequence_parallel_sol_attention_peer_tensor_pipe(attn: MiniMaxH3Attention, 
     bases = [getattr(linear, "base_layer", linear) for linear in linears]
     methods = [getattr(base, "quant_method", None) for base in bases]
     if not all(method is not None and method.wants_prequantized_input() for method in methods):
+        return None
+    # One quantized input feeds all three projections, so they must agree on its format (as
+    # ``_shared_input_projections`` requires); otherwise K/V would see Q's activation quantization.
+    keys = {_prequantized_input_key(method, base) for method, base in zip(methods, bases)}
+    if len(keys) != 1 or None in keys:
         return None
     if any(_lora_delta_pending(linear) for linear in linears):
         return None
@@ -783,7 +790,7 @@ class MiniMaxH3Attention(nn.Module):
         """
         pad_m = envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.get()
         rows = hidden_states.shape[1]
-        if pad_m and 0 < rows < pad_m and not hasattr(hidden_states, "_mxfp8_prequantized"):
+        if pad_m and 0 < rows < pad_m and getattr(hidden_states, "_mxfp8_prequantized", None) is None:
             padded = torch.nn.functional.pad(hidden_states, (0, 0, 0, pad_m - rows))
             output, _ = self.to_out(padded)
             return output[:, :rows]
@@ -877,7 +884,7 @@ class MiniMaxH3Attention(nn.Module):
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
                 with STAGES.span("out_proj"):
-                    hidden_states = self._sol_out_projection(hidden_states)
+                    hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
         gate_linear = (self.to_gate_compress if self.to_gate_compress is not None and self._gate_active() else None)
         with STAGES.span("qkv_proj"):
@@ -913,7 +920,7 @@ class MiniMaxH3Attention(nn.Module):
                         qkv, original_seq_len=original_seq_len, attn_metadata=attn_metadata)
                 hidden_states = hidden_states.flatten(2, 3).type_as(qkv)
                 with STAGES.span("out_proj"):
-                    hidden_states = self._sol_out_projection(hidden_states)
+                    hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
             query = fused_qknorm_rope(query, self.norm_q.weight, cos, sin, self.norm_q.eps)
             key = fused_qknorm_rope(key, self.norm_k.weight, cos, sin, self.norm_k.eps)

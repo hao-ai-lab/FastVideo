@@ -217,17 +217,20 @@ class FastH3VaeDecoder(nn.Module):
         gathered = sp_group.all_gather(segment, dim=2)
         if output is None:
             return None
-        # Contiguous block ownership makes the concatenated owned frames the prefix of the gathered tensor: every
-        # rank but the last owns a whole number of 17-frame blocks, and the last one's padding trails its valid
-        # frames. Copy per (batch, channel) so both sides are contiguous -- a single strided view of ``gathered``
-        # would make the device-to-host copy re-fault pages again.
-        total_owned = sum(frames for _, _, frames in spans)
-        for b in range(output.shape[0]):
-            for c in range(output.shape[1]):
-                part = gathered[b, c, :total_owned]
-                if part.dtype != output.dtype:
-                    part = part.to(output.dtype)
-                output[b, c].copy_(part)
+        # Rank r's owned frames sit at [r * max_frames, r * max_frames + frames) of the gathered tensor and at
+        # [own_lo * block_frames, ...) of the clip. Any rank with fewer blocks than the largest carries trailing
+        # padding, so copy each rank's segment by its own span. Copy per (batch, channel) so both sides are
+        # contiguous -- a single strided view of ``gathered`` would make the device-to-host copy re-fault pages.
+        for r, (lo, _hi, frames) in enumerate(spans):
+            if frames <= 0:
+                continue
+            src, dst = r * max_frames, lo * block_frames
+            for b in range(output.shape[0]):
+                for c in range(output.shape[1]):
+                    part = gathered[b, c, src:src + frames]
+                    if part.dtype != output.dtype:
+                        part = part.to(output.dtype)
+                    output[b, c, dst:dst + frames].copy_(part)
         return output
 
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:

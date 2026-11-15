@@ -173,7 +173,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             before = torch.cuda.memory_reserved()
             torch.cuda.empty_cache()
             logger.info("MiniMax-H3 decode: resident DiT, empty_cache reserved %.2f -> %.2f GiB, allocated %.2f GiB",
-                        before / 1024**3, torch.cuda.memory_reserved() / 1024**3,
+                        before / 1024**3,
+                        torch.cuda.memory_reserved() / 1024**3,
                         torch.cuda.memory_allocated() / 1024**3)
         if not is_output_rank and not parallel:
             # Consumers read the output rank's ForwardBatch. Keep a
@@ -260,8 +261,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             if is_output_rank:
                 # The released VAE's chunk/tile split assembles in fp32 on the output rank; the fast decoder's
                 # native-block split quantizes each rank's owned frames before the collective and writes uint8.
-                pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
-                ) and (not parallel or fast_split) else torch.float32
+                pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get() and (
+                    not parallel or fast_split) else torch.float32
                 output = self._pixel_buffer(tuple(vae.decoded_pixel_shape(latents.shape)),
                                             fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining

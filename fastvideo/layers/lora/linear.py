@@ -449,6 +449,10 @@ class BaseLayerWithLoRA(nn.Module):
                 return
             if self.training_mode:
                 raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
+            if getattr(self, "lora_factors_released", False):
+                raise RuntimeError("This LoRA layer's merged adapter factors were released "
+                                   "(FASTVIDEO_H3_RELEASE_LORA_ADAPTER), so it cannot unmerge or switch adapters; "
+                                   "restart without that setting to change adapters.")
             raise RuntimeError("LoRA layer has no unmerge snapshot and no adapter factors to reverse the merge")
         if self.base_layer.weight is None:
             if isinstance(self.cpu_weight, DTensor):

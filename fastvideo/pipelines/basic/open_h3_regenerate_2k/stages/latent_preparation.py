@@ -56,6 +56,13 @@ def _parse_encode_tile(tile_spec: str | None) -> tuple[int, int, int, int] | Non
     return tile_height, tile_width, overlap_height, overlap_width
 
 
+def _parallel_encode_group(fastvideo_args: FastVideoArgs) -> Any:
+    """The sequence-parallel group that shares the draft encode, or ``None`` for a local encode."""
+    if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized() and get_sp_group().world_size > 1:
+        return get_sp_group()
+    return None
+
+
 class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
     """Encode the draft with the H3 VAE, upscale its latent to the target grid and re-noise it to the first sigma."""
 
@@ -96,10 +103,8 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         previous_overlap_width = vae.tile_sample_min_overlap_width
         if overridden:
             vae.enable_tiling(*tile_override)
-        parallel_group = None
-        if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized() and get_sp_group().world_size > 1:
-            # Each rank encodes a subset of the draft's clips; the all-gather leaves the full posterior everywhere.
-            parallel_group = get_sp_group()
+        # Each rank encodes a subset of the draft's clips; the all-gather leaves the full posterior everywhere.
+        parallel_group = _parallel_encode_group(fastvideo_args)
         try:
             if parallel_group is not None:
                 posterior = encode_pixels_parallel(vae, pixels, parallel_group).latent_dist
@@ -139,6 +144,16 @@ class Regenerate2KLatentPreparationStage(MiniMaxH3LatentPreparationStage):
         seed = MINIMAX_H3_KEYFRAME_ENCODE_SEED
         key = draft_latent_cache_key(video_path, self.draft_size, settings, model_path, seed)
         cached = cache.get(key)
+        group = _parallel_encode_group(fastvideo_args)
+        if group is not None:
+            # The ranks are separate hosts with their own cache directories, and the parallel encode is a
+            # collective: if one rank hit and another missed, the missing rank would wait in the encode forever.
+            # Use the cache only when every rank hit.
+            import torch.distributed as dist
+            hit = torch.tensor([int(cached is not None)], dtype=torch.int32, device=device)
+            dist.all_reduce(hit, op=dist.ReduceOp.MIN, group=group.device_group)
+            if not int(hit.item()):
+                cached = None
         if cached is not None:
             logger.info("Open-H3 draft-latent cache hit (%s); skipping the VAE encode", key)
             return cached.to(device=device, dtype=torch.float32)

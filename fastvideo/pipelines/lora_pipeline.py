@@ -770,6 +770,8 @@ class LoRAPipeline(ComposedPipelineBase):
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
         if not self._setting_constructor_adapter and not accumulate:
             self._runtime_adapter = (lora_nickname, strength)
+        # The loader's locals alias the adapter tensors on unified memory; drop them so the release frees memory.
+        raw_state_dict = lora_state_dict = to_merge_params = weight = None  # type: ignore[assignment]  # noqa: F841
         self._maybe_release_adapter_factors(lora_nickname)
 
     def _maybe_release_adapter_factors(self, lora_nickname: str) -> None:
@@ -778,8 +780,8 @@ class LoRAPipeline(ComposedPipelineBase):
         On unified memory the wrapped linear's ``lora_A``/``lora_B`` share storage with
         ``self.lora_adapters``, so a 12.4 GB adapter is resident a second time next to the packed
         weights. A server that keeps the DiT resident never unmerges, so those factors are dead weight
-        that competes with the 2K fast-decoder decode. Clearing the path cache makes a later
-        rematerialize reload the adapter from ``lora_path`` instead of silently running unadapted.
+        that competes with the 2K fast-decoder decode. Released layers can no longer unmerge or switch
+        adapters: on unified memory the merge is reversed from these factors, so such a call raises.
         """
         import fastvideo.envs as envs
         if not envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.get() or self.training_mode:
@@ -795,6 +797,7 @@ class LoRAPipeline(ComposedPipelineBase):
                         continue
                     layer.lora_A = None
                     layer.lora_B = None
+                    layer.lora_factors_released = True
                     released += 1
         if released == 0:
             return
