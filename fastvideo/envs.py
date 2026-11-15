@@ -494,6 +494,15 @@ FASTVIDEO_H3_SOL_ATTN = EnvChoice(
     doc="Open-H3-Regenerate-2K refine attention through NVlabs' training-free Sol-Attn block-sparse kernel (needs the "
     "optional sol_attn package). sol_engine: step 0 dense, steps 1-2 tau 1.0; sol_engine_fast: every step tau 1.75; "
     "the _tau0 variants run step 0 sparse at tau 0.0. Approximate tier; off keeps dense attention.")
+FASTVIDEO_H3_SOLSP_EXCHANGE = EnvChoice(
+    "legacy",
+    choices=("legacy", "peer"),
+    category="performance",
+    doc="Transport for the sequence-parallel Sol-Attn QKV/output exchange. 'legacy' runs the generic AllToAll4D "
+    "(cat + head-major transpose + all_to_all_single + cat/transpose back, ~12 GB of copies per block at 2K). "
+    "'peer' uses a two-rank batch_isend_irecv of only the peer's attention-head slice, so no cat and no transposes "
+    "are materialized. Exact tier: identical BF16 values; only two ranks and head_dim=128 are supported, otherwise "
+    "the legacy path runs.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",

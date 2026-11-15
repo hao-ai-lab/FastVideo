@@ -161,6 +161,65 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
         return freqs.cos(), freqs.sin()
 
 
+def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
+                                          original_seq_len: int | None) -> torch.Tensor | None:
+    """Two-rank Sol-Attn exchange that moves only the peer's attention-head slice.
+
+    Each rank attends ``heads_per_rank`` heads over the full padded sequence. The generic ``AllToAll4D`` path
+    materializes a cat plus two head-major transposes per block (~12 GB of copies at 2K); here each rank sends
+    the peer's head slice of its local rows and receives its own, then combines the two sequence halves directly.
+    Values are the same BF16 tensors, so the result matches the all-to-all path bit for bit; ``None`` means the
+    shape/backend is unsupported and the caller keeps the generic path.
+    """
+    import torch.distributed as dist
+    sp_group = get_sp_group()
+    world, rank = sp_group.world_size, sp_group.rank_in_group
+    heads, dim = query.shape[2], query.shape[3]
+    if (world != 2 or heads % world or dim != 128 or not query.is_cuda or query.dtype is not torch.bfloat16
+            or not (query.is_contiguous() and key.is_contiguous() and value.is_contiguous())):
+        return None
+    heads_per_rank = heads // world
+    self_heads = slice(rank * heads_per_rank, (rank + 1) * heads_per_rank)
+    peer_heads = slice((1 - rank) * heads_per_rank, (2 - rank) * heads_per_rank)
+    peer = sp_group.ranks[1 - rank]
+    group = sp_group.device_group
+    with STAGES.span("sp_qkv_pack"):
+        sends = [tensor[:, :, peer_heads, :].contiguous() for tensor in (query, key, value)]
+        recvs = [torch.empty_like(send) for send in sends]
+    with STAGES.span("sp_a2a_qkv"):
+        works = dist.batch_isend_irecv([
+            op for recv, send in zip(recvs, sends)
+            for op in (dist.P2POp(dist.irecv, recv, peer, group), dist.P2POp(dist.isend, send, peer, group))
+        ])
+        for work in works:
+            work.wait()
+    shard = query.shape[1]
+    seq_len = original_seq_len or shard * world
+    pad = shard * world - seq_len
+    parts = []
+    for tensor, recv in zip((query, key, value), recvs):
+        own = tensor[:, :, self_heads, :]
+        parts.append(torch.cat([recv, own] if rank else [own, recv], dim=1)[:, :seq_len])
+    with STAGES.span("sp_sol"):
+        output = _sol_attention(parts[0], parts[1], parts[2], step)
+    with STAGES.span("sp_pad"):
+        if pad:
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
+    out_shard = output.shape[1] // world
+    own_output = output[:, rank * out_shard:(rank + 1) * out_shard, :, :]
+    peer_output = torch.empty_like(own_output)
+    with STAGES.span("sp_a2a_out"):
+        works = dist.batch_isend_irecv([
+            dist.P2POp(dist.irecv, peer_output, peer, group),
+            dist.P2POp(dist.isend, own_output, peer, group),
+        ])
+        for work in works:
+            work.wait()
+    if rank:
+        return torch.cat([peer_output, own_output], dim=2)
+    return torch.cat([own_output, peer_output], dim=2)
+
+
 def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
                                      original_seq_len: int | None) -> torch.Tensor:
     """Sol-Attn over ``[B, S, H, D]``; under sequence parallel each rank attends the full sequence for its heads.
@@ -171,6 +230,10 @@ def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, val
     if not model_parallel_is_initialized() or get_sp_world_size() == 1:
         with STAGES.span("sp_sol"):
             return _sol_attention(query, key, value, step)
+    if envs.FASTVIDEO_H3_SOLSP_EXCHANGE.get() == "peer":
+        peer_output = _sequence_parallel_sol_attention_peer(query, key, value, step, original_seq_len)
+        if peer_output is not None:
+            return peer_output
     batch = query.shape[0]
     with STAGES.span("sp_qkv_cat"):
         qkv_local = torch.cat([query, key, value], dim=0)
