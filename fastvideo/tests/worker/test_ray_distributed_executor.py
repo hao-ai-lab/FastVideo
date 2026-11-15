@@ -77,3 +77,30 @@ def test_ray_worker_device_ordinal_addresses_the_inherited_device_list() -> None
     assert [ray_worker_device_ordinal([2, 3], i, "0,1,2,3") for i in range(2)] == [2, 3]
     with pytest.raises(RuntimeError, match="not in the worker's CUDA_VISIBLE_DEVICES"):
         ray_worker_device_ordinal([5], 0, "0,1")
+
+
+@pytest.mark.parametrize("states,expected", [(["ALIVE", "ALIVE"], True), (["ALIVE", "DEAD"], False),
+                                           (["ALIVE", "PENDING_CREATION"], False), ([], False)])
+def test_ray_health_reads_control_plane_without_worker_rpc(monkeypatch, states, expected) -> None:
+    from types import SimpleNamespace
+    import ray._private.state
+
+    executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
+    executor.workers = [SimpleNamespace(_actor_id=SimpleNamespace(hex=lambda i=i: str(i))) for i in range(len(states))]
+    monkeypatch.setattr(ray._private.state, "actors", lambda actor_id: {"State": states[int(actor_id)]})
+    assert executor.healthy is expected
+    # These handles deliberately have no .proc or execute_method: a rendering actor may not answer an RPC.
+    executor.workers = []
+
+
+def test_ray_health_fails_closed_when_control_plane_is_unavailable(monkeypatch) -> None:
+    from types import SimpleNamespace
+    import ray._private.state
+
+    executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
+    executor.workers = [SimpleNamespace(_actor_id=SimpleNamespace(hex=lambda: "actor"))]
+    def unavailable(actor_id):
+        raise RuntimeError("control plane unavailable")
+    monkeypatch.setattr(ray._private.state, "actors", unavailable)
+    assert executor.healthy is False
+    executor.workers = []
