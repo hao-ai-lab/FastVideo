@@ -29,6 +29,7 @@ from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedRefe
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import (
     MINIMAX_H3_KEYFRAME_ANCHORS_KEY,
     MINIMAX_H3_KEYFRAMES_KEY,
+    uses_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -203,9 +204,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
-        else:
+        if not uses_references(self.ref2va, batch):
             result.add_check("keyframes", batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY), V.is_list)
         return result
 
@@ -369,7 +368,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         if cache_usable:
             settings = text_encoder_cache_settings(fastvideo_args)
             model_path = getattr(fastvideo_args, "model_path", None)
-            cache_key = prompt_embeds_cache_key(batch, self.ref2va, model_path, device, settings)
+            cache_key = prompt_embeds_cache_key(batch, uses_references(self.ref2va, batch), model_path, device,
+                                                settings)
             cached = cache.get(cache_key)
             if cached is not None:
                 cached_embeds, cached_tags = cached
@@ -390,7 +390,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             # Keep both H3 prompt-presentation modes under one text-encoding
             # range so Nsight Systems exposes their complete conditioning cost.
             with nvtx_range("minimax_h3.text_encoding"):
-                if self.ref2va:
+                if uses_references(self.ref2va, batch):
                     prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
                 else:
                     prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
