@@ -232,10 +232,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             return batch
 
         vae = fast_vae_decoder(fastvideo_args, device)
-        if vae is not None:
-            if parallel:
-                raise RuntimeError("The fast 24-layer H3 VAE decoder does not support sequence-parallel decode yet.")
-        else:
+        if vae is None:
             if self.vae is None:
                 raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
             pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
@@ -259,9 +256,12 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             latents = vae.denormalize_latents(latents)
 
             output = None
+            fast_split = getattr(vae, "supports_sequence_parallel_decode", False)
             if is_output_rank:
+                # The released VAE's chunk/tile split assembles in fp32 on the output rank; the fast decoder's
+                # native-block split quantizes each rank's owned frames before the collective and writes uint8.
                 pixel_dtype = torch.uint8 if envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.get(
-                ) and not parallel else torch.float32
+                ) and (not parallel or fast_split) else torch.float32
                 output = self._pixel_buffer(tuple(vae.decoded_pixel_shape(latents.shape)),
                                             fastvideo_args.pin_cpu_memory, device, pixel_dtype)
             # Attribute the streamed decoder computation while retaining
@@ -273,7 +273,11 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     nvtx_range("minimax_h3.vae"),
                     torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=device.type == "cuda"),
             ):
-                if parallel:
+                if parallel and fast_split:
+                    logger.info("MiniMax-H3 VAE decode: fast decoder native-block slices across %d ranks",
+                                sp_group.world_size)
+                    vae.decode_to_pixels_parallel(latents, output, sp_group)
+                elif parallel:
                     strategy = fastvideo_args.vae_parallel_decode_strategy or DEFAULT_DECODE_GATHER_STRATEGY
                     logger.info("MiniMax-H3 VAE decode: sequence-parallel chunks across %d ranks (%s)",
                                 sp_group.world_size, strategy)
