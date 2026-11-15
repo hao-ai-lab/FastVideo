@@ -167,6 +167,8 @@ surfaces:
       draft_latent_path:
         sources:
           - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      text_conditioning_cache_max_bytes:
+        sources: [fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig]
       draft_bundle_prompt_embeds:
         sources:
           - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
