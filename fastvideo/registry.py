@@ -43,6 +43,8 @@ from fastvideo.configs.pipelines.flux_2 import (
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.pika_h3_flex import PikaH3FlexPipelineConfig
+from fastvideo.configs.pipelines.open_h3_regenerate_2k import OpenH3Regenerate2KPipelineConfig
 from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
 from fastvideo.configs.pipelines.mmaudio import (
     MMAudioLarge44kV2PipelineConfig,
@@ -62,6 +64,7 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
 from fastvideo.api.flux import FluxSamplingParam
+from fastvideo.api.pika_h3_flex import PikaH3FlexSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -218,6 +221,13 @@ def _resolve_class_name(config: dict[str, Any]) -> str | None:
     return class_name
 
 
+OPEN_H3_REGENERATE_2K_HF_PATH = "Efficient-Large-Model/Open-H3-Regenerate-2K"
+
+
+def _is_open_h3_regenerate_2k_release(model_path: str) -> bool:
+    return os.path.isfile(os.path.join(model_path, "lora", "open_h3_regenerate_2k_lora.safetensors"))
+
+
 def _get_config_info(
     model_path: str,
     *,
@@ -249,12 +259,16 @@ def _get_config_info(
             return _CONFIG_REGISTRY.get(model_id)
 
     # 3. Use detectors (path or model_index pipeline name).
+    if os.path.exists(model_path) and _is_open_h3_regenerate_2k_release(model_path):
+        # The release keeps its Diffusers manifest under base_model/, so a renamed local copy has no root manifest.
+        return _CONFIG_REGISTRY.get(_MODEL_HF_PATH_TO_NAME[OPEN_H3_REGENERATE_2K_HF_PATH])
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
     elif allow_remote:
         config = maybe_download_model_index(model_path, revision=revision)
     else:
-        return None
+        # Offline resolution still matches the path-name detectors; only the model index is unavailable.
+        config = {}
 
     pipeline_name = (_resolve_class_name(config) or "").lower()
     scheduler = config.get("scheduler")
@@ -1154,6 +1168,42 @@ def _register_configs() -> None:
 
     _register_wan_configs(WAN_MODEL_DEFINITIONS)
 
+    # Pika H3 Flex. It reuses MiniMax-H3's components, but its six-forward
+    # re-noise sampler and bucket geometry are a separate family contract.
+    register_configs(
+        sampling_param_cls=PikaH3FlexSamplingParam,
+        pipeline_config_cls=PikaH3FlexPipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["Pika-Labs/Pika-H3-Flex"],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "pika-h3-flex",
+                "pika_h3_flex",
+                "pikah3flexmodularpipeline",
+                "pikah3flexref2vamodularpipeline",
+            )),
+        ],
+        model_family="pika_h3_flex",
+        default_preset="pika_h3_flex_t2va",
+        pipeline_cls_name="PikaH3FlexModularPipeline",
+    )
+
+    # Open-H3-Regenerate-2K (video -> video). Registered before MiniMax H3 so the first matching detector wins. There is
+    # no V2V WorkloadType, so, like the Kandinsky6 SR entries, it declares no workload.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=OpenH3Regenerate2KPipelineConfig,
+        workload_types=(),
+        hf_model_paths=[OPEN_H3_REGENERATE_2K_HF_PATH],
+        model_detectors=[
+            lambda path: any(token in path.lower()
+                             for token in ("open-h3-regenerate", "open_h3_regenerate", "openh3regenerate2kpipeline")),
+        ],
+        model_family="open_h3_regenerate_2k",
+        default_preset="open_h3_regenerate_2k",
+        pipeline_cls_name="OpenH3Regenerate2KPipeline",
+    )
+
     # MiniMax H3
     register_configs(
         sampling_param_cls=None,
@@ -1281,19 +1331,18 @@ def get_model_info(
         # is triggered just to log the replaced name).
         pipeline_name: str | None = override_pipeline_cls_name
         logger.info("Using override pipeline class name %s", pipeline_name)
+    elif config_info.pipeline_cls_name is not None:
+        # The resolved (path/detector-based) config pins the pipeline class, e.g. an I2V checkpoint whose
+        # `_class_name` would otherwise resolve to the T2V pipeline. The manifest is not read: a release such as
+        # Open-H3-Regenerate-2K keeps it in a subfolder.
+        pipeline_name = config_info.pipeline_cls_name
+        logger.info("Pinned pipeline class name %s", pipeline_name)
     else:
         if os.path.exists(model_path):
             config = verify_model_config_and_directory(model_path, required_component_dirs=[])
         else:
             config = maybe_download_model_index(model_path, revision=revision)
-
         pipeline_name = _resolve_class_name(config)
-        if config_info.pipeline_cls_name is not None:
-            # The resolved (path/detector-based) config pins the pipeline class,
-            # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve
-            # to the T2V pipeline.
-            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
-            pipeline_name = config_info.pipeline_cls_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -1368,6 +1417,10 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
     from fastvideo.pipelines.basic.minimax_h3.presets import (
         ALL_PRESETS as MINIMAX_H3_PRESETS, )
+    from fastvideo.pipelines.basic.pika_h3_flex.presets import (
+        ALL_PRESETS as PIKA_H3_FLEX_PRESETS, )
+    from fastvideo.pipelines.basic.open_h3_regenerate_2k.presets import (
+        ALL_PRESETS as OPEN_H3_REGENERATE_2K_PRESETS, )
     from fastvideo.pipelines.basic.mmaudio.presets import (
         ALL_PRESETS as MMAUDIO_PRESETS, )
     from fastvideo.pipelines.basic.pan2.presets import (
@@ -1403,6 +1456,8 @@ def _register_presets() -> None:
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
+        PIKA_H3_FLEX_PRESETS,
+        OPEN_H3_REGENERATE_2K_PRESETS,
         MMAUDIO_PRESETS,
         PAN2_PRESETS,
         SD35_PRESETS,
@@ -1434,14 +1489,17 @@ def get_default_preset(model_path: str) -> str | None:
     return config_info.default_preset
 
 
-def get_preset_selection(model_path: str) -> tuple[str | None, str | None]:
+def get_preset_selection(model_path: str, *, allow_remote: bool = True) -> tuple[str | None, str | None]:
     """Return ``(default_preset, model_family)`` for a model path.
 
     Single-lookup variant of :func:`get_default_preset` +
     :func:`get_model_family`; callers that need both should prefer this
-    to avoid walking the registry twice.
+    to avoid walking the registry twice. With ``allow_remote=False`` the
+    family comes only from the registry and local directories, so an
+    unresolved path returns ``(None, None)`` instead of downloading a Hub
+    manifest.
     """
-    config_info = _get_config_info(model_path, raise_on_missing=False)
+    config_info = _get_config_info(model_path, raise_on_missing=False, allow_remote=allow_remote)
     if config_info is None:
         return None, None
     return config_info.default_preset, config_info.model_family

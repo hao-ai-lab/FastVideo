@@ -40,6 +40,7 @@ import gc
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import fastvideo.envs as envs
@@ -345,6 +346,10 @@ def _save_role_pretrained(
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
                 reverse_key = reverse_lookup_aliases.get(key, key)
+                if reverse_key not in reverse_mapping and key in reverse_mapping:
+                    # Plugins that enable LoRA after loading (e.g. Wan) record the
+                    # mapping under the pre-LoRA name, not ``base_layer.weight``.
+                    reverse_key = key
                 if reverse_key in reverse_mapping:
                     hf_key, merge_index, _ = reverse_mapping[reverse_key]
                     if merge_index is not None:
@@ -449,6 +454,15 @@ def _strict_reload_verify(
     logger.info("Strict reload verification passed.")
 
 
+def _resolve_export_checkpoint(checkpoint_dir: str) -> Path:
+    """A DCP image directory, including a tagged weights-only one, or a regular checkpoint path."""
+    raw_path = Path(os.path.expanduser(checkpoint_dir)).resolve()
+    if (raw_path / "dcp" / ".metadata").is_file():
+        return raw_path
+    from fastvideo.train.utils.checkpoint import _resolve_resume_checkpoint
+    return _resolve_resume_checkpoint(checkpoint_dir, output_dir=checkpoint_dir)
+
+
 def convert(
     *,
     checkpoint_dir: str,
@@ -468,10 +482,7 @@ def convert(
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.train.utils.builder import build_from_config
-    from fastvideo.train.utils.checkpoint import (
-        CheckpointManager,
-        _resolve_resume_checkpoint,
-    )
+    from fastvideo.train.utils.checkpoint import CheckpointManager
     from fastvideo.train.utils.config import (
         RunConfig,
         load_run_config,
@@ -480,20 +491,18 @@ def convert(
     import torch.distributed.checkpoint as dcp
 
     # -- Resolve checkpoint directory --
-    resolved = _resolve_resume_checkpoint(
-        checkpoint_dir,
-        output_dir=checkpoint_dir,
-    )
+    resolved = _resolve_export_checkpoint(checkpoint_dir)
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")
+    metadata = CheckpointManager.load_metadata(resolved) if (resolved / "metadata.json").is_file() else {}
+    weights_only = bool(metadata.get("weights_only", False))
 
     # -- Obtain config --
     cfg: RunConfig
     if config_path is not None:
         cfg = load_run_config(config_path)
     else:
-        metadata = CheckpointManager.load_metadata(resolved)
         raw_config = metadata.get("config")
         if raw_config is None:
             raise ValueError("Checkpoint metadata.json does not "
@@ -526,6 +535,8 @@ def convert(
 
     # -- Load DCP weights into the model --
     states = method.checkpoint_state()
+    if weights_only:
+        states = {key: value for key, value in states.items() if key.startswith("roles.")}
     logger.info(
         "Loading DCP checkpoint from %s",
         resolved,

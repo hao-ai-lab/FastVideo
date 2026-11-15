@@ -22,6 +22,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_FRAMES_PER_CHUNK,
     MINIMAX_H3_LATENTS_PER_CHUNK,
     MINIMAX_H3_MAX_DURATION,
+    MINIMAX_H3_MAX_PIXELS,
+    MINIMAX_H3_SHORT_EDGE,
     resolve_canvas_size,
 )
 
@@ -32,14 +34,24 @@ MINIMAX_H3_MAX_REFERENCE_IMAGES = 9
 MINIMAX_H3_MAX_REFERENCE_VIDEOS = 3
 MINIMAX_H3_MAX_REFERENCE_AUDIOS = 3
 MINIMAX_H3_MAX_REFERENCES = 12
+# A continuation clip ends on a causal-VAE chunk boundary: 2, 7 or 12 latent frames.
+MINIMAX_H3_CONTINUATION_FRAMES = (5, 22, 39)
+# ForwardBatch.extra key for the decoded continuation clip, set by input preparation.
+MINIMAX_H3_PREPARED_CONTINUATION_KEY = "minimax_h3_prepared_continuation"
 
 
 @dataclass(frozen=True)
 class MiniMaxH3Reference:
-    """One ordered Ref2VA input; decoding is deferred until request preparation."""
+    """One ordered Ref2VA input; decoding is deferred until request preparation.
+
+    ``media_type="continuation"`` is not a reference: it is the end of an earlier video (5, 22 or 39 frames, on the
+    target canvas) that the request continues. The generated video starts by regenerating those frames, at the same
+    positions, so a caller joins the two by dropping them. At most one per request; it is not presented to the text
+    encoder and does not count toward the reference limits.
+    """
 
     source: Any
-    media_type: Literal["image", "video", "audio"] = "image"
+    media_type: Literal["image", "video", "audio", "continuation"] = "image"
     soundtrack: Any | None = None
     fps: float | None = None
     sample_rate: int | None = None
@@ -47,13 +59,13 @@ class MiniMaxH3Reference:
     def __post_init__(self) -> None:
         if self.source is None:
             raise ValueError("A MiniMax-H3 reference requires a media source.")
-        if self.media_type not in ("image", "video", "audio"):
+        if self.media_type not in ("image", "video", "audio", "continuation"):
             raise ValueError(f"Unsupported MiniMax-H3 reference type: {self.media_type!r}.")
-        if self.soundtrack is not None and self.media_type != "video":
-            raise ValueError("Only a video reference may carry a separate soundtrack.")
-        if self.fps is not None and (self.media_type != "video" or isinstance(self.fps, bool)
+        if self.soundtrack is not None and self.media_type not in ("video", "continuation"):
+            raise ValueError("Only a video reference or a continuation clip may carry a separate soundtrack.")
+        if self.fps is not None and (self.media_type not in ("video", "continuation") or isinstance(self.fps, bool)
                                      or not isinstance(self.fps, Real) or self.fps <= 0):
-            raise ValueError("Reference `fps` must be positive and is only valid for video.")
+            raise ValueError("Reference `fps` must be positive and is only valid for video and continuation clips.")
         if self.sample_rate is not None and (self.media_type == "image" or isinstance(self.sample_rate, bool)
                                              or not isinstance(self.sample_rate, Integral) or self.sample_rate <= 0):
             raise ValueError("Reference `sample_rate` must be positive and is only valid for audio-bearing media.")
@@ -97,8 +109,13 @@ def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
         raise ValueError("MiniMax-H3 Ref2VA requires at least one reference.")
 
     typed = [coerce_reference(reference) for reference in references]
+    if sum(reference.media_type == "continuation" for reference in typed) > 1:
+        raise ValueError("MiniMax-H3 accepts at most one continuation clip.")
+    typed_references = [reference for reference in typed if reference.media_type != "continuation"]
+    if not typed_references:
+        raise ValueError("A MiniMax-H3 continuation needs at least one reference besides its clip.")
     counts = {
-        media_type: sum(reference.media_type == media_type for reference in typed)
+        media_type: sum(reference.media_type == media_type for reference in typed_references)
         for media_type in ("image", "video", "audio")
     }
     limits = {
@@ -109,9 +126,9 @@ def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
     for media_type, limit in limits.items():
         if counts[media_type] > limit:
             raise ValueError(f"MiniMax-H3 accepts at most {limit} {media_type} references.")
-    if len(typed) > MINIMAX_H3_MAX_REFERENCES:
+    if len(typed_references) > MINIMAX_H3_MAX_REFERENCES:
         raise ValueError(f"MiniMax-H3 accepts at most {MINIMAX_H3_MAX_REFERENCES} references.")
-    if counts["audio"] == len(typed):
+    if counts["audio"] == len(typed_references):
         raise ValueError("Audio references must be paired with at least one image or video reference.")
     return typed
 
@@ -180,13 +197,20 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
     return result, float(rate), soundtrack
 
 
-def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
-    """Resolve the released 2048-short-edge reference-image canvas."""
+def resolve_reference_image_size(
+    width: int,
+    height: int,
+    *,
+    short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
+) -> tuple[int, int]:
+    """Resolve the released reference-image canvas at ``short_edge``."""
     if width <= 0 or height <= 0:
         raise ValueError(f"A reference image must have a positive size, got {width}x{height}.")
     if width > 4 * height or height > 4 * width:
         raise ValueError(f"A reference image must be within 1:4 and 4:1, got {width}x{height}.")
-    scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+    if short_edge <= 0:
+        raise ValueError(f"A reference-image short edge must be positive, got {short_edge}.")
+    scale = short_edge / min(width, height)
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return (
         max(multiple,
@@ -231,12 +255,23 @@ def resample_reference_frames(frames: np.ndarray, fps: float) -> np.ndarray:
     return np.repeat(frames, repeats, axis=0)
 
 
-def prepare_reference_frames(frames: np.ndarray, num_frames: int) -> np.ndarray:
+def prepare_reference_frames(
+    frames: np.ndarray,
+    num_frames: int,
+    *,
+    short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    max_pixels: int = MINIMAX_H3_MAX_PIXELS,
+) -> np.ndarray:
     """Trim a reference video to the request and resize every RGB frame."""
     if frames.ndim != 4 or frames.shape[-1] != 3 or frames.shape[0] == 0:
         raise ValueError(f"A reference video must be non-empty RGB frames, got {tuple(frames.shape)}.")
     frames = frames[:num_frames]
-    height, width = resolve_canvas_size(frames.shape[2], frames.shape[1])
+    height, width = resolve_canvas_size(
+        frames.shape[2],
+        frames.shape[1],
+        short_edge=short_edge,
+        max_pixels=max_pixels,
+    )
     if frames.shape[1:3] == (height, width):
         return frames
     return np.stack(
@@ -319,8 +354,19 @@ def prepare_reference(
     reference: MiniMaxH3Reference,
     num_frames: int,
     target_sample_rate: int,
+    *,
+    reference_short_edge: int = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE,
+    reference_canvas_short_edge: int = MINIMAX_H3_SHORT_EDGE,
+    reference_canvas_max_pixels: int = MINIMAX_H3_MAX_PIXELS,
 ) -> MiniMaxH3PreparedReference:
-    """Decode and normalize one deferred Ref2VA medium."""
+    """Decode and normalize one deferred Ref2VA medium.
+
+    The keyword arguments let a family use its own tier's reference-image short
+    edge and reference-video canvas rule.  MiniMax-H3's released values are the
+    defaults; Pika H3 Flex passes its 480p/768p tier values.
+    """
+    if reference.media_type == "continuation":
+        raise ValueError("A continuation clip is decoded by prepare_continuation, not as a reference.")
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
         source = reference.source
@@ -331,7 +377,7 @@ def prepare_reference(
                 raise ValueError(f"An image reference must be RGB, got {tuple(pixels.shape)}.")
             image = Image.fromarray(pixels)
         image = ImageOps.exif_transpose(image).convert("RGB")
-        height, width = resolve_reference_image_size(*image.size)
+        height, width = resolve_reference_image_size(*image.size, short_edge=reference_short_edge)
         prepared.image = prepare_reference_image(image, height, width)
         return prepared
 
@@ -346,7 +392,12 @@ def prepare_reference(
             frames = reference_media_to_uint8(reference.source)
             decoded_fps = float(MINIMAX_H3_FPS)
         fps = float(reference.fps if reference.fps is not None else decoded_fps)
-        prepared.frames = prepare_reference_frames(resample_reference_frames(frames, fps), num_frames)
+        prepared.frames = prepare_reference_frames(
+            resample_reference_frames(frames, fps),
+            num_frames,
+            short_edge=reference_canvas_short_edge,
+            max_pixels=reference_canvas_max_pixels,
+        )
 
         if reference.soundtrack is not None:
             waveform, source_rate = _resolve_audio_source(reference.soundtrack)
@@ -377,19 +428,68 @@ def prepare_reference(
     return prepared
 
 
+@dataclass
+class MiniMaxH3PreparedContinuation:
+    """A decoded continuation clip: 24-fps RGB frames on the target canvas, and its soundtrack if it has one."""
+
+    frames: np.ndarray
+    waveform: torch.Tensor | None = None
+
+
+def prepare_continuation(
+    reference: MiniMaxH3Reference,
+    height: int,
+    width: int,
+    target_sample_rate: int,
+) -> MiniMaxH3PreparedContinuation:
+    """Decode a continuation clip, resampled to 24 fps; its frames and canvas must match the contract.
+
+    Like a video reference, the clip is a path (its own soundtrack, if any, is used) or in-memory frames, and
+    ``soundtrack``/``fps``/``sample_rate`` on the reference override what the file carries.
+    """
+    sound: torch.Tensor | None = None
+    sound_rate: int | None = None
+    if isinstance(reference.source, str | os.PathLike):
+        frames, fps, decoded = decode_reference_video(reference.source)
+        if decoded is not None:
+            sound, sound_rate = decoded
+    else:
+        frames, fps = reference_media_to_uint8(reference.source), float(MINIMAX_H3_FPS)
+    if reference.soundtrack is not None:
+        sound, sound_rate = _resolve_audio_source(reference.soundtrack)
+    frames = resample_reference_frames(frames, float(reference.fps if reference.fps is not None else fps))
+    if frames.shape[0] not in MINIMAX_H3_CONTINUATION_FRAMES:
+        raise ValueError(f"A continuation clip must have {', '.join(map(str, MINIMAX_H3_CONTINUATION_FRAMES))} frames "
+                         f"at {MINIMAX_H3_FPS} fps, got {frames.shape[0]}.")
+    if frames.shape[1:3] != (height, width):
+        raise ValueError(f"A continuation clip must be on the target canvas {width}x{height}, "
+                         f"got {frames.shape[2]}x{frames.shape[1]}.")
+    waveform = None
+    if sound is not None:
+        waveform = prepare_reference_waveform(sound,
+                                              int(reference.sample_rate or sound_rate or target_sample_rate),
+                                              target_sample_rate,
+                                              max_duration=frames.shape[0] / MINIMAX_H3_FPS)
+    return MiniMaxH3PreparedContinuation(frames=frames, waveform=waveform)
+
+
 __all__ = [
     "MINIMAX_H3_MAX_REFERENCES",
     "MINIMAX_H3_MAX_REFERENCE_AUDIOS",
     "MINIMAX_H3_MAX_REFERENCE_IMAGES",
     "MINIMAX_H3_MAX_REFERENCE_VIDEOS",
+    "MINIMAX_H3_CONTINUATION_FRAMES",
+    "MINIMAX_H3_PREPARED_CONTINUATION_KEY",
     "MINIMAX_H3_QWEN_TEMPORAL_PATCH",
     "MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS",
     "MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE",
     "coerce_reference",
+    "MiniMaxH3PreparedContinuation",
     "MiniMaxH3PreparedReference",
     "MiniMaxH3Reference",
     "decode_reference_audio",
     "decode_reference_video",
+    "prepare_continuation",
     "prepare_reference",
     "prepare_reference_frames",
     "prepare_reference_image",

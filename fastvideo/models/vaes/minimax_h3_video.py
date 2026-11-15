@@ -294,6 +294,55 @@ class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
         return angles.cos(), angles.sin()
 
 
+def _apply_rotary(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the rotate-half partial RoPE to activation-dtype ``[B, S, H, D]`` Q/K."""
+    rotary_dim = cos.shape[-1]
+    query_rotary, query_pass = query[..., :rotary_dim], query[..., rotary_dim:]
+    key_rotary, key_pass = key[..., :rotary_dim], key[..., rotary_dim:]
+    query_first, query_second = query_rotary.chunk(2, dim=-1)
+    key_first, key_second = key_rotary.chunk(2, dim=-1)
+    query_rotated = torch.cat([-query_second, query_first], dim=-1)
+    key_rotated = torch.cat([-key_second, key_first], dim=-1)
+    query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
+    key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
+    return query, key
+
+
+def _rotary_tables_fit(query: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> bool:
+    batch, seq_len, head_dim = query.shape[0], query.shape[1], query.shape[-1]
+    if cos.dim() != 4 or cos.shape != sin.shape:
+        return False
+    if cos.shape[0] != batch or cos.shape[1] != seq_len or cos.shape[2] != 1:
+        return False
+    if cos.device != query.device or sin.device != query.device:
+        return False
+    if not cos.is_contiguous() or not sin.is_contiguous():
+        return False
+    rotary_dim = cos.shape[-1]
+    return 0 < rotary_dim <= head_dim and rotary_dim % 2 == 0
+
+
+def _can_fuse_qk_norm_rope(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
+) -> bool:
+    """The Triton prologue needs CUDA, contiguous Q/K, packed per-token rotary tables, and a power-of-two head dim."""
+    if rotary_emb is None or not query.is_cuda or not query.is_contiguous():
+        return False
+    if not key.is_contiguous() or key.shape != query.shape or key.dtype != query.dtype or not query.is_floating_point():
+        return False
+    if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad):
+        return False
+    head_dim = query.shape[-1]
+    return head_dim & (head_dim - 1) == 0 and _rotary_tables_fit(query, rotary_emb[0], rotary_emb[1])
+
+
 class MiniMaxH3VideoAttention(nn.Module):
 
     def __init__(self, dim: int, heads: int, dim_head: int, eps: float = 1e-5, bias: bool = True) -> None:
@@ -350,21 +399,15 @@ class MiniMaxH3VideoAttention(nn.Module):
         query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
         del projections
 
-        query = self.norm_q(query.float()).to(query.dtype)
-        key = self.norm_k(key.float()).to(key.dtype)
-        if rotary_emb is not None:
+        if envs.FASTVIDEO_H3_VAE_FUSED_QK_NORM_ROPE.get() and _can_fuse_qk_norm_rope(query, key, rotary_emb):
+            from fastvideo.models.vaes.minimax_h3_qk_norm_rope import qk_norm_rope_
             cos, sin = rotary_emb
-            cos = cos.to(query.dtype)
-            sin = sin.to(query.dtype)
-            rotary_dim = cos.shape[-1]
-            query_rotary, query_pass = query[..., :rotary_dim], query[..., rotary_dim:]
-            key_rotary, key_pass = key[..., :rotary_dim], key[..., rotary_dim:]
-            query_first, query_second = query_rotary.chunk(2, dim=-1)
-            key_first, key_second = key_rotary.chunk(2, dim=-1)
-            query_rotated = torch.cat([-query_second, query_first], dim=-1)
-            key_rotated = torch.cat([-key_second, key_first], dim=-1)
-            query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
-            key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
+            qk_norm_rope_(query, key, cos, sin, self.heads, query.shape[-1], cos.shape[-1], float(self.norm_q.eps))
+        else:
+            query = self.norm_q(query.float()).to(query.dtype)
+            key = self.norm_k(key.float()).to(key.dtype)
+            if rotary_emb is not None:
+                query, key = _apply_rotary(query, key, rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype))
 
         if self.attn_impl is not None and query.device.type != "cpu":
             # VAE decoding has no diffusion-step metadata, so call the selected
@@ -439,6 +482,15 @@ class MiniMaxH3VideoTransformerBlock(nn.Module):
         return hidden_states + self.ff(norm_hidden_states) * self.scale2
 
 
+def _run_decoder_block(
+    block: nn.Module,
+    hidden_states: torch.Tensor,
+    rotary_emb: tuple[torch.Tensor, torch.Tensor],
+) -> torch.Tensor:
+    # Takes the block as an argument so one compiled graph serves every block (parameters are graph inputs).
+    return block(hidden_states, rotary_emb)
+
+
 class MiniMaxH3VideoViTDecoder3d(nn.Module):
 
     def __init__(
@@ -479,6 +531,25 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.gradient_checkpointing = False
         self.fused_blocks_forward: Callable[[nn.ModuleList, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
                                             torch.Tensor | None] | None = None
+        self._compiled_block_forward: Callable[[nn.Module, torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+                                               torch.Tensor] | None = None
+        if envs.FASTVIDEO_H3_VAE_COMPILE_BLOCKS.get():
+            self.install_compiled_blocks()
+
+    def install_compiled_blocks(self) -> int:
+        """Compile the shared decoder-block region; returns the number of blocks it now serves (0 if installed)."""
+        if self._compiled_block_forward is not None:
+            return 0
+        self._compiled_block_forward = torch.compile(_run_decoder_block, dynamic=False)
+        return len(self.transformer_blocks)
+
+    def set_compiled_blocks(self, enabled: bool) -> int:
+        """Switch between the compiled region and the eager loop; returns the number of blocks switched."""
+        if enabled:
+            return self.install_compiled_blocks()
+        switched = self._compiled_block_forward is not None
+        self._compiled_block_forward = None
+        return len(self.transformer_blocks) if switched else 0
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Decode one latent spatial input through the H3 video transformer."""
@@ -508,9 +579,12 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
                                           rotary_emb) if self.fused_blocks_forward is not None else None
         if fused is not None:
             hidden_states = fused
+        compiled_block_forward = self._compiled_block_forward
         for block in self.transformer_blocks if fused is None else ():
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = checkpoint(block, hidden_states, rotary_emb, use_reentrant=False)
+            elif compiled_block_forward is not None:
+                hidden_states = compiled_block_forward(block, hidden_states, rotary_emb)
             else:
                 hidden_states = block(hidden_states, rotary_emb)
 
@@ -536,8 +610,15 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
-def _tile_batch_size() -> int:
-    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+def _has_dynamic_nvfp4_act_scale(module: nn.Module) -> bool:
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import nvfp4_linears
+
+    return any(layer.act_scale == "dynamic" for layer in nvfp4_linears(module))
+
+
+def _tile_batch_size(decoder: nn.Module | None = None) -> int:
+    if decoder is not None and _has_dynamic_nvfp4_act_scale(decoder):
+        return 1
     return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
 
 
@@ -792,8 +873,21 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             self.tile_sample_min_width,
             self.tile_sample_min_overlap_width,
         )
+        per_call = envs.FASTVIDEO_H3_VAE_ENCODE_TILE_BATCH.get()
         rows = []
-        for y_position, y_length in zip(y_indices, y_lengths):
+        if per_call > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+            tiles = [
+                x[..., y_position:y_position + y_length, x_position:x_position + x_length]
+                for y_position, y_length in zip(y_indices, y_lengths)
+                for x_position, x_length in zip(x_indices, x_lengths)
+            ]
+            encoded: list[torch.Tensor] = []
+            for start in range(0, len(tiles), per_call):
+                batch = torch.cat(tiles[start:start + per_call], dim=0)
+                encoded.extend(self.quant_conv(self.encoder(batch)).split(x.shape[0], dim=0))
+            columns = len(x_indices)
+            rows = [encoded[index:index + columns] for index in range(0, len(encoded), columns)]
+        for y_position, y_length in zip(y_indices, y_lengths) if not rows else ():
             row = []
             for x_position, x_length in zip(x_indices, x_lengths):
                 tile = x[..., y_position:y_position + y_length, x_position:x_position + x_length]
@@ -838,7 +932,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
             ratio = self.spatial_compression_ratio
             rows = []
-            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+            per_call = _tile_batch_size(self.decoder)
+            if per_call > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
                 # Every tile of the grid has one shape, and the ViT decoder
                 # treats batch entries independently: decode the grid in a few
                 # large calls instead of one small call per tile.
@@ -850,7 +945,6 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                         for x_position, x_length in zip(x_indices, x_lengths)
                     ]
                     decoded: list[torch.Tensor] = []
-                    per_call = _tile_batch_size()
                     for start in range(0, len(latent_tiles), per_call):
                         batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
                         # Clone before retaining: under the reduce-overhead compile the decoder output lives in
@@ -1027,6 +1121,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         before releasing the buffer.
         """
         target = output[:, :, frame_start:frame_start + pixels.shape[2]]
+        if output.dtype == torch.uint8:
+            pixels = (pixels * 255).clamp_(0, 255).to(torch.uint8)
         if pixels.device.type == "cuda":
             pixels = pixels.contiguous()
             for batch_index in range(pixels.shape[0]):
@@ -1145,11 +1241,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         return DecoderOutput(sample=decoded)
 
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-        """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
+        """Stream decoded ``[0, 1]`` pixels into a caller-owned CPU buffer.
+
+        ``output`` is float32, or uint8 when the caller asks for the quantized
+        stream (``FASTVIDEO_H3_VAE_UINT8_PIXELS``); uint8 quantizes each chunk on
+        the GPU with the fp32 host path's exact mul/clamp/truncate arithmetic.
+        """
         expected_shape = self.decoded_pixel_shape(z.shape)
-        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+        if (output.device.type != "cpu" or output.dtype not in (torch.float32, torch.uint8)
+                or tuple(output.shape) != expected_shape):
             raise ValueError(
-                "`output` must be a CPU float32 tensor with shape "
+                "`output` must be a CPU float32 or uint8 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
         try:
             if self.use_slicing and z.shape[0] > 1:

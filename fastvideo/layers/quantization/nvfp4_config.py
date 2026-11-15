@@ -418,6 +418,12 @@ def _mm_fp4(
         raise TypeError(f"Unsupported kwargs for _mm_fp4: {sorted(kwargs)}")
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
+    if (out is None and backend == "cudnn" and block_size == 16 and use_nvfp4 and not use_8x4_sf_layout
+            and (a.shape[0], a.shape[1], b.shape[1]) == (14859, 2688, 28672) and a.dtype == torch.uint8
+            and a_scale.ndim == 2 and a_scale.shape[0] >= a.shape[0] and a.is_cuda
+            and not torch.compiler.is_compiling() and envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() != "off"
+            and _is_dgx_spark(a.device.index or 0)):
+        return _mm_fp4_direct_rows(a, b, a_scale, b_scale, alpha, out_dtype, 8)
     if (out is None and backend == "cudnn" and a.shape[0] >= _SPLIT_MIN_ROWS
             and envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() != "off" and not torch.compiler.is_compiling()):
         return _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
@@ -460,6 +466,27 @@ def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> li
         scale_hi = min(((hi + 127) // 128) * 128, a_scale.shape[0])
         chunks.append((a[lo:hi], a_scale[lo:scale_hi]))
     return chunks
+
+
+def _mm_fp4_direct_rows(a, b, a_scale, b_scale, alpha, out_dtype, parts: int) -> torch.Tensor:
+    _, mm_fp4, _ = _require_flashinfer()
+    out = torch.empty((a.shape[0], b.shape[1]), device=a.device, dtype=out_dtype)
+    offset = 0
+    for chunk, scale in _mm_fp4_row_chunks(a, a_scale, parts):
+        rows = chunk.shape[0]
+        mm_fp4(chunk,
+               b,
+               scale,
+               b_scale,
+               alpha,
+               out_dtype,
+               out[offset:offset + rows],
+               block_size=16,
+               use_8x4_sf_layout=False,
+               backend="cudnn",
+               use_nvfp4=True)
+        offset += rows
+    return out
 
 
 def _mm_fp4_chunked(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4,
@@ -509,14 +536,27 @@ def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_
     return _mm_fp4_chunked(*args, _SPLIT_CHOICE[key])
 
 
-def _mm_fp4_backend() -> str:
+_H3_LAYER_PROFILES = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+
+
+@functools.cache
+def _is_sm100() -> bool:
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
+
+
+def _mm_fp4_backend(layer_profile: str | None = None) -> str:
     """FlashInfer ``mm_fp4`` backend (``FASTVIDEO_NVFP4_MM_BACKEND``, default ``auto``).
 
     On sm_120 ``auto`` picks a kernel about 2x slower than ``cutlass`` or
     ``cudnn`` once activations reach tens of thousands of rows (measured at
-    73k rows on an RTX PRO 6000); short sequences are unaffected.
+    73k rows on an RTX PRO 6000); short sequences are unaffected. On sm_100,
+    ``auto`` resolves to ``cudnn`` for the MiniMax-H3 DiT profiles, where it is
+    bitwise identical to the default kernel and faster at H3 shapes.
     """
-    return envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
+    backend = envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
+    if backend == "auto" and layer_profile in _H3_LAYER_PROFILES and _is_sm100():
+        return "cudnn"
+    return backend
 
 
 def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
@@ -552,6 +592,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
     # Lazily resolved by _static_activation_global_sf; class defaults also cover object.__new__ test doubles.
     _static_sf_checked: bool = False
     _static_sf: torch.Tensor | None = None
+    _layer_profile: str | None = None
 
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
@@ -708,7 +749,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend=_mm_fp4_backend(),
+            backend=_mm_fp4_backend(self._layer_profile),
         )
 
         if bias is not None:
@@ -804,6 +845,7 @@ class NVFP4Config(QuantizationConfig):
         if tagged:
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
+            method._layer_profile = self.layer_profile
             return method
         if (self.layer_profile == "h3_dit_ffn" and envs.FASTVIDEO_H3_FP8_ATTENTION.get()
                 and _H3_BLOCK_ATTN_PROJ.search(prefix) is not None):
@@ -869,6 +911,10 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
             else:
                 purged_bytes += weight.numel() * weight.element_size()
                 purged += 1
+                # Preserve weight placement after purge.
+                mod.register_buffer("weight_device",
+                                    torch.empty(0, device=weight.device, dtype=weight.dtype),
+                                    persistent=False)
                 mod.register_parameter("weight", None)
 
     if purged or retained:
@@ -920,7 +966,7 @@ def load_minimax_h3_nvfp4_dit_export(
         for name, module in modules.items() if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
     }
     groups: dict[str, dict[str, str]] = {}
-    with safe_open(path, framework="pt", device="cpu") as reader:
+    with safe_open(path, framework="pt", device=str(device)) as reader:
         for key in reader.keys():  # noqa: SIM118
             if H3_NVFP4_DIT_KEY_SEP not in key:
                 raise ValueError(f"MiniMax-H3 NVFP4 DiT export key {key!r} is missing {H3_NVFP4_DIT_KEY_SEP!r}")
@@ -944,7 +990,7 @@ def load_minimax_h3_nvfp4_dit_export(
             for buffer_name in H3_NVFP4_DIT_BUFFER_NAMES + (H3_NVFP4_DIT_INPUT_SF_NAME, ):
                 if buffer_name not in buffers:
                     continue
-                tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
+                tensor = reader.get_tensor(buffers[buffer_name])
                 module.register_buffer(buffer_name, tensor, persistent=False)
             module.register_parameter("weight", None)
             loaded_names.add(next(name for name, candidate in modules.items() if candidate is module))

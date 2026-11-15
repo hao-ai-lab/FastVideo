@@ -134,15 +134,16 @@ _fa4_fp4_import_ok: bool | None = None
 
 
 def _fa4_fp4_available() -> bool:
-    """flash_attn.cute (FA4) import probe, cached. Reuses #1221's guarded
-    import chain in fastvideo.attention.utils.flash_attn_cute (which maps
-    cutlass-dsl version skew to ImportError with a loud warning)."""
+    """FP4 FA4 kernel probe, cached. Reuses #1221's guarded import chain in
+    fastvideo.attention.utils.flash_attn_cute (which maps cutlass-dsl version
+    skew to ImportError with a loud warning) and requires the installed kernel
+    to accept the NVFP4 scale-factor kwargs: upstream flash-attn-4 imports but
+    rejects mSFQ/mSFK, so only the flash-attention-fp4 fork can serve this route."""
     global _fa4_fp4_import_ok
     if _fa4_fp4_import_ok is None:
         try:
-            from fastvideo.attention.utils.flash_attn_cute import (  # noqa: F401
-                flash_attn_fp4_func, )
-            _fa4_fp4_import_ok = True
+            from fastvideo.attention.utils.flash_attn_cute import fp4_forward_available
+            _fa4_fp4_import_ok = fp4_forward_available()
         except ImportError:
             _fa4_fp4_import_ok = False
     return _fa4_fp4_import_ok
@@ -193,7 +194,7 @@ def attn_qat_infer_receipt() -> str:
                 f"pv_mode={_current_fa4_pv_mode()} train_sim_mismatch=measured")
     supported = "sm_120a/sm_121a via fastvideo-kernel build.sh; sm_100a/sm_103a via flash-attention-fp4"
     if cap is not None and cap in _FA4_FP4_CAPABILITIES:
-        return f"arch={arch} kernel=none (flash_attn.cute not importable -- {_FA4_INSTALL_HINT})"
+        return f"arch={arch} kernel=none (no NVFP4 flash_attn.cute forward -- {_FA4_INSTALL_HINT})"
     return f"arch={arch} kernel=none (supported: {supported})"
 
 

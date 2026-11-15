@@ -24,12 +24,11 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.platforms import AttentionBackendEnum
 
 @pytest.fixture
-def qwen_setup(env_overrides, monkeypatch, request):
+def qwen_setup(env_overrides, request):
     if not torch.cuda.is_available():
         pytest.skip("Requires one CUDA GPU")
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
-    monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
-    monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
+    request.getfixturevalue("tf32_disabled")
     request.getfixturevalue("distributed_setup")
     with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
         yield torch.device("cuda")

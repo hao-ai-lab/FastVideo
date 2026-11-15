@@ -18,7 +18,7 @@ should use the config-driven system documented here.
 ### Launch with the helper script
 
 ```bash
-bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml
+bash examples/train/run.sh examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml
 ```
 
 The script auto-detects available GPUs and sets up `torchrun`. Override with
@@ -35,7 +35,7 @@ NUM_GPUS=4 NNODES=2 NODE_RANK=0 \
 ```bash
 torchrun --nproc_per_node=8 \
     fastvideo/train/entrypoint/train.py \
-    --config examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml
+    --config examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml
 ```
 
 ### CLI flags

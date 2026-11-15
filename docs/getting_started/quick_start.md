@@ -1,27 +1,43 @@
-# 🚀 Quick Start
+# Quick start
 
-Get up and running with FastVideo in minutes!
+Install FastVideo, generate one video, then start from a maintained recipe.
 
-## Installation
+## Install
 
-First, install FastVideo:
+Requires Python 3.10 to 3.12 and CUDA 12.6 or newer.
 
 ```bash
-# If you previously used Conda, use uv instead for a faster, more stable setup
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-# Install FastVideo on NVIDIA CUDA 12
+# CUDA 12. Use cu130 on CUDA 13.
 UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
-Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13.
-
-Also optionally install flash-attn:
+For the fastest attention kernels, install flash-attn:
 
 ```bash
 uv pip install flash-attn --no-build-isolation -v
 ```
+
+## Generate a video
+
+```python
+from fastvideo import VideoGenerator
+
+generator = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    text_encoder_cpu_offload=True,
+)
+generator.generate_video(
+    "A raccoon peers through a field of sunflowers.",
+    output_path="videos/",
+    save_video=True,
+)
+```
+
+The first run downloads the Wan2.1 1.3B checkpoint. The call writes an MP4 under `videos/`. The full example is `examples/inference/basic/basic.py`.
 
 ## Choose a maintained recipe
 

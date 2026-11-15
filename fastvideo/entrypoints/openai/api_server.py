@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from fastvideo.api.presets import validate_preset_selection
 from fastvideo.api.schema import DEFAULT_MEDIA_REFERENCE_MAX_BYTES, GenerationRequest
+from fastvideo.entrypoints.openai.lora import LoraRuntime
 from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.state import (
     DEFAULT_OUTPUT_DIR,
@@ -68,7 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
     factory = app.state.generator_factory
     generator = factory() if factory is not None else VideoGenerator.from_fastvideo_args(args)
-    serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator)
+    serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator, app.state.lora_runtime)
     logger.info("Generation runtime ready.")
 
     set_state(
@@ -105,6 +106,7 @@ def create_app(
     runtime: str = "cuda",
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
     media_policy: MediaPolicy | None = None,
+    lora_runtime: LoraRuntime | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -129,6 +131,7 @@ def create_app(
     app.state.generator_factory = generator_factory
     app.state.video_request_validator = video_request_validator
     app.state.runtime = runtime
+    app.state.lora_runtime = lora_runtime
 
     app.add_middleware(
         CORSMiddleware,
@@ -222,6 +225,7 @@ def run_server(
     served_model_name: str | None = None,
     media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
     media_policy: MediaPolicy | None = None,
+    lora_runtime: LoraRuntime | None = None,
 ):
     """Create the app and run it with uvicorn"""
     os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
@@ -235,6 +239,7 @@ def run_server(
         served_model_name=served_model_name,
         media_reference_max_bytes=media_reference_max_bytes,
         media_policy=media_policy,
+        lora_runtime=lora_runtime,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)

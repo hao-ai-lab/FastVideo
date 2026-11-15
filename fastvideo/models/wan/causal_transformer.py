@@ -470,9 +470,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         # Block-wise causal mask will attend to all elements that are before the end of the current chunk
         frame_indices = torch.arange(start=0, end=total_length, step=frame_seqlen * num_frame_per_block, device=device)
 
+        # A partial last block ends at the last real token, so it never reaches the padding.
         for tmp in frame_indices:
-            ends[tmp:tmp + frame_seqlen * num_frame_per_block] = tmp + \
-                frame_seqlen * num_frame_per_block
+            block_end = min(int(tmp) + frame_seqlen * num_frame_per_block, total_length)
+            ends[tmp:block_end] = block_end
 
         def attention_mask(b, h, q_idx, kv_idx):
             if local_attn_size == -1:
@@ -539,15 +540,18 @@ class CausalWanTransformer3DModel(BaseDiT):
                                      step=attention_block_size,
                                      device=device,
                                      dtype=torch.long)
+        # A partial last block ends at its clean or noisy boundary, so clean tokens never see
+        # noisy tokens and no real token sees the padding.
         for start in frame_indices:
-            context_ends[start:start + attention_block_size] = start + attention_block_size
+            block_end = min(int(start) + attention_block_size, clean_ends)
+            context_ends[start:block_end] = block_end
 
         noisy_image_start_list = torch.arange(num_frames * frame_seqlen,
                                               total_length,
                                               step=attention_block_size,
                                               device=device,
                                               dtype=torch.long)
-        noisy_image_end_list = noisy_image_start_list + attention_block_size
+        noisy_image_end_list = torch.clamp(noisy_image_start_list + attention_block_size, max=total_length)
         for block_index, (start, end) in enumerate(zip(noisy_image_start_list, noisy_image_end_list)):
             noise_noise_starts[start:end] = start
             noise_noise_ends[start:end] = end

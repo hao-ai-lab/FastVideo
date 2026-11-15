@@ -25,12 +25,14 @@ server:
   served_model_name: pan2
 
 default_request:
+  # Empty: PAN 2's default negative prompt, its time ranges set to the clip's duration.
+  negative_prompt: ""
   sampling:
     height: 704
     width: 1248
     num_frames: 313
     fps: 24
     num_inference_steps: 50
-    guidance_scale: 3.0
+    guidance_scale: 2.5
   output:
     return_frames: false

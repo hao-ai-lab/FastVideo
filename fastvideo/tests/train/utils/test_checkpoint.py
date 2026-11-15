@@ -234,6 +234,58 @@ def test_write_metadata_roundtrip_with_step(tmp_path: Path) -> None:
     assert loaded == {"step": 7}
 
 
+def test_write_metadata_marks_tagged_weights_only(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path)
+    tagged = tmp_path / "best"
+    tagged.mkdir()
+    mgr._write_metadata(tagged, step=30, weights_only=True)
+    loaded = CheckpointManager.load_metadata(tagged)
+    assert loaded == {"step": 30, "weights_only": True}
+
+
+
+class _TaggedMethod:
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        return {"roles.student": {"weight": 1}, "optimizer": {}}
+
+
+def _tagged_manager(tmp_path: Path) -> CheckpointManager:
+    return CheckpointManager(method=_TaggedMethod(), dataloader=None, output_dir=str(tmp_path),
+                             config=CheckpointConfig(save_steps=0, keep_last=0))
+
+
+def test_save_tagged_replaces_the_previous_weights_only_after_the_write(tmp_path: Path,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    import fastvideo.train.utils.checkpoint as checkpoint
+
+    def fake_save(states, checkpoint_id, process_group=None):
+        assert set(states) == {"roles.student"}
+        Path(checkpoint_id, ".metadata").write_text("new")
+
+    monkeypatch.setattr(checkpoint.dcp, "save", fake_save)
+    (tmp_path / "best" / "dcp").mkdir(parents=True)
+    (tmp_path / "best" / "dcp" / ".metadata").write_text("old")
+    _tagged_manager(tmp_path).save_tagged("best", step=60)
+    assert (tmp_path / "best" / "dcp" / ".metadata").read_text() == "new"
+    assert CheckpointManager.load_metadata(tmp_path / "best")["step"] == 60
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["best"]
+
+
+def test_save_tagged_keeps_the_previous_weights_when_the_write_fails(tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    import fastvideo.train.utils.checkpoint as checkpoint
+
+    def failing_save(states, checkpoint_id, process_group=None):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(checkpoint.dcp, "save", failing_save)
+    (tmp_path / "best" / "dcp").mkdir(parents=True)
+    (tmp_path / "best" / "dcp" / ".metadata").write_text("old")
+    with pytest.raises(RuntimeError, match="disk full"):
+        _tagged_manager(tmp_path).save_tagged("best", step=60)
+    assert (tmp_path / "best" / "dcp" / ".metadata").read_text() == "old"
+
 def test_write_metadata_includes_raw_config(tmp_path: Path) -> None:
     raw = {
         "models": {

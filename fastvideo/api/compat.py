@@ -199,6 +199,8 @@ def legacy_from_pretrained_to_config(
             components["transformer_weights"] = value
         elif key == "init_weights_from_safetensors_2":
             components["transformer_2_weights"] = value
+        elif key == "h3_vae_nvfp4_decoder":
+            components["h3_vae_nvfp4_decoder"] = value
         else:
             experimental[key] = deepcopy(value)
 
@@ -331,6 +333,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["init_weights_from_safetensors"] = components.transformer_weights
     if components.transformer_2_weights is not None:
         kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
+    if components.h3_vae_nvfp4_decoder is not None:
+        kwargs["h3_vae_nvfp4_decoder"] = components.h3_vae_nvfp4_decoder
     if components.config_root is not None:
         kwargs["config_model_path"] = components.config_root
     if components.upsampler_weights is not None:

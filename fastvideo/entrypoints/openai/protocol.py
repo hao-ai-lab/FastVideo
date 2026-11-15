@@ -131,6 +131,9 @@ class VideoGenerationRequest(BaseModel):
     # SGLang's legacy direct-video spellings.
     video_path: str | None = None
     video_url: str | None = None
+    # MiniMax-H3 Ref2VA: the last 5, 22 or 39 frames of an earlier video (URL or local path) that this request
+    # continues; see MiniMaxH3Reference(media_type="continuation").
+    continuation_video: str | None = None
     video_params: VideoParams | None = None
     user: str | None = None
     task: str | None = None

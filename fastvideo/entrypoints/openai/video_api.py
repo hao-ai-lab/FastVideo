@@ -18,6 +18,7 @@ from starlette.datastructures import UploadFile
 
 from fastvideo.api.compat import explicit_request_updates, request_to_sampling_param
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai.lora import LoraSelection
 from fastvideo.entrypoints.openai.protocol import (
     VideoDeleteResponse,
     VideoGenerationRequest,
@@ -213,6 +214,7 @@ async def _run_generation(
     request_id: str,
     generation_request: GenerationRequest,
     materialized_media: list[str] | None = None,
+    lora: LoraSelection | None = None,
 ) -> None:
     started = 0.0
     video_path = generation_request.output.output_path
@@ -229,7 +231,7 @@ async def _run_generation(
         )
 
     try:
-        result = await get_serving_engine().generate(generation_request, on_start=mark_started)
+        result = await get_serving_engine().generate(generation_request, on_start=mark_started, lora=lora)
         if isinstance(result, list):
             if not result:
                 raise RuntimeError("FastVideo returned no generation results")
@@ -354,11 +356,13 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
         raise HTTPException(status_code=400, detail=f"Invalid request body: {error}") from error
 
 
-async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> tuple[GenerationRequest, list[str]]:
+async def _adapt_request(request_id: str,
+                         request: VideoGenerationRequest) -> tuple[GenerationRequest, list[str], LoraSelection | None]:
     materialized_media: list[str] = []
     try:
         get_serving_engine().validate_video_request(request)
-        validate_model_and_lora(request, get_server_args(), get_served_model_name())
+        selection = validate_model_and_lora(request, get_server_args(), get_served_model_name(),
+                                            get_serving_engine().lora_runtime)
         materialized_media = await prepare_reference_media(request_id,
                                                            request,
                                                            get_output_dir(),
@@ -371,8 +375,9 @@ async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> tu
             served_model_name=get_served_model_name(),
             output_dir=get_output_dir(),
             default_request=get_default_request(),
+            lora_runtime=get_serving_engine().lora_runtime,
         )
-        return generation_request, materialized_media
+        return generation_request, materialized_media, selection
     except Exception as error:
         discard_materialized_media(materialized_media)
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -384,14 +389,14 @@ async def create_video(raw_request: Request) -> VideoResponse:
     """Create an asynchronous video generation job."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_gen_{generate_request_id()}"
-    generation_request, materialized_media = await _adapt_request(request_id, request)
+    generation_request, materialized_media, lora = await _adapt_request(request_id, request)
     try:
         job = _make_video_job(request_id, request, generation_request)
         await VIDEO_STORE.upsert(request_id, job)
     except Exception:
         discard_materialized_media(materialized_media)
         raise
-    task = asyncio.create_task(_run_generation(request_id, generation_request, materialized_media),
+    task = asyncio.create_task(_run_generation(request_id, generation_request, materialized_media, lora),
                                name=f"video-job-{request_id}")
     task.add_done_callback(lambda _: discard_materialized_media(materialized_media))
     _track_video_job(request_id, task)
@@ -403,12 +408,12 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
     """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_sync-{generate_request_id()}"
-    generation_request, materialized_media = await _adapt_request(request_id, request)
+    generation_request, materialized_media, lora = await _adapt_request(request_id, request)
     started = time.perf_counter()
     response: FileResponse | None = None
     try:
         try:
-            result = await get_serving_engine().generate(generation_request)
+            result = await get_serving_engine().generate(generation_request, lora=lora)
         except Exception as error:
             logger.exception("Sync video generation failed for %s", request_id)
             raise HTTPException(status_code=500, detail=f"Video generation failed: {error}") from error

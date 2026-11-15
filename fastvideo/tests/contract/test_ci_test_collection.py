@@ -187,6 +187,9 @@ def test_merge_comment_has_one_change_aware_trigger_path():
     assert "pr.state !== 'open'" in ready_workflow
     assert "pr.base.repo.full_name !== context.payload.repository.full_name" in ready_workflow
     assert "pr.base.ref !== context.payload.repository.default_branch" in ready_workflow
+    trigger_if = yaml.safe_load(ready_workflow)["jobs"]["trigger"]["if"]
+    assert "github.event.pull_request.base.ref == github.event.repository.default_branch" in trigger_if
+    assert trigger_if.startswith("inputs.pr_number > 0 ||")
     assert "core.setOutput('head_sha', pr.head.sha)" in ready_workflow
     assert "core.setOutput('base_sha', pr.base.sha)" in ready_workflow
     assert "api.buildkite.com" in ready_workflow

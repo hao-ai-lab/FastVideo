@@ -20,10 +20,12 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import timedelta
 from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -66,9 +68,11 @@ def run_training_from_config(
             "VIDEO_SPARSE_ATTN",
         )
 
+    timeout_min = envs.FASTVIDEO_PG_TIMEOUT_MIN.get()
     maybe_init_distributed_environment_and_model_parallel(
         tc.distributed.tp_size,
         tc.distributed.sp_size,
+        timeout=timedelta(minutes=timeout_min) if timeout_min > 0 else None,
     )
 
     _, method, dataloader, start_step = build_from_config(cfg)

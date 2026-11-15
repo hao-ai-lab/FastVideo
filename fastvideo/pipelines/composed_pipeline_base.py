@@ -21,7 +21,8 @@ from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.fastvideo_args import (DIT_COMPILE_CUDAGRAPHS_ATTR, FastVideoArgs, TrainingArgs,
+                                      compile_kwargs_record_cudagraphs)
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -222,6 +223,11 @@ class ComposedPipelineBase(ABC):
             logger.info("Running prepare_for_compile for %s", module_name)
             prepare_for_compile()
 
+        # The FSDP check above is an instance test, so use_fsdp_inference=True
+        # still reaches here for a transformer that was never wrapped. Stamp
+        # before any wrapper goes on, so the loop reads the compile off the DiT.
+        setattr(module, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(compile_kwargs))
+
         compiled_count = ComposedPipelineBase._compile_with_conditions(module, compile_kwargs)
         if compiled_count > 0:
             logger.info(
@@ -327,6 +333,14 @@ class ComposedPipelineBase(ABC):
                     )
             if any(name in self.modules for name in ("transformer", "transformer_refine", "transformer_2")):
                 logger.info("Torch Compile enabled for DiT")
+                if (self.fastvideo_args.dit_layerwise_offload and compile_kwargs_record_cudagraphs(dit_compile_kwargs)
+                        and not getattr(self, "_warned_cudagraph_offload", False)):
+                    self._warned_cudagraph_offload = True
+                    logger.warning(
+                        "The DiT torch.compile records CUDA graphs (%s), but dit_layerwise_offload copies the DiT "
+                        "weights to new GPU memory on every forward, so the graphs are recorded again each step "
+                        "instead of replayed (slower than the default mode). Set dit_layerwise_offload=False.",
+                        dit_compile_kwargs)
 
         if compile_text_encoder and any(_want(name) for name in ("text_encoder", "text_encoder_2")):
             for name in ("text_encoder", "text_encoder_2"):
@@ -519,6 +533,16 @@ class ComposedPipelineBase(ABC):
         """
         return
 
+    def _component_load_target(self, module_name: str) -> tuple[str, str]:
+        """The loader dispatch name and directory of ``module_name``, following ``_extra_config_module_map``.
+
+        A relative mapping (``"transformer_ref"``, ``"base_model/vae"``) dispatches on its own name. An absolute one is a
+        directory outside the checkpoint whose name says nothing about the component, so it dispatches on the role.
+        """
+        mapped = self._extra_config_module_map.get(module_name, module_name)
+        dispatch_name = module_name if os.path.isabs(mapped) else mapped
+        return dispatch_name, os.path.join(self.model_path, mapped)
+
     def load_modules(self,
                      fastvideo_args: FastVideoArgs,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
@@ -611,13 +635,7 @@ class ComposedPipelineBase(ABC):
                 modules[module_name] = loaded_modules[module_name]
                 continue
 
-            # we load the module from the extra config module map if it exists
-            if module_name in self._extra_config_module_map:
-                load_module_name = self._extra_config_module_map[module_name]
-            else:
-                load_module_name = module_name
-
-            component_model_path = os.path.join(self.model_path, load_module_name)
+            load_module_name, component_model_path = self._component_load_target(module_name)
 
             def load_component(load_module_name: str = load_module_name,
                                component_model_path: str = component_model_path,
