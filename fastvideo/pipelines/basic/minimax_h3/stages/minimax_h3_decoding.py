@@ -166,6 +166,15 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         batch.extra.pop(_IDLE_AUDIO_KEY, None)
         placeholder = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
         sp_group, is_output_rank, parallel = _decode_participation(fastvideo_args, fastvideo_args.vae_parallel_decode)
+        if envs.FASTVIDEO_H3_KEEP_DIT_RESIDENT.get() and get_local_torch_device().type == "cuda":
+            # A resident DiT means the lazy-release hook (which empties the caching
+            # allocator) never runs before this stage, so hand the denoise's
+            # reserved-but-unused segments back to the driver before the 2K decode.
+            before = torch.cuda.memory_reserved()
+            torch.cuda.empty_cache()
+            logger.info("MiniMax-H3 decode: resident DiT, empty_cache reserved %.2f -> %.2f GiB, allocated %.2f GiB",
+                        before / 1024**3, torch.cuda.memory_reserved() / 1024**3,
+                        torch.cuda.memory_allocated() / 1024**3)
         if not is_output_rank and not parallel:
             # Consumers read the output rank's ForwardBatch. Keep a
             # verifier-compatible placeholder on other ranks and avoid
