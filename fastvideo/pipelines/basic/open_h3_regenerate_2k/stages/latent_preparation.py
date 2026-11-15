@@ -58,7 +58,8 @@ def _parse_encode_tile(tile_spec: str | None) -> tuple[int, int, int, int] | Non
 
 def _parallel_encode_group(fastvideo_args: FastVideoArgs) -> Any:
     """The sequence-parallel group that shares the draft encode, or ``None`` for a local encode."""
-    if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized() and get_sp_group().world_size > 1:
+    if (getattr(fastvideo_args, "vae_parallel_encode", False) and model_parallel_is_initialized()
+            and get_sp_group().world_size > 1):
         return get_sp_group()
     return None
 
