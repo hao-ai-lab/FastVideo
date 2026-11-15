@@ -525,6 +525,10 @@ def classify_paths(paths: list[str], removed_paths: Iterable[str] = ()) -> Merge
         if path in {".buildkite/scripts/unit_test.sh", ".buildkite/scripts/pr_test.sh"}:
             plan.reasons.append(f"covered by automatic unit Fastcheck: {path}")
             continue
+        if path == ".buildkite/scripts/spark_kernel_sync.sh":
+            # Every Spark-capable Fastcheck lane except DreamVerse sources it.
+            plan.reasons.append(f"covered by automatic Fastcheck: {path}")
+            continue
         if _matches_any(path, SAFE_PATTERNS):
             plan.reasons.append(f"no additional GPU integration needed: {path}")
             continue

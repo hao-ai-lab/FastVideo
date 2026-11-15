@@ -1694,3 +1694,30 @@ def test_existing_image_extension_directory_receives_output(tmp_path, extension,
     result = generator._prepare_output_path(str(directory), "a cat")
     assert result == str(directory / ("a cat_1" + target_extension))
     assert existing.read_bytes() == b"existing image"
+
+
+def test_generate_single_video_writes_a_returned_draft_bundle(tmp_path):
+    from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (BUNDLE_PATH_EXTRA_KEY, BUNDLE_PAYLOAD_EXTRA_KEY,
+                                                                   build_draft_bundle, load_draft_bundle)
+
+    latent = torch.randn(24, 2, 3, 4)
+    bundle = build_draft_bundle(latent=latent, prompt_embeds=None, text_token_tags=None, prompt="a fox",
+                                text_encoder=None)
+    output_batch = _single_video_output_batch(torch.ones((1, 3, 2, 16, 16)) * 0.5,
+                                              extra={BUNDLE_PAYLOAD_EXTRA_KEY: bundle})
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    target = tmp_path / "drafts" / "job.h3draft.pt"
+
+    generator._generate_single_video(
+        prompt="a fox",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+        _extra_overrides={BUNDLE_PATH_EXTRA_KEY: str(target)},
+    )
+
+    loaded = load_draft_bundle(str(target))
+    assert torch.equal(loaded["latent"], latent)
+    assert loaded["prompt"] == "a fox"
+    assert BUNDLE_PAYLOAD_EXTRA_KEY not in output_batch.extra

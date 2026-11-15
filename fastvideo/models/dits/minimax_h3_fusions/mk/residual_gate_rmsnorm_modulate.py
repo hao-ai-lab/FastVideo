@@ -11,6 +11,8 @@ import torch
 import triton
 import triton.language as tl
 
+from .rmsnorm_modulate import _store_mxfp8_row_blocks
+
 H3_NORM_EPS = 1e-5
 
 _BLOCK = 1024
@@ -35,8 +37,13 @@ def _residual_gate_rmsnorm_modulate_kernel(
     stride_gate,
     stride_scale,
     stride_shift,
+    quantized_ptr,
+    scale_out_ptr,
+    scale_column_count,
     BLOCK: tl.constexpr,
     IDENTITY_INDEX: tl.constexpr,
+    QUANT: tl.constexpr,
+    BPP: tl.constexpr,
 ):
     row = tl.program_id(0).to(tl.int64)
     cols = tl.arange(0, BLOCK)
@@ -81,6 +88,17 @@ def _residual_gate_rmsnorm_modulate_kernel(
             output.to(normed_out_ptr.dtype.element_ty),
             mask=m,
         )
+        if QUANT:
+            _store_mxfp8_row_blocks(
+                output.to(tl.bfloat16).to(tl.float32),
+                quantized_ptr,
+                scale_out_ptr,
+                row,
+                c // 32,
+                n_cols,
+                scale_column_count,
+                BPP,
+            )
 
 
 def _row_addressable(table: torch.Tensor) -> torch.Tensor:
@@ -95,8 +113,14 @@ def residual_gate_rmsnorm_modulate(
     scale: torch.Tensor,
     shift: torch.Tensor,
     index: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return ``(hidden, normed)`` exactly as FastVideo's optimized profile does."""
+    prequantize: bool = False,
+):
+    """Return ``(hidden, normed)`` exactly as FastVideo's optimized profile does.
+
+    With ``prequantize=True`` the kernel also writes the MXFP8 image of ``normed`` and returns
+    ``(hidden, normed, quantized, scales)``; the values are bit-identical to a separate
+    ``quantize_mxfp8_blockwise(normed)`` pass.
+    """
     if not residual.is_cuda:
         raise ValueError("h3_residual_gate_rmsnorm_modulate requires CUDA tensors")
     if branch.shape != residual.shape or branch.dtype != residual.dtype:
@@ -113,6 +137,16 @@ def residual_gate_rmsnorm_modulate(
     index = index.contiguous()
     hidden = torch.empty_like(flat_residual)
     modulated = torch.empty_like(flat_residual)
+    if prequantize:
+        scc = triton.cdiv((hidden_size // 32), 4) * 4
+        blocked_size = triton.cdiv(flat_residual.shape[0], 128) * 128 * scc
+        quantized = torch.empty((flat_residual.shape[0], hidden_size), dtype=torch.float8_e4m3fn,
+                                device=flat_residual.device)
+        scales_u8 = torch.empty(blocked_size, dtype=torch.uint8, device=flat_residual.device)
+    else:
+        scc = 4
+        quantized = modulated
+        scales_u8 = modulated
     _residual_gate_rmsnorm_modulate_kernel[(flat_residual.shape[0], )](
         hidden,
         modulated,
@@ -129,9 +163,16 @@ def residual_gate_rmsnorm_modulate(
         gate.stride(0),
         scale.stride(0),
         shift.stride(0),
+        quantized,
+        scales_u8,
+        scc,
         IDENTITY_INDEX=index.numel() == flat_residual.shape[0],
+        QUANT=prequantize,
+        BPP=_BLOCK // 32,
         BLOCK=_BLOCK,
         num_warps=_NUM_WARPS,
         num_stages=_NUM_STAGES,
     )
+    if prequantize:
+        return hidden.view_as(residual), modulated.view_as(residual), quantized, scales_u8.view(torch.float8_e8m0fnu)
     return hidden.view_as(residual), modulated.view_as(residual)

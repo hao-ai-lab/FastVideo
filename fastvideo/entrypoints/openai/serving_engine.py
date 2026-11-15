@@ -37,13 +37,15 @@ class OpenAIServingEngine:
     def __init__(self,
                  generator: ServingGenerator,
                  video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
-                 lora_runtime: LoraRuntime | None = None) -> None:
+                 lora_runtime: LoraRuntime | None = None,
+                 model_manager=None) -> None:
         self._generator = generator
         self._lora_runtime = lora_runtime
         self._video_request_validator = video_request_validator
         self._generation_lock = asyncio.Lock()
         self._closed = False
         self._unhealthy_reason: str | None = None
+        self.model_manager = model_manager
 
     @property
     def generator(self) -> ServingGenerator:
@@ -61,23 +63,26 @@ class OpenAIServingEngine:
     def closed(self) -> bool:
         return self._closed
 
+    def health_status(self) -> tuple[bool, str | None]:
+        """Probe executor liveness once and return ``(healthy, reason)``.
+
+        The executor probe may make a synchronous control-plane call, so callers
+        on the event loop must run it in a worker thread.
+        """
+        if self._closed or self._unhealthy_reason is not None:
+            return False, self._unhealthy_reason or "one or more generation workers are not alive"
+        executor = getattr(self._generator, "executor", None)
+        if executor is None or executor.healthy:
+            return True, None
+        return False, "one or more generation workers are not alive"
+
     @property
     def healthy(self) -> bool:
-        if self._closed or self._unhealthy_reason is not None:
-            return False
-        executor = getattr(self._generator, "executor", None)
-        workers = getattr(executor, "workers", None)
-        if workers is None:
-            return True
-        return bool(workers) and all(worker.proc.is_alive() for worker in workers)
+        return self.health_status()[0]
 
     @property
     def unhealthy_reason(self) -> str | None:
-        if self._unhealthy_reason is not None:
-            return self._unhealthy_reason
-        if not self.healthy:
-            return "one or more generation workers are not alive"
-        return None
+        return self.health_status()[1]
 
     async def generate(
         self,
@@ -87,7 +92,23 @@ class OpenAIServingEngine:
         lora: LoraSelection | None = None,
     ) -> Any:
         """Generate one typed request without blocking the event loop."""
-        return await self.run_serialized(self._generator.generate, request, on_start=on_start, lora=lora)
+
+        def generate_selected():
+            if self.model_manager is not None:
+                from fastvideo.entrypoints.openai.state import request_model_profile
+
+                profile = request_model_profile.get()
+                if profile is None:
+                    raise ValueError("A catalog generation requires a selected model/task")
+                self.model_manager.activate(profile)
+            return self._generator.generate(request)
+
+        return await self.run_serialized(generate_selected, on_start=on_start, lora=lora)
+
+    @property
+    def busy(self) -> bool:
+        """Whether generation or a model lifecycle operation holds the worker."""
+        return self._generation_lock.locked()
 
     async def run_serialized(
         self,

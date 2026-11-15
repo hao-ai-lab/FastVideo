@@ -526,3 +526,31 @@ def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
     firefox_command = re.search(r'npm run e2e(?:\\\n|[^\n])*', arm_branch).group(0)
     assert '--project=firefox' in firefox_command
     assert '--grep' not in firefox_command
+
+
+SPARK_KERNEL_SYNC = 'source "$(dirname "${BASH_SOURCE[0]}")/'
+
+
+def _lane_script(test_type: str) -> Path:
+    if test_type == "unit_test":
+        return REPO_ROOT / ".buildkite/scripts/unit_test.sh"
+    if test_type == "dreamverse_app":
+        return REPO_ROOT / ".buildkite/scripts/lanes/dreamverse.sh"
+    return REPO_ROOT / f".buildkite/scripts/lanes/{test_type}.sh"
+
+
+def test_spark_lanes_sync_the_kernel_to_the_checkout():
+    # The Spark runner installs no kernel of its own, unlike the Slurm worker,
+    # so each Spark-capable lane that loads fastvideo-kernel must sync it.
+    sync = (REPO_ROOT / ".buildkite/scripts/spark_kernel_sync.sh").read_text()
+    assert '"${FASTVIDEO_CI_BACKEND:-}" = spark4' in sync
+    assert "kernel_build_cache.py install" in sync
+    for _, _, test_type, _, step_key, _, _ in SLURM_LANES:
+        if step_key not in SPARK_CAPABLE_LANES or step_key == "dreamverse":
+            continue
+        lines = _lane_script(test_type).read_text().splitlines()
+        relative = "spark_kernel_sync.sh" if test_type == "unit_test" else "../spark_kernel_sync.sh"
+        expected = f'{SPARK_KERNEL_SYNC}{relative}"'
+        assert expected in lines, f"{test_type} lane does not source spark_kernel_sync.sh"
+        assert lines.index(expected) == lines.index("set -euo pipefail") + 1, (
+            f"{test_type} must sync the kernel before running anything")
