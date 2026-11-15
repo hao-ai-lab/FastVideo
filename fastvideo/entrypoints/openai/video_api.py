@@ -10,7 +10,7 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
@@ -40,11 +40,13 @@ from fastvideo.entrypoints.openai.state import (
     get_served_model_name,
     get_server_args,
     get_serving_engine,
+    request_model_profile,
 )
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 from fastvideo.entrypoints.openai.utils import parse_size, save_image_to_path
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_MEDIA_TYPE, BUNDLE_SUFFIX
+from fastvideo.registry import get_preset_selection
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
@@ -314,6 +316,9 @@ def _parse_json_form_value(name: str, value: Any) -> Any:
 
 
 async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
+    cached = getattr(raw_request.state, "parsed_catalog_video", None)
+    if cached is not None:
+        return cached
     content_type = raw_request.headers.get("content-type", "").lower()
     if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
         form = await raw_request.form()
@@ -390,8 +395,36 @@ async def _adapt_request(request_id: str,
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-@router.post("", response_model=VideoResponse)
-@router.post("/generations", response_model=VideoResponse, include_in_schema=False)
+async def _catalog_profile(raw_request: Request):
+    manager = get_serving_engine().model_manager
+    if manager is None:
+        yield
+        return
+    request = await _parse_video_request(raw_request)
+    try:
+        profile = manager.catalog.resolve(request.model, request.task)
+        if not profile.installed:
+            raise ValueError(f"Model {profile.model} is not installed locally")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    # The catalog uses `task` as a profile key; the request-level task selector is only defined
+    # for MiniMax-H3, so drop it for other families before the adapter applies its model-specific check.
+    _, model_family = get_preset_selection(profile.config.generator.model_path)
+    if request.task is not None and model_family != "minimax_h3":
+        request = request.model_copy(update={"task": None})
+    raw_request.state.parsed_catalog_video = request
+    token = request_model_profile.set(profile)
+    try:
+        yield
+    finally:
+        request_model_profile.reset(token)
+
+
+@router.post("", response_model=VideoResponse, dependencies=[Depends(_catalog_profile)])
+@router.post("/generations",
+             response_model=VideoResponse,
+             include_in_schema=False,
+             dependencies=[Depends(_catalog_profile)])
 async def create_video(raw_request: Request) -> VideoResponse:
     """Create an asynchronous video generation job."""
     request = await _parse_video_request(raw_request)
@@ -410,7 +443,7 @@ async def create_video(raw_request: Request) -> VideoResponse:
     return VideoResponse(**job)
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(_catalog_profile)])
 async def create_video_sync(raw_request: Request) -> FileResponse:
     """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)

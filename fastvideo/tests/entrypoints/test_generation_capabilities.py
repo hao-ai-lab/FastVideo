@@ -68,7 +68,8 @@ def test_model_info_exposes_output_constraints_without_generation(monkeypatch):
 
     _family(monkeypatch, "minimax_h3")
     monkeypatch.setattr(common_api, "get_server_args", lambda: SimpleNamespace(model_path="local-model", lora_path=None))
-    monkeypatch.setattr(common_api, "get_serving_engine", lambda: SimpleNamespace(lora_runtime=None))
+    monkeypatch.setattr(common_api, "get_serving_engine", lambda: SimpleNamespace(lora_runtime=None,
+                                                                                   model_manager=None))
     monkeypatch.setattr(common_api, "get_served_model_name", lambda: "custom-omni-alias")
     app = FastAPI()
     app.include_router(common_api.router)
@@ -110,3 +111,24 @@ def test_a_runtime_limits_the_advertised_tasks(monkeypatch):
     result = video_output_capabilities(SimpleNamespace(model_path="local-model", override_pipeline_cls_name=None,
                                                        supported_tasks=("t2va", )))
     assert [entry["task"] for entry in result["tasks"]] == ["t2va"]
+
+
+def test_catalog_model_info_reports_the_profile_capabilities(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fastvideo.entrypoints.openai import common_api
+
+    _family(monkeypatch, "minimax_h3")
+    components = SimpleNamespace(override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline")
+    generator = SimpleNamespace(model_path="local-omni", pipeline=SimpleNamespace(components=components))
+    profile = SimpleNamespace(model="omni", path="omni.yaml", installed=True,
+                              config=SimpleNamespace(generator=generator))
+    manager = SimpleNamespace(catalog=SimpleNamespace(resolve=lambda model, task: profile), active=None)
+    monkeypatch.setattr(common_api, "get_serving_engine", lambda: SimpleNamespace(model_manager=manager))
+    app = FastAPI()
+    app.include_router(common_api.router)
+    with TestClient(app) as client:
+        response = client.get("/v1/model_info", params={"model": "omni", "task": "ref2va"})
+    assert response.status_code == 200
+    capabilities = response.json()["video_output_capabilities"]
+    assert [entry["task"] for entry in capabilities["tasks"]] == ["t2va", "ref2va"]

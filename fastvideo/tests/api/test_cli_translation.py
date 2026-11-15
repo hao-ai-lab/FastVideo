@@ -479,6 +479,7 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
                         output_dir,
                         default_request,
                         served_model_name=None,
+                        model_catalog=None,
                         media_reference_max_bytes=None,
                         media_policy=None):
         captured["fastvideo_args"] = fastvideo_args
@@ -573,6 +574,7 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
                         output_dir,
                         default_request,
                         served_model_name=None,
+                        model_catalog=None,
                         media_reference_max_bytes=None,
                         media_policy=None):
         captured["default_request"] = default_request
