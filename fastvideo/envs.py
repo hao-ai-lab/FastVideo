@@ -517,6 +517,13 @@ FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE = EnvBool(
     "batch_isend_irecv as soon as it is ready, so the Q exchange drains while K/V still project. Unlike a sequence "
     "split this keeps the full GEMM M dimension. Exact tier: same BF16 projection/norm/RoPE values and the same "
     "exchange; only the launch order changes.")
+FASTVIDEO_H3_SOLSP_OUT_PAD_M = EnvInt(
+    0,
+    category="performance",
+    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, pad the attention output's M dimension up to at least this many rows "
+    "before to_out. On sm_121 F.scaled_mm selects a ~3x slower tile for the H3 to_out shape (K=7168, N=5376) when M "
+    "is below ~80000, so padding to 80000 makes the fast tile run and the extra rows are dropped. Row-independent, "
+    "so exact up to the tile's K-reduction order. 0 disables the pad.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",

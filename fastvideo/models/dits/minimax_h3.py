@@ -773,6 +773,23 @@ class MiniMaxH3Attention(nn.Module):
             return exact_kernels.rope_prefix(hidden_states, rotary_emb)
         return self._apply_rotary_emb(hidden_states, rotary_emb)
 
+    def _sol_out_projection(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Run ``to_out`` on the Sol peer output, optionally padding M past the MXFP8 cliff.
+
+        On sm_121 ``F.scaled_mm`` picks a ~3x slower tile for the H3 ``to_out`` shape (K=7168,
+        N=5376) below ``FASTVIDEO_H3_SOLSP_OUT_PAD_M`` rows; the GEMM is row-independent, so
+        running it on zero-padded rows and dropping them makes the fast tile run with identical
+        real rows (up to the tile's K-reduction order). Off by default.
+        """
+        pad_m = envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.get()
+        rows = hidden_states.shape[1]
+        if pad_m and 0 < rows < pad_m and not hasattr(hidden_states, "_mxfp8_prequantized"):
+            padded = torch.nn.functional.pad(hidden_states, (0, 0, 0, pad_m - rows))
+            output, _ = self.to_out(padded)
+            return output[:, :rows]
+        output, _ = self.to_out(hidden_states)
+        return output
+
     def input_quantization_scale(
         self, hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
     ) -> torch.Tensor | None:
@@ -815,7 +832,7 @@ class MiniMaxH3Attention(nn.Module):
             if pipelined is not None:
                 hidden_states = pipelined.flatten(2, 3).type_as(hidden_states)
                 with STAGES.span("out_proj"):
-                    hidden_states, _ = self.to_out(hidden_states)
+                    hidden_states = self._sol_out_projection(hidden_states)
                 return hidden_states
         if (sol_sparse and pre_quantized is None and envs.FASTVIDEO_H3_SOLSP_EXCHANGE.get() == "peer"
                 and int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()) > 1):
@@ -826,7 +843,7 @@ class MiniMaxH3Attention(nn.Module):
             if chunked is not None:
                 hidden_states = chunked.flatten(2, 3).type_as(hidden_states)
                 with STAGES.span("out_proj"):
-                    hidden_states, _ = self.to_out(hidden_states)
+                    hidden_states = self._sol_out_projection(hidden_states)
                 return hidden_states
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
@@ -860,7 +877,7 @@ class MiniMaxH3Attention(nn.Module):
                 use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
                 hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
                 with STAGES.span("out_proj"):
-                    hidden_states, _ = self.to_out(hidden_states)
+                    hidden_states = self._sol_out_projection(hidden_states)
                 return hidden_states
         gate_linear = (self.to_gate_compress if self.to_gate_compress is not None and self._gate_active() else None)
         with STAGES.span("qkv_proj"):
@@ -896,7 +913,7 @@ class MiniMaxH3Attention(nn.Module):
                         qkv, original_seq_len=original_seq_len, attn_metadata=attn_metadata)
                 hidden_states = hidden_states.flatten(2, 3).type_as(qkv)
                 with STAGES.span("out_proj"):
-                    hidden_states, _ = self.to_out(hidden_states)
+                    hidden_states = self._sol_out_projection(hidden_states)
                 return hidden_states
             query = fused_qknorm_rope(query, self.norm_q.weight, cos, sin, self.norm_q.eps)
             key = fused_qknorm_rope(key, self.norm_k.weight, cos, sin, self.norm_k.eps)
