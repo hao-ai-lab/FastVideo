@@ -60,6 +60,10 @@ class ServeSubcommand(CLISubcommand):
             serve_config.server.port,
         )
 
+        from fastvideo.entrypoints.openai.lora import build_lora_runtime
+        lora_runtime = build_lora_runtime(serve_config)
+        lora_kwargs = {} if lora_runtime is None else {"lora_runtime": lora_runtime}
+
         fastvideo_args = generator_config_to_fastvideo_args(serve_config.generator)
         run_server(
             fastvideo_args,
@@ -68,11 +72,13 @@ class ServeSubcommand(CLISubcommand):
             output_dir=serve_config.server.output_dir,
             default_request=serve_config.default_request,
             served_model_name=serve_config.server.served_model_name,
+            model_catalog=serve_config.server.model_catalog,
             media_reference_max_bytes=serve_config.server.media_reference_max_bytes,
             media_policy=MediaPolicy(
                 roots=tuple(serve_config.server.media_roots),
                 allow_private_urls=serve_config.server.allow_private_media_urls,
             ),
+            **lora_kwargs,
         )
 
     def validate(self, args: argparse.Namespace) -> None:

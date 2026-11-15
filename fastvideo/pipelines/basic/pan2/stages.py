@@ -15,6 +15,8 @@ from torch.distributed.tensor import DTensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.models.vision_utils import load_image
+from fastvideo.pipelines.basic.pan2.negative_prompt import render_pan2_default_negative_prompt
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -28,11 +30,31 @@ from fastvideo.utils import PRECISION_TO_TYPE
 _USER_HEADER = "<|im_start|>user\n"
 
 
+def _set_default_negative_prompt(batch: ForwardBatch) -> None:
+    if not getattr(batch, "do_classifier_free_guidance", False) or getattr(batch, "negative_prompt", None):
+        return
+    num_frames = batch.num_frames[0] if isinstance(batch.num_frames, list) else batch.num_frames
+    fps = batch.fps[0] if isinstance(batch.fps, list) else batch.fps
+    batch.negative_prompt = render_pan2_default_negative_prompt(num_frames, fps or 24)
+
+
 class PAN2InputValidationStage(InputValidationStage):
-    """Rejects geometry the PAN2 VAE and patch embedding cannot represent."""
+    """Rejects geometry the PAN2 VAE and patch embedding cannot represent.
+
+    An ``image_path`` first frame is loaded as the reference sampler loads it: the stored pixels, without the rotation
+    of an EXIF orientation tag.
+    """
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        batch = super().forward(batch, fastvideo_args)
+        _set_default_negative_prompt(batch)
+        image_path = batch.image_path
+        if image_path is not None and not image_path.endswith(".mp4"):
+            batch.pil_image = load_image(image_path, exif_transpose=False)
+            batch.image_path = None
+        try:
+            batch = super().forward(batch, fastvideo_args)
+        finally:
+            batch.image_path = image_path
         pipeline_config = fastvideo_args.pipeline_config
         vae_arch = pipeline_config.vae_config.arch_config
         spatial_multiple = vae_arch.spatial_compression_ratio * pipeline_config.dit_config.arch_config.patch_size[1]
@@ -52,7 +74,14 @@ class PAN2TextEncodingStage(TextEncodingStage):
 
     PAN2 conditions on the tokens after the ``<|im_start|>user\\n`` header (the prompt and the assistant header),
     read from the text encoder's hidden states with its last ``text_encoder_skip_layers`` layers skipped.
+
+    An empty or missing negative prompt is replaced by the release's default one, its time ranges set to the clip's
+    duration, as in the reference sampler. A single space encodes the empty unconditional prompt PAN2 trained with.
     """
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        _set_default_negative_prompt(batch)
+        return super().forward(batch, fastvideo_args)
 
     @staticmethod
     def tokenize(tokenizer: Any, prompt: str, system_prompt: str, max_length: int) -> tuple[torch.Tensor, int]:

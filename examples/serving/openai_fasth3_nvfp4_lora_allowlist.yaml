@@ -1,0 +1,47 @@
+# OpenAI-compatible FastH3 V2.1 NVFP4 server with a per-request community LoRA allow-list.
+# Do not combine with generator.pipeline.components.lora_path (a startup adapter); the server refuses both.
+# Clients select an adapter with {"lora": {"name": "<id>", "scale": 0.8}} on POST /v1/videos/sync.
+generator:
+  model_path: /path/to/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer
+  engine:
+    num_gpus: 1
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    offload:
+      dit: true
+      dit_layerwise: true
+      text_encoder: true
+      image_encoder: true
+      vae: true
+      pin_cpu_memory: true
+    compile:
+      enabled: false
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_fasth3_lora_allowlist
+
+lora:
+  adapters:
+    - id: fal/MiniMax-H3-Realism-People-LoRA
+      path: fal/MiniMax-H3-Realism-People-LoRA
+      default_strength: 0.8
+      min_strength: 0.0
+      max_strength: 1.5
+      description: Photoreal people and faces for MiniMax-H3.
+      license: Apache-2.0
+      source_url: https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    height: 768
+    width: 1344
+    num_frames: 124
+    fps: 24
+    # The V2.1 consumer checkpoint samples a 9-point sigma grid for its 8 DMD forwards.
+    num_inference_steps: 9

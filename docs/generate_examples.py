@@ -40,6 +40,7 @@ COOKBOOK_FAMILIES = {
     "qwen_image21",
     "sd35",
     "minimax_h3",
+    "pika_h3_flex",
     "stable_audio",
     "mmaudio",
     "matrixgame",

@@ -39,6 +39,66 @@ they can be evaluated separately. Where the `ptx_blackwell` kernel is unavailabl
 (non-Blackwell GPUs, or a build without it), use `--vsa-kernel triton`; compare outputs and performance before adopting that
 backend. This recipe is T2AV-only, not a distilled `transformer_ref` model.
 
+## Reusing text conditioning for repeated prompts
+
+For a single-rank T2VA pipeline, set
+`pipeline_config.text_conditioning_cache_max_bytes` to a positive CPU byte
+budget. The default is zero, which recomputes conditioning. For example,
+pass `pipeline_config={"text_conditioning_cache_max_bytes": 16777216}` to
+`VideoGenerator.from_pretrained` alongside the model's normal settings.
+Repeated token IDs and tags reuse the same text features across different
+seeds; keyframe and reference inputs always keep their existing paths.
+
+The shared FastH3 example also accepts a seed list and the cache budget:
+
+```bash
+python examples/inference/basic/basic_fasth3_8step.py \
+  --model-path /path/to/FastVideo-FastH3-8-Step-V2 \
+  --prompt 'A slow cinematic drone shot glides over a coastal town; gulls call over the harbor.' \
+  --num-gpus 1 --seeds 1000 1001 1002 --repeats 1 \
+  --text-conditioning-cache-max-bytes 16777216 \
+  --no-lazy-module-load --no-h3-sequential-load \
+  --profile strict --no-inference-torch-compile --no-compile-vae \
+  --no-fa4 --vsa-kernel triton --no-warmup \
+  --output outputs/fasth3-seeds-cached
+```
+
+Use a local snapshot of the full checkpoint. The GPU must fit the chosen
+single-rank recipe; the cache budget covers retained text tensors, not model
+weights. Keeping lazy and sequential loading off preserves the encoder
+instance between requests; rematerializing it invalidates the cache.
+
+`--seeds` runs the list in order on one generator, and `--repeats` repeats
+the whole list. Each measured output includes its run number and seed, so
+repeated seeds have separate files. `--seed` and `--seeds` are mutually
+exclusive. Omitting both preserves the existing single-seed behavior;
+omitting the cache budget keeps reuse disabled. A positive budget requires
+`--num-gpus 1` and is rejected before model loading otherwise. These options
+are shared by the four-step and eight-step examples.
+
+For a cache-off comparison, repeat the same command with the budget set to
+`0` and a different output directory. Keep the checkpoint, prompt, seed list,
+dimensions and other settings fixed. `--no-warmup` includes the first request;
+with the default warmup, that excluded request also conditions the prompt.
+Compare corresponding outputs and per-request timings, not just a median
+across seeds: first-request timings include other cold-start costs, and a
+faster request alone does not prove a text-cache hit or output parity.
+
+The cache retains at most eight entries and only CPU tensors, evicts least
+recently used results to stay within its tensor-byte budget, and does not
+retain a result larger than that budget. Returned features are independent
+copies. Replacing or rematerializing the encoder, changing its dtype, compute device,
+autocast context or float32 matmul precision, or
+calling its root `load_weights` / `load_state_dict` invalidates old results,
+including when loading fails after a partial write. Training bypasses reuse.
+Disable the cache when modifying child modules or parameter storage directly;
+those mutations do not pass through the root loading contract.
+
+Enabling this option on multiple ranks is rejected. It skips Qwen computation
+on a cache hit; sequential loading and offload still prepare the encoder before
+the conditioning stage. It does not reduce weight residency or promise a
+latency improvement for a particular deployment.
+
 ## Export metadata and validation
 
 The export's `fastvideo_inference.json` supplies the trained ladder. The
@@ -198,6 +258,57 @@ forwards. With the DiT sharded, peak allocated memory is about 66 GiB per GPU
 (about 95 GiB in use), against 83 GiB (103 GiB) with a full DiT copy on each
 GPU; the output is identical. Model loading and decoding come on top of this.
 
+## Token reduction
+
+`--token-reduction` is an opt-in, training-free speed mode that follows the
+`--token-reduction` mode of [antirez/h3.c](https://github.com/antirez/h3.c).
+Inside DiT blocks 4 to 29, every two horizontally adjacent tokens of the
+generated video are averaged into one, so those blocks see the video at half
+width. During the first 4 of the 8 forwards, where the coarse layout forms,
+the interval extends to block 39. Before the first full-width block, each
+token gets back its own value plus the update its pair received. Text, audio,
+reference and condition tokens are never paired.
+
+FastH3 8-Step V2 and the OmniRef PDD export both support it:
+
+```bash
+python examples/inference/basic/basic_fasth3_8step.py \
+  --prompt 'Two people walk along a beach at sunset, talking and laughing' \
+  --num-gpus 4 --token-reduction
+
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <OmniRef export> --image reference.png \
+  --prompt '<Picture 1> ...' --num-gpus 4 --token-reduction
+```
+
+In a recipe, set `pipeline.experimental.h3_token_reduction` to
+`{enabled: true}`. The optional keys `blocks`, `early` and `update_scale`
+match the `--token-reduction-blocks`, `--token-reduction-early` and
+`--token-reduction-scale` flags. Malformed values, and intervals past the
+checkpoint's DiT depth, fail before any weights load.
+
+Measured on one GB200 tray with 4 GPUs, 1344x768, 124 frames and BF16
+weights, after warm-up:
+
+| Checkpoint | Denoising, 8 forwards | Whole request |
+|---|---|---|
+| FastH3 8-Step V2, default profile with regional compile | 5.08 s to 3.53 s, 30.6% less | 9.13 s to 7.58 s, 17.0% less |
+| FastH3 8-Step V2, regional compile off | 6.10 s to 4.26 s, 30.2% less | 10.18 s to 8.41 s, 17.4% less |
+| OmniRef PDD with one image reference, eager | 12.07 s to 9.33 s, 22.7% less | 24.67 s to 21.62 s, 12.3% less |
+
+The saving follows how many rows the middle blocks drop. A V2 request has a
+short text and audio prefix, so the reduced blocks see about half the rows.
+An OmniRef request also carries the reference tokens, which stay unpaired, so
+it saves less. Decoding takes the same time either way.
+
+The reduced video keeps the quality of the unreduced one, but it is not the
+same video. Most scenes keep their overall layout, while details can change,
+such as one of two people in a scene or the venue of a concert. The
+checkpoints were not trained with token reduction, and fine-tuning with it
+enabled is the expected way to keep the original shot. Only the GB200 BF16
+path has been validated so far; the NVFP4 and FP8 consumer profiles have not
+been tested with it.
+
 ## Apple Silicon
 
 `mlx_fasth3.py` stays on FastH3 V1 and its uniform AdaLN cache.
@@ -212,3 +323,4 @@ Install is in the
 [MLX install guide](../getting_started/installation/mlx.md). Generation and
 serving are in the [MiniMax H3 cookbook](../cookbook/minimax-h3.md) and the
 [H3 server guide](../cookbook/openai-api.md).
+Note: main's own prompt-embeds reuse (blake2b-keyed) supersedes parts of this opt-in cache; keep both only if the token-budgeted LRU remains needed.

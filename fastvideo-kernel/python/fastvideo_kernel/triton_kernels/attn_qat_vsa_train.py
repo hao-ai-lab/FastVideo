@@ -141,9 +141,9 @@ def _key_ok(KV_VALID, n_block, cols, HAS_VALID: tl.constexpr, HALF: tl.constexpr
 
 
 @triton.jit
-def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, BIAS, QGROUP, n_groups, seq_len, n_qblocks,
-                list_width, scale_log2, OFFSET: tl.constexpr, QUANT: tl.constexpr, HAS_VALID: tl.constexpr,
-                HAS_BIAS: tl.constexpr, FLOOR: tl.constexpr, FLOOR_VALUE: tl.constexpr, HIGH_PREC_O: tl.constexpr,
+def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, Q2K_QUAD, BIAS, QGROUP, n_groups, seq_len,
+                n_qblocks, list_width, scale_log2, OFFSET: tl.constexpr, QUANT: tl.constexpr, HAS_VALID: tl.constexpr,
+                HAS_QUAD: tl.constexpr, HAS_BIAS: tl.constexpr, FLOOR: tl.constexpr, FLOOR_VALUE: tl.constexpr, HIGH_PREC_O: tl.constexpr,
                 SAVE_MRUN: tl.constexpr,
                 D: tl.constexpr, ROWS: tl.constexpr, BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
@@ -174,18 +174,28 @@ def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, BIAS, QG
         if HAS_BIAS:  # per-key score correction (Q smoothing: mu_q . k_j, high precision)
             s = s + tl.load(bias_row + keys)[None, :]
         ok = _key_ok(KV_VALID, n_block, offs_n, HAS_VALID, BLOCK_N // 2)
+        if HAS_QUAD:
+            quad = tl.load(Q2K_QUAD + meta * list_width + slot).to(tl.int32)
+            qh = pid % halves
+            bit = tl.where(offs_n < ROWS, (quad >> (qh * 2)) & 1, (quad >> (qh * 2 + 1)) & 1)
+            ok = ok & (bit != 0)
         s = tl.where(ok[None, :], s, float("-inf"))
         group_max = tl.max(tl.reshape(s, (ROWS, BLOCK_N // 16, 16)), axis=2)
         if FLOOR:
             group_max = tl.where(it == 0, tl.maximum(group_max, FLOOR_VALUE), group_max)
         m_new = tl.maximum(m_i, tl.max(group_max, axis=1))
+        # Tile 64 pairs two query halves per block, so a listed block can have no selected keys for this half:
+        # both maxima are -inf and exp2(-inf - -inf) is NaN. Keep the running state and emit zero probabilities.
+        empty = m_new == float("-inf")
         m_scaled = m_new * scale_log2 + OFFSET
-        alpha = tl.math.exp2((m_i - m_new) * scale_log2)
+        alpha = tl.where(empty, 0.0, tl.math.exp2((m_i - m_new) * scale_log2))
         if QUANT:
             p_tilde, p_hat = _quantized_p(s, m_scaled, it == 0, scale_log2, FLOOR, FLOOR_VALUE, ROWS, BLOCK_N)
         else:
             p_tilde = tl.math.exp2(s * scale_log2 - m_scaled[:, None])
             p_hat = p_tilde
+        p_tilde = tl.where(empty[:, None], 0.0, p_tilde)
+        p_hat = tl.where(empty[:, None], 0.0, p_hat)
         l_i = l_i * alpha + tl.sum(p_tilde, axis=1)
         v = tl.load(V + base + keys[:, None] * D + offs_d[None, :])
         acc = acc * alpha[:, None] + tl.dot(p_hat.to(tl.bfloat16), v)
@@ -202,9 +212,9 @@ def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, BIAS, QG
 
 
 @triton.jit
-def _bwd_dq_kernel(Q, K, V, DO, LSE, DELTA, DQ, Q2K_IDX, Q2K_NUM, KV_VALID, seq_len, n_qblocks, list_width,
-                   scale_log2, sm_scale, HAS_VALID: tl.constexpr, D: tl.constexpr, ROWS: tl.constexpr,
-                   BLOCK_N: tl.constexpr):
+def _bwd_dq_kernel(Q, K, V, DO, LSE, DELTA, DQ, Q2K_IDX, Q2K_NUM, KV_VALID, Q2K_QUAD, seq_len, n_qblocks,
+                   list_width, scale_log2, sm_scale, HAS_VALID: tl.constexpr, HAS_QUAD: tl.constexpr,
+                   D: tl.constexpr, ROWS: tl.constexpr, BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
     bh = tl.program_id(1).to(tl.int64)
     halves: tl.constexpr = BLOCK_N // ROWS
@@ -229,7 +239,13 @@ def _bwd_dq_kernel(Q, K, V, DO, LSE, DELTA, DQ, Q2K_IDX, Q2K_NUM, KV_VALID, seq_
         v = tl.load(V + base + keys[:, None] * D + offs_d[None, :])
         s = tl.dot(q, tl.trans(k))
         ok = _key_ok(KV_VALID, n_block, cols, HAS_VALID, BLOCK_N // 2)
-        p = tl.where(ok[None, :], tl.math.exp2(s * scale_log2 - lse[:, None]), 0.0)
+        if HAS_QUAD:
+            quad = tl.load(Q2K_QUAD + meta * list_width + (it // halves)).to(tl.int32)
+            bit = (quad >> ((pid % halves) * 2 + (it % halves))) & 1
+            ok = ok & (bit != 0)
+        # A row with no valid keys has lse = -inf; clamp it so it contributes zero instead of NaN.
+        lse_safe = tl.where(lse == float("-inf"), 0.0, lse)
+        p = tl.where(ok[None, :], tl.math.exp2(s * scale_log2 - lse_safe[:, None]), 0.0)
         dp = tl.dot(do, tl.trans(v))
         ds = p * (dp - delta[:, None])
         dq += tl.dot(ds.to(tl.bfloat16), k)
@@ -237,10 +253,11 @@ def _bwd_dq_kernel(Q, K, V, DO, LSE, DELTA, DQ, Q2K_IDX, Q2K_NUM, KV_VALID, seq_
 
 
 @triton.jit
-def _bwd_dkdv_kernel(Q, K, V, DO, LSE, DELTA, MRUN, DK, DV, K2Q_IDX, K2Q_SLOT, K2Q_NUM, Q2K_NUM, KV_VALID, seq_len,
-                     n_qblocks, n_kblocks, list_width, scale_log2, sm_scale, OFFSET: tl.constexpr,
-                     QUANT: tl.constexpr, HAS_VALID: tl.constexpr, FLOOR: tl.constexpr,
-                     FLOOR_VALUE: tl.constexpr, D: tl.constexpr, ROWS: tl.constexpr, BLOCK_N: tl.constexpr):
+def _bwd_dkdv_kernel(Q, K, V, DO, LSE, DELTA, MRUN, DK, DV, K2Q_IDX, K2Q_SLOT, K2Q_NUM, Q2K_NUM, KV_VALID,
+                     Q2K_QUAD, seq_len, n_qblocks, n_kblocks, list_width, scale_log2, sm_scale,
+                     OFFSET: tl.constexpr, QUANT: tl.constexpr, HAS_VALID: tl.constexpr, HAS_QUAD: tl.constexpr,
+                     FLOOR: tl.constexpr, FLOOR_VALUE: tl.constexpr, D: tl.constexpr, ROWS: tl.constexpr,
+                     BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
     bh = tl.program_id(1).to(tl.int64)
     halves: tl.constexpr = BLOCK_N // ROWS
@@ -268,15 +285,22 @@ def _bwd_dkdv_kernel(Q, K, V, DO, LSE, DELTA, MRUN, DK, DV, K2Q_IDX, K2Q_SLOT, K
         lse = tl.load(LSE + bh * seq_len + rows)
         delta = tl.load(DELTA + bh * seq_len + rows)
         s = tl.dot(q, tl.trans(k))
-        s = tl.where(ok[None, :], s, float("-inf"))
-        p = tl.math.exp2(s * scale_log2 - lse[:, None])
+        if HAS_QUAD:
+            quad = tl.load(Q2K_QUAD + (bh * n_qblocks + m_block) * list_width + slot).to(tl.int32)
+            bit = (quad >> ((it % halves) * 2 + (pid % halves))) & 1
+            s = tl.where(ok[None, :] & (bit != 0), s, float("-inf"))
+        else:
+            s = tl.where(ok[None, :], s, float("-inf"))
+        lse_safe = tl.where(lse == float("-inf"), 0.0, lse)
+        p = tl.math.exp2(s * scale_log2 - lse_safe[:, None])
         if QUANT:
             qmeta = bh * n_qblocks + m_block
             first_visit = slot == tl.load(Q2K_NUM + qmeta) - 1
             m_run = tl.load(MRUN + (qmeta * list_width + slot) * BLOCK_N + row0 + offs_r)
-            m_scaled = m_run * scale_log2 + OFFSET
+            m_ok = m_run != float("-inf")
+            m_scaled = tl.where(m_ok, m_run * scale_log2 + OFFSET, 0.0)
             _, p_hat = _quantized_p(s, m_scaled, first_visit, scale_log2, FLOOR, FLOOR_VALUE, ROWS, ROWS)
-            weight = p_hat * tl.math.exp2(m_scaled - lse)[:, None]
+            weight = tl.where(m_ok[:, None], p_hat * tl.math.exp2(m_scaled - lse_safe)[:, None], 0.0)
         else:
             weight = p
         dv += tl.dot(tl.trans(weight.to(tl.bfloat16)), do)
@@ -290,8 +314,8 @@ def _bwd_dkdv_kernel(Q, K, V, DO, LSE, DELTA, MRUN, DK, DV, K2Q_IDX, K2Q_SLOT, K
 class _FP4VSAAttnQAT(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, q2k_idx, q2k_num, kv_valid, quantize, quantize_pv, two_level_p, first_block_max_floor,
-                sm_scale, high_prec_o, key_bias=None, q_group=None, need_backward=False):  # type: ignore[override]
+    def forward(ctx, q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize, quantize_pv, two_level_p,
+                first_block_max_floor, sm_scale, high_prec_o, key_bias=None, q_group=None, need_backward=False):  # type: ignore[override]
         batch, heads, seq_len, dim = q.shape
         if seq_len % BLOCK or dim not in (64, 128):
             raise ValueError(f"need L % {BLOCK} == 0 and D in (64, 128), got L={seq_len}, D={dim}")
@@ -306,6 +330,8 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
         q2k_num = q2k_num.to(torch.int32).contiguous()
         has_valid = kv_valid is not None
         kv_valid_arg = kv_valid.to(torch.int32).contiguous() if has_valid else q2k_num
+        has_quad = q2k_quad is not None
+        q2k_quad_arg = q2k_quad.to(torch.uint8).contiguous() if has_quad else q2k_idx
         width = q2k_idx.shape[-1]
         out = torch.empty_like(q_hat)
         out_hp = torch.empty_like(q_hat) if high_prec_o else out
@@ -326,15 +352,17 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
             q_group = (q_group if q_group is not None else torch.zeros(n_blocks, dtype=torch.int32,
                                                                        device=q.device)).to(torch.int32).contiguous()
         grid = (n_blocks * (BLOCK // _ROWS), batch * heads)
-        _fwd_kernel[grid](q_hat, k_hat, v_hat, out, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg,
+        _fwd_kernel[grid](q_hat, k_hat, v_hat, out, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg, q2k_quad_arg,
                           key_bias if has_bias else lse, q_group if has_bias else q2k_num,
                           key_bias.shape[2] if has_bias else 1, seq_len, n_blocks, width, scale_log2, OFFSET=offset,
-                          QUANT=bool(quantize), HAS_VALID=has_valid, HAS_BIAS=has_bias, FLOOR=floor, FLOOR_VALUE=float(first_block_max_floor or 0.0),
+                          QUANT=bool(quantize), HAS_VALID=has_valid, HAS_QUAD=has_quad, HAS_BIAS=has_bias, FLOOR=floor, FLOOR_VALUE=float(first_block_max_floor or 0.0),
                           HIGH_PREC_O=bool(high_prec_o), SAVE_MRUN=save_mrun, D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS,
                           num_stages=2)
         if need_backward:
-            ctx.save_for_backward(q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg)
-        ctx.options = (bool(quantize), has_valid, floor, float(first_block_max_floor or 0.0), offset, sm_scale)
+            ctx.save_for_backward(q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg,
+                                  q2k_quad_arg)
+        ctx.options = (bool(quantize), has_valid, has_quad, floor, float(first_block_max_floor or 0.0), offset,
+                       sm_scale)
         ctx.has_bias = has_bias
         return out
 
@@ -342,8 +370,8 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
     def backward(ctx, grad_out):  # type: ignore[override]
         if ctx.has_bias:
             raise NotImplementedError("the Q-smoothing score bias is an eval-only emulator option (no backward)")
-        q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid = ctx.saved_tensors
-        quantize, has_valid, floor, floor_value, offset, sm_scale = ctx.options
+        q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid, q2k_quad = ctx.saved_tensors
+        quantize, has_valid, has_quad, floor, floor_value, offset, sm_scale = ctx.options
         batch, heads, seq_len, dim = q_hat.shape
         n_blocks = seq_len // BLOCK
         width = q2k_idx.shape[-1]
@@ -355,15 +383,15 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
         dv = torch.empty_like(v_hat)
         scale_log2 = sm_scale * LOG2E
         grid = (n_blocks * (BLOCK // _ROWS), batch * heads)
-        _bwd_dq_kernel[grid](q_hat, k_hat, v_hat, grad_out, lse, delta, dq, q2k_idx, q2k_num, kv_valid, seq_len,
-                             n_blocks, width, scale_log2, sm_scale, HAS_VALID=has_valid, D=dim, ROWS=_ROWS,
-                             BLOCK_N=BLOCK, num_warps=_WARPS, num_stages=2)
+        _bwd_dq_kernel[grid](q_hat, k_hat, v_hat, grad_out, lse, delta, dq, q2k_idx, q2k_num, kv_valid, q2k_quad,
+                             seq_len, n_blocks, width, scale_log2, sm_scale, HAS_VALID=has_valid,
+                             HAS_QUAD=has_quad, D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS, num_stages=2)
         _bwd_dkdv_kernel[grid](q_hat, k_hat, v_hat, grad_out, lse, delta, m_run, dk, dv, k2q_idx, k2q_slot, k2q_num,
-                               q2k_num, kv_valid, seq_len, n_blocks, n_blocks, width, scale_log2, sm_scale,
-                               OFFSET=offset, QUANT=quantize, HAS_VALID=has_valid, FLOOR=floor,
+                               q2k_num, kv_valid, q2k_quad, seq_len, n_blocks, n_blocks, width, scale_log2, sm_scale,
+                               OFFSET=offset, QUANT=quantize, HAS_VALID=has_valid, HAS_QUAD=has_quad, FLOOR=floor,
                                FLOOR_VALUE=floor_value, D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS,
                                num_stages=2)
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 def _hadamard(dim: int, device: torch.device) -> torch.Tensor:
@@ -426,6 +454,7 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
                      q2k_idx: torch.Tensor,
                      q2k_num: torch.Tensor,
                      kv_valid: torch.Tensor | None = None,
+                     q2k_quad: torch.Tensor | None = None,
                      *,
                      quantize: bool = True,
                      quantize_pv: bool = True,
@@ -442,7 +471,8 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
 
     ``q``/``k``/``v`` are ``[B, H, L, D]`` (L a multiple of 128, tile-ordered,
     pad rows zero); the lists are ``vsa_tile_mask_to_fp4_blocks(mask, 128, vbs)``
-    outputs (``q2k_quad`` must be None: 128-token tiles map 1:1 onto blocks).
+    outputs (``q2k_quad`` is None for 128-token tiles, which map 1:1 onto
+    blocks, and carries the four 64x64 quadrant bits for 64-token tiles).
     ``smooth_k`` subtracts each head's token mean from K first (exact for
     softmax, differentiable through autograd). ``quantize_pv=False`` quantizes
     Q/K only and keeps P and V in BF16 (the FA4 NVFP4-QK + BF16-PV kernel).
@@ -483,7 +513,7 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
     # Capture the caller's grad mode here, including no_grad on grad-enabled inputs.
     need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
     if not (hadamard or smooth_q or prefix_precision):
-        return _FP4VSAAttnQAT.apply(q, k, v, q2k_idx, q2k_num, kv_valid, quantize, quantize_pv, two_level_p,
+        return _FP4VSAAttnQAT.apply(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize, quantize_pv, two_level_p,
                                     first_block_max_floor, scale, high_prec_o, None, None, need_backward)
     n_blocks = q.shape[2] // BLOCK
     hp_tiles = min(int(num_prefix_tiles or 0), n_blocks) if prefix_precision else 0
@@ -500,14 +530,14 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
         n_groups = 2 if smooth_q == "segment" else 1
         groups = _query_groups(n_blocks, num_prefix_tiles, smooth_q == "segment", q.device)
         q_lo, bias = _smooth_queries(q_lo, k_lo, groups, n_groups)
-    out = _FP4VSAAttnQAT.apply(q_lo, k_lo, v, q2k_idx, num_fp4, kv_valid, quantize, quantize_pv, two_level_p,
+    out = _FP4VSAAttnQAT.apply(q_lo, k_lo, v, q2k_idx, num_fp4, kv_valid, q2k_quad, quantize, quantize_pv, two_level_p,
                                first_block_max_floor, scale, high_prec_o, bias, groups, need_backward)
     if not hp_tiles:
         return out
     num_hp = q2k_num - num_fp4
     hp_quant = {"bf16": lambda t: t, "fp8": fp8_per_token_fake_quant, "mxfp8": mxfp8_fake_quant}[prefix_precision]
     q_hp, k_hp = hp_quant(q), hp_quant(k)
-    out_hp = _FP4VSAAttnQAT.apply(q_hp, k_hp, v, q2k_idx, num_hp, kv_valid, False, True, False, None, scale,
+    out_hp = _FP4VSAAttnQAT.apply(q_hp, k_hp, v, q2k_idx, num_hp, kv_valid, q2k_quad, False, True, False, None, scale,
                                   high_prec_o, None, None, need_backward)
     return out + out_hp
 

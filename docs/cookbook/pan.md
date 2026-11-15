@@ -5,16 +5,18 @@
 Generate a video from text, or from a first frame, with `IFM/PAN2`. One pipeline
 serves both modes: leave out the first frame for text-to-video and supply one
 for image-to-video. The defaults are 704×1248, 313 frames (13 s at 24 fps),
-50 steps and guidance 3.0. See [PAN 2 Text/Image to Video](../inference/pan2.md)
+50 steps, guidance 2.5 and PAN 2's default negative prompt. See [PAN 2 Text/Image to Video](../inference/pan2.md)
 for the model, sampler and parallelism details.
 
 ## Run on a GPU
 
 Follow the [CUDA installation guide](../getting_started/installation/gpu.md), then run
-from the repository root. The full `IFM/PAN2` checkpoint is not public yet; pass a
-local directory or private repo you can access with `PAN2_MODEL_PATH`.
+from the repository root. Set `PAN2_MODEL_PATH` to run from a local copy of the
+checkpoint. PAN 2 runs with its prompt and video guardrails by default, so install
+them first (see [Guardrails](../inference/pan2.md#guardrails)):
 
 ```bash
+pip install git+https://github.com/ifm-ai/pan2-guardrail
 python examples/inference/basic/basic_pan2.py
 ```
 
@@ -71,6 +73,4 @@ Both recipes are **Source-backed**: the model ID, example and serving YAML are
 checked against each other, and the serving defaults are tested against the
 registered `pan2_t2v` preset. No GPU generation, memory measurement or HTTP
 client run is recorded, so hardware fit and throughput are unknown. Numerical
-parity with the reference implementation is checked on CPU with a public
-random-weight checkpoint, which verifies the port and produces noise rather than
-useful video.
+parity with the reference implementation is checked by the PAN 2 parity tests.

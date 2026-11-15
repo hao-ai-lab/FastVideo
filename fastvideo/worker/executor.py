@@ -73,6 +73,11 @@ class Executor(ABC):
         raise ValueError(f"Unsupported distributed executor backend: {backend}")
 
     @property
+    def healthy(self) -> bool:
+        """Whether the executor can accept work, without scheduling a generation RPC."""
+        return True
+
+    @property
     def is_output_rank(self) -> bool:
         """Whether this process owns user-facing generated outputs."""
         return True
@@ -119,6 +124,13 @@ class Executor(ABC):
         Unmerge the LoRA weights for the workers.
         """
         raise NotImplementedError
+
+    def clear_lora_adapter(self) -> None:
+        """Return every worker's LoRA layers to the base weights."""
+        responses: list[dict[str, Any]] = self.collective_rpc("clear_lora_adapter", kwargs={})
+        for i, response in enumerate(responses):
+            if response["status"] != "lora_adapter_cleared":
+                raise RuntimeError(f"Worker {i} failed to clear the LoRA adapter: {response['status']}")
 
     @abstractmethod
     def merge_lora_weights(self) -> None:

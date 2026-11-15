@@ -57,6 +57,7 @@ def test_pan2_pipeline_requests_fp32_latents(monkeypatch):
                  "PAN2ConditioningStage", "PAN2DenoisingStage", "DecodingStage"):
         monkeypatch.setattr(pan2_pipeline, name, _Stage)
     monkeypatch.setattr(pan2_pipeline, "LatentPreparationStage", _Stage)
+    monkeypatch.setattr(pan2_pipeline, "PAN2Guardrails", lambda **kwargs: None)
     pipeline = pan2_pipeline.PAN2Pipeline.__new__(pan2_pipeline.PAN2Pipeline)
     stages = {}
     pipeline.add_stage = lambda stage_name, stage: stages.__setitem__(stage_name, stage)
@@ -65,3 +66,27 @@ def test_pan2_pipeline_requests_fp32_latents(monkeypatch):
     pipeline.create_pipeline_stages(None)
 
     assert any(kwargs.get("latent_dtype") is torch.float32 for kwargs in seen["kwargs"])
+
+
+def test_pan2_pipeline_applies_its_performance_switches(monkeypatch):
+    for name in ("PAN2InputValidationStage", "PAN2TextEncodingStage", "PAN2TimestepPreparationStage",
+                 "PAN2ConditioningStage", "PAN2DenoisingStage", "DecodingStage", "LatentPreparationStage"):
+        monkeypatch.setattr(pan2_pipeline, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(pan2_pipeline, "PAN2Guardrails", lambda **kwargs: None)
+
+    class _Transformer:
+        fused = None
+
+        def set_fused_kernels(self, enabled):
+            self.fused = enabled
+
+    modules = {"transformer": _Transformer(), "vae": types.SimpleNamespace(config=types.SimpleNamespace(decode_kernel=False))}
+    pipeline = pan2_pipeline.PAN2Pipeline.__new__(pan2_pipeline.PAN2Pipeline)
+    pipeline.add_stage = lambda stage_name, stage: None
+    pipeline.get_module = modules.get
+    config = types.SimpleNamespace(dit_fused_kernels=True, vae_decode_kernel=True, vae_decode_kernel_parallel=False)
+
+    pipeline.create_pipeline_stages(types.SimpleNamespace(pipeline_config=config))
+
+    assert modules["transformer"].fused is True
+    assert modules["vae"].config.decode_kernel is True and modules["vae"].config.decode_kernel_parallel is False

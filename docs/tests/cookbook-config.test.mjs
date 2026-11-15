@@ -16,6 +16,27 @@ import {
 
 const require = createRequire(import.meta.url);
 
+test("configuration output rejects ignored decoder overrides and incompatible quantization profiles", () => {
+  const data = catalog();
+  data.base_config.generator.pipeline.experimental = {
+    video_decode_backend: "taeh3",
+    h3_vae_nvfp4_decoder: "decoder.safetensors",
+  };
+  assert.throws(
+    () => resolveConfig(data),
+    (error) => {
+      assert.equal(error.path, "generator.pipeline.experimental.h3_vae_nvfp4_decoder");
+      return /TAEH3 uses its own decoder/.test(error.message);
+    },
+  );
+  data.base_config.generator.pipeline.experimental.h3_vae_nvfp4_decoder = null;
+  assert.doesNotThrow(() => resolveConfig(data));
+  data.base_config.generator.engine.quantization = { transformer_quant: "FP8", layer_profile: "h3_dit_vsa" };
+  assert.throws(() => resolveConfig(data), /requires NVFP4/);
+  data.base_config.generator.engine.quantization.transformer_quant = "NVFP4";
+  assert.doesNotThrow(() => resolveConfig(data));
+});
+
 function catalog() {
   return {
     id: "example/rest",
@@ -488,6 +509,7 @@ test("sample requests follow shared workload media", () => {
     t2i: { endpoint: /\/v1\/images\/generations/, output: /--output output\.json/, reference: null },
     t2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: null },
     v2a: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.wav/, reference: "video_reference" },
+    v2v: { endpoint: /\/v1\/videos\/sync/, output: /--output output\.mp4/, reference: "video_reference" },
   };
   for (const [workload, expected] of Object.entries(expectations)) {
     const data = catalog();

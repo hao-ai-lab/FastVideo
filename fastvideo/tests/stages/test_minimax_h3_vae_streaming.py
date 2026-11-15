@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import fastvideo.envs as envs
 import torch
 
 from fastvideo.pipelines.basic.minimax_h3 import encoder_split
@@ -74,7 +75,8 @@ def test_reference_video_encode_keeps_pixels_on_cpu() -> None:
     assert rows[0].shape == (7 * 4 * 4, 4)
 
 
-def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
+def test_decode_stage_uses_cpu_output_buffer(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(False))
     latent_shape = (1, 4, 2, 4, 4)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
@@ -128,7 +130,8 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
     assert torch.equal(result.output, expected)
 
 
-def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
+def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(False))
     latent_shape = (1, 4, 2, 4, 4)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
@@ -177,10 +180,52 @@ def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
     }
 
 
+def test_decode_stage_streams_uint8_by_default(monkeypatch, env_overrides) -> None:
+    latent_shape = (1, 4, 2, 4, 4)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
+    batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+    observed = {}
+
+    class VAE:
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+        def decode_to_pixels(self, decoded_latents, output):
+            observed["dtype"] = output.dtype
+            output.fill_(63)
+
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(None))
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    result = MiniMaxH3VideoDecodingStage(VAE()).forward(
+        batch,
+        SimpleNamespace(
+            output_type="pil",
+            pin_cpu_memory=False,
+            vae_cpu_offload=False,
+            vae_parallel_decode=False,
+            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+        ),
+    )
+
+    assert observed["dtype"] == torch.uint8
+    assert torch.equal(result.output, torch.full((1, 3, 5, 16, 16), 63, dtype=torch.uint8))
+
+
+@pytest.mark.parametrize("uint8_pixels", [False, True])
 @pytest.mark.parametrize("unified_memory", [True, False])
-def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory) -> None:
+def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch, unified_memory,
+                                                                     uint8_pixels, env_overrides) -> None:
     """On unified memory, same-geometry requests reuse one pre-touched CPU buffer; returned
     frames never alias it. Discrete GPUs allocate per request and hold nothing between them."""
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_UINT8_PIXELS.override(uint8_pixels))
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     allocations = []
@@ -200,12 +245,13 @@ def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch
             return (1, 3, 5, 16, 16)
 
         def decode_to_pixels(self, decoded_latents, output):
-            buffers.append((output, bool(torch.isnan(output).any())))
-            output.fill_(VAE.fill)
+            poisoned = bool(torch.isnan(output).any()) if output.is_floating_point() else bool((output == 255).any())
+            buffers.append((output, poisoned))
+            output.fill_(VAE.fill if output.is_floating_point() else round(VAE.fill * 255 - 0.5))
 
     def fake_allocate(size, *, dtype=None, pin_memory=False):
         allocations.append(size)
-        return torch.full(size, float("nan"), dtype=dtype)
+        return torch.full(size, float("nan") if dtype.is_floating_point else 255, dtype=dtype)
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
@@ -235,6 +281,7 @@ def test_decode_stage_reuses_its_pixel_buffer_only_on_unified_memory(monkeypatch
         assert buffers[0][0] is not buffers[1][0]
         assert stage._output_buffer is None
     assert torch.equal(first, torch.full_like(first, 63)) and torch.equal(second, torch.full_like(second, 127))
+    assert first.data_ptr() != second.data_ptr()
 
 
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
@@ -422,3 +469,92 @@ def test_encoder_split_decodes_in_the_denoise_group_on_its_first_rank(monkeypatc
                         lambda: SimpleNamespace(is_first_rank=True, world_size=1, rank_in_group=0, ranks=[0]))
     result = MiniMaxH3VideoDecodingStage(EncoderRankVAE()).forward(ForwardBatch(data_type="video"), args)
     assert result.output.shape == (0, 3, 0, 0, 0)
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+@pytest.mark.parametrize("use_idle_slot", [True, False])
+def test_idle_audio_preserves_request_and_output_ownership(monkeypatch, rank, use_idle_slot) -> None:
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_decoding import MiniMaxH3AudioDecodingStage
+
+    calls = []
+    waveform = torch.arange(16, dtype=torch.float32).reshape(8, 2)
+    audio = MiniMaxH3AudioDecodingStage(SimpleNamespace(sampling_rate=32000))
+
+    def decode_audio(batch, args):
+        assert not torch.is_autocast_enabled("cpu")
+        assert batch.latents is not None and batch.audio_latents is not None
+        calls.append(batch)
+        return waveform.clone(), 32000
+
+    audio.decode_audio = decode_audio
+    group = SimpleNamespace(world_size=2, rank_in_group=rank)
+
+    def broadcast(value, src):
+        assert src == 1
+        if rank == 1 and use_idle_slot:
+            torch.testing.assert_close(value[0], waveform, atol=0, rtol=0)
+        return (waveform.clone(), 32000) if use_idle_slot else None
+
+    group.broadcast_object = broadcast
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group", lambda: group)
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "h3_is_output_worker", lambda args: rank == 0)
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    saved = []
+    for _ in range(2):
+        batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4),
+                             latents=torch.ones(2, 4), audio_latents=torch.ones(2, 4))
+        args = SimpleNamespace(vae_cpu_offload=False)
+        callback = video._idle_audio_callback(batch, args, group, torch.device("cpu"))
+        assert (callback is not None) == (rank == 1)
+        if callback is not None and use_idle_slot:
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                callback()
+        assert batch.latents is not None and batch.audio_latents is not None
+        result = audio.forward(batch, SimpleNamespace())
+        saved.append(result.extra["audio"])
+        assert result.latents is None and result.audio_latents is None
+        assert not any(key.startswith("minimax_h3_") for key in result.extra)
+        assert result.extra["audio_sample_rate"] == 32000
+        assert result.extra["audio"].shape == ((8, 2) if rank == 0 else (0, 2))
+    assert len(calls) == (2 if (rank == 1 and use_idle_slot) or (rank == 0 and not use_idle_slot) else 0)
+    if rank == 0:
+        torch.testing.assert_close(saved[0], waveform, atol=0, rtol=0)
+
+
+def test_failed_idle_audio_returns_and_falls_back_to_serial_decode(monkeypatch) -> None:
+    from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_decoding import MiniMaxH3AudioDecodingStage
+
+    def fail(batch, args):
+        raise torch.OutOfMemoryError("idle-slot audio decode")
+
+    audio = MiniMaxH3AudioDecodingStage(SimpleNamespace(sampling_rate=32000))
+    audio.decode_audio = fail
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    group = SimpleNamespace(world_size=2, rank_in_group=1)
+    batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4),
+                         latents=torch.ones(2, 4), audio_latents=torch.ones(2, 4))
+    callback = video._idle_audio_callback(batch, SimpleNamespace(vae_cpu_offload=False), group, torch.device("cpu"))
+    callback()
+    assert batch.extra[minimax_h3_decoding._IDLE_AUDIO_KEY] is None
+
+    broadcasts = []
+    group.broadcast_object = lambda value, src: broadcasts.append((value, src)) or value
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group", lambda: group)
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "h3_is_output_worker", lambda args: True)
+    waveform = torch.ones(8, 2)
+    audio.decode_audio = lambda batch, args: (waveform, 32000)
+    result = audio.forward(batch, SimpleNamespace())
+    assert broadcasts == [(None, 1)]
+    assert result.extra["audio"] is waveform
+
+
+def test_idle_audio_stays_off_under_vae_cpu_offload() -> None:
+    audio = SimpleNamespace(decode_audio=lambda batch, args: pytest.fail("audio must wait for the video unload"))
+    video = MiniMaxH3VideoDecodingStage(SimpleNamespace(_temporal_decode_plan=lambda frames: (0, 3, 20)), audio)
+    group = SimpleNamespace(world_size=2, rank_in_group=1)
+    batch = ForwardBatch(data_type="video", raw_latent_shape=(1, 4, 13, 4, 4))
+    args = SimpleNamespace(vae_cpu_offload=True)
+    assert video._idle_audio_callback(batch, args, group, torch.device("cpu")) is None
+    assert minimax_h3_decoding._IDLE_AUDIO_KEY not in batch.extra

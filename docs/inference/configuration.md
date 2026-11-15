@@ -72,7 +72,7 @@ def main():
     sampling_param.guidance_scale = 7.5
     
     # Random seed for reproducibility
-    sampling_param.seed = 42  # Optional, leave unset for random results
+    sampling_param.seed = 42  # Optional; the default is 1024
 
     # Generate video with custom parameters
     prompt = "A beautiful sunset over a calm ocean, with gentle waves."

@@ -99,7 +99,8 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     trigger the initialization upfront, before the first real forward pass.
     
     Args:
-        device: Device to use for warmup tensors. If None, uses CUDA device 0.
+        device: Device to use for warmup tensors. If None, uses the device type of the
+            accelerator the rank was placed on.
     """
     global _sp_warmup_done
 
@@ -114,8 +115,14 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
         _sp_warmup_done = True
         return
 
+    from fastvideo.platforms import current_platform
+    device_module = current_platform.get_torch_device()
+
     if device is None:
-        device = torch.device("cuda")
+        # The warmup tensors go through the SP collectives, so they have to live on the
+        # accelerator this rank runs on: a "cuda" default is not a valid device on a build
+        # without CUDA (Ascend NPU, MPS, ...) and the warmup would fail to allocate.
+        device = torch.device(current_platform.device_type)
 
     logger.info("Warming up sequence parallel communication (SP=%d)...", sp_world_size)
 
@@ -149,7 +156,7 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     _ = sequence_model_parallel_all_gather(dummy3, dim=2)
 
     # Synchronize to ensure warmup completes
-    torch.cuda.synchronize(device)
+    device_module.synchronize(device)
 
     # Clean up
     del dummy, dummy2, dummy3

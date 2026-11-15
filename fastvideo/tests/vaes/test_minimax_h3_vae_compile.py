@@ -11,13 +11,19 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+import fastvideo.envs as envs
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.minimax_h3_audio import (
     MiniMaxH3AudioBigVGANDecoder,
     MiniMaxH3AudioVAE,
+)
+from fastvideo.configs.models.vaes.minimax_h3_video import (
+    MiniMaxH3VideoVAEArchConfig,
+    MiniMaxH3VideoVAEConfig,
 )
 from fastvideo.models.vaes.minimax_h3_video import (
     AutoencoderKLMiniMaxH3,
@@ -350,8 +356,9 @@ def test_decode_clip_no_spatial_tiling_stage_ranges() -> None:
     ]
 
 
-def test_decode_clip_emits_tiled_stage_ranges() -> None:
+def test_decode_clip_emits_tiled_stage_ranges(env_overrides) -> None:
     """Nest indexed decoder tiles between tile-splitting and stitching ranges."""
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(1))
     vae = _empty_typed_module(AutoencoderKLMiniMaxH3)
     vae.use_tiling = True
     vae.spatial_compression_ratio = 1
@@ -500,3 +507,79 @@ def test_tiled_decode_and_encode_survive_cudagraph_buffer_reuse_on_cuda() -> Non
     assert not eager_vae._tile_helpers_compiled
     torch.testing.assert_close(decoded_first, eager_vae.decode(z).sample, atol=2e-4, rtol=2e-4)
     torch.testing.assert_close(encoded_first, eager_vae.encode(pixels).latent_dist.parameters, atol=2e-4, rtol=2e-4)
+
+
+def test_regional_block_compile_installs_one_graph_and_toggles() -> None:
+    """FASTVIDEO_H3_VAE_COMPILE_BLOCKS compiles one block region shared by every block."""
+    decoder = _empty_typed_module(MiniMaxH3VideoViTDecoder3d)
+    decoder.transformer_blocks = nn.ModuleList([nn.Identity(), nn.Identity(), nn.Identity()])
+    decoder._compiled_block_forward = None
+    compiled_block = Mock(name="compiled_block")
+
+    with patch("fastvideo.models.vaes.minimax_h3_video.torch.compile", return_value=compiled_block) as compile_mock:
+        assert decoder.install_compiled_blocks() == 3
+        compile_mock.assert_called_once()
+        assert compile_mock.call_args.args[0].__name__ == "_run_decoder_block"
+        assert compile_mock.call_args.kwargs == {"dynamic": False}
+        # One graph for the whole decoder: a second install is a no-op.
+        assert decoder.install_compiled_blocks() == 0
+        compile_mock.assert_called_once()
+        # Disabling restores the eager loop; enabling reinstalls the same graph.
+        assert decoder.set_compiled_blocks(False) == 3
+        assert decoder._compiled_block_forward is None
+        assert decoder.set_compiled_blocks(True) == 3
+        assert decoder._compiled_block_forward is compiled_block
+        assert decoder.set_compiled_blocks(False) == 3
+
+
+@torch.inference_mode()
+def test_decoder_forward_uses_the_compiled_block_region() -> None:
+    """The decoder routes every transformer block through the compiled region when installed."""
+    torch.manual_seed(20260818)
+    decoder = _tiny_h3_decoder()
+    latents = torch.randn(1, 4, 12, 4, 4)
+    with torch.no_grad():
+        expected = decoder(latents)
+
+    seen: list[nn.Module] = []
+    compiled_block = Mock(name="compiled_block")
+    compiled_block.side_effect = lambda block, hidden, rotary: (seen.append(block), block(hidden, rotary))[1]
+    decoder._compiled_block_forward = compiled_block
+
+    with torch.no_grad():
+        actual = decoder(latents)
+
+    assert len(seen) == len(decoder.transformer_blocks)
+    assert seen == list(decoder.transformer_blocks)
+    assert torch.equal(actual, expected)
+
+
+def test_regional_block_compile_flag_installs_on_construction(monkeypatch, env_overrides) -> None:
+    """The env flag is read when the decoder is built, like the other VAE load-time knobs."""
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_COMPILE_BLOCKS.override(True))
+    compiled_block = Mock(name="compiled_block")
+    with patch("fastvideo.models.vaes.minimax_h3_video.torch.compile", return_value=compiled_block) as compile_mock:
+        decoder = _tiny_h3_decoder()
+    compile_mock.assert_called_once()
+    assert decoder._compiled_block_forward is compiled_block
+
+
+def _tiny_h3_decoder() -> MiniMaxH3VideoViTDecoder3d:
+    arch = MiniMaxH3VideoVAEArchConfig(
+        latent_channels=4,
+        block_out_channels=(32, 32),
+        layers_per_block=1,
+        spatial_downsample_factors=(2, 2),
+        temporal_downsample_factors=(2, 2),
+        decoder_num_layers=2,
+        decoder_num_attention_heads=1,
+        decoder_attention_head_dim=8,
+        decoder_num_register_tokens=2,
+        decoder_ffn_mult=1,
+        latents_mean=(0.0, ) * 4,
+        latents_std=(1.0, ) * 4,
+    )
+    vae = AutoencoderKLMiniMaxH3(
+        MiniMaxH3VideoVAEConfig(arch_config=arch, use_tiling=False, use_temporal_tiling=False,
+                                use_parallel_tiling=False))
+    return vae.decoder

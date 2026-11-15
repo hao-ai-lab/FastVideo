@@ -90,7 +90,7 @@ PipelineConfig                    (fastvideo/configs/pipelines/base.py)
 │   ├── WanT2V720PConfig
 │   └── WanI2V480PConfig
 ├── HunyuanConfig                 (fastvideo/configs/pipelines/hunyuan.py)
-├── LTX2T2VConfig                 (fastvideo/configs/pipelines/ltx2.py)
+├── LTX2T2VConfig                 (fastvideo/pipelines/basic/ltx2/pipeline_configs.py)
 ├── CosmosConfig                  (fastvideo/configs/pipelines/cosmos.py)
 └── ... (15+ model families)
 ```
@@ -136,7 +136,7 @@ Concrete hierarchy: `DiTConfig` → `DiTArchConfig`, `VAEConfig` →
 ### SamplingParam (`fastvideo/api/sampling_param.py`)
 
 Generation parameters separate from pipeline config. Each model family
-provides defaults via a profile (see `fastvideo/pipelines/basic/<family>/profiles.py`):
+provides defaults via a profile (see `fastvideo/pipelines/basic/<family>/presets.py`):
 
 ```python
 sp = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
@@ -505,7 +505,7 @@ User: generator.generate_video(prompt, ...)
    flow_shift, precision defaults.
 
 2. **Sampling param profile** — Create a profile in
-   `fastvideo/pipelines/basic/<model>/profiles.py` with default height,
+   `fastvideo/pipelines/basic/<model>/presets.py` with default height,
    width, num_frames, guidance_scale, num_inference_steps.
 
 3. **Register configs** — In `fastvideo/registry.py`, add a

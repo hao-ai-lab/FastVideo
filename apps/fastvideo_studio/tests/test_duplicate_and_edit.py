@@ -10,11 +10,15 @@ from fastvideo_studio.job_runner import JobRunner, JobStatus
 
 @pytest.fixture
 def runner(tmp_path):
-    return JobRunner(
+    instance = JobRunner(
         output_dir=str(tmp_path / "out"),
         log_dir=str(tmp_path / "logs"),
         database=Database(tmp_path / "t.db"),
     )
+    try:
+        yield instance
+    finally:
+        instance._shutdown()
 
 
 def _make(runner, **over):

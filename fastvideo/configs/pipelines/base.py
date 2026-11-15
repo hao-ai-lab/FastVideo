@@ -2,7 +2,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import torch
 
@@ -76,6 +76,8 @@ class PipelineConfig:
     image_encoder_precisions: tuple[str, ...] | None = None
 
     # Text encoder configuration
+    # This is a model-fixed normalization policy, not a serialized request knob.
+    preserve_single_space_negative_prompt: ClassVar[bool] = False
     DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32", )
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (EncoderConfig(), ))
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))

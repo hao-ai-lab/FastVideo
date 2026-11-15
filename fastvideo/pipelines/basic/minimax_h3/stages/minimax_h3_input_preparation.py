@@ -25,6 +25,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.reference import (
     MiniMaxH3PreparedReference,
     prepare_reference,
+    MINIMAX_H3_PREPARED_CONTINUATION_KEY,
+    prepare_continuation,
     validate_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -103,6 +105,11 @@ def resolve_target_num_frames(num_frames: object) -> int:
     return aligned
 
 
+def uses_references(ref2va: bool, batch: ForwardBatch) -> bool:
+    """Whether a request runs the Ref2VA layout; a Ref2VA pipeline runs plain T2VA without references."""
+    return ref2va and bool(batch.references)
+
+
 class MiniMaxH3InputPreparationStage(PipelineStage):
     """Prepare FL2VA/T2VA or Ref2VA inputs without a parallel family state object."""
 
@@ -122,8 +129,6 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, lambda value: value == 1)
         result.add_check("latents", batch.latents, V.none_or_tensor)
         result.add_check("audio_latents", batch.audio_latents, V.none_or_tensor)
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -146,7 +151,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY),
             lambda value: isinstance(value, tuple),
         )
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             result.add_check(
                 "prepared_references",
                 batch.references,
@@ -202,8 +207,19 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
         target_sample_rate = int(self.audio_vae.sampling_rate)
-        batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
+        clips = [reference for reference in references if reference.media_type == "continuation"]
+        batch.references = [
+            prepare_reference(reference, num_frames, target_sample_rate) for reference in references
+            if reference.media_type != "continuation"
+        ]
         self._write_target_geometry(batch, height, width, ratio, num_frames)
+        batch.extra.pop(MINIMAX_H3_PREPARED_CONTINUATION_KEY, None)
+        if clips:
+            continuation = prepare_continuation(clips[0], height, width, target_sample_rate)
+            if continuation.frames.shape[0] >= num_frames:
+                raise ValueError(f"A {continuation.frames.shape[0]}-frame continuation clip leaves no new frames in "
+                                 f"{num_frames}.")
+            batch.extra[MINIMAX_H3_PREPARED_CONTINUATION_KEY] = continuation
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
 
@@ -211,7 +227,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         del fastvideo_args
         prepare_common_request(batch)
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             self._prepare_ref2va(batch)
         else:
             self._prepare_fl2va(batch)

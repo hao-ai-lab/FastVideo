@@ -1,12 +1,12 @@
-# 🧠 Finetuning
+# Fine-tuning
 
 This guide covers finetuning video diffusion models with FastVideo, including full finetuning and LoRA.
 
-## Training Arguments
+## Training arguments
 
 FastVideo training scripts use several argument groups:
 
-### Training Arguments
+### Loop and model arguments
 
 | Argument | Description |
 |----------|-------------|

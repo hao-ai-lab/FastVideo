@@ -932,3 +932,35 @@ def test_lora_transformer_bookkeeping_is_per_pipeline(monkeypatch):
     assert first.trainable_transformer_modules == {"transformer": first_transformer}
     assert second.trainable_transformer_modules == {"transformer": second_transformer}
     assert first.trainable_transformer_modules is not second.trainable_transformer_modules
+
+
+def test_transform_reading_through_proxy_does_not_reload():
+    """A materialize transform may read attributes back through its own proxy
+    (the constructor LoRA adapter does); that must not trigger a second load."""
+    loader, calls = _counting_loader()
+    module = LazyModule("transformer", loader)
+    seen = []
+
+    def transform(loaded):
+        seen.append(module.tag)
+        return loaded
+
+    module.set_materialize_transform(transform)
+
+    assert module.tag == "c"
+    assert calls == ["c"]
+    assert seen == ["c"]
+
+
+def test_failed_transform_leaves_module_unmaterialized():
+    loader, calls = _counting_loader()
+    module = LazyModule("transformer", loader)
+
+    def transform(loaded):
+        raise RuntimeError("boom")
+
+    module.set_materialize_transform(transform)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        module.materialize()
+    assert not module.is_materialized

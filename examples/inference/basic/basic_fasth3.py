@@ -37,6 +37,8 @@ from fastvideo.api import (
     PipelineSelection,
     SamplingConfig,
 )
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig
+from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3TokenReductionSchedule
 
 DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
 
@@ -70,9 +72,21 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         type=int,
                         default=5,
                         help="sigma-grid points; N points run N-1 DiT forwards (the trained default is 5)")
-    parser.add_argument("--seed", type=int, default=1000, help="seed reused for every measured request")
+    seeds = parser.add_mutually_exclusive_group()
+    seeds.add_argument("--seed", type=int, default=1000, help="seed reused for every measured request")
+    seeds.add_argument("--seeds",
+                       type=int,
+                       nargs="+",
+                       help="ordered seed sweep on one pipeline; repeat the list --repeats times")
     parser.add_argument("--warmup-seed", type=int, default=999)
-    parser.add_argument("--repeats", type=int, default=3, help="number of measured requests after warmup")
+    parser.add_argument("--repeats",
+                        type=int,
+                        default=3,
+                        help="number of passes over the seed or seed list after warmup")
+    parser.add_argument("--text-conditioning-cache-max-bytes",
+                        type=int,
+                        default=0,
+                        help="CPU tensor-byte budget for single-rank T2VA text reuse; 0 disables the cache")
     parser.add_argument("--warmup",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -163,14 +177,61 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=None,
                         help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
                         "--no-inference-torch-compile")
+    parser.add_argument("--token-reduction",
+                        action="store_true",
+                        help="training-free speed mode after antirez/h3.c: pair horizontally adjacent generated-video "
+                        "tokens inside the middle DiT blocks; faster, but can change composition")
+    parser.add_argument("--token-reduction-blocks",
+                        default=None,
+                        metavar="BEGIN:END",
+                        help="blocks that run reduced (default 4:30)")
+    parser.add_argument("--token-reduction-early",
+                        default=None,
+                        metavar="STEPS:END",
+                        help="for the first STEPS forwards, reduce up to block END instead (default 4:40; 0:0 "
+                        "disables)")
+    parser.add_argument("--token-reduction-scale",
+                        type=float,
+                        default=None,
+                        help="scale of the update each paired token gets from its pair (default 1.0); unpaired "
+                        "tokens, such as the last column of an odd-width video, take the full update as in h3.c")
     return parser
+
+
+def token_reduction_options(args: argparse.Namespace) -> dict[str, object] | None:
+    """``h3_token_reduction`` options from the command line, or None when it is off."""
+    if not getattr(args, "token_reduction", False):
+        return None
+    options: dict[str, object] = {"enabled": True}
+    if args.token_reduction_blocks is not None:
+        options["blocks"] = args.token_reduction_blocks
+    if args.token_reduction_early is not None:
+        options["early"] = args.token_reduction_early
+    if args.token_reduction_scale is not None:
+        options["update_scale"] = args.token_reduction_scale
+    return options
 
 
 def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
+    tuning = (args.token_reduction_blocks, args.token_reduction_early, args.token_reduction_scale)
+    if not args.token_reduction and any(value is not None for value in tuning):
+        parser.error("--token-reduction-blocks/-early/-scale need --token-reduction")
+    if args.token_reduction:
+        # Reject malformed values and intervals past H3's 50 blocks before any download; the
+        # transformer loader checks a shallower checkpoint, such as FastH3 Trim, against its own depth.
+        try:
+            MiniMaxH3TokenReductionSchedule.from_options(token_reduction_options(args) or {},
+                                                         num_blocks=MiniMaxH3ArchConfig().num_layers)
+        except ValueError as error:
+            parser.error(str(error))
     if args.num_gpus < 1:
         parser.error("--num-gpus must be at least 1")
+    if args.text_conditioning_cache_max_bytes < 0:
+        parser.error("--text-conditioning-cache-max-bytes must be non-negative")
+    if args.text_conditioning_cache_max_bytes and args.num_gpus != 1:
+        parser.error("--text-conditioning-cache-max-bytes requires --num-gpus 1")
     if not 0.0 <= args.vsa_sparsity < 1.0:
         parser.error("--vsa-sparsity must be in [0, 1)")
     if args.compile_mode is not None and args.inference_torch_compile:
@@ -292,6 +353,8 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
         "vae_parallel_decode": args.parallel_vae,
         "vae_parallel_decode_strategy": "gather",
     }
+    if args.text_conditioning_cache_max_bytes:
+        experimental["text_conditioning_cache_max_bytes"] = args.text_conditioning_cache_max_bytes
     if args.h3_sequential_load is not None:
         experimental["h3_sequential_load"] = args.h3_sequential_load
     if args.video_decode_backend != "h3-vae":
@@ -303,6 +366,9 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
             "VSA_sparsity": args.vsa_sparsity,
             "VSA_tile_size": args.vsa_tile_size,
         })
+    token_reduction = token_reduction_options(args)
+    if token_reduction is not None:
+        experimental["h3_token_reduction"] = token_reduction
     return GeneratorConfig(
         model_path=args.model_path,
         pipeline=PipelineSelection(
@@ -388,6 +454,10 @@ def run(args: argparse.Namespace) -> list[float]:
     print("Profile environment: " + " ".join(f"{key}={value if value is not None else '<unset>'}"
                                                   for key, value in environment.items()))
     print(f"Execution backend: {_execution_backend(args)}")
+    if args.text_conditioning_cache_max_bytes:
+        print(f"Text conditioning cache budget: {args.text_conditioning_cache_max_bytes} CPU tensor bytes")
+        if args.warmup:
+            print("The excluded warmup also conditions this prompt; use --no-warmup to include the first request.")
 
     generator = VideoGenerator.from_config(build_generator_config(args))
     measured_wall_times: list[float] = []
@@ -403,11 +473,15 @@ def run(args: argparse.Namespace) -> list[float]:
             print(f"[warmup] wall={warmup_wall:.3f}s (excluded)")
             print(f"Warmup output written to: {actual_warmup_path}")
 
-        for index in range(1, args.repeats + 1):
-            requested_path = output_dir / f"fasth3_{args.profile}_run_{index:02d}.mp4"
-            print(f"[measured {index}/{args.repeats}] generating: {requested_path}")
+        seeds = args.seeds or [args.seed]
+        request_count = len(seeds) * args.repeats
+        for index in range(1, request_count + 1):
+            seed = seeds[(index - 1) % len(seeds)]
+            seed_suffix = f"_seed_{seed}" if args.seeds else ""
+            requested_path = output_dir / f"fasth3_{args.profile}_run_{index:02d}{seed_suffix}.mp4"
+            print(f"[measured {index}/{request_count}] seed={seed}, generating: {requested_path}")
             started = time.perf_counter()
-            result = generator.generate(build_request(args, requested_path, args.seed))
+            result = generator.generate(build_request(args, requested_path, seed))
             wall = time.perf_counter() - started
             measured_wall_times.append(wall)
             actual_path = _actual_output_path(result, requested_path)

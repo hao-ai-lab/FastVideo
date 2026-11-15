@@ -25,7 +25,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires 
 
 
 @pytest.fixture
-def hunyuan_setup(monkeypatch, request):
+def hunyuan_setup(request):
     # Environment writes go through the registry helpers (docs/contributing/env_vars.md).
     with contextlib.ExitStack() as stack:
         # Respect the port reserved by the CI runner when sharing a GPU host.
@@ -37,8 +37,7 @@ def hunyuan_setup(monkeypatch, request):
         if "MASTER_ADDR" not in os.environ:
             stack.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
         stack.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
-        monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
-        monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
+        request.getfixturevalue("tf32_disabled")
         request.getfixturevalue("distributed_setup")
         yield
 

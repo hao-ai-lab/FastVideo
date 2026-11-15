@@ -12,17 +12,35 @@ per-request sampling state, and some adapters merge weights at load time, so a
 single loaded pipeline is never entered concurrently by image and video
 requests. HTTP handling and job polling remain asynchronous.
 
+`GET /v1/model_info` includes `video_output_capabilities` for MiniMax-H3
+(including FastH3 and Omni) and Pika H3 Flex. Version 1 reports the 24 fps
+frame grid, integer duration choices from 5 to 15 seconds, recommended
+480p/768p width/height pairs by aspect ratio, and the `tasks` this server
+accepts. A Ref2VA server also reports `reference_limits`. Other families return
+`null`.
+The family is resolved from the registry and local checkpoints only, so
+discovery never downloads a Hub manifest.
+These values describe model geometry, independently of the serve file's
+default request. `recommended_frame_sizes` is not an exhaustive canvas list,
+and `hardware_capacity_verified: false` means the response does not establish
+that every resolution, duration and reference combination fits the device.
+Sampling schedules, attention and memory policies are unchanged by discovery.
+
 ## Endpoints
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/v1/models` | List the served model and optional startup adapter |
 | `GET` | `/v1/models/{model}` | Retrieve one served model card |
+| `GET` | `/v1/model_state` | Report the loaded catalog model (catalog servers) |
+| `POST` | `/v1/models/load` | Load a catalog model/task (catalog servers) |
+| `POST` | `/v1/models/unload` | Unload the catalog model (catalog servers) |
 | `POST` | `/v1/videos` | Submit an asynchronous video job |
 | `POST` | `/v1/videos/sync` | Generate and return an MP4 response directly |
 | `GET` | `/v1/videos` | List in-memory jobs with `after`, `limit`, and `order` |
 | `GET` | `/v1/videos/{id}` | Retrieve job status and metadata |
 | `GET` | `/v1/videos/{id}/content` | Download a completed MP4 |
+| `GET` | `/v1/videos/{id}/draft_bundle` | Download the MiniMax-H3 draft bundle of a video created with `return_draft_bundle` |
 | `DELETE` | `/v1/videos/{id}` | Delete a job and its completed artifact |
 | `POST` | `/v1/images` | Generate an image |
 | `POST` | `/v1/images/generations` | OpenAI-compatible alias for image generation |
@@ -88,12 +106,39 @@ block. If `num_frames` is absent, `seconds * fps` is used. FastVideo also keeps
 the legacy `input_reference`, `reference_url`, `video_path`, and `video_url`
 spellings.
 
-Reference objects support URL or local-path strings through `image_url`,
-`video_url`, and `audio_url`. `file_id` references are schema-compatible but
-return HTTP 400 because FastVideo does not provide an OpenAI Files store.
-Image URLs, data URLs, local paths, and multipart `input_reference` uploads are
-materialized and decoded under the configured output directory during
-admission. Invalid media returns HTTP 400 before a job is created.
+A MiniMax-H3 generator keeps the finished draft as a *draft bundle* (its
+normalized latent plus the prompt embeddings it was conditioned on) when the
+request sets `"return_draft_bundle": true`. The bundle is written beside the
+video and served by `GET /v1/videos/{id}/draft_bundle` as
+`application/x-fastvideo-h3-draft`. An Open-H3-Regenerate-2K server takes that
+bundle as `"draft_bundle"` instead of `video_reference`. The
+`pipeline.experimental.draft_bundle_prompt_embeds` policy (`match` by default)
+decides whether the 2K server reuses the bundle's embeddings or re-encodes the
+prompt. `return_draft_bundle` is rejected on `/v1/videos/sync`; submit
+`POST /v1/videos` and download the bundle from the job.
+
+Reference objects carry one string each through `image_url`, `video_url`, and
+`audio_url`. Each field accepts these forms:
+
+| Field | `http(s)` URL | `data:` URL | Local path |
+| --- | --- | --- | --- |
+| `image_reference[].image_url`, `input_reference`, `reference_url` | yes | `data:image/...;base64,` | under `server.media_roots` |
+| `video_reference[].video_url`, `video_path`, `video_url`, `continuation_video` | yes | `data:video/...;base64,` | under `server.media_roots` |
+| `audio_reference[].audio_url` | yes | `data:audio/...;base64,` | under `server.media_roots` |
+| `draft_bundle` (Open-H3-Regenerate-2K) | yes | `data:application/x-fastvideo-h3-draft;base64,` | a `.pt` file under `server.media_roots` |
+
+`input_reference` also accepts a multipart upload. `file_id` references are
+schema-compatible but return HTTP 400 because FastVideo does not provide an
+OpenAI Files store.
+
+URLs must resolve to public addresses unless
+`server.allow_private_media_urls` is set. A `data:` URL must be base64-encoded,
+and its media type must match its field: a `data:audio/...` URL in
+`video_reference` is refused. Each downloaded file, and each decoded video or
+audio file, is limited to `server.media_reference_max_bytes`. URLs and `data:` URLs are
+written under `server.output_dir/uploads` during admission, keep their order
+within each field, and are deleted when the job ends. Invalid, oversized, or
+mismatched media returns HTTP 400 before a job is created.
 
 ## Jobs and synchronous responses
 
@@ -142,15 +187,54 @@ files can contain dense replacement tensors and VSA gates in addition to
 low-rank factors, so swapping them inside concurrent requests would corrupt
 shared pipeline state. A mismatch is rejected with HTTP 400.
 
+## Model catalog
+
+`server.model_catalog` points at a JSON document that lets one single-GPU server hold several
+serve configurations and switch between them:
+
+```json
+{
+  "shared_components": ["text_encoder"],
+  "models": {
+    "fasth3-4step": {
+      "tasks": {"t2va": "fasth3_4step.yaml"},
+      "environment": {"FASTVIDEO_H3_SOL_ATTN": "sol_engine_fast"}
+    },
+    "open-h3-regen-2k": {"tasks": {"ref2va": "open_h3_regen_2k.yaml"}}
+  }
+}
+```
+
+Each `tasks` entry names a normal single-GPU serve config whose `served_model_name` is the
+catalog alias. `GET /v1/models` lists the aliases with their tasks and install state,
+`GET /v1/model_info?model=&task=` reports one profile, `GET /v1/model_state` reports what is
+loaded, and `POST /v1/models/load` / `POST /v1/models/unload` change it. A generation request
+for another alias loads it first, serialized behind the generation lock. A catalog server
+mounts the video routes only, so `/v1/images` is unavailable.
+
 ## MiniMax-H3 and FastH3
 
-FastH3 uses the same general routes and adapter. `task` is accepted for
-SGLang-compatible H3 clients:
+FastH3 and Pika H3 Flex use the same general routes and adapter. `task` is
+optional and accepted for SGLang-compatible H3 clients; `t2v` and `i2v` are
+aliases of `t2va` and `i2va`:
 
 - `t2va` uses text only.
-- `fl2va` takes one or two image references.
+- `i2va` takes exactly one image reference, the first frame.
+- `l2va` takes exactly one image reference, the last frame.
+- `fl2va` takes one or two image references, the first and last frames.
 - `ref2va` takes ordered image, video, and audio references and requires a
-  server started with `MiniMaxH3Ref2VAModularPipeline`.
+  server started with the Ref2VA pipeline (`MiniMaxH3Ref2VAModularPipeline` or
+  `PikaH3FlexRef2VAModularPipeline`).
+
+A FastH3 Ref2VA server (Omni) also serves `t2va`: a request with no reference
+media runs the T2VA layout through the same transformer. A Pika H3 Flex server
+loads one adapter, so `t2va`, `i2va`, `l2va` and `fl2va` come from the FL2VA model and
+`ref2va` from a separately served Ref2VA model.
+
+`aspect_ratio` with `short_edge` 480 or 768 (768 when omitted) selects the 480p
+or 768p canvas. Pika H3 Flex snaps a requested size to its nearest released
+bucket at admission and reports that size; its fps, size and frame-grid errors
+return HTTP 400.
 
 The released FastH3 pipeline generates one packed video/audio result per
 request, uses 24 fps, requires guidance scale 1, and accepts frame counts on

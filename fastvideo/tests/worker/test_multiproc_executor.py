@@ -1,3 +1,5 @@
+from collections import OrderedDict, namedtuple
+from dataclasses import dataclass
 import multiprocessing as mp
 from multiprocessing import resource_tracker, util
 import os
@@ -5,16 +7,18 @@ from pathlib import Path
 import shutil
 import sys
 import time
+from threading import Thread
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PipelineLoggingInfo
 from fastvideo.worker.multiproc_executor import (
     _RPC_ERROR_KEY,
     _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    _copy_mps_tensors_to_cpu,
     _prepare_worker_output_for_parent,
     _raise_for_rpc_errors,
     _shutdown_torch_compile_workers,
@@ -116,6 +120,296 @@ class _RecordingPipe:
 
     def close(self):
         self.closed = True
+
+
+_Audio = namedtuple("_Audio", ["samples", "sample_rate"])
+
+
+@dataclass(frozen=True)
+class _TensorMetadata:
+    features: tuple[torch.Tensor, ...]
+    label: str = "test"
+
+
+class _OutputWorker:
+
+    def __init__(self, output_batch):
+        self.output_batch = output_batch
+
+    def execute_forward(self, forward_batch, fastvideo_args):
+        return self.output_batch
+
+    def shutdown(self):
+        return {"status": "shutdown"}
+
+
+class _SpawnOutputWorker:
+    """Create device tensors in the child, as a real inference worker does."""
+
+    def __init__(self, device):
+        self.device = device
+        self.calls = 0
+        self.output_batch = None
+
+    def execute_forward(self, forward_batch, fastvideo_args):
+        self.calls += 1
+        tensor = torch.arange(6, device=self.device, dtype=torch.float32).reshape(2, 3) + self.calls
+        # MPS inference results are detached for transport even if a caller
+        # accidentally left autograd enabled. CPU tensors keep their behavior.
+        tensor.requires_grad_(self.device == "mps")
+        output = tensor * 2
+        self.output_batch = ForwardBatch(
+            data_type="video",
+            output=output,
+            extra={
+                "audio": [_Audio(output, 24000)],
+                "metadata": _TensorMetadata((output,)),
+            },
+            trajectory_latents=output.to(torch.float16),
+            trajectory_timesteps=[torch.arange(2, device=self.device, dtype=torch.int32)],
+        )
+        self.output_batch.logging_info.add_stage_metric("decode", "metric", {"values": (output,)})
+        return self.output_batch
+
+    def shutdown(self):
+        output = self.output_batch.output
+        assert output.device.type == self.device
+        assert output.requires_grad is (self.device == "mps")
+        assert self.output_batch.extra["metadata"].features[0] is output
+        return {"status": "shutdown", "calls": self.calls, "source_device": output.device.type}
+
+
+def _run_output_worker(pipe, device):
+    # This top-level target is importable by a spawned interpreter. Pass only
+    # the device name into it: passing an MPS tensor would fail before the test.
+    proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
+    proc.rank = 0
+    proc.pipe = pipe
+    proc.worker = _SpawnOutputWorker(device)
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+            monkeypatch.setattr("fastvideo.worker.multiproc_executor.envs.FASTVIDEO_STAGE_LOGGING.get", lambda: True)
+            monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: device == "mps")
+            proc.worker_busy_loop()
+    finally:
+        pipe.close()
+
+
+@pytest.mark.parametrize("device", ["cpu", "mps", "cuda"])
+def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
+    if device == "mps" and not torch.backends.mps.is_available():
+        pytest.skip("Requires an Apple GPU with MPS")
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("Requires an NVIDIA GPU with CUDA")
+
+    expected_device = "cuda" if device == "cuda" else "cpu"
+
+    def assert_tensor(actual, expected):
+        received_device = actual.device.type
+        requires_grad = actual.requires_grad
+        actual_cpu = actual.cpu()
+        del actual
+        assert received_device == expected_device
+        assert not requires_grad
+        torch.testing.assert_close(actual_cpu, expected, rtol=0, atol=0)
+
+    context = mp.get_context("spawn")
+    parent_pipe, child_pipe = context.Pipe()
+    process = context.Process(target=_run_output_worker, args=(child_pipe, device))
+    process.start()
+    child_pipe.close()
+    response = output = metadata = metric = None
+    try:
+        for call in (1, 2):
+            parent_pipe.send({
+                "method": "execute_forward",
+                "kwargs": {"forward_batch": None, "fastvideo_args": SimpleNamespace(output_type="pil")},
+            })
+            assert parent_pipe.poll(30), "Spawned worker did not return a response"
+            response = parent_pipe.recv()
+            assert _RPC_ERROR_KEY not in response, response.get("error")
+            output = response["output_batch"]
+            expected = (torch.arange(6, dtype=torch.float32).reshape(2, 3) + call) * 2
+            assert_tensor(output, expected)
+            metadata = response["extra"]["metadata"]
+            assert isinstance(metadata, _TensorMetadata)
+            assert metadata.label == "test"
+            assert_tensor(metadata.features[0], expected)
+            assert_tensor(response["extra"]["audio"][0].samples, expected)
+            assert response["extra"]["audio"][0].sample_rate == 24000
+            metric = response["logging_info"].get_stage_info("decode")["metric"]["values"][0]
+            assert_tensor(metric, expected)
+            assert_tensor(response["trajectory_latents"], expected.half())
+            assert_tensor(response["trajectory_timesteps"][0], torch.arange(2, dtype=torch.int32))
+            # Blocking CPU copies finish before imported CUDA storage is released; the producer must outlive it.
+            response = output = metadata = metric = None
+
+        parent_pipe.send({"method": "shutdown"})
+        assert parent_pipe.poll(30), "Spawned worker did not shut down"
+        assert parent_pipe.recv() == {"status": "shutdown", "calls": 2, "source_device": device}
+        process.join(timeout=10)
+        assert process.exitcode == 0
+    finally:
+        response = output = metadata = metric = None
+        parent_pipe.close()
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=10)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=10)
+        process.close()
+
+
+def _execute_forward_over_pipe(output_batch):
+    """Exercise the real response path and PyTorch's multiprocessing reducers."""
+    parent_pipe, worker_pipe = mp.Pipe()
+    proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
+    proc.rank = 0
+    proc.pipe = worker_pipe
+    proc.worker = _OutputWorker(output_batch)
+    # This thread shares pytest's compiler pools; it must not shut them down.
+    proc.shutdown = proc.worker.shutdown
+    thread = Thread(target=proc.worker_busy_loop, daemon=True)
+    thread.start()
+    try:
+        parent_pipe.send({
+            "method": "execute_forward",
+            "kwargs": {
+                "forward_batch": SimpleNamespace(),
+                "fastvideo_args": SimpleNamespace(),
+            },
+        })
+        assert parent_pipe.poll(10), "Worker did not return a response"
+        response = parent_pipe.recv()
+        parent_pipe.send({"method": "shutdown"})
+        assert parent_pipe.poll(10), "Worker did not shut down"
+        assert parent_pipe.recv() == {"status": "shutdown"}
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        return response
+    finally:
+        parent_pipe.close()
+        worker_pipe.close()
+
+
+def test_pipe_response_helper_preserves_parent_compile_workers(monkeypatch):
+    cleanup_calls = []
+    monkeypatch.setattr("fastvideo.worker.multiproc_executor._shutdown_torch_compile_workers",
+                        lambda: cleanup_calls.append(True))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+
+    response = _execute_forward_over_pipe(ForwardBatch(data_type="video", output=torch.ones(1)))
+
+    assert _RPC_ERROR_KEY not in response
+    assert cleanup_calls == []
+
+
+@pytest.mark.parametrize("device, tensor_field", [
+    ("cpu", "all"),
+    ("mps", "output"),
+    ("mps", "extra"),
+    ("mps", "trajectory_latents"),
+    ("mps", "trajectory_timesteps"),
+    ("mps", "logging_info"),
+])
+def test_execute_forward_response_serializes_device_tensors(monkeypatch, device, tensor_field):
+    if device == "mps" and not torch.backends.mps.is_available():
+        pytest.skip("Requires an Apple GPU with MPS")
+
+    def tensor(field, dtype=torch.float32):
+        target = device if tensor_field in (field, "all") else "cpu"
+        return torch.arange(6, dtype=dtype, device=target).reshape(2, 3)
+
+    output_batch = ForwardBatch(
+        data_type="video",
+        output=tensor("output"),
+        extra={
+            "audio": [_Audio(tensor("extra"), 24000)],
+            "metadata": OrderedDict(ids=tensor("extra", torch.int32), label="test", optional=None),
+        },
+        trajectory_latents=tensor("trajectory_latents", torch.float16),
+        trajectory_timesteps=[tensor("trajectory_timesteps", torch.int32)],
+    )
+    output_batch.logging_info.add_stage_metric("decode", "metric", {"values": (tensor("logging_info"),)})
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+    monkeypatch.setattr("fastvideo.worker.multiproc_executor.envs.FASTVIDEO_STAGE_LOGGING.get", lambda: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: device == "mps")
+
+    response = _execute_forward_over_pipe(output_batch)
+
+    assert _RPC_ERROR_KEY not in response, response.get("error")
+
+    def assert_tensor(actual, expected):
+        assert actual.device.type == "cpu"
+        assert not actual.requires_grad
+        torch.testing.assert_close(actual, expected.detach().cpu(), rtol=0, atol=0)
+
+    assert_tensor(response["output_batch"], output_batch.output)
+    assert isinstance(response["extra"]["audio"], list)
+    assert type(response["extra"]["audio"][0]) is _Audio
+    assert_tensor(response["extra"]["audio"][0].samples, output_batch.extra["audio"][0].samples)
+    assert response["extra"]["audio"][0].sample_rate == 24000
+    assert type(response["extra"]["metadata"]) is OrderedDict
+    assert_tensor(response["extra"]["metadata"]["ids"], output_batch.extra["metadata"]["ids"])
+    assert response["extra"]["metadata"]["label"] == "test"
+    assert response["extra"]["metadata"]["optional"] is None
+    assert response["extra"]["peak_memory_mb"] == 0
+    assert_tensor(response["trajectory_latents"], output_batch.trajectory_latents)
+    assert_tensor(response["trajectory_timesteps"][0], output_batch.trajectory_timesteps[0])
+    assert type(response["logging_info"]) is type(output_batch.logging_info)
+    assert response["logging_info"].get_execution_order() == ["decode"]
+    actual_metric = response["logging_info"].get_stage_info("decode")["metric"]["values"]
+    expected_metric = output_batch.logging_info.get_stage_info("decode")["metric"]["values"]
+    assert type(actual_metric) is tuple
+    assert_tensor(actual_metric[0], expected_metric[0])
+    original_tensors = {
+        "output": output_batch.output,
+        "extra": output_batch.extra["audio"][0].samples,
+        "trajectory_latents": output_batch.trajectory_latents,
+        "trajectory_timesteps": output_batch.trajectory_timesteps[0],
+        "logging_info": expected_metric[0],
+    }
+    for field, original in original_tensors.items():
+        expected_device = device if tensor_field in (field, "all") else "cpu"
+        assert original.device.type == expected_device
+
+
+def test_non_mps_response_bypasses_preparation(monkeypatch):
+    output_batch = ForwardBatch(data_type="video", output=torch.ones(1), extra={"nested": [torch.ones(1)]})
+    pipe = _ScriptedPipe([
+        {"method": "execute_forward", "kwargs": {"forward_batch": None, "fastvideo_args": None}},
+        {"method": "shutdown"},
+    ])
+    proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
+    proc.rank = 0
+    proc.pipe = pipe
+    proc.worker = _OutputWorker(output_batch)
+
+    def unexpected_preparation(response):
+        raise AssertionError("Non-MPS responses must not enter the copy helper")
+
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+    monkeypatch.setattr("fastvideo.worker.multiproc_executor._copy_mps_tensors_to_cpu", unexpected_preparation)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+    proc.worker_busy_loop()
+
+    assert pipe.responses[0]["output_batch"] is output_batch.output
+    assert pipe.responses[0]["extra"] is output_batch.extra
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Requires an Apple GPU with MPS")
+def test_mps_response_preparation_preserves_cpu_tensor_identity():
+    cpu_tensor = torch.ones(2, requires_grad=True)
+    mps_tensor = torch.arange(2, device="mps", dtype=torch.float32)
+
+    response = _copy_mps_tensors_to_cpu({"output_batch": mps_tensor, "extra": {"cpu_tensor": cpu_tensor}})
+
+    assert response["extra"]["cpu_tensor"] is cpu_tensor
+    assert response["extra"]["cpu_tensor"].requires_grad
+    assert response["output_batch"].device.type == "cpu"
+    torch.testing.assert_close(response["output_batch"], mps_tensor.cpu(), rtol=0, atol=0)
 
 
 def test_worker_rpc_error_does_not_exit_busy_loop(monkeypatch) -> None:
@@ -487,3 +781,65 @@ def test_prepare_worker_output_moves_latent_cuda_tensor_to_cpu():
 
     assert prepared.device.type == "cpu"
     assert prepared.shape == result.shape
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_response_preparation_preserves_non_mps_tensor_identity(device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("Requires an NVIDIA GPU with CUDA")
+    tensor = torch.ones(2, 3, device=device, requires_grad=True) * 2
+    response = {"output_batch": tensor, "extra": {"nested": [tensor, (tensor,)]}}
+
+    prepared = _copy_mps_tensors_to_cpu(response)
+
+    assert prepared["output_batch"] is tensor
+    assert prepared["extra"]["nested"][0] is tensor
+    assert prepared["extra"]["nested"][1][0] is tensor
+    assert tensor.requires_grad
+
+
+def test_response_preparation_rebuilds_nested_containers_on_cpu():
+    tensor = torch.arange(3, dtype=torch.float32)
+    metadata = _TensorMetadata((tensor,), label="features")
+    values = OrderedDict(
+        audio=_Audio(tensor, 24000),
+        metadata=metadata,
+        tags=["ready", 7, None],
+        empty=(),
+    )
+    logging_info = PipelineLoggingInfo()
+    logging_info.add_stage_metric("decode", "result", values)
+    response = {"logging_info": logging_info}
+
+    prepared = _copy_mps_tensors_to_cpu(response)
+
+    assert prepared is not response
+    copied_logging = prepared["logging_info"]
+    assert type(copied_logging) is PipelineLoggingInfo
+    assert copied_logging is not logging_info
+    assert type(copied_logging.stages) is OrderedDict
+    assert copied_logging.stages is not logging_info.stages
+    assert copied_logging.get_execution_order() == ["decode"]
+    copied_stage = copied_logging.get_stage_info("decode")
+    assert copied_stage is not logging_info.get_stage_info("decode")
+    copied_values = copied_stage["result"]
+    assert type(copied_values) is OrderedDict
+    assert copied_values is not values
+    assert list(copied_values) == ["audio", "metadata", "tags", "empty"]
+    assert type(copied_values["audio"]) is _Audio
+    assert copied_values["audio"] is not values["audio"]
+    assert copied_values["audio"].samples is tensor
+    assert copied_values["audio"].sample_rate == 24000
+    copied_metadata = copied_values["metadata"]
+    assert type(copied_metadata) is _TensorMetadata
+    assert copied_metadata is not metadata
+    assert copied_metadata.label == "features"
+    assert type(copied_metadata.features) is tuple
+    assert copied_metadata.features is not metadata.features
+    assert copied_metadata.features[0] is tensor
+    assert copied_values["empty"] == ()
+    assert copied_values["tags"] == ["ready", 7, None]
+    assert copied_values["tags"] is not values["tags"]
+    copied_values["tags"].append("changed")
+    assert values["tags"] == ["ready", 7, None]
+    assert logging_info.get_stage_info("decode")["result"] is values

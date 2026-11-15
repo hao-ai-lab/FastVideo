@@ -83,12 +83,14 @@ surfaces:
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
       h3_vsa_fp4: "MiniMax-H3 native FP4 attention options carried through generator.pipeline.experimental.h3_vsa_fp4 rather than a dedicated typed component setting."
+      h3_token_reduction: "MiniMax-H3 training-free token reduction options carried through generator.pipeline.experimental.h3_token_reduction rather than a dedicated typed component setting."
       h3_encoder_split: "MiniMax-H3 Ray-only split that runs the Qwen3-VL text encoder on dedicated nodes and the DiT/VAE on the rest; model-specific optimization not yet represented in the typed public schema."
       h3_encoder_nodes: "Leading node count that h3_encoder_split reserves for the MiniMax-H3 text encoder; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
-      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; model-specific optimization not yet represented in the typed public schema."
+      h3_vae_nvfp4_decoder: "Exported NVFP4 MiniMax-H3 video decoder file that replaces the VAE decoder at load; represented as ComponentConfig.h3_vae_nvfp4_decoder."
+      h3_vae_nvfp4_quantize_dense: "Quantize the loaded MiniMax-H3 decoder to NVFP4 in memory without changing its depth; carried through generator.pipeline.experimental."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
@@ -153,6 +155,23 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      draft_size:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_start_sigma:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      refine_transformer_dir:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      draft_latent_path:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
+      text_conditioning_cache_max_bytes:
+        sources: [fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig]
+      draft_bundle_prompt_embeds:
+        sources:
+          - fastvideo.configs.pipelines.open_h3_regenerate_2k.OpenH3Regenerate2KPipelineConfig
       audio_encoder_precision:
         sources:
           - fastvideo.configs.pipelines.wan.WanS2V14BConfig
@@ -293,6 +312,21 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       i2v_skip_first_latent_cfg:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vae_decode_kernel_parallel:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      dit_fused_kernels:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      enable_guardrails:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      offload_guardrail_models:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
@@ -464,6 +498,9 @@ surfaces:
       kv_cache_device:
         target: generator.pipeline.experimental.kv_cache_device
         sources: [fastvideo.configs.pipelines.qwen_image21.QwenImage21PipelineConfig]
+      pika_resolution_tier:
+        target: generator.pipeline.experimental.pika_resolution_tier
+        sources: [fastvideo.configs.pipelines.pika_h3_flex.PikaH3FlexPipelineConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -477,6 +514,7 @@ surfaces:
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
       pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      pika_denoising_steps: "Pika H3 Flex six-forward re-noise ladder fixed by the adapter contract; check_pipeline_config rejects any other value."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
@@ -610,20 +648,25 @@ surfaces:
 
   openai_video_request:
     kept:
+      return_draft_bundle: "MiniMax-H3 draft handoff: keep the finished draft's latent and conditioning for GET /v1/videos/{id}/draft_bundle."
+      draft_bundle: "MiniMax-H3 draft handoff: a saved draft bundle (URL, media-root path or data URL) that Open-H3-Regenerate-2K refines."
       model: "HTTP adapter model-routing field."
       user: "OpenAI-compatible caller tracking field."
       task: "SGLang-compatible MiniMax-H3 task selector validated against the startup pipeline."
       quality: "vLLM-Omni-compatible quality-intent field; model-specific."
       lora: "vLLM-Omni-compatible selector for the adapter fixed at server startup."
+      return_draft_bundle: "MiniMax-H3 generator opt-in; the server writes a draft bundle beside the video, served by GET /v1/videos/{id}/draft_bundle."
     moved:
       prompt: request.prompt
       input_reference: request.inputs.image_path
       reference_url: request.inputs.image_path
       image_reference: request.inputs.image_path,last_image,references
       video_reference: request.inputs.video_path,references
+      draft_bundle: request.inputs.video_path
       audio_reference: request.inputs.references
       video_path: request.inputs.video_path
       video_url: request.inputs.video_path
+      continuation_video: request.inputs.references
       video_params: request.sampling.width,height,num_frames,fps
       size:
         target: request.sampling.width,height

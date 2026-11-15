@@ -195,7 +195,8 @@ def create_mlx_app(config: MLXServeConfig):
                            lora_path=None,
                            lora_nickname="default",
                            lora_strength=1.0,
-                           override_pipeline_cls_name=None)
+                           override_pipeline_cls_name=None,
+                           supported_tasks=("t2va", ))
     from fastvideo.entrypoints.openai.request_adapter import build_generation_request
 
     build_generation_request("config-check",

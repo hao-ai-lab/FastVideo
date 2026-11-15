@@ -9,7 +9,7 @@ import { getJobVideoUrl, getJobsList } from '@/lib/api';
 import type { Job } from '@/lib/types';
 
 function isImage(job: Job): boolean {
-  return job.output_path?.toLowerCase().endsWith('.png') ?? false;
+  return /\.(png|jpe?g|webp)$/i.test(job.output_path ?? '');
 }
 
 function GalleryMedia({ job }: { job: Job }) {
