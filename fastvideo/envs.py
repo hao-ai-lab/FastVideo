@@ -939,6 +939,16 @@ FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
                                          "across requests instead of releasing it after the video-decoding "
                                          "stage. Saves the ~76 s host-to-device reload the Spark pays before "
                                          "every draft encode, at the cost of ~9.7 GiB held during the refine.")
+FASTVIDEO_H3_RELEASE_LORA_ADAPTER = EnvBool(
+    False,
+    category="performance",
+    doc="After the constructor LoRA adapter is merged and its packed weights rebuilt, drop the in-memory "
+    "low-rank factors (the wrapped linear's lora_A/lora_B and the pipeline's adapter dict, ~11.6 GiB for the "
+    "Open-H3-Regenerate-2K 12.4 GB adapter). On unified memory the factors are a second resident copy of the "
+    "delta beside the packed weights; an inference server that keeps the DiT resident never unmerges, so "
+    "releasing them gives the 2K fast-decoder decode the headroom to coexist with "
+    "FASTVIDEO_H3_KEEP_DIT_RESIDENT. Exact tier: the merged weights are already baked into the packed buffers; "
+    "a later rematerialize reloads the adapter from lora_path because the path cache is cleared.")
 FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
     "",
     category="performance",

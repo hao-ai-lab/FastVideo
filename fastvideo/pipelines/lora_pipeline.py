@@ -770,6 +770,44 @@ class LoRAPipeline(ComposedPipelineBase):
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
         if not self._setting_constructor_adapter and not accumulate:
             self._runtime_adapter = (lora_nickname, strength)
+        self._maybe_release_adapter_factors(lora_nickname)
+
+    def _maybe_release_adapter_factors(self, lora_nickname: str) -> None:
+        """Drop the in-memory adapter factors once they have been merged and packed.
+
+        On unified memory the wrapped linear's ``lora_A``/``lora_B`` share storage with
+        ``self.lora_adapters``, so a 12.4 GB adapter is resident a second time next to the packed
+        weights. A server that keeps the DiT resident never unmerges, so those factors are dead weight
+        that competes with the 2K fast-decoder decode. Clearing the path cache makes a later
+        rematerialize reload the adapter from ``lora_path`` instead of silently running unadapted.
+        """
+        import fastvideo.envs as envs
+        if not envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.get() or self.training_mode:
+            return
+        if not self._setting_constructor_adapter or self._runtime_adapter is not None:
+            # Runtime adapters are reapplied from memory when a lazy transformer reloads, so keep them.
+            return
+        released = 0
+        for transformer_lora_layers in self.lora_layers.values():
+            for _module, layers in transformer_lora_layers.lora_layers_by_block():
+                for layer in layers.values():
+                    if layer.side_branch or getattr(layer, "lora_A", None) is None:
+                        continue
+                    layer.lora_A = None
+                    layer.lora_B = None
+                    released += 1
+        if released == 0:
+            return
+        adapter = self.lora_adapters.pop(lora_nickname, None)
+        if adapter is not None:
+            adapter.clear()
+        self.lora_adapter_paths.pop(lora_nickname, None)
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("Released merged LoRA adapter factors for %s: %d layers, adapter tensors freed", lora_nickname,
+                    released)
 
     def merge_lora_weights(self) -> None:
         """Merge LoRA weights, then repack the packed quantized buffers for the merged state."""
