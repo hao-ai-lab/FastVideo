@@ -503,6 +503,13 @@ FASTVIDEO_H3_SOLSP_EXCHANGE = EnvChoice(
     "'peer' uses a two-rank batch_isend_irecv of only the peer's attention-head slice, so no cat and no transposes "
     "are materialized. Exact tier: identical BF16 values; only two ranks and head_dim=128 are supported, otherwise "
     "the legacy path runs.")
+FASTVIDEO_H3_SOLSP_QKV_CHUNKS = EnvInt(
+    1,
+    category="performance",
+    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, split the local sequence shard into this many pieces and post each "
+    "piece's QKV batch_isend_irecv as soon as its projection finishes, so the NCCL high-priority stream drains "
+    "chunk c while the compute stream runs chunk c+1's projection. 1 keeps the monolithic peer path. Exact tier: "
+    "same BF16 projection/norm/RoPE values and the same exchange; only the launch order changes.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",

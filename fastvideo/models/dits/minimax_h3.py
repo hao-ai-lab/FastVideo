@@ -246,6 +246,105 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
     return torch.cat([own_rows, peer_recv], dim=2)
 
 
+def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidden_states: torch.Tensor,
+                                                  rotary_emb: tuple[torch.Tensor, torch.Tensor] | None, step: int,
+                                                  original_seq_len: int | None, chunks: int) -> torch.Tensor | None:
+    """Chunked peer exchange that overlaps the QKV all-to-all with the projection GEMM.
+
+    The QKV projection and the exchange are each ~4.7 s per refine forward at 2K. Splitting the local shard into
+    ``chunks`` pieces and posting each piece's ``batch_isend_irecv`` right after its projection lets NCCL drain
+    chunk c on its high-priority stream while the compute stream runs chunk c+1's projection. The projection, norm
+    and RoPE values are the same BF16 tensors the monolithic peer path exchanges, so the result is unchanged;
+    ``None`` means an unsupported shape/state and the caller keeps the monolithic path.
+    """
+    import torch.distributed as dist
+    from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
+
+    sp_group = get_sp_group()
+    world, rank = sp_group.world_size, sp_group.rank_in_group
+    heads, dim = attn.num_attention_heads, attn.attention_head_dim
+    if (world != 2 or chunks < 2 or heads % world or dim != 128 or not hidden_states.is_cuda
+            or hidden_states.dtype is not torch.bfloat16 or not hidden_states.is_contiguous() or rotary_emb is None
+            or not attn.fuse_qknorm_rope or getattr(hidden_states, "_mxfp8_prequantized", None) is not None
+            or not _can_run_minimax_h3_fusion(hidden_states)):
+        return None
+    batch, local = hidden_states.shape[0], hidden_states.shape[1]
+    if local % chunks:
+        return None
+    heads_per_rank = heads // world
+    self_heads = slice(rank * heads_per_rank, (rank + 1) * heads_per_rank)
+    peer_heads = slice((1 - rank) * heads_per_rank, (2 - rank) * heads_per_rank)
+    peer = sp_group.ranks[1 - rank]
+    group = sp_group.device_group
+    chunk = local // chunks
+    cos, sin = rotary_emb
+    cos = cos.to(torch.bfloat16)
+    sin = sin.to(torch.bfloat16)
+    own: list[list[torch.Tensor]] = [[], [], []]
+    recvs: list[list[torch.Tensor]] = [[], [], []]
+    works: list[Any] = []
+    with STAGES.span("sp_a2a_qkv"):
+        for index in range(chunks):
+            start = index * chunk
+            stop = start + chunk
+            with STAGES.span("qkv_proj"):
+                projected = _shared_input_projections((attn.to_q, attn.to_k, attn.to_v),
+                                                      hidden_states[:, start:stop].contiguous())
+                tensors = [t.unflatten(-1, (heads, dim)) for t in projected]
+                tensors[0] = fused_qknorm_rope(tensors[0], attn.norm_q.weight, cos[start:stop], sin[start:stop],
+                                               attn.norm_q.eps)
+                tensors[1] = fused_qknorm_rope(tensors[1], attn.norm_k.weight, cos[start:stop], sin[start:stop],
+                                               attn.norm_k.eps)
+            with STAGES.span("sp_qkv_pack"):
+                sends = [
+                    _peer_exchange_buffer((batch, chunk, heads_per_rank, dim), t, f"csend{index}_{slot}")
+                    for slot, t in enumerate(tensors)
+                ]
+                recv = [
+                    _peer_exchange_buffer((batch, chunk, heads_per_rank, dim), t, f"crecv{index}_{slot}")
+                    for slot, t in enumerate(tensors)
+                ]
+                for buffer, tensor in zip(sends, tensors):
+                    buffer.copy_(tensor[:, :, peer_heads, :])
+            for slot, tensor in enumerate(tensors):
+                own[slot].append(tensor[:, :, self_heads, :].contiguous())
+            del tensors
+            for slot in range(3):
+                recvs[slot].append(recv[slot])
+            works.extend(
+                dist.batch_isend_irecv([
+                    op for r, s in zip(recv, sends)
+                    for op in (dist.P2POp(dist.irecv, r, peer, group), dist.P2POp(dist.isend, s, peer, group))
+                ]))
+        for work in works:
+            work.wait()
+    half, other = (own, recvs) if rank == 0 else (recvs, own)
+    parts = [torch.cat(half[slot] + other[slot], dim=1) for slot in range(3)]
+    seq_len = original_seq_len or local * world
+    pad = local * world - seq_len
+    parts = [part[:, :seq_len] for part in parts]
+    with STAGES.span("sp_sol"):
+        output = _sol_attention(parts[0], parts[1], parts[2], step)
+    with STAGES.span("sp_pad"):
+        if pad:
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad))
+    out_shard = output.shape[1] // world
+    own_rows = output[:, rank * out_shard:(rank + 1) * out_shard, :, :]
+    peer_send = _peer_exchange_buffer((batch, out_shard, heads_per_rank, dim), output, "out_send")
+    peer_send.copy_(output[:, (1 - rank) * out_shard:(2 - rank) * out_shard, :, :])
+    peer_recv = _peer_exchange_buffer(peer_send.shape, output, "out_recv")
+    with STAGES.span("sp_a2a_out"):
+        out_works = dist.batch_isend_irecv([
+            dist.P2POp(dist.irecv, peer_recv, peer, group),
+            dist.P2POp(dist.isend, peer_send, peer, group),
+        ])
+        for work in out_works:
+            work.wait()
+    if rank:
+        return torch.cat([peer_recv, own_rows], dim=2)
+    return torch.cat([own_rows, peer_recv], dim=2)
+
+
 def _sequence_parallel_sol_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, step: int,
                                      original_seq_len: int | None) -> torch.Tensor:
     """Sol-Attn over ``[B, S, H, D]``; under sequence parallel each rank attends the full sequence for its heads.
@@ -608,6 +707,16 @@ class MiniMaxH3Attention(nn.Module):
             sol_step = get_forward_context().current_timestep
         sol_sparse = (sol_step is not None and _sol_sink_tokens() < (original_seq_len or 0)
                       and _sol_sparse_step(int(sol_step)))
+        if (sol_sparse and pre_quantized is None and envs.FASTVIDEO_H3_SOLSP_EXCHANGE.get() == "peer"
+                and int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()) > 1):
+            chunked = _sequence_parallel_sol_attention_peer_chunked(
+                self, hidden_states, rotary_emb, int(sol_step), original_seq_len,
+                int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()))
+            if chunked is not None:
+                hidden_states = chunked.flatten(2, 3).type_as(hidden_states)
+                with STAGES.span("out_proj"):
+                    hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
         if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
             meta = get_forward_context().attn_metadata
