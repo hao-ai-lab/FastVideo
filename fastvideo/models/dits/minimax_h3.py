@@ -265,18 +265,18 @@ def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidd
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
     if (world != 2 or chunks < 2 or heads % world or dim != 128 or not hidden_states.is_cuda
             or hidden_states.dtype is not torch.bfloat16 or not hidden_states.is_contiguous() or rotary_emb is None
-            or not attn.fuse_qknorm_rope or getattr(hidden_states, "_mxfp8_prequantized", None) is not None
-            or not _can_run_minimax_h3_fusion(hidden_states)):
+            or getattr(hidden_states, "_mxfp8_prequantized", None) is not None):
+        return None
+    if attn.fuse_qknorm_rope and not _can_run_minimax_h3_fusion(hidden_states):
         return None
     batch, local = hidden_states.shape[0], hidden_states.shape[1]
-    if local % chunks:
+    if local < 2 * chunks:
         return None
     heads_per_rank = heads // world
     self_heads = slice(rank * heads_per_rank, (rank + 1) * heads_per_rank)
     peer_heads = slice((1 - rank) * heads_per_rank, (2 - rank) * heads_per_rank)
     peer = sp_group.ranks[1 - rank]
     group = sp_group.device_group
-    chunk = local // chunks
     cos, sin = rotary_emb
     cos = cos.to(torch.bfloat16)
     sin = sin.to(torch.bfloat16)
@@ -285,23 +285,28 @@ def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidd
     works: list[Any] = []
     with STAGES.span("sp_a2a_qkv"):
         for index in range(chunks):
-            start = index * chunk
-            stop = start + chunk
+            start = index * local // chunks
+            stop = (index + 1) * local // chunks
+            size = stop - start
             with STAGES.span("qkv_proj"):
                 projected = _shared_input_projections((attn.to_q, attn.to_k, attn.to_v),
                                                       hidden_states[:, start:stop].contiguous())
                 tensors = [t.unflatten(-1, (heads, dim)) for t in projected]
-                tensors[0] = fused_qknorm_rope(tensors[0], attn.norm_q.weight, cos[start:stop], sin[start:stop],
-                                               attn.norm_q.eps)
-                tensors[1] = fused_qknorm_rope(tensors[1], attn.norm_k.weight, cos[start:stop], sin[start:stop],
-                                               attn.norm_k.eps)
+                if attn.fuse_qknorm_rope:
+                    tensors[0] = fused_qknorm_rope(tensors[0], attn.norm_q.weight, cos[start:stop], sin[start:stop],
+                                                   attn.norm_q.eps)
+                    tensors[1] = fused_qknorm_rope(tensors[1], attn.norm_k.weight, cos[start:stop], sin[start:stop],
+                                                   attn.norm_k.eps)
+                else:
+                    tensors[0] = attn._rotate(attn.norm_q(tensors[0]), (cos[start:stop], sin[start:stop]))
+                    tensors[1] = attn._rotate(attn.norm_k(tensors[1]), (cos[start:stop], sin[start:stop]))
             with STAGES.span("sp_qkv_pack"):
                 sends = [
-                    _peer_exchange_buffer((batch, chunk, heads_per_rank, dim), t, f"csend{index}_{slot}")
+                    _peer_exchange_buffer((batch, size, heads_per_rank, dim), t, f"csend{index}_{slot}")
                     for slot, t in enumerate(tensors)
                 ]
                 recv = [
-                    _peer_exchange_buffer((batch, chunk, heads_per_rank, dim), t, f"crecv{index}_{slot}")
+                    _peer_exchange_buffer((batch, size, heads_per_rank, dim), t, f"crecv{index}_{slot}")
                     for slot, t in enumerate(tensors)
                 ]
                 for buffer, tensor in zip(sends, tensors):
@@ -709,9 +714,10 @@ class MiniMaxH3Attention(nn.Module):
                       and _sol_sparse_step(int(sol_step)))
         if (sol_sparse and pre_quantized is None and envs.FASTVIDEO_H3_SOLSP_EXCHANGE.get() == "peer"
                 and int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()) > 1):
-            chunked = _sequence_parallel_sol_attention_peer_chunked(
-                self, hidden_states, rotary_emb, int(sol_step), original_seq_len,
-                int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()))
+            with STAGES.span("attention"):
+                chunked = _sequence_parallel_sol_attention_peer_chunked(
+                    self, hidden_states, rotary_emb, int(sol_step), original_seq_len,
+                    int(envs.FASTVIDEO_H3_SOLSP_QKV_CHUNKS.get()))
             if chunked is not None:
                 hidden_states = chunked.flatten(2, 3).type_as(hidden_states)
                 with STAGES.span("out_proj"):
