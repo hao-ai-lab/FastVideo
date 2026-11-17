@@ -77,6 +77,23 @@ def _transformers_5_15_contract_reference(
     return torch.cat(outputs)
 
 
+def _installed_transformers_interpolation_reference(
+    position_embedding: torch.Tensor,
+    grid_thw: torch.Tensor,
+) -> torch.Tensor:
+    from transformers import vision_utils
+
+    get_reference = getattr(vision_utils, "get_vision_interpolation_indices_and_weights", None)
+    if get_reference is None:
+        pytest.fail("transformers>=5.15 must provide get_vision_interpolation_indices_and_weights", pytrace=False)
+    indices, weights = get_reference(grid_thw,
+                                     num_grid_per_side=48,
+                                     mode="bilinear",
+                                     align_corners=True,
+                                     spatial_merge_size=2)
+    return (position_embedding[indices] * weights[:, :, None]).sum(1)
+
+
 @pytest.mark.parametrize("grid_thw", _GRID_CASES)
 def test_position_interpolation_matches_transformers_5_15_contract(grid_thw: torch.Tensor) -> None:
     """Pin visual-token ordering and float32 accumulation for every supported dependency version."""
@@ -87,6 +104,18 @@ def test_position_interpolation_matches_transformers_5_15_contract(grid_thw: tor
     actual = _interpolate_vision_position_embeddings(position_embedding, grid_thw, 48, 2)
 
     assert actual.dtype == torch.float32
+    assert_close(actual, expected, atol=0.0, rtol=0.0)
+
+
+@pytest.mark.parametrize("grid_thw", _GRID_CASES)
+def test_transformers_5_15_contract_matches_installed_helper(grid_thw: torch.Tensor) -> None:
+    """Cross-check the self-contained contract against the installed public helper."""
+    torch.manual_seed(1733)
+    position_embedding = torch.randn(48 * 48, 32, dtype=torch.bfloat16)
+
+    expected = _installed_transformers_interpolation_reference(position_embedding, grid_thw)
+    actual = _transformers_5_15_contract_reference(position_embedding, grid_thw)
+
     assert_close(actual, expected, atol=0.0, rtol=0.0)
 
 

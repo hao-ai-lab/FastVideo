@@ -48,6 +48,7 @@ def test_gather_tiling_equals_scatter_with_ragged_padding(dtype, prefix):
     actual = vsa._tile_hidden(x, geometry)
     assert mx.array_equal(actual, expected).item()
     assert mx.array_equal(vsa._untile_hidden(actual, geometry), x).item()
+    assert geometry.tile_gather_index is geometry.tile_gather_index
     prefix_tiled = mx.concatenate([x[:geometry.prefix_length], mx.zeros((1, 2, 8), dtype=dtype)])[
         geometry.prefix_gather_index]
     assert mx.array_equal(prefix_tiled, expected[:geometry.num_prefix_tiles * 64]).item()

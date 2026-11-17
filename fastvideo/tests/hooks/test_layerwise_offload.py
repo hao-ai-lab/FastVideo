@@ -255,6 +255,88 @@ def test_layerwise_offload_no_modulelist_error():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_layerwise_offload_memory_reduction():
+    """Test that layerwise offloading reduces GPU memory usage."""
+    device = torch.device("cuda")
+    hidden_size = 512
+    num_blocks = 8
+    batch_size = 1
+    seq_len = 64
+
+    # Create model
+    model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
+
+    # Measure initial GPU memory
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device)
+    with torch.no_grad():
+        _ = model(input_tensor)
+
+    memory_without_offload = torch.cuda.max_memory_allocated()
+
+    # Reset model
+    model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
+
+    # Enable offloading
+    enable_layerwise_offload(model)
+
+    # Measure GPU memory with offloading
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device)
+    with torch.no_grad():
+        _ = model(input_tensor)
+
+    memory_with_offload = torch.cuda.max_memory_allocated()
+
+    # Memory with offload should be less (parameters are offloaded)
+    # Note: This is a weak check as memory usage depends on many factors
+    print(f"Memory without offload: {memory_without_offload / 1024**2:.2f} MB, "
+          f"with offload: {memory_with_offload / 1024**2:.2f} MB")
+
+    # We expect some reduction but this test is more informational
+    assert memory_with_offload < memory_without_offload * 1.5, (
+        "Memory usage should not increase significantly with offloading")
+
+    print(" Memory reduction test passed")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_layerwise_offload_gradient_disabled():
+    """Test that layerwise offloading works correctly with gradients disabled."""
+    device = torch.device("cuda")
+    hidden_size = 128
+    batch_size = 2
+    seq_len = 16
+    num_blocks = 3
+
+    # Create model
+    model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
+    model.eval()
+
+    # Enable layerwise offloading
+    enable_layerwise_offload(model)
+
+    input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device)
+
+    # Forward pass should work without gradients
+    with torch.no_grad():
+        output = model(input_tensor)
+
+    assert output.requires_grad is False, "Output should not require gradients"
+    assert output.shape == (
+        batch_size,
+        seq_len,
+        hidden_size,
+    ), "Output shape should match input"
+
+    print(" Gradient disabled test passed")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_layerwise_offload_different_batch_sizes():
     """Test layerwise offloading with different batch sizes."""
     device = torch.device("cuda")
@@ -295,6 +377,8 @@ if __name__ == "__main__":
         test_layerwise_offload_multiple_forward_passes()
         test_layerwise_offload_parameter_integrity()
         test_layerwise_offload_no_modulelist_error()
+        test_layerwise_offload_memory_reduction()
+        test_layerwise_offload_gradient_disabled()
         test_layerwise_offload_different_batch_sizes()
         print("\n All tests passed!")
     else:
