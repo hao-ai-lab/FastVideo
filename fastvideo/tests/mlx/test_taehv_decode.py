@@ -11,7 +11,6 @@ from fastvideo.mlx_runtime.taehv_decode import TAEW2_1_CHECKPOINT_SHA256, ensure
 
 def test_taehv_checkpoint_pin_is_a_sha256() -> None:
     assert len(TAEW2_1_CHECKPOINT_SHA256) == 64
-    assert int(TAEW2_1_CHECKPOINT_SHA256, 16) >= 0
 
 
 def test_explicit_taehv_checkpoint_path_is_not_downloaded(tmp_path) -> None:

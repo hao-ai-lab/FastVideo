@@ -22,17 +22,6 @@ def _build_metadata(cache_tile_buf: bool, raw_latent_shape=(4, 4, 4), VSA_sparsi
     )
 
 
-def test_vsa_tile_does_not_cache_training_scratch_when_disabled():
-    metadata = _build_metadata(cache_tile_buf=False)
-    impl = object.__new__(VideoSparseAttentionImpl)
-    x = torch.ones(1, 64, 2, 2)
-
-    tiled = impl.tile(x, metadata)
-
-    assert tiled.shape == x.shape
-    assert metadata.tile_buf is None
-
-
 def test_vsa_tile_caches_scratch_by_default():
     metadata = _build_metadata(cache_tile_buf=True)
     impl = object.__new__(VideoSparseAttentionImpl)

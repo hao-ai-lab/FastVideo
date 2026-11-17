@@ -33,9 +33,6 @@ from fastvideo.pipelines.basic.ltx2.continuation import (
 
 class TestInMemoryBlobStore:
 
-    def test_is_blob_store(self):
-        assert isinstance(InMemoryBlobStore(), BlobStore)
-
     def test_put_then_get_returns_same_bytes(self):
         store = InMemoryBlobStore()
         blob_id = store.put(b"hello")
@@ -72,9 +69,6 @@ class TestInMemoryBlobStore:
 
 
 class TestInMemorySessionStore:
-
-    def test_is_session_store(self):
-        assert isinstance(InMemorySessionStore(), SessionStore)
 
     def test_store_then_snapshot(self):
         store = InMemorySessionStore()

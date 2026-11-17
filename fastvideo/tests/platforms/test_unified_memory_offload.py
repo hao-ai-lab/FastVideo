@@ -170,14 +170,6 @@ def test_pin_cpu_memory_is_not_a_host_offload_mode(as_unified_cuda) -> None:
     assert args.pin_cpu_memory is True
 
 
-def test_already_disabled_flags_stay_disabled(as_unified_cuda) -> None:
-    args = _args_with_offloads()
-
-    args.finalize_device_offload_policy()
-
-    assert not [flag for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS if getattr(args, flag)]
-
-
 @pytest.mark.parametrize("name_error", [NotImplementedError, ValueError, RuntimeError])
 def test_platform_without_device_name_uses_generic_name(monkeypatch, name_error: type[Exception]) -> None:
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)

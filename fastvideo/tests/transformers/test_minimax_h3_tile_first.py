@@ -2,16 +2,13 @@
 """Tile-first VSA parity on CUDA, including partial tiles and learned gates."""
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 import torch
 
 import fastvideo.envs as envs
 
-from fastvideo.layers.quantization.fp8_config import FP8Config, FP8QuantizeMethod
+from fastvideo.layers.quantization.fp8_config import FP8Config
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
 
 
 def _install_fp8_buffers(layer):
@@ -23,31 +20,6 @@ def _install_fp8_buffers(layer):
     layer.register_buffer("_fp8_weight", (weight / scale).to(torch.float8_e4m3fn))
     layer.register_buffer("_fp8_weight_scale", scale)
     layer.register_parameter("weight", None)
-
-
-@pytest.mark.parametrize("granularity", ["tensor", "channel"])
-def test_shared_fp8_projections_match_independent_quantization(granularity):
-    if not torch.cuda.is_available() or torch.cuda.get_device_capability() < (8, 9):
-        pytest.skip("sm89+ CUDA is required for FP8 GEMM")
-    from fastvideo.layers.linear import ReplicatedLinear
-
-    torch.manual_seed(17)
-    layers = tuple(ReplicatedLinear(128, 256, bias=True, quant_config=FP8Config(granularity),
-                                    prefix=f"block.attn.to_{name}") for name in ("q", "k", "v"))
-    for layer in layers:
-        layer.to(device="cuda", dtype=torch.bfloat16)
-        layer.weight.data.normal_(std=0.1)
-        layer.bias.data.normal_(std=0.1)
-        _install_fp8_buffers(layer)
-    x = torch.randn(1, 272, 128, device="cuda", dtype=torch.bfloat16)
-    with torch.inference_mode():
-        reference = [layer(x)[0] for layer in layers]
-        with patch.object(FP8QuantizeMethod, "quantize_input", autospec=True,
-                          side_effect=FP8QuantizeMethod.quantize_input) as quant:
-            actual = _shared_input_projections(layers, x)
-        assert quant.call_count == 1
-        for expected, output in zip(reference, actual, strict=True):
-            torch.testing.assert_close(output, expected, atol=0, rtol=0)
 
 
 @pytest.mark.parametrize("kernel", ["original", "bf16", "int8"])

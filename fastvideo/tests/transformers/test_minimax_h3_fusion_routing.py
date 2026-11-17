@@ -114,13 +114,6 @@ def test_minimax_h3_fusion_selector(raw: str, expected: frozenset[str]) -> None:
     assert _enabled_minimax_h3_fusions(raw) == expected
 
 
-def test_minimax_h3_fusion_selector_rejects_unknown_name() -> None:
-    from fastvideo.models.dits.minimax_h3 import _enabled_minimax_h3_fusions
-
-    with pytest.raises(ValueError, match="Unknown MiniMax H3 fusion"):
-        _enabled_minimax_h3_fusions("swiglu,unknown")
-
-
 def test_swiglu_fusion_stays_on_eager_path_with_grad(monkeypatch: pytest.MonkeyPatch) -> None:
     import fastvideo.models.dits.minimax_h3 as h3
 

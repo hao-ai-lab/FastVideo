@@ -309,7 +309,6 @@ def test_gen3c_weight_loading():
 
     # Verify model is usable
     model.eval()
-    assert model is not None
 
 
 @pytest.mark.skipif(not os.getenv("GEN3C_OFFICIAL_PATH") or not os.getenv("GEN3C_FASTVIDEO_PATH"),
