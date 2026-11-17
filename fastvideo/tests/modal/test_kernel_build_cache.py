@@ -300,7 +300,7 @@ def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, env_overrides
     monkeypatch.setattr(kernel_build_cache, "_torch_metadata", lambda: {**torch_metadata, "cxx11_abi": False})
     torch_abi_changed = kernel_build_cache._build_metadata(tmp_path)
 
-    assert baseline["schema_version"] == 4
+    assert baseline["schema_version"] == 5
     assert baseline["cache_key"] != compiler_changed["cache_key"]
     assert baseline["cache_key"] != torch_abi_changed["cache_key"]
 
@@ -528,3 +528,43 @@ def test_producer_repairs_invalid_entry_and_stores_valid_wheel(monkeypatch, tmp_
     assert installed == [built_wheel]
     assert cached_wheel == cache_root / "cache-key" / WHEEL_NAME
     assert reason == ""
+
+
+CUTLASS_SHA = "e67e63c331d6e4b729047c95cf6b92c8454cba89"
+TK_SHA = "6c27e28c8115d1839d9eeeb530913c184a75fc87"
+
+
+def test_fresh_clone_and_image_checkout_share_submodule_identity() -> None:
+    fresh_clone = (f"-{CUTLASS_SHA} fastvideo-kernel/include/cutlass\n"
+                   f"-{TK_SHA} fastvideo-kernel/include/tk")
+    # _run strips captured output, which removes the first line's clean flag.
+    image_checkout = (f"{CUTLASS_SHA} fastvideo-kernel/include/cutlass (v4.3.0)\n"
+                      f" {TK_SHA} fastvideo-kernel/include/tk (6c27e28c)")
+
+    assert (kernel_build_cache._submodule_identity(fresh_clone) == kernel_build_cache._submodule_identity(
+        image_checkout))
+
+
+@pytest.mark.parametrize("flag", ["+", "U"])
+def test_moved_or_conflicted_submodule_changes_identity(flag) -> None:
+    clean = f" {CUTLASS_SHA} fastvideo-kernel/include/cutlass"
+    changed = f"{flag}{CUTLASS_SHA} fastvideo-kernel/include/cutlass"
+
+    assert kernel_build_cache._submodule_identity(clean) != kernel_build_cache._submodule_identity(changed)
+
+
+def test_unparsed_submodule_status_is_kept_verbatim() -> None:
+    status = "<unavailable: git not found>"
+
+    assert kernel_build_cache._submodule_identity(status) == status
+
+
+@pytest.mark.parametrize(("capability", "expected"), [((9, 0), "9.0a"), ((12, 0), "12.0a"), ((12, 1), "12.1a"),
+                                                       ((8, 9), "8.9")])
+def test_detected_arch_matches_image_build_arch(monkeypatch, capability, expected) -> None:
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _device=0: capability)
+
+    assert kernel_build_cache._detect_arch_from_torch() == expected

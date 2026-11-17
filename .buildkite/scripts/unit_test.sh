@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/spark_kernel_sync.sh"
 
 # Collect the whole attention directory so new files cannot land uncovered.
 # Its FA2/FA3 regression files skip when FA4 is selected (the Modal image
@@ -30,6 +31,7 @@ exec pytest \
   ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/training/test_ltx2_rope_fps.py \
+  ./fastvideo/tests/inference/test_basic_fasth3_profile.py \
   ./fastvideo/tests/inference/test_basic_fasth3_omniref_pdd.py \
   ./fastvideo/tests/inference/test_basic_fasth3_token_reduction.py \
   ./fastvideo/tests/inference/test_inference_regional_compile.py \

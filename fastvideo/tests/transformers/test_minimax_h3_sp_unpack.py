@@ -180,8 +180,8 @@ def test_fp8_query_unpack_matches_bf16_scatter_and_native_fp4(world, rows, heads
     from fastvideo.models.dits.minimax_h3_fusions.sp_exchange import unpack_fp8_tiles
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _api, _unpack_seq_fp8
 
-    if torch.cuda.get_device_capability()[0] < 10:
-        pytest.skip("native FP4 conversion requires Blackwell")
+    if torch.cuda.get_device_capability()[0] != 12:
+        pytest.skip("attn_qat_infer native kernels are built only for sm_120a/sm_121a")
     torch.manual_seed(357)
     dim, sequence = 128, world * rows - 1
     tile_rows = ((sequence + 127) // 128 + 1) * 128

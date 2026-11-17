@@ -13,7 +13,9 @@ isolated Docker containers. Both execute the immutable PR SHA.
 
 The files under `fastvideo/tests/modal/` and `.buildkite/scripts/pr_test.sh`
 are dormant rollback code. Never add an active Buildkite or slash-command
-route to them. `pr_test.sh` must continue to reject Buildkite invocations.
+route to them. The one exception is `kernel_build_cache.py`, which the image
+build and the Spark lanes' `spark_kernel_sync.sh` call to install a matching
+kernel. `pr_test.sh` must continue to reject Buildkite invocations.
 
 The private operator bundle is deliberately outside this repository because
 it contains site paths and credentials. See
@@ -33,6 +35,11 @@ and the coordination contract with that bundle.
   A Spark runner sets `FASTVIDEO_CI_BACKEND=spark4`; gate cluster-only tests on
   that flag, never on memory heuristics. Keep
   `SPARK_CAPABLE_LANES` in `test_ci_test_collection.py` in sync.
+- Every Spark-capable lane script except DreamVerse sources
+  `.buildkite/scripts/spark_kernel_sync.sh` right after `set -euo pipefail`.
+  The Spark runner installs no kernel of its own, so this keeps
+  `fastvideo-kernel` in step with the checkout. A new Spark-capable lane must
+  do the same; `test_spark_lanes_sync_the_kernel_to_the_checkout` enforces it.
 - The trusted uploader fills `FV_SPARK_BACKEND`: `spark4` for `fastcheck`,
   `merge` and `direct` builds, including unset scope treated as Fastcheck,
   while an agent tagged `queue=ci-runner,backend=spark4` is connected and

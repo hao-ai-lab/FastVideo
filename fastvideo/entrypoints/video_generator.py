@@ -58,6 +58,8 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (BUNDLE_PATH_EXTRA_KEY, BUNDLE_PAYLOAD_EXTRA_KEY,
+                                                               write_draft_bundle)
 from fastvideo.utils import align_to, allocate_cpu_tensor_with_pin_fallback, pixels_to_uint8, shallow_asdict
 from fastvideo.worker.executor import Executor
 
@@ -1022,6 +1024,10 @@ class VideoGenerator:
         if output_batch.output is None:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
+        draft_bundle = output_batch.extra.pop(BUNDLE_PAYLOAD_EXTRA_KEY, None)
+        if draft_bundle is not None:
+            # Written here, beside the video, so a remote (Ray) output worker's bundle reaches the serving host.
+            write_draft_bundle(batch.extra[BUNDLE_PATH_EXTRA_KEY], draft_bundle)
 
         audio_only = bool(output_batch.extra.get("audio_only"))
         if not needs_samples_out:

@@ -79,8 +79,10 @@ def test_stacked_accumulate_preserves_forward_across_unmerge_remerge():
         assert outputs == [34.0, 34.0, 34.0], f"Merged, unmerged, remerged outputs: {outputs}"
 
 
-@pytest.fixture
-def scalar_stack():
+@pytest.fixture(params=[False, True], ids=["snapshot", "snapshot_free"])
+def scalar_stack(request, monkeypatch):
+    # Exercise the unified-memory lifecycle on CPU without requiring a CUDA platform.
+    monkeypatch.setattr(lora_linear, "_skips_unmerge_snapshot", lambda _base: request.param)
     with (torch.no_grad(), torch._dynamo.config.patch(disable=True), envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False)):
         dtype = torch.bfloat16
         base = ReplicatedLinear(1, 1, bias=False, params_dtype=dtype)
@@ -114,7 +116,8 @@ def test_update_stacked_adapters_preserves_rank_scale_and_replacement(scalar_sta
         layer.merge_lora_weights()
         layer.merge_lora_weights()
         assert layer(x)[0].item() == expected
-    assert layer.cpu_weight.item() == 10.0
+    if layer.cpu_weight is not None:
+        assert layer.cpu_weight.item() == 10.0
 
 
 @pytest.mark.parametrize("unmerge_before_update", [False, True])
@@ -148,3 +151,22 @@ def test_unmerged_stack_uses_live_current_adapter(scalar_stack, change, expected
     else:
         layer.lora_B.fill_(6)
     assert layer(x)[0].item() == expected
+
+
+@pytest.mark.parametrize("change", ["strength", "factors"])
+def test_unmerge_uses_saved_merged_contributions(scalar_stack, change):
+    layer, x = scalar_stack
+    if change == "strength":
+        layer.lora_strength = 0.5
+        expected = 29.0
+    else:
+        layer.lora_B.fill_(6)
+        expected = 36.0
+
+    layer.unmerge_lora_weights()
+    assert layer.base_layer.weight.item() == 10.0
+    assert layer(x)[0].item() == expected
+    layer.merge_lora_weights()
+    assert layer(x)[0].item() == expected
+    layer.unmerge_lora_weights()
+    assert layer.base_layer.weight.item() == 10.0
