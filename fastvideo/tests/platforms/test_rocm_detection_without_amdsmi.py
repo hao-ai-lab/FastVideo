@@ -32,8 +32,11 @@ def test_hip_torch_with_amd_device_node_is_rocm(monkeypatch, no_amdsmi):
 
 
 def test_hip_torch_without_amd_device_node_is_not_rocm(monkeypatch, no_amdsmi):
+    # On Linux the device nodes gate detection even when the HIP runtime sees a GPU.
     monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
     monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "posix")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     assert platforms.rocm_platform_plugin() is None
 
 

@@ -133,6 +133,7 @@ def rocm_platform_plugin() -> str | None:
             import torch
             hip_version = getattr(torch.version, "hip", None)
             # Windows has no /dev/kfd; there a HIP torch build that sees a GPU is the ROCm platform.
+            # torch.cuda.is_available() initializes the HIP runtime, which the Linux node probe avoids.
             if hip_version and (_rocm_device_node_accessible() or (os.name == "nt" and torch.cuda.is_available())):
                 is_rocm = True
                 logger.info("ROCm platform is available (torch HIP %s; detected without amdsmi)", hip_version)
