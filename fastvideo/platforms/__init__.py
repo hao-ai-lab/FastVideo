@@ -132,7 +132,8 @@ def rocm_platform_plugin() -> str | None:
         try:
             import torch
             hip_version = getattr(torch.version, "hip", None)
-            if hip_version and _rocm_device_node_accessible():
+            # Windows has no /dev/kfd; there a HIP torch build that sees a GPU is the ROCm platform.
+            if hip_version and (_rocm_device_node_accessible() or (os.name == "nt" and torch.cuda.is_available())):
                 is_rocm = True
                 logger.info("ROCm platform is available (torch HIP %s; detected without amdsmi)", hip_version)
         except Exception as e:

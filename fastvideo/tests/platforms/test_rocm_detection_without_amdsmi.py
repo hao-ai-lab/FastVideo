@@ -43,6 +43,23 @@ def test_cuda_torch_is_not_rocm_even_with_the_device_node(monkeypatch, no_amdsmi
     assert platforms.rocm_platform_plugin() is None
 
 
+def test_windows_hip_torch_with_a_gpu_is_rocm(monkeypatch, no_amdsmi):
+    # Windows has no /dev/kfd, so the device-node probe always fails there.
+    monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
+    monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "nt")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert platforms.rocm_platform_plugin() == ROCM_PLATFORM
+
+
+def test_windows_hip_torch_without_a_gpu_is_not_rocm(monkeypatch, no_amdsmi):
+    monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
+    monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "nt")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert platforms.rocm_platform_plugin() is None
+
+
 def test_current_platform_resolves_to_rocm_without_amdsmi(monkeypatch, no_amdsmi):
     monkeypatch.setattr(platforms, "mps_platform_plugin", lambda: None)
     monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
