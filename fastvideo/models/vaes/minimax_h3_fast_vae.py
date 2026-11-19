@@ -174,8 +174,7 @@ class FastH3VaeDecoder(nn.Module):
     def decode_to_pixels_parallel(self,
                                   z: torch.Tensor,
                                   output: torch.Tensor | None,
-                                  sp_group: Any,
-                                  strategy: str | None = None) -> torch.Tensor | None:
+                                  sp_group: Any) -> torch.Tensor | None:
         """Decode the native-block slices across ``sp_group`` and assemble on the ``output`` rank.
 
         Every rank decodes the blocks it owns plus a one-block halo on each side and keeps only its owned frames; the
@@ -269,6 +268,7 @@ def fast_vae_decoder(fastvideo_args: Any, device: torch.device) -> FastH3VaeDeco
         bool(envs.FASTVIDEO_H3_FAST_VAE_FP8_STATIC.get()),
         bool(envs.FASTVIDEO_H3_FAST_VAE_COMPILE.get()),
         bool(envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.get()),
+        int(envs.FASTVIDEO_H3_FAST_VAE_TOKEN_CHUNK.get()),
     )
     decoder = _DECODERS.get(key)
     if decoder is None:

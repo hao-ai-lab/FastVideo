@@ -276,7 +276,9 @@ class NonCausalViTDecoder(nn.Module):
 
         The norm and both linears act on each row independently, so slicing is exact; it caps the
         ``w1`` activation (``2 * 4 * dim`` per token, the decoder's largest single transient) at
-        ``token_chunk`` rows instead of the whole ``T*H*W`` sequence.
+        ``token_chunk`` rows instead of the whole ``T*H*W`` sequence. The exception is
+        ``FASTVIDEO_H3_FAST_VAE_FP8`` with dynamic activation scales: each slice then gets its own
+        per-tensor scale, so the result is approximate (as that FP8 tier already is).
         """
         if self.token_chunk <= 0:
             return blk.ff(blk.norm2(x.float()).to(x.dtype))

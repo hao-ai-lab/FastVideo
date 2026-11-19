@@ -12,16 +12,25 @@ import pytest
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+from fastvideo.models.dits import minimax_h3
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.models.vaes.minimax_h3_fast_vae import BLOCK, FRAMES_TO_TRIM, PATCH_T, FastH3VaeDecoder
 from fastvideo.models.vaes.minimax_h3_fast_vae_decoder import NonCausalViTDecoder
 from fastvideo.pipelines.basic.open_h3_regenerate_2k.stages import latent_preparation
+from fastvideo.pipelines import lora_pipeline
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 
 def _tiny_fast_decoder(token_chunk: int = 0) -> FastH3VaeDecoder:
     torch.manual_seed(0)
     model = NonCausalViTDecoder([0.0] * 24, [1.0] * 24, list(range(2)), time_norm=5, heads=2, dim_head=8)
+    # The released scales start at zero, which would make every block an identity.
+    for blk in model.blocks:
+        torch.nn.init.normal_(blk.scale1, std=0.5)
+        torch.nn.init.normal_(blk.scale2, std=0.5)
     model.token_chunk = token_chunk
     decoder = FastH3VaeDecoder.__new__(FastH3VaeDecoder)
     torch.nn.Module.__init__(decoder)
@@ -122,15 +131,54 @@ class _RecordingLinear:
         return hidden_states @ self.weight, None
 
 
-@pytest.mark.parametrize(("pad_m", "expected_rows"), [(0, 5), (16, 16), (4, 5)])
-def test_sol_out_projection_pads_rows_and_drops_them(pad_m, expected_rows):
+@pytest.mark.parametrize(("exchange", "pad_m", "expected_rows"), [("peer", 0, 5), ("peer", 16, 16), ("peer", 4, 5),
+                                                                    ("legacy", 16, 5)])
+def test_sol_out_projection_pads_rows_and_drops_them(exchange, pad_m, expected_rows):
     torch.manual_seed(0)
     attn = SimpleNamespace(to_out=_RecordingLinear(torch.randn(8, 6)))
     hidden = torch.randn(1, 5, 8)
-    with envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.override(pad_m):
+    with envs.FASTVIDEO_H3_SOLSP_EXCHANGE.override(exchange), envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.override(pad_m):
         out = MiniMaxH3Attention._sol_out_projection(attn, hidden)
     assert attn.to_out.rows == [expected_rows]
     torch.testing.assert_close(out, hidden @ attn.to_out.weight)
+
+
+def test_ordinary_peer_sol_route_pads_to_out(monkeypatch):
+    torch.manual_seed(0)
+    attn = MiniMaxH3Attention(16, 2, 8, 1e-6, (AttentionBackendEnum.TORCH_SDPA, ), None, "blocks.0.attn")
+    weight = torch.randn(16, 16)
+    del attn.to_out
+    attn.to_out = _RecordingLinear(weight)
+    attn._rotate = lambda tensor, rotary_emb: tensor
+    monkeypatch.setattr(minimax_h3, "_sol_attn_mode", lambda: "sol_engine")
+    monkeypatch.setattr(minimax_h3, "_sol_sink_tokens", lambda: 0)
+    monkeypatch.setattr(minimax_h3, "_sol_sparse_step", lambda step: True)
+    monkeypatch.setattr(minimax_h3, "get_forward_context", lambda: SimpleNamespace(current_timestep=1))
+    monkeypatch.setattr(minimax_h3, "_sequence_parallel_sol_attention",
+                        lambda query, key, value, step, original_seq_len: value)
+    hidden = torch.randn(1, 5, 16)
+    rotary = (torch.ones(5, 8), torch.zeros(5, 8))
+    with torch.no_grad(), envs.FASTVIDEO_H3_SOLSP_EXCHANGE.override("peer"), \
+            envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.override(12):
+        out = attn(hidden, rotary, original_seq_len=5)
+        value = attn.to_v(hidden)[0]
+    assert attn.to_out.rows == [12]
+    torch.testing.assert_close(out, value @ weight)
+
+
+def _quantized_linear(method):
+    return SimpleNamespace(base_layer=SimpleNamespace(quant_method=method))
+
+
+@pytest.mark.parametrize(("method", "row_independent"), [
+    (None, True),
+    (MXFP8QuantizeMethod(), True),
+    (FP8QuantizeMethod(granularity="channel"), True),
+    (FP8QuantizeMethod(granularity="tensor"), False),
+])
+def test_chunked_qkv_runs_only_with_row_independent_input_quantization(method, row_independent):
+    linears = (_quantized_linear(None), _quantized_linear(method), _quantized_linear(None))
+    assert minimax_h3._row_independent_input_quantization(linears) is row_independent
 
 
 class _FakeLoRALayer:
@@ -159,14 +207,14 @@ def _fake_lora_pipeline(*, constructor: bool, runtime_adapter=None, training: bo
 
 def test_release_lora_adapter_is_off_by_default():
     pipeline, merged, _ = _fake_lora_pipeline(constructor=True)
-    LoRAPipeline._maybe_release_adapter_factors(pipeline, "base")
+    lora_pipeline._maybe_release_adapter_factors(pipeline, "base")
     assert merged.lora_A is not None and "base" in pipeline.lora_adapters
 
 
 def test_release_lora_adapter_drops_merged_constructor_factors():
     pipeline, merged, side = _fake_lora_pipeline(constructor=True)
     with envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.override(True):
-        LoRAPipeline._maybe_release_adapter_factors(pipeline, "base")
+        lora_pipeline._maybe_release_adapter_factors(pipeline, "base")
     assert merged.lora_A is None and merged.lora_B is None
     assert merged.lora_factors_released
     # Side-branch layers apply their factors on every forward, so they keep them.
@@ -185,8 +233,30 @@ def test_release_lora_adapter_keeps_runtime_and_training_factors(constructor, ru
     pipeline, merged, _ = _fake_lora_pipeline(constructor=constructor, runtime_adapter=runtime_adapter,
                                               training=training)
     with envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.override(True):
-        LoRAPipeline._maybe_release_adapter_factors(pipeline, "base")
+        lora_pipeline._maybe_release_adapter_factors(pipeline, "base")
     assert merged.lora_A is not None and "base" in pipeline.lora_adapters
+
+
+def _released_lora_pipeline():
+    pipeline, merged, side = _fake_lora_pipeline(constructor=True)
+    with envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.override(True):
+        lora_pipeline._maybe_release_adapter_factors(pipeline, "base")
+    return pipeline, merged, side
+
+
+@pytest.mark.parametrize("change", [
+    lambda pipeline: LoRAPipeline.clear_lora_adapter(pipeline),
+    lambda pipeline: LoRAPipeline.unmerge_lora_weights(pipeline),
+    lambda pipeline: LoRAPipeline.set_lora_adapter(pipeline, "style", "/weights/style"),
+])
+def test_released_adapter_rejects_changes_before_touching_a_layer(change):
+    pipeline, merged, side = _released_lora_pipeline()
+    pipeline.cur_adapter_strength = 1.0
+    side_factors = (side.lora_A, side.lora_B)
+    with pytest.raises(RuntimeError, match="FASTVIDEO_H3_RELEASE_LORA_ADAPTER"):
+        change(pipeline)
+    assert (side.lora_A, side.lora_B) == side_factors
+    assert merged.lora_factors_released
 
 
 class _FakeDraftCache:

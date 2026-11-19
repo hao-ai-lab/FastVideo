@@ -509,7 +509,9 @@ FASTVIDEO_H3_SOLSP_QKV_CHUNKS = EnvInt(
     doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, split the local sequence shard into this many pieces and post each "
     "piece's QKV batch_isend_irecv as soon as its projection finishes, so the NCCL high-priority stream drains "
     "chunk c while the compute stream runs chunk c+1's projection. 1 keeps the monolithic peer path. Exact tier: "
-    "same BF16 projection/norm/RoPE values and the same exchange; only the launch order changes.")
+    "same BF16 projection/norm/RoPE values and the same exchange; only the launch order changes. Runs only when "
+    "the QKV input quantization is row-independent (BF16, MXFP8, per-token FP8, unit or calibrated NVFP4 scales); "
+    "per-tensor dynamic FP8 or dynamic NVFP4 activation scales keep the monolithic peer path.")
 FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE = EnvBool(
     False,
     category="performance",
@@ -521,9 +523,10 @@ FASTVIDEO_H3_SOLSP_OUT_PAD_M = EnvInt(
     0,
     category="performance",
     doc="On the peer Sol-Attn exchange paths, pad the attention output's M dimension up to at least this many rows "
-    "before to_out. On sm_121 F.scaled_mm selects a ~3x slower tile for the H3 to_out shape (K=7168, N=5376) when M "
-    "is below ~80000, so padding to 80000 makes the fast tile run and the extra rows are dropped. Row-independent, "
-    "so exact up to the tile's K-reduction order. 0 disables the pad.")
+    "before to_out (the ordinary, tensor-pipelined and chunked peer routes). On sm_121 F.scaled_mm selects a ~3x "
+    "slower tile for the H3 to_out shape (K=7168, N=5376) when M is below ~80000, so padding to 80000 makes the "
+    "fast tile run and the extra rows are dropped. Row-independent, so exact up to the tile's K-reduction order. 0 "
+    "disables the pad.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",
@@ -574,8 +577,10 @@ FASTVIDEO_H3_FAST_VAE_TOKEN_CHUNK = EnvInt(
     category="performance",
     doc="Token chunk for the FASTVIDEO_H3_FAST_VAE_DECODER feed-forward and final output projection. 0 keeps the "
     "layer whole, which on GB10 holds the decoder at its ~35 GiB peak; a positive value (e.g. 32768) runs the same "
-    "linears on flat token slices, which is exact (row-independent) and cuts the 2K decode peak enough to fit next "
-    "to a resident DiT under the unified-memory watchdog.")
+    "linears on flat token slices, which cuts the 2K decode peak enough to fit next to a resident DiT under the "
+    "unified-memory watchdog. Exact tier in BF16 and with FASTVIDEO_H3_FAST_VAE_FP8_STATIC (row-independent); with "
+    "FASTVIDEO_H3_FAST_VAE_FP8 and dynamic activation scales each slice gets its own per-tensor scale, so that "
+    "combination is approximate.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",

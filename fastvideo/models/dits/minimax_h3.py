@@ -29,7 +29,8 @@ from fastvideo.distributed.communication_op import (
 from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size,
                                                  model_parallel_is_initialized)
 from fastvideo.forward_context import get_forward_context
-from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.linear import ReplicatedLinear, UnquantizedLinearMethod
+from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 from fastvideo.layers.mlp import MLP
@@ -248,6 +249,24 @@ def _sequence_parallel_sol_attention_peer(query: torch.Tensor, key: torch.Tensor
     return torch.cat([own_rows, peer_recv], dim=2)
 
 
+def _row_independent_input_quantization(linears: tuple[Any, ...]) -> bool:
+    """Whether each linear quantizes its input row by row, so projecting a row slice gives the same rows.
+
+    BF16, MXFP8 (block scales along K), per-token FP8 and NVFP4 with a unit or calibrated global scale qualify.
+    Per-tensor dynamic FP8 and dynamic NVFP4 scale by the whole input's absmax, so a slice would get its own scale.
+    """
+    for linear in linears:
+        method = getattr(getattr(linear, "base_layer", linear), "quant_method", None)
+        if method is None or isinstance(method, UnquantizedLinearMethod | MXFP8QuantizeMethod):
+            continue
+        if isinstance(method, FP8QuantizeMethod) and method.granularity == "channel":
+            continue
+        if isinstance(method, NVFP4QuantizeMethod) and not method._dynamic_activation_scale():
+            continue
+        return False
+    return True
+
+
 def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidden_states: torch.Tensor,
                                                   rotary_emb: tuple[torch.Tensor, torch.Tensor] | None, step: int,
                                                   original_seq_len: int | None, chunks: int) -> torch.Tensor | None:
@@ -262,6 +281,8 @@ def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidd
     import torch.distributed as dist
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
 
+    if not model_parallel_is_initialized():
+        return None
     sp_group = get_sp_group()
     world, rank = sp_group.world_size, sp_group.rank_in_group
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
@@ -270,6 +291,8 @@ def _sequence_parallel_sol_attention_peer_chunked(attn: MiniMaxH3Attention, hidd
             or getattr(hidden_states, "_mxfp8_prequantized", None) is not None):
         return None
     if attn.fuse_qknorm_rope and not _can_run_minimax_h3_fusion(hidden_states):
+        return None
+    if not _row_independent_input_quantization((attn.to_q, attn.to_k, attn.to_v)):
         return None
     batch, local = hidden_states.shape[0], hidden_states.shape[1]
     if local < 2 * chunks:
@@ -367,6 +390,8 @@ def _sequence_parallel_sol_attention_peer_tensor_pipe(attn: MiniMaxH3Attention, 
     import torch.distributed as dist
     from fastvideo.models.dits.minimax_h3_vsa_fp4 import _lora_delta_pending, _prequantized_input_key
 
+    if not model_parallel_is_initialized():
+        return None
     sp_group = get_sp_group()
     world, rank = sp_group.world_size, sp_group.rank_in_group
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
@@ -781,16 +806,18 @@ class MiniMaxH3Attention(nn.Module):
         return self._apply_rotary_emb(hidden_states, rotary_emb)
 
     def _sol_out_projection(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Run ``to_out`` on the Sol peer output, optionally padding M past the MXFP8 cliff.
+        """Run ``to_out`` on the Sol-Attn output, padding M past the MXFP8 cliff on the peer exchange.
 
         On sm_121 ``F.scaled_mm`` picks a ~3x slower tile for the H3 ``to_out`` shape (K=7168,
         N=5376) below ``FASTVIDEO_H3_SOLSP_OUT_PAD_M`` rows; the GEMM is row-independent, so
         running it on zero-padded rows and dropping them makes the fast tile run with identical
-        real rows (up to the tile's K-reduction order). Off by default.
+        real rows (up to the tile's K-reduction order). Off by default, and only with
+        ``FASTVIDEO_H3_SOLSP_EXCHANGE=peer``.
         """
         pad_m = envs.FASTVIDEO_H3_SOLSP_OUT_PAD_M.get()
         rows = hidden_states.shape[1]
-        if pad_m and 0 < rows < pad_m and getattr(hidden_states, "_mxfp8_prequantized", None) is None:
+        if (pad_m and 0 < rows < pad_m and envs.FASTVIDEO_H3_SOLSP_EXCHANGE.get() == "peer"
+                and getattr(hidden_states, "_mxfp8_prequantized", None) is None):
             padded = torch.nn.functional.pad(hidden_states, (0, 0, 0, pad_m - rows))
             output, _ = self.to_out(padded)
             return output[:, :rows]
@@ -936,7 +963,7 @@ class MiniMaxH3Attention(nn.Module):
                 hidden_states = _sequence_parallel_sol_attention(query, key, value, int(sol_step), original_seq_len)
             hidden_states = hidden_states.flatten(2, 3).type_as(query)
             with STAGES.span("out_proj"):
-                hidden_states, _ = self.to_out(hidden_states)
+                hidden_states = self._sol_out_projection(hidden_states)
             return hidden_states
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
