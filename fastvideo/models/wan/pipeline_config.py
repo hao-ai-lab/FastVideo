@@ -3,6 +3,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import torch
 
@@ -64,9 +65,20 @@ class WanT2V480PConfig(PipelineConfig):
     # self-forcing params
     warp_denoising_step: bool = True
 
+    causal_local_attn_size: int | None = None
+    causal_rope_cache_policy: Literal["absolute", "relativistic"] | None = None
+
     # WanConfig-specific added parameters
 
     def __post_init__(self):
+        if self.causal_local_attn_size is not None:
+            if self.causal_local_attn_size != -1 and self.causal_local_attn_size < 1:
+                raise ValueError("causal_local_attn_size must be -1 or a positive latent-frame count")
+            self.dit_config.arch_config.local_attn_size = self.causal_local_attn_size
+        if self.causal_rope_cache_policy is not None:
+            if self.causal_rope_cache_policy not in {"absolute", "relativistic"}:
+                raise ValueError("causal_rope_cache_policy must be absolute or relativistic")
+            self.dit_config.arch_config.rope_cache_policy = self.causal_rope_cache_policy
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 
