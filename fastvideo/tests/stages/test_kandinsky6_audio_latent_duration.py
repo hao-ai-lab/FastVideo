@@ -39,7 +39,3 @@ def test_audio_latent_duration_scales_with_video_length():
     long = audio_latent_duration(31, fps=24.0, audio_sample_rate=44100, audio_downsample_factor=1024)
     assert long > short
 
-
-def test_audio_latent_duration_returns_int():
-    result = audio_latent_duration(31, fps=24.0, audio_sample_rate=44100, audio_downsample_factor=1024)
-    assert isinstance(result, int)

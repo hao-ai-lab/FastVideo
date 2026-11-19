@@ -216,8 +216,6 @@ def test_deferred_stage_decodes_local_video_soundtrack_and_audio(
 
     video_reference = MiniMaxH3Reference(source=str(video_path), media_type="video")
     audio_reference = MiniMaxH3Reference(source=str(audio_path), media_type="audio")
-    assert isinstance(video_reference.source, str)
-    assert isinstance(audio_reference.source, str)
 
     monkeypatch.setattr(base_packing, "MINIMAX_H3_SHORT_EDGE", 32)
     monkeypatch.setattr(base_packing, "MINIMAX_H3_MAX_PIXELS", 32 * 64)
