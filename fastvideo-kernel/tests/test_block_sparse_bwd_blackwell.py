@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from fastvideo_kernel import block_sparse_attn_bwd_ptx_blackwell as bwd
+from fastvideo_kernel import block_sparse_attn_ptx_blackwell as fwd
 
 HEAD_DIM = 128
 LOG2E = 1.4426950408889634
@@ -229,6 +230,40 @@ def test_zero_count_kv_blocks(block):
         rows = slice(kb * block, (kb + 1) * block)
         assert dk[:, :, rows].abs().max().item() == 0.0, f"dk: unselected kv block {kb}"
         assert dv[:, :, rows].abs().max().item() == 0.0, f"dv: unselected kv block {kb}"
+
+
+@pytest.mark.parametrize("seqlen", [16384, 65536])
+def test_back_to_back_calls_read_the_previous_dq(block, seqlen):
+    """Programmatic dependent launch: chain calls with no host sync, each taking the previous dq as
+    grad_o; each matches its replay alone (dk/dv bitwise, dq to rounding: fp32 atomics reorder)."""
+    if fwd._FWD_BY_BLOCK.get(block) is None:
+        pytest.skip(f"no {block}-token forward in this build")
+    num_blocks = seqlen // block
+    q, k, v, grad_o, idx, num, vbs = make_case(block, num_blocks=num_blocks, topk=8, heads=8,
+                                               ragged=True)
+    o, lse = fwd.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=True)
+    k2q_idx, k2q_num = invert_indices_torch(idx, num, num_blocks)
+
+    def backward(g):
+        return bwd.block_sparse_attn_backward_ptx_blackwell_from_k2q(g, q, k, v, o, lse, k2q_idx,
+                                                                     k2q_num, vbs)
+
+    torch.cuda.synchronize()
+    torch.cuda._sleep(200_000_000)  # the GPU idles while the host queues the whole chain
+    chain = [backward(grad_o)]
+    for _ in range(5):
+        chain.append(backward(chain[-1][0]))
+    torch.cuda.synchronize()
+
+    for call, (dq, dk, dv) in enumerate(chain):
+        replay_dq, replay_dk, replay_dv = backward(grad_o if call == 0 else chain[call - 1][0])
+        torch.cuda.synchronize()
+        assert torch.isfinite(dq).all(), f"call {call}: non-finite dq"
+        assert torch.equal(dk, replay_dk), f"call {call}: dk differs from its replay"
+        assert torch.equal(dv, replay_dv), f"call {call}: dv differs from its replay"
+        dq_diff = (dq.float() - replay_dq.float()).abs().max().item()
+        assert dq_diff <= 1e-2 * replay_dq.float().abs().max().item(), (
+            f"call {call}: dq differs from its replay by {dq_diff:.3e}")
 
 
 def test_invert_indices_torch_matches_q2k():
