@@ -74,6 +74,15 @@ def _consumer_blackwell_join_qat_pv_enabled():
     return os.environ.get("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", "1") != "0"
 
 
+def _use_consumer_blackwell_joined_qat_pv(device):
+    # On GB10 (SM121), joining P@V also changes the compiled QK/softmax
+    # layout and its saved statistics. Keep the split path to preserve
+    # reference-order outputs and gradients, even when
+    # FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=1.
+    return (is_cuda() and torch.cuda.get_device_capability(device) == (12, 0)
+            and _consumer_blackwell_join_qat_pv_enabled())
+
+
 def _use_sm100_optimized_qat(
     device,
     head_dim: int,
@@ -1477,7 +1486,7 @@ class _attention(torch.autograd.Function):
                         fake_quant_P=fake_quant_P,
                         two_level_quant_P=two_level_quant_P,
                         use_global_sf_P=use_global_sf_P,
-                        JOIN_QAT_PV=(consumer_blackwell and _consumer_blackwell_join_qat_pv_enabled()),
+                        JOIN_QAT_PV=_use_consumer_blackwell_joined_qat_pv(q.device),
                         SM100_SPLIT_FULL_TILES=_sm100_long_sequence_route(
                             N_CTX_Q, N_CTX_KV, q.dtype, sm100_optimized, fwd_mode),
                         num_warps=fwd_num_warps,
