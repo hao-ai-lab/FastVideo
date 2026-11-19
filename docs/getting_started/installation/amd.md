@@ -7,7 +7,9 @@ end-to-end installation walkthrough are not currently documented.
 ## What is implemented
 
 - ROCm platform detection uses AMD SMI or a HIP-enabled PyTorch build with
-  access to `/dev/kfd` and DRM render devices.
+  access to `/dev/kfd` and DRM render devices. On native Windows, which has
+  neither, a HIP-enabled PyTorch build that sees a GPU is enough; Windows
+  PyTorch has no NCCL, so runs there are limited to one GPU.
 - The platform supports PyTorch SDPA and selects FlashAttention when its
   installation, dtype and head size are compatible, with SDPA fallback.
 - `VIDEO_SPARSE_ATTN` and `VIDEO_SPARSE_ATTN_H3` use the kernel package's Triton

@@ -26,6 +26,7 @@ exec pytest \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
+  ./fastvideo/tests/distributed/test_platform_backend_falls_back_to_gloo.py \
   ./fastvideo/tests/distributed/test_pyhccl_stream.py \
   ./fastvideo/tests/distributed/test_sp_warmup_device.py \
   ./fastvideo/tests/training/test_runner.py \

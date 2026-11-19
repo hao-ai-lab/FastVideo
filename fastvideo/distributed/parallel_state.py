@@ -739,6 +739,26 @@ def set_custom_all_reduce(enable: bool):
     _ENABLE_CUSTOM_ALL_REDUCE = enable
 
 
+def _platform_backend(world_size: int) -> str:
+    from fastvideo.platforms import current_platform
+    if current_platform.is_cuda_alike():
+        if torch.distributed.is_nccl_available():
+            logger.info("Using nccl backend for CUDA platform")
+            return "nccl"
+        # Windows PyTorch has no NCCL. gloo serves one rank; GroupCoordinator would still drive device
+        # collectives (and SP all-to-all) through it with more ranks, so refuse those up front.
+        if world_size > 1:
+            raise RuntimeError(f"This torch build has no NCCL, so {current_platform.device_name} runs are limited "
+                               f"to one GPU (world_size={world_size}).")
+        logger.warning("This torch build has no NCCL; using the gloo backend for %s", current_platform.device_name)
+        return "gloo"
+    if current_platform.is_npu():
+        logger.info("Using hccl backend for NPU platform")
+        return "hccl"
+    logger.info("Using gloo backend for %s platform", current_platform.device_name)
+    return "gloo"
+
+
 def init_distributed_environment(
     world_size: int = 1,
     rank: int = 0,
@@ -748,17 +768,7 @@ def init_distributed_environment(
     device_id: torch.device | None = None,
     timeout: timedelta | None = None,
 ):
-    # Determine the appropriate backend based on the platform
-    from fastvideo.platforms import current_platform
-    backend = "nccl"
-    if current_platform.is_cuda_alike():
-        logger.info("Using nccl backend for CUDA platform")
-    elif current_platform.is_npu():
-        backend = "hccl"
-        logger.info("Using hccl backend for NPU platform")
-    else:
-        backend = "gloo"
-        logger.info("Using gloo backend for %s platform", current_platform.device_name)
+    backend = _platform_backend(world_size)
 
     logger.debug("world_size=%d rank=%d local_rank=%d "
                  "distributed_init_method=%s backend=%s", world_size, rank, local_rank, distributed_init_method,
