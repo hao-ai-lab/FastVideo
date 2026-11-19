@@ -1,0 +1,20 @@
+# fastvideo generate --config examples/inference/basic/pjit_21k_t2i.yaml
+generator:
+  model_path: Linum-AI/pjit-21k
+  engine:
+    num_gpus: 1
+    offload:
+      dit_layerwise: false
+      lazy_module_load: true
+  pipeline:
+    workload_type: t2i
+request:
+  prompt: >-
+    A ceramic blue teapot rests on a folded linen cloth near a kitchen window.
+    Soft morning light catches the spout, leaving a faint shadow across the warm wooden table.
+    Behind it, an out-of-focus garden fills the window with shades of green.
+  sampling:
+    seed: 2
+  output:
+    output_path: outputs/pjit/teapot.png
+    save_video: true
