@@ -27,7 +27,6 @@ import re
 import shutil
 from collections import OrderedDict
 from pathlib import Path
-from typing import Iterator
 
 import torch
 from safetensors.torch import save_file
@@ -164,25 +163,6 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
         return checkpoint
 
     return checkpoint
-
-
-def iterate_checkpoint_keys(path: Path) -> Iterator[str]:
-    """Iterate over checkpoint keys without loading all tensors.
-    
-    This is useful for analysis when memory is limited.
-    """
-    # Load with weights_only=True to just get the structure
-    # Unfortunately PyTorch doesn't have a great way to do this
-    # So we load the full checkpoint but only keep keys
-    checkpoint = torch.load(path, map_location="meta", weights_only=False)
-
-    if isinstance(checkpoint, dict):
-        for key in ("state_dict", "model_state_dict", "model", "ema"):
-            if key in checkpoint:
-                checkpoint = checkpoint[key]
-                break
-
-    return checkpoint.keys()
 
 
 def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:

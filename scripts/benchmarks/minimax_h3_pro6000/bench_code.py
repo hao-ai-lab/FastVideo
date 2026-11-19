@@ -1,7 +1,6 @@
 """Per-component timing of one MiniMax-H3 block on the current GPU. Imported inside the Modal container."""
 import json
 import math
-import time
 
 import torch
 import torch.nn.functional as F
@@ -160,7 +159,6 @@ def run(shapes):
         diff = (o_fp4[:, :, rows].float() - o_tri[:, :, rows].float())
         att["quad_vs_triton_rel_l2"] = round((diff.norm() / o_tri[:, :, rows].float().norm()).item(), 4)
         od = sageattn_blackwell(qd, kd, vd)
-        from torch.nn.attention import SDPBackend, sdpa_kernel
         if L < 30000:
             ref_dense = F.scaled_dot_product_attention(qd, kd, vd)
             att["dense_fp4_vs_bf16_rel_l2"] = round(((od.float() - ref_dense.float()).norm() /

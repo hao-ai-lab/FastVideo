@@ -13,7 +13,6 @@ from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange
 
 import fastvideo.envs as envs

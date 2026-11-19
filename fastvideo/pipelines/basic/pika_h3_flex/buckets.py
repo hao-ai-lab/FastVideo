@@ -138,11 +138,6 @@ def canvas_for_aspect(aspect: str | tuple[float, float], tier: str | None = None
     )
 
 
-def aspect_families(tier: str | None = None) -> tuple[str, ...]:
-    del tier
-    return PIKA_ASPECTS
-
-
 def bucket_table(tier: str | None = None) -> tuple[tuple[int, int], ...]:
     """All ``(width, height)`` buckets of one tier, in :data:`PIKA_ASPECTS` order."""
     return tuple((canvas_for_aspect(aspect, tier)[1], canvas_for_aspect(aspect, tier)[0]) for aspect in PIKA_ASPECTS)

@@ -4,7 +4,7 @@
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 if TYPE_CHECKING:
     pass
@@ -218,24 +218,6 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
     ) -> AttentionMetadata:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
-
-
-class AttentionLayer(Protocol):
-
-    _k_scale: torch.Tensor
-    _v_scale: torch.Tensor
-    _k_scale_float: float
-    _v_scale_float: float
-
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
-    ) -> torch.Tensor:
-        ...
 
 
 class AttentionImpl(ABC, Generic[T]):

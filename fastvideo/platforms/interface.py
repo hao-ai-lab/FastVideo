@@ -262,8 +262,3 @@ class Platform:
     def get_cpu_architecture(cls) -> CpuArchEnum:
         """Get the CPU architecture of the current platform."""
         return CpuArchEnum.UNSPECIFIED
-
-
-class UnspecifiedPlatform(Platform):
-    _enum = PlatformEnum.UNSPECIFIED
-    device_type = ""

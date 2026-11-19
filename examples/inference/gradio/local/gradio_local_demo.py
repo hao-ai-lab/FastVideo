@@ -1,6 +1,5 @@
 import argparse
 import os
-import base64
 import time
 
 import gradio as gr

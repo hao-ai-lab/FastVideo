@@ -13,7 +13,6 @@ from fastvideo.models.vaes.common import (
 from fastvideo.models.vaes.flux2_components import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
-    Attention,
     AttnAddedKVProcessor,
     AttnProcessor,
     AutoencoderKLOutput,

@@ -12,7 +12,6 @@ Key Features:
 Reference: https://arxiv.org/abs/2503.03751
 """
 
-import math
 from typing import Any
 
 import numpy as np
@@ -27,7 +26,6 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP

@@ -11,7 +11,6 @@ import argparse
 import logging
 from pathlib import Path
 
-import torch
 from safetensors.torch import load_file
 
 LOG = logging.getLogger(__name__)
