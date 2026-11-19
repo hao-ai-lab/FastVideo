@@ -19,6 +19,7 @@ exec pytest \
   ./fastvideo/tests/entrypoints/ \
   ./apps/fastvideo_studio/tests/test_inference_output.py \
   ./fastvideo/tests/loader/ \
+  ./fastvideo/tests/models/ \
   ./fastvideo/tests/pipelines/ \
   ./fastvideo/tests/platforms/ \
   ./fastvideo/tests/schedulers/ \
