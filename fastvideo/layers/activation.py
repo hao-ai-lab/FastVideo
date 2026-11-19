@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# TODO (will): remove this dependency
 from fastvideo.layers.custom_op import CustomOp
 
 

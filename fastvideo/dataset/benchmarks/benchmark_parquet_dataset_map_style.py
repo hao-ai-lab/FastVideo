@@ -51,7 +51,6 @@ def main() -> None:
     maybe_init_distributed_environment_and_model_parallel(tp_size=(world_size + 1) // 2, sp_size=(world_size + 1) // 2)
     logger.info("Initialized distributed environment with world_size=%d", world_size)
 
-    # Create DataLoader with proper settings
     dataset, dataloader = build_parquet_map_style_dataloader(args.path,
                                                              args.batch_size,
                                                              parquet_schema=pyarrow_schema_t2v,
@@ -70,7 +69,6 @@ def main() -> None:
             if i >= args.num_batches_per_epoch - 1:
                 break
 
-        # Save dataloader state using distributed checkpoint
         checkpoint_dir = pathlib.Path(args.checkpoint_path)
         logger.info("Rank %d: Saving dataloader state to %s", get_world_rank(), checkpoint_dir)
         states = {"dataloader": dataloader}
@@ -81,7 +79,6 @@ def main() -> None:
 
         logger.info("Rank %d: Saved checkpoint in %.2f seconds", get_world_rank(), end_time - begin_time)
 
-        # Make sure all processes wait for checkpoint to be saved
         if world_size > 1:
             dist.barrier()
 
@@ -119,7 +116,6 @@ def main() -> None:
             if i >= args.num_batches_per_epoch * 2 - 1:
                 break
 
-        # Verify all sums match
         if all(abs(a - b) < 1e-6 for a, b in zip(first_pass_sums, second_pass_sums, strict=True)):
             logger.info("All latent sums match between passes - resume verification successful!")
         else:
@@ -135,11 +131,9 @@ def main() -> None:
             if i >= args.num_batches_per_epoch:
                 break
 
-            # Move data to device
             latents = latents.to(get_local_torch_device())
             embeddings = embeddings.to(get_local_torch_device())
 
-            # Calculate actual batch size
             batch_size = latents.size(0)
             total_samples += batch_size
             total_batches += 1

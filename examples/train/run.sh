@@ -27,7 +27,6 @@ if [[ "${CONFIG}" != /* ]]; then
     CONFIG="$(pwd)/${CONFIG}"
 fi
 
-# ── GPU / node settings ──────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
 NUM_GPUS="${NUM_GPUS:-1}"
 NNODES="${NNODES:-1}"
@@ -38,11 +37,9 @@ export TOKENIZERS_PARALLELISM=false
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 cd "${REPO_ROOT}"
-# ── W&B ──────────────────────────────────────────────────────────
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="${WANDB_MODE:-online}"
 
-# ── Log file ─────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${LOG_DIR:-examples/train}"

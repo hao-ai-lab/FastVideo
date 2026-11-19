@@ -5,7 +5,6 @@ import random
 
 
 def generate_merged_validation_json(input_dir, output_file):
-    # read in video2caption.json
     with open(os.path.join(input_dir, "video2caption_replace.json"), "r") as f:
         video2caption = json.load(f)
 
@@ -30,10 +29,8 @@ def generate_merged_validation_json(input_dir, output_file):
         }
         validation_data.append(validation_entry)
 
-    # Create the final validation structure
     validation_json = {"data": validation_data}
 
-    # Write the validation JSON to the output file
     with open(output_file, "w") as f:
         json.dump(validation_json, f, indent=2)
 

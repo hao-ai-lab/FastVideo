@@ -64,7 +64,6 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         batch_norm_momentum: float = arch_config.batch_norm_momentum
         patch_size: Tuple[int, int] = arch_config.patch_size
 
-        # pass init params to Encoder
         self.encoder = Encoder(
             in_channels=in_channels,
             out_channels=latent_channels,
@@ -77,7 +76,6 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
             mid_block_add_attention=mid_block_add_attention,
         )
 
-        # pass init params to Decoder
         self.decoder = Decoder(
             in_channels=latent_channels,
             out_channels=out_channels,
@@ -117,7 +115,6 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
             `dict` of attention processors: A dictionary containing all attention processors used in the model with
             indexed by its weight name.
         """
-        # set recursively
         processors = {}
 
         def fn_recursive_add_processors(

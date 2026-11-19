@@ -31,7 +31,6 @@ def main():
     print(f"Num frames: {args.num_frames}")
     print(f"Output path: {args.output_path}")
 
-    # Initialize generator
     print("\nInitializing VideoGenerator for HYWorld...")
     generator = VideoGenerator.from_pretrained(
         "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
@@ -44,7 +43,6 @@ def main():
         image_encoder_cpu_offload=True,
     )
 
-    # Generate video
     # The pose string is automatically converted to camera matrices by the pipeline
     print("\nGenerating video...")
     generator.generate_video(

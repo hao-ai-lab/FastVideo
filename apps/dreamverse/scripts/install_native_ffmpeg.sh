@@ -49,7 +49,6 @@
 # toolchain.
 set -euo pipefail
 
-# ─── Defaults (override via env) ──────────────────────────────────────────
 INSTALL_PREFIX="${INSTALL_PREFIX:-$HOME/opt/ffmpeg-native}"
 SOURCE_DIR="${SOURCE_DIR:-$HOME/src/ffmpeg-native}"
 X264_REF="${X264_REF:-stable}"
@@ -137,7 +136,6 @@ export CC CXX
 [[ -n "${AS:-}" ]] && export AS
 echo "[install_native_ffmpeg] toolchain: CC=$CC CXX=$CXX AS=${AS:-<gnu-as>} (uname -m=$ARCH, source: $toolchain_source)"
 
-# ─── Step 0: probe required tools ─────────────────────────────────────────
 required=("$CC" "$CXX" make pkg-config git)
 [[ "$(uname -m)" == "x86_64" ]] && required+=(nasm)
 missing=()
@@ -155,7 +153,6 @@ if (( ${#missing[@]} > 0 )); then
   exit 1
 fi
 
-# ─── Step 0.5: destructive-path guards ────────────────────────────────────
 guard_path() {
   local name="$1" value="$2"
   case "$value" in
@@ -172,7 +169,6 @@ guard_path() {
 guard_path INSTALL_PREFIX "$INSTALL_PREFIX"
 guard_path SOURCE_DIR     "$SOURCE_DIR"
 
-# ─── Step 1: clean ────────────────────────────────────────────────────────
 echo "[install_native_ffmpeg] cleaning prior install + sources"
 rm -rf "$INSTALL_PREFIX" "$SOURCE_DIR/x264" "$SOURCE_DIR/ffmpeg" "$SOURCE_DIR/nv-codec-headers"
 mkdir -p "$SOURCE_DIR" "$INSTALL_PREFIX/lib"
@@ -271,7 +267,6 @@ git clone --depth 1 --branch "$FFMPEG_REF" \
   make install
 )
 
-# ─── Step 4: sanity check ──────────────────────────────────────────────────
 ffmpeg_bin="$INSTALL_PREFIX/bin/ffmpeg"
 echo "[install_native_ffmpeg] verifying $ffmpeg_bin"
 "$ffmpeg_bin" -hide_banner -buildconf | grep -i -E 'libx264|lto'

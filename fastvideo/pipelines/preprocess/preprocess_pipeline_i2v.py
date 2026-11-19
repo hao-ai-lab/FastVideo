@@ -44,14 +44,12 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
-        # TODO(will): move these to cpu at some point
         self.get_module("vae").to(get_local_torch_device())
 
         features = {}
         first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
 
-        # Get CLIP features if image_encoder is available
         if (self.get_module("image_encoder") is not None and self.get_module("image_processor") is not None):
             self.get_module("image_encoder").to(get_local_torch_device())
 
@@ -72,7 +70,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
             features["clip_feature"] = clip_features
 
-        # Get VAE features from the first frame of each video
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)

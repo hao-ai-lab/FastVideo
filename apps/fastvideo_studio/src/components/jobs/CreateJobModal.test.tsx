@@ -23,7 +23,6 @@ const MODELS = [
 ];
 
 beforeEach(() => {
-  // Reset the shared options store to a known baseline for test isolation.
   defaultOptionsStore.set({ options: DEFAULT_OPTIONS });
   vi.mocked(getModels).mockResolvedValue(MODELS);
   vi.mocked(getDatasets).mockResolvedValue([]);

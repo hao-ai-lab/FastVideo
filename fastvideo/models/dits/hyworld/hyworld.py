@@ -65,7 +65,6 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         )
         self.hidden_size = hidden_size
 
-        # Add ProPE projection layer for camera-aware attention
         self.img_attn_prope_proj = ReplicatedLinear(hidden_size,
                                                     hidden_size,
                                                     bias=True,
@@ -104,7 +103,6 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         Returns:
             Tuple of (img, txt) output tokens
         """
-        # Process modulation vectors (inherited from parent)
         img_mod_outputs = self.img_mod(vec)
         (
             img_attn_shift,
@@ -125,9 +123,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             txt_mlp_gate,
         ) = torch.chunk(txt_mod_outputs, 6, dim=-1)
 
-        # Prepare image for attention using fused operation
         img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale, convert_modulation_dtype=True)
-        # Get QKV for image
         img_qkv, _ = self.img_attn_qkv(img_attn_input)
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
 
@@ -135,21 +131,17 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
 
-        # Apply QK-Norm if needed
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
-        # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale, convert_modulation_dtype=True)
 
-        # Get QKV for text
         txt_qkv, _ = self.txt_attn_qkv(txt_attn_input)
         batch_size, text_seq_len = txt_qkv.shape[0], txt_qkv.shape[1]
 
         # Split QKV
         txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.num_attention_heads, -1)
         txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :, 2]
-        # Apply QK-Norm if needed
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
@@ -174,7 +166,6 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             current_timestep=0,
             attn_mask=encoder_attention_mask,
         )
-        # Run distributed attention
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn, txt_attn = self.attn(
                 img_q,
@@ -187,7 +178,6 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
                 freqs_cis=freqs_cis,
             )
 
-        # begin hyworld
         # attention with prope (same text mask, so reuse the metadata)
         # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
@@ -206,13 +196,11 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             img_attn_prope = apply_fn_o(img_attn_prope)  # [batch, num_heads, seqlen, head_dim]
             img_attn_prope = rearrange(img_attn_prope, "B H L D -> B L (H D)")
 
-        # add prope to img_attn
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         img_attn_prope_out, _ = self.img_attn_prope_proj(img_attn_prope)
         img_attn_out = img_attn_out + img_attn_prope_out
         # end hyworld
 
-        # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(img,
                                                                       img_attn_out,
                                                                       img_attn_gate,
@@ -220,14 +208,11 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
                                                                       img_mlp_scale,
                                                                       convert_modulation_dtype=True)
 
-        # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
-        # Process text attention output
         txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
 
-        # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(txt,
                                                                       txt_attn_out,
                                                                       txt_attn_gate,
@@ -235,7 +220,6 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
                                                                       txt_mlp_scale,
                                                                       convert_modulation_dtype=True)
 
-        # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
         txt = self.txt_mlp_residual(txt_residual, txt_mlp_out, txt_mlp_gate)
 
@@ -314,7 +298,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
             for i in range(config.arch_config.num_layers)
         ])
 
-        # Add action conditioning module
         self.action_in = TimestepEmbedder(self.hidden_size,
                                           act_layer="silu",
                                           dtype=None,
@@ -382,7 +365,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         temb = self.time_in(timestep, timestep_r=timestep_r)
         temb_txt = self.time_in(timestep_txt, timestep_r=timestep_r)
 
-        # Add action conditioning if provided
         # temb shape: [B*T, C] where T = num_frames
         temb = temb + self.action_in(action.reshape(-1))
 
@@ -472,7 +454,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     ],
                     dim=0,
                 ))
-            # Apply same reordering to attention masks
             new_encoder_attention_mask.append(
                 torch.cat(
                     [
@@ -522,7 +503,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         # Apply final_layer on sharded data first, then gather
         hidden_states = self.final_layer(hidden_states, temb)
 
-        # Gather the output from all ranks
         if get_sp_world_size() > 1:
             hidden_states = hidden_states.contiguous()
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)

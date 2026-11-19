@@ -37,7 +37,6 @@ from fastvideo.models.wan.transformer import (
 )
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
-# Import ActionModule
 from .action_module import ActionModule
 
 logger = init_logger(__name__)
@@ -102,7 +101,6 @@ class MatrixGame2CrossAttention(WanSelfAttention):
         """
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
 
         if crossattn_cache is not None:
@@ -119,7 +117,6 @@ class MatrixGame2CrossAttention(WanSelfAttention):
             k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
             v = self.to_v(context)[0].view(b, -1, n, d)
 
-        # compute attention
         x = self.attn(q, k, v)
 
         # output
@@ -273,7 +270,6 @@ class MatrixGame2TransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
         cos, sin = freqs_cis
         query, key = (
             _apply_rotary_emb(query, cos, sin, is_neox_style=False),
@@ -316,7 +312,6 @@ class MatrixGame2TransformerBlock(nn.Module):
                     keyboard_cond,
                     num_frame_per_block=int(grid_sizes[0]),
                 )
-        # =================================================
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
@@ -428,7 +423,6 @@ class MatrixGame2WanModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(

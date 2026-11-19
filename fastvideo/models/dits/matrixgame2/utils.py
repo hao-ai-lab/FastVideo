@@ -408,13 +408,11 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
     if num_frames % 4 != 1:
         raise ValueError("Matrix-Game conditioning expects num_frames to be 4k+1.")
 
-    # Set seed for reproducibility if provided
     if seed is not None:
         random.seed(seed)
 
     num_samples_per_action = 4
 
-    # Define actions based on keyboard_dim
     if keyboard_dim == 4:
         # Universal model: W, S, A, D
         actions_single_action = ["forward", "left", "right"]
@@ -444,7 +442,6 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
         for camera in actions_single_camera:
             actions_to_test.append(f"{action}_{camera}")
 
-    # Ensure we have at least some actions
     if not actions_to_test:
         actions_to_test = actions_single_action * 5
 

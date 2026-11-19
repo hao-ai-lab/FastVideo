@@ -17,8 +17,6 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-# TODO(will): check if this is needed
-# track_batchsize: bool = envs.FASTVIDEO_LOG_BATCHSIZE_INTERVAL >= 0
 track_batchsize: bool = False
 last_logging_time: float = 0
 forward_start_time: float = 0
@@ -27,14 +25,9 @@ batchsize_logging_interval: float = 1000
 batchsize_forward_time: defaultdict = defaultdict(list)
 
 
-#
 @dataclass
 class ForwardContext:
     current_timestep: int
-    # TODO(will): check this arg
-    # copy from vllm_config.compilation_config.static_forward_context
-    # attn_layers: Dict[str, Any]
-    # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
     forward_batch: Optional["ForwardBatch"] = None
 
@@ -49,7 +42,6 @@ def get_forward_context() -> "ForwardContext":
     return _forward_context
 
 
-# TODO(will): finalize the interface
 @contextmanager
 def set_forward_context(current_timestep, attn_metadata, forward_batch: Optional["ForwardBatch"] = None):
     """A context manager that stores the current forward context,

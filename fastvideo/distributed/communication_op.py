@@ -24,7 +24,6 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor, dim: int = -1) -> tor
     return get_tp_group().all_gather(input_, dim)
 
 
-# TODO: remove model, make it sequence_parallel
 def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
                                           scatter_dim: int = 2,
                                           gather_dim: int = 1) -> torch.Tensor:
@@ -78,7 +77,6 @@ def sequence_model_parallel_shard(input_: torch.Tensor, dim: int = 1) -> tuple[t
 
     original_seq_len = input_.shape[dim]
 
-    # Compute padding if needed
     padded_seq_len, padding_amount = compute_padding_for_sp(original_seq_len, sp_world_size)
 
     # Pad if necessary
@@ -136,7 +134,6 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     num_heads = sp_world_size * 4  # Must be divisible by sp_world_size
     head_dim = 64
 
-    # Create dummy tensor for warmup
     dummy = torch.zeros(batch_size, seq_len_per_rank, num_heads, head_dim, device=device, dtype=torch.bfloat16)
 
     # Warmup pattern 1: scatter heads, gather sequence (before attention)
@@ -158,7 +155,6 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     # Synchronize to ensure warmup completes
     device_module.synchronize(device)
 
-    # Clean up
     del dummy, dummy2, dummy3
 
     _sp_warmup_done = True

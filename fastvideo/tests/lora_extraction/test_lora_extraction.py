@@ -11,7 +11,6 @@ import torch
 from fastvideo import VideoGenerator
 from fastvideo.api import ComponentConfig, EngineConfig, GeneratorConfig, OffloadConfig, ParallelismConfig, PipelineSelection
 
-# Add scripts/lora_extraction to path for imports
 repo_root = Path(__file__).parents[3]
 lora_scripts = repo_root / "scripts" / "lora_extraction"
 sys.path.insert(0, str(lora_scripts))

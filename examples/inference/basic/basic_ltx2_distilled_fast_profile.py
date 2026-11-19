@@ -258,8 +258,6 @@ def main() -> None:
                 width=benchmark_entry.get("width", 1920),
                 num_frames=121,
                 num_inference_steps=5,
-                # image_path="examples/inference/basic/prompt1.png",
-                # ltx2_image_crf=0.0
             )
             if os.environ.get("FASTVIDEO_STAGE_LOGGING") == "0":
                 torch.cuda.synchronize()

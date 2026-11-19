@@ -68,7 +68,6 @@ class LTX2VideoArchConfig(DiTArchConfig):
     timestep_scale_multiplier: int = 1000
     use_middle_indices_grid: bool = True
 
-    # Patchification (video-only path)
     patch_size: tuple[int, int, int] = (1, 1, 1)
     num_channels_latents: int = 128
     in_channels: int | None = None

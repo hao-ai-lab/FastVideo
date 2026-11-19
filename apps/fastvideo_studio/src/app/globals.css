@@ -120,7 +120,6 @@
 	--radius-xl: calc(var(--radius) + 4px);
 }
 
-/* ——— Resets ——— */
 
 html,
 body {
@@ -211,7 +210,6 @@ html.theme-transition *::after {
 		stroke 300ms ease !important;
 }
 
-/* ——— Base layer ——— */
 
 @layer base {
 	button,

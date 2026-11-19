@@ -131,7 +131,6 @@ def test_encode_text_selection_and_shapes():
     for e in embeds:
         assert e.shape == (2, hidden)
 
-    # with masks
     embeds2, masks2 = stage.encode_text("a", fastvideo_args, encoder_index=[1], return_attention_mask=True)
     assert len(embeds2) == 1 and len(masks2) == 1
     assert embeds2[0].shape == (1, hidden)

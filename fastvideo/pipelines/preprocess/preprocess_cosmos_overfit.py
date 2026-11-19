@@ -48,7 +48,6 @@ def load_video(path: str, num_frames: int) -> torch.Tensor:
     cap.release()
 
     if len(frames) < num_frames:
-        # Repeat last frame to fill
         while len(frames) < num_frames:
             frames.append(frames[-1])
 
@@ -66,7 +65,6 @@ def main() -> None:
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load captions
     with open(os.path.join(DATA_DIR, "videos2caption.json")) as f:
         caption_data = json.load(f)
 
@@ -150,10 +148,8 @@ def main() -> None:
         }
         records.append(record)
 
-    # Clean up encoders
     del text_encoder, tokenizer, vae
 
-    # Write parquet
     table = pa.table(
         {k: [r[k] for r in records]
          for k in records[0]},
@@ -163,7 +159,6 @@ def main() -> None:
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")
 
-    # Extract first frame from first video as V2W conditioning image
     import cv2
     first_video = os.path.join(DATA_DIR, "videos", caption_data[0]["path"])
     cap = cv2.VideoCapture(first_video)

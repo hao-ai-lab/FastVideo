@@ -121,7 +121,6 @@ def apply_mapping(key: str) -> str | None:
         if key.startswith(pattern):
             return None
 
-    # Apply mapping patterns
     for pattern, replacement in PARAM_NAMES_MAPPING.items():
         if re.match(pattern, key):
             return re.sub(pattern, replacement, key)
@@ -143,7 +142,7 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
     if mmap:
         # Check if PyTorch version supports mmap (2.1+)
         try:
-            version_str = torch.__version__.split("+")[0]  # Remove +cu118 suffix etc.
+            version_str = torch.__version__.split("+")[0]
             major, minor = version_str.split(".")[:2]
             torch_version = (int(major), int(minor))
             if torch_version >= (2, 1):
@@ -156,7 +155,6 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
 
     checkpoint = torch.load(path, **load_kwargs)
 
-    # Handle different checkpoint formats
     if isinstance(checkpoint, dict):
         for key in ("state_dict", "model_state_dict", "model", "ema"):
             if key in checkpoint:
@@ -254,7 +252,6 @@ def convert_weights(
     unmapped = []
     skipped = []
 
-    # Get all keys first (so we can delete as we go)
     keys = list(state_dict.keys())
     total = len(keys)
 
@@ -283,7 +280,6 @@ def convert_weights(
             if verbose:
                 print(f"  {key} -> {new_key}")
 
-        # Free memory by deleting processed tensor from source
         if memory_efficient:
             del state_dict[key]
             if i % 100 == 0:
@@ -310,13 +306,11 @@ def write_component(
     component_dir = output_dir / name
     component_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save weights
     output_file = component_dir / "model.safetensors"
     save_file(weights, str(output_file))
     print(f"Saved {name} weights to {output_file}")
     print(f"  {len(weights)} tensors, {sum(t.numel() for t in weights.values()):,} parameters")
 
-    # Save config
     if config is not None:
         config_path = component_dir / "config.json"
         with config_path.open("w", encoding="utf-8") as f:
@@ -570,7 +564,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate arguments
     if args.components_only:
         if args.output is None:
             raise ValueError("--output is required with --components-only")
@@ -602,7 +595,6 @@ Examples:
         print(f"Done. Components added to {output_dir}")
         return
 
-    # Parse dtype
     dtype_map = {
         "fp32": torch.float32,
         "fp16": torch.float16,
@@ -610,7 +602,6 @@ Examples:
     }
     target_dtype = dtype_map[args.dtype]
 
-    # Get checkpoint path
     if args.download:
         checkpoint_path = download_checkpoint(
             repo_id=args.download,
@@ -622,7 +613,6 @@ Examples:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    # Load checkpoint with memory-mapped loading
     print(f"Loading checkpoint from {checkpoint_path}...")
     use_mmap = not args.no_mmap
     state_dict = load_checkpoint(checkpoint_path, mmap=use_mmap)
@@ -637,7 +627,6 @@ Examples:
     total_params = sum(p.numel() for p in state_dict.values())
     print(f"Total parameters: {total_params:,} ({total_params / 1e9:.2f}B)")
 
-    # Convert weights (memory-efficient mode)
     print(f"\nConverting weights to {args.dtype}...")
     converted, unmapped, skipped = convert_weights(
         state_dict,
@@ -662,14 +651,12 @@ Examples:
         if len(unmapped) > 20:
             print(f"  ... and {len(unmapped) - 20} more")
 
-    # Write output
     output_dir = Path(args.output)
     if output_dir.exists() and not args.force:
         raise FileExistsError(f"Output directory exists: {output_dir}. Use --force to overwrite.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write transformer weights
     print(f"\nSaving converted weights...")
     transformer_config = build_transformer_config()
     write_component(output_dir, "transformer", converted, transformer_config)
@@ -678,7 +665,6 @@ Examples:
     del converted
     gc.collect()
 
-    # Write model_index.json
     model_index = build_model_index()
     model_index_path = output_dir / "model_index.json"
     with model_index_path.open("w", encoding="utf-8") as f:

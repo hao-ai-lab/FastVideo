@@ -65,7 +65,7 @@ template<int D> struct fwd_globals {
 
 template<int D>
 __global__  __launch_bounds__(128, 4)
-void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block size of 64
+void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
 #if FASTVIDEO_TK_HOPPER
     extern __shared__ int __shm[];
     tma_swizzle_allocator al((int*)&__shm[0]);
@@ -138,7 +138,6 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         // wait k
         wait(k_smem_arrived, kv_idx % 2);
 
-        // compute QK^T
         warpgroup::mm_ABt(att_block, q_smem[0], k_smem[0]);
 
         copy(max_vec_last_scaled, max_vec);
@@ -147,7 +146,6 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         
         warpgroup::mma_async_wait();
 
-        // load K
         if (threadIdx.x == 0) {
             tma::expect_bytes(k_smem_arrived, sizeof(k_tile));
             coord<k_tile> k_tile_idx = {blockIdx.z, kv_head_idx, kv_block_index, 0};
@@ -180,11 +178,9 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         // wait v
         wait(v_smem_arrived, kv_idx % 2);
 
-        // compute SV
         warpgroup::mma_AB(o_reg, att_block_mma, v_smem[0]);
         warpgroup::mma_async_wait();
 
-        // load V
         if (threadIdx.x == 0) {
             tma::expect_bytes(v_smem_arrived, sizeof(v_tile));
             coord<v_tile> v_tile_idx = {blockIdx.z, kv_head_idx, kv_block_index, 0};
@@ -198,7 +194,6 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         // wait k
         wait(k_smem_arrived, kv_idx % 2);
 
-        // compute QK^T
         warpgroup::mm_ABt(att_block, q_smem[0], k_smem[0]);
 
         copy(max_vec_last_scaled, max_vec);
@@ -234,7 +229,6 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         // wait v
         wait(v_smem_arrived, kv_idx % 2);
 
-        // compute SV
         warpgroup::mma_AB(o_reg, att_block_mma, v_smem[0]);
         warpgroup::mma_async_wait();
     }
@@ -550,7 +544,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         if constexpr (D == 64) { mul(ds_block_t, ds_block_t, 0.125f); }
         else                   { mul(ds_block_t, ds_block_t, 0.08838834764f); }
 
-        // load vec
         if (threadIdx.x == 0) {
             coord<l_tile> vec_idx = {blockIdx.z, blockIdx.y, 0, load_q_block_index};
             tma::expect_bytes(vec_b[0], sizeof(l_smem[0]) + sizeof(d_smem[0]));
@@ -564,7 +557,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         warpgroup::store(ds_smem_t[0], ds_block_t);
         warpgroup::mma_async_wait();
 
-        // load og
         if (threadIdx.x == 0) {
             coord<q_tile> tile_idx = {blockIdx.z, blockIdx.y, load_q_block_index, 0};
             tma::expect_bytes(o_b[0],   sizeof(og_smem[0]));
@@ -575,7 +567,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         warpgroup::mma_commit_group();
         warpgroup::mma_async_wait();
 
-        // load q
         if (threadIdx.x == 0) {
             coord<q_tile> q_tile_idx = {blockIdx.z, blockIdx.y, load_q_block_index, 0};
             tma::expect_bytes(q_b[0], sizeof(q_smem[0]));
@@ -587,11 +578,9 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         warpgroup::mm_AtB(qg_reg, ds_smem_t[0], k_smem[0]); //delat dQ = dSK
         warpgroup::mma_commit_group();
         warpgroup::mma_async_wait();
-        // store qg to shared memory
         warpgroup::store(qg_smem, qg_reg);
         __syncthreads();
 
-        // store and add dQ to global memory
         if (threadIdx.x / 32 == 0) {
             coord<qg_tile> tile_idx = {blockIdx.z, blockIdx.y, store_qg_block_index, 0};
             tma::store_add_async(g.qg, qg_smem, tile_idx);
@@ -643,11 +632,9 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         warpgroup::mm_AtB(qg_reg, ds_smem_t[0], k_smem[0]); //delat dQ = dSK
         warpgroup::mma_commit_group();
         warpgroup::mma_async_wait();
-        // store qg to shared memory
         warpgroup::store(qg_smem, qg_reg);
         __syncthreads();
 
-        // store and add dQ to global memory
         if (threadIdx.x / 32 == 0) {
             coord<qg_tile> tile_idx = {blockIdx.z, blockIdx.y, store_qg_block_index, 0};
             tma::store_add_async(g.qg, qg_smem, tile_idx);
@@ -655,7 +642,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         }
     }
 
-    // store kq and vq
 
     // ! the following two line seems unnecessary.
     // tma::store_async_wait(); // ensure qg is finished
@@ -768,7 +754,6 @@ block_sparse_attention_forward(
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    //cudadevicesynchronize();
     const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
@@ -820,7 +805,6 @@ block_sparse_attention_forward(
         fwd_attend_ker<64><<<grid, (128), mem_size, stream>>>(g);
 
         CHECK_CUDA_ERROR(cudaGetLastError());
-        // cudaStreamSynchronize(stream);
     }
 
     if (head_dim == 128) {
@@ -871,11 +855,9 @@ block_sparse_attention_forward(
         fwd_attend_ker<128><<<grid, (128), mem_size, stream>>>(g);
 
         CHECK_CUDA_ERROR(cudaGetLastError());
-        // cudaStreamSynchronize(stream);
     }
 
     return {o, l_vec};
-    //cudadevicesynchronize();
 }
 
 std::vector<torch::Tensor> 
@@ -996,11 +978,9 @@ block_sparse_attention_backward(torch::Tensor q,
     constexpr int mem_size = kittens::MAX_SHARED_MEMORY; 
     int threads  = PREP_NUM_WARPS * kittens::WARP_THREADS;
 
-    //cudadevicesynchronize();
     const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
-    //  cudaStreamSynchronize(stream);
 
     // TORCH_CHECK(seq_len % (4*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 256");
     dim3 grid_bwd(q_seq_len/(PREP_NUM_WARPS*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
@@ -1084,7 +1064,6 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(kv_seq_len/BLOCK_N, qo_heads, batch);
         threads = 128;
 
-        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1101,12 +1080,6 @@ block_sparse_attention_backward(torch::Tensor q,
             bwd_attend_ker<64><<<grid_bwd_2, threads, 72000, stream>>>(bwd_global); 
         }
 
-        // CHECK_CUDA_ERROR(cudaGetLastError());
-        // cudaStreamSynchronize(stream);
-        //cudadevicesynchronize();
-        // const auto kernel_end = std::chrono::high_resolution_clock::now();
-        // std::cout << "Kernel Time: " << std::chrono::duration_cast<std::chrono::microseconds>(kernel_end - start).count() << "us" << std::endl;
-        // std::cout << "---" << std::endl;
     }
 
     if (head_dim == 128) {
@@ -1188,7 +1161,6 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(kv_seq_len/BLOCK_N, qo_heads, batch);
         threads = 128;
 
-        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1200,10 +1172,7 @@ block_sparse_attention_backward(torch::Tensor q,
             bwd_attend_ker<128><<<grid_bwd_2, threads, 113000, stream>>>(bwd_global); 
         }
 
-        // cudaStreamSynchronize(stream);
-        //cudadevicesynchronize();
     }
 
     return {qg, kg, vg};
-    //cudadevicesynchronize();
 }

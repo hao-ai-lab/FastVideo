@@ -43,13 +43,11 @@ def test_clip_encoder():
 
     logger.info("Loading models from %s", args.model_path)
 
-    # config = json.load(open(os.path.join(model_path, "config.json")))
 
     hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
     print(hf_config)
     print(hf_config.use_return_dict)
 
-    # Load HuggingFace implementation
     model1 = CLIPTextModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
 
     from fastvideo.models.loader.component_loader import TextEncoderLoader
@@ -57,9 +55,6 @@ def test_clip_encoder():
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, args)
 
-    # Load the HuggingFace implementation directly
-    # model2 = CLIPTextModel(hf_config)
-    # model2 = model2.to(torch.float16)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -67,7 +62,6 @@ def test_clip_encoder():
     params1 = dict(model1.named_parameters())
     params2 = dict(model2.named_parameters())
 
-    # Check number of parameters
     logger.info("Model1 has %d parameters", len(params1))
     logger.info("Model2 has %d parameters", len(params2))
 
@@ -85,7 +79,6 @@ def test_clip_encoder():
         assert_close(param1, param2, atol=1e-4, rtol=1e-4)
     gc.collect()
     torch.cuda.empty_cache()
-    # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
     # Test with some sample prompts
@@ -100,24 +93,19 @@ def test_clip_encoder():
             # Tokenize the prompt
             tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True,
                                return_tensors="pt").to(device)
-            # Get embeddings from our implementation
             outputs1 = model1(input_ids=tokens.input_ids, output_hidden_states=True)
 
             logger.info("Testing model2")
             print("--------------------------------")
-            # Get embeddings from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
-                    # attention_mask=tokens.attention_mask,
                     output_hidden_states=True,
                 )
 
             # Compare last hidden states
             last_hidden_state1 = outputs1.last_hidden_state[tokens.attention_mask == 1]
             last_hidden_state2 = outputs2.last_hidden_state[tokens.attention_mask == 1]
-            # print("last_hidden_state1", last_hidden_state1)
-            # print("last_hidden_state2", last_hidden_state2)
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, (
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}")

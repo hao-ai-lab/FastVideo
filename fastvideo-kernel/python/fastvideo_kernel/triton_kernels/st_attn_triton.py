@@ -78,12 +78,10 @@ def _attn_fwd_loop(
     exp_scores = tl.math.exp2(scores - new_m[:, None])
     current_l = tl.sum(exp_scores, axis=1)
 
-    # Update L <- L * exp(M - M') + L1, M <- M'
     alpha = tl.math.exp2(m - new_m)
     l = l * alpha + current_l
     m = new_m
 
-    # Update O <- O * exp(M - M') + P @ V
     acc = (acc * alpha[:, None] + tl.dot(exp_scores.to(v.type.element_ty), v))
 
     return m, l, acc
@@ -286,8 +284,6 @@ def sliding_tile_attention_triton(q: torch.Tensor,
 
     total_tile_size = tile_t * tile_h * tile_w
 
-    # BLOCK_Q=128
-    # BLOCK_KV=128
     BLOCK_DIM = head_dim
 
     output = torch.empty_like(q)
@@ -329,8 +325,6 @@ def sliding_tile_attention_triton(q: torch.Tensor,
                 scale=1.0 / (head_dim**0.5),
                 has_text=has_text,
                 text_q=False,
-                # BLOCK_Q=BLOCK_Q,
-                # BLOCK_KV=BLOCK_KV,
                 BLOCK_DIM=BLOCK_DIM,
             )
 
@@ -363,8 +357,6 @@ def sliding_tile_attention_triton(q: torch.Tensor,
             scale=1.0 / (head_dim**0.5),
             has_text=has_text,
             text_q=True,
-            # BLOCK_Q=BLOCK_Q,
-            # BLOCK_KV=BLOCK_KV,
             BLOCK_DIM=BLOCK_DIM,
         )
 

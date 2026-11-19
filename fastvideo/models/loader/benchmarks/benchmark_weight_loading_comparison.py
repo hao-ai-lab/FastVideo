@@ -163,7 +163,6 @@ def main():
         args.repeats,
     )
 
-    # Clear GPU memory between benchmarks
     torch.cuda.empty_cache()
     dist.barrier()
 
@@ -176,7 +175,6 @@ def main():
         args.repeats,
     )
 
-    # Clear GPU memory between benchmarks
     torch.cuda.empty_cache()
     dist.barrier()
 

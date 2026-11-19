@@ -70,7 +70,6 @@ def _print_info_once(logger: Logger, msg: str) -> None:
 
 @lru_cache
 def _print_warning_once(logger: Logger, msg: str) -> None:
-    # Set the stacklevel to 2 to print the original caller's line info
     logger.warning(msg, stacklevel=2)
 
 
@@ -248,7 +247,6 @@ logger = init_logger(__name__)
 
 def _trace_calls(log_path, root_dir, frame, event, arg=None):
     if event in ['call', 'return']:
-        # Extract the filename, line number, function name, and the code object
         filename = frame.f_code.co_filename
         lineno = frame.f_lineno
         func_name = frame.f_code.co_name

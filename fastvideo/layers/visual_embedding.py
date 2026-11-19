@@ -34,7 +34,6 @@ class PatchEmbed(nn.Module):
                  dtype=None,
                  prefix: str = ""):
         super().__init__()
-        # Convert patch_size to 2-tuple
         if isinstance(patch_size, list | tuple):
             if len(patch_size) == 1:
                 patch_size = (patch_size[0], patch_size[0])
@@ -129,7 +128,6 @@ class TimestepEmbedder(nn.Module):
                                     dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
         if timestep_seq_len is not None:
             t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
-        # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
@@ -240,7 +238,6 @@ def get_timestep_embedding(
     emb = torch.exp(exponent)
     emb = timesteps[:, None].float() * emb[None, :]
 
-    # scale embeddings
     emb = scale * emb
 
     # concat sine and cosine embeddings

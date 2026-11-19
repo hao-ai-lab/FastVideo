@@ -65,7 +65,6 @@ def main() -> None:
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load captions
     with open(os.path.join(DATA_DIR, "videos2caption.json")) as f:
         caption_data = json.load(f)
 
@@ -161,11 +160,9 @@ def main() -> None:
         }
         records.append(record)
 
-    # Clean up
     del text_encoder, vae
     torch.cuda.empty_cache()
 
-    # Write parquet
     table = pa.table(
         {k: [r[k] for r in records]
          for k in records[0]},
@@ -175,7 +172,6 @@ def main() -> None:
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")
 
-    # Write T2W validation prompts (no image_path for T2W)
     val_prompts = {
         "data": [{
             "caption": item["cap"][0],

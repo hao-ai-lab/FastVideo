@@ -323,14 +323,7 @@ def run_kernel_tests():
     run_test("bash .buildkite/scripts/lanes/kernel_tests.sh")
 
 
-# @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
-# def run_precision_tests_VSA():
-#     # VSA correctness is covered by the same file now
-#     run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
-# @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
-# def run_precision_tests_vmoba():
-#     run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
@@ -359,7 +352,6 @@ def run_unit_test():
     run_test("bash .buildkite/scripts/unit_test.sh")
 
 
-# TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
 @app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800, secrets=[ci_env_secret])
 def run_dreamverse_app_tests():
     run_test_command(install_command="",

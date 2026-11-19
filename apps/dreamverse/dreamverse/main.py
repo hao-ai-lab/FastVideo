@@ -60,11 +60,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     print("Starting server...")
 
-    # Get available GPUs
     gpu_ids = get_available_gpus()
     print(f"Selected GPU ids: {gpu_ids}")
 
-    # Initialize GPU pool (spawns subprocess per GPU)
     runtime.gpu_pool = GPUPool(gpu_ids)
     await runtime.gpu_pool.initialize()
 

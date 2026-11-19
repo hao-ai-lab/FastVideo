@@ -2,7 +2,6 @@
 
 from fastvideo import VideoGenerator
 
-# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_self_forcing_causal_wan2_2_14B_t2v"
 
@@ -28,7 +27,6 @@ def main():
         init_weights_from_safetensors_2=
         "/mnt/sharefs/users/hao.zhang/wei/SFwan2.2_distill_self_forcing_release_cfg2/checkpoint-246_weight_only/generator_2_inference_transformer/",
         num_frame_per_block=7,
-        # image_encoder_cpu_offload=False,
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")

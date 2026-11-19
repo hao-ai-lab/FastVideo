@@ -575,7 +575,6 @@ def _register_configs() -> None:
         model_family="flux2",
         default_preset="flux2_klein_4b",
     )
-    # Flux2 (full, Mistral3 text encoder, embedded guidance)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Flux2PipelineConfig,
@@ -648,7 +647,6 @@ def _register_configs() -> None:
         default_preset="hunyuan15_sr_1080p",
     )
 
-    # Hunyuan (excludes hyworld, versioned models, and removed GameCraft checkpoints)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=HunyuanConfig,

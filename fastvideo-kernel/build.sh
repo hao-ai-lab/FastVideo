@@ -224,8 +224,6 @@ export CMAKE_ARGS
 echo "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST:-<unset>}"
 echo "CMAKE_ARGS: ${CMAKE_ARGS:-<unset>}"
 echo "GPU_BACKEND: ${GPU_BACKEND:-<unset>}"
-# Build and install
-# Use -v for verbose output
 if [ -n "${WHEEL_DIR}" ]; then
     mkdir -p "${WHEEL_DIR}"
     uv build --wheel -v --no-build-isolation --out-dir "${WHEEL_DIR}" .

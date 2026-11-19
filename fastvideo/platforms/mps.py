@@ -62,7 +62,6 @@ class MpsPlatform(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        # Use base communicator for MPS
         return "fastvideo.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"
 
     @classmethod

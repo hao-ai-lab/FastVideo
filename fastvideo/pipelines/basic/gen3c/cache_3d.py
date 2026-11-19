@@ -301,11 +301,9 @@ def forward_warp(
         intrinsic2 = intrinsic1.clone()
 
     if world_points1 is not None:
-        # Use pre-computed world points
         assert world_points1.shape == (b, h, w, 3)
         trans_points1 = project_points(world_points1, transformation2, intrinsic2)
     else:
-        # Compute from depth
         assert depth1 is not None and transformation1 is not None
         assert depth1.shape == (b, 1, h, w)
 
@@ -427,7 +425,6 @@ class Cache3DBase:
         if input_mask is not None:
             input_image = torch.cat([input_image, input_mask], dim=format_to_indices.get("C"))
 
-        # Extract dimensions
         B = input_shape[format_to_indices.get("B", 0)] if "B" in format_to_indices else 1
         F = input_shape[format_to_indices.get("F", 0)] if "F" in format_to_indices else 1
         N = input_shape[format_to_indices.get("N", 0)] if "N" in format_to_indices else 1
@@ -458,7 +455,6 @@ class Cache3DBase:
             self.input_image = input_image
         self.input_image = self.input_image.to(weight_dtype).to("cpu")
 
-        # Compute 3D world points
         if input_points is not None:
             self.input_points = input_points.reshape(B, F, N, V, H, W, 3).to("cpu")
             self.input_depth = None
@@ -523,7 +519,6 @@ class Cache3DBase:
         target_intrinsics = target_intrinsics.reshape(B, F_target, 1, 3, 3).expand(B, F_target, N, 3,
                                                                                    3).reshape(-1, 3, 3)
 
-        # Prepare inputs
         first_images = rearrange(
             self.input_image[:, start_frame_idx:start_frame_idx + F_target].expand(B, F_target, N, V, C, H, W),
             "B F N V C H W -> (B F N) V C H W")
@@ -534,7 +529,6 @@ class Cache3DBase:
             self.input_mask[:, start_frame_idx:start_frame_idx + F_target].expand(B, F_target, N, V, 1, H, W),
             "B F N V C H W -> (B F N) V C H W") if self.input_mask is not None else None
 
-        # Process in chunks for memory efficiency
         if first_images.shape[1] == 1:
             warp_chunk_size = 2
             rendered_warp_images = []
@@ -651,7 +645,6 @@ class Cache3DBuffer(Cache3DBase):
 
         B, F, N, V, C, H, W = self.input_image.shape
 
-        # Compute new 3D points
         new_points = unproject_points(new_depth, new_w2c, new_intrinsics, is_depth=self.is_depth).cpu()
         new_image = new_image.cpu()
 
@@ -710,7 +703,6 @@ class Cache3DBuffer(Cache3DBase):
         pixels = pixels.to(output_device)
         masks = masks.to(output_device)
 
-        # Apply noise augmentation (stronger for older buffers)
         if not render_depth and self.noise_aug_strength > 0:
             noise = torch.randn(pixels.shape, generator=self.generator, device=pixels.device, dtype=pixels.dtype)
             per_buffer_noise = (torch.arange(start=pixels.shape[2] - 1, end=-1, step=-1, device=pixels.device) *

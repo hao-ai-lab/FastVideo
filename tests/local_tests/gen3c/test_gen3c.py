@@ -45,7 +45,6 @@ def create_test_config(
     config.arch_config.max_size = max_size
     config.arch_config.frame_buffer_max = frame_buffer_max
 
-    # Ensure buffer channels are recalculated
     config.arch_config.__post_init__()
 
     return config
@@ -57,7 +56,6 @@ def test_gen3c_model_instantiation():
 
     model = Gen3CTransformer3DModel(config=config, hf_config={})
 
-    # Verify model attributes
     assert model.hidden_size == config.arch_config.num_attention_heads * config.arch_config.attention_head_dim
     assert model.in_channels == config.arch_config.in_channels
     assert model.out_channels == config.arch_config.out_channels
@@ -79,7 +77,6 @@ def test_gen3c_forward_pass_shapes():
     if not torch.cuda.is_available():
         pytest.skip("CUDA required for GEN3C forward pass test")
 
-    # Check if distributed is initialized
     try:
         from fastvideo.distributed.parallel_state import get_sp_group
         get_sp_group()
@@ -93,7 +90,6 @@ def test_gen3c_forward_pass_shapes():
     model = Gen3CTransformer3DModel(config=config, hf_config={}).to(device=device, dtype=dtype)
     model.eval()
 
-    # Create test inputs
     batch_size = 1
     num_frames = 8  # Divisible by patch_t=1
     height = 16  # Divisible by patch_h=2
@@ -160,7 +156,6 @@ def test_gen3c_forward_pass_shapes():
                 padding_mask=padding_mask,
             )
 
-    # Verify output shape matches input latent shape
     assert output.shape == hidden_states.shape, (
         f"Output shape {output.shape} does not match input shape {hidden_states.shape}")
 
@@ -179,7 +174,6 @@ def test_gen3c_forward_pass_no_conditioning():
     if not torch.cuda.is_available():
         pytest.skip("CUDA required for GEN3C forward pass test")
 
-    # Check if distributed is initialized
     try:
         from fastvideo.distributed.parallel_state import get_sp_group
         get_sp_group()
@@ -307,7 +301,6 @@ def test_gen3c_weight_loading():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"[GEN3C TEST] Total parameters: {total_params:,}")
 
-    # Verify model is usable
     model.eval()
     assert model is not None
 
@@ -332,7 +325,6 @@ def test_gen3c_transformer_parity():
     device = torch.device("cuda:0")
     dtype = torch.bfloat16
 
-    # Load FastVideo model
     config = Gen3CVideoConfig()
     args = FastVideoArgs(
         model_path=str(fastvideo_path),
@@ -346,7 +338,6 @@ def test_gen3c_transformer_parity():
     fastvideo_model = loader.load(str(fastvideo_path), args).to(device=device, dtype=dtype)
     fastvideo_model.eval()
 
-    # Load official GEN3C model
     try:
         from cosmos_predict1.diffusion.networks.general_dit_video_conditioned import VideoExtendGeneralDIT
 
@@ -383,7 +374,6 @@ def test_gen3c_transformer_parity():
     except Exception as e:
         pytest.skip(f"Failed to load official GEN3C: {e}")
 
-    # Create test inputs
     batch_size = 1
     num_frames = 8
     height = 16
@@ -443,7 +433,6 @@ def test_gen3c_transformer_parity():
                 condition_video_pose=condition_video_pose,
             )
 
-        # Prepare inputs for official model
         x_official = torch.cat([
             hidden_states,
             condition_video_input_mask,

@@ -33,7 +33,6 @@ def test_parquet_dataset_saver_flush_and_last(tmp_path: Path):
     ])
 
     B = 5
-    # Build a minimal PreprocessBatch
     batch = PreprocessBatch(
         data_type="video",
         latents=torch.randn(B, 2),

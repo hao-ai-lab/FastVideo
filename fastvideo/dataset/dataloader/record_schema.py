@@ -23,11 +23,9 @@ def basic_t2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
         width = batch.width[idx] if batch.width is not None else 0
         height = batch.height[idx] if batch.height is not None else 0
 
-        # Get FPS - single value in PreprocessBatch
         fps_val = float(batch.fps[idx]) if batch.fps is not None else 0.0
 
         # For duration, we need to calculate it or use a default since it's not in PreprocessBatch
-        # duration = num_frames / fps if available
         duration_val = 0.0
         if batch.num_frames[idx] and batch.fps[idx] and batch.fps[idx] > 0:
             duration_val = float(batch.num_frames[idx]) / float(batch.fps[idx])

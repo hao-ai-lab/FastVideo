@@ -61,7 +61,6 @@ public:
     int tidx = threadIdx.x;
     float x[NumElementPerThread];
 
-    // load
     Loader<InputDtype, 1, MaxHiddenSize, NumThrPerCta, true, IsEven> loader;
     loader.load(params.Iptr, x, params.m, params.n, blk_m, 0, tidx);
 
@@ -86,7 +85,6 @@ public:
     }
 
     __syncthreads();
-    // var reduction
     float v = sqrtf(_reduce_square(x, shared_data) / params.n + params.eps);
 
     CUTLASS_PRAGMA_UNROLL
@@ -94,7 +92,6 @@ public:
       x[i] /= v;
 
     if constexpr (Affine) {
-      // load weight
       Loader<WeightDtype, 1, MaxHiddenSize, NumThrPerCta, true, IsEven> weight_loader;
       float w[NumElementPerThread];
       weight_loader.load(params.Wptr, w, 1, params.n, 0, 0, tidx);
@@ -111,7 +108,6 @@ public:
       }
     }
 
-    // save y
     {
       Saver<OutputDtype, 1, MaxHiddenSize, NumThrPerCta, true, IsEven, false, false> saver;
       if constexpr (std::is_same_v<OutputDtype, float>) {

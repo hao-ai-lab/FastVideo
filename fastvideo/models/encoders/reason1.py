@@ -192,7 +192,6 @@ class Reason1TextEncoder(TextEncoder):
                 skipped_weights["decoder"] += 1
                 continue
 
-            # Handle stacked params mapping (for quantized models)
             for param_name, weight_name, shard_id in self.config.arch_config.stacked_params_mapping:
                 if weight_name not in name:
                     continue

@@ -43,11 +43,9 @@ def test_qwen2_5_encoder(qwen_model_path_and_config):
 
     logger.info(f"Using precision: {precision_str}")
 
-    # Load HF model (Base model)
     model1 = Qwen2_5_VLTextModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    # Load FastVideo model
     args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
 
     loader = TextEncoderLoader()
@@ -81,10 +79,8 @@ def test_qwen2_5_encoder(qwen_model_path_and_config):
             p2 = params2[name2]
             p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
 
-            # Check shape
             assert p1.shape == p2.shape, f"Shape mismatch for {w}: {p1.shape} vs {p2.shape}"
 
-            # Check values
             assert_close(p1, p2, atol=1e-7, rtol=1e-7, msg=f"Weight mismatch for {w}")
 
     # Test with sample prompts
@@ -113,7 +109,6 @@ def test_qwen2_5_encoder(qwen_model_path_and_config):
             # Compare
             # Filter padding for comparison if needed, but here we just check raw output matching
 
-            # Check shapes
             assert outputs1.shape == outputs2.shape, f"Output shape mismatch: {outputs1.shape} vs {outputs2.shape}"
 
             diff = torch.abs(outputs1 - outputs2)

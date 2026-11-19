@@ -263,7 +263,6 @@ class Kandinsky6SRDenoisingStage(PipelineStage):
                 state, cond = x[..., :channels], x[..., channels:]
                 self._set_timesteps(num_steps, device, use_piflow)
                 for i, t in enumerate(self.scheduler.timesteps):
-                    # Stop if interrupted
                     if getattr(self, "interrupt", False):
                         break
                     timestep = t.to(device=device, dtype=torch.float32).expand(x.shape[0])

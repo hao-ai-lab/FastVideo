@@ -2,7 +2,6 @@
 #include <ATen/ATen.h>
 #include <vector>
 
-// Forward declarations
 #ifdef TK_COMPILE_ST_ATTN
 extern torch::Tensor sta_forward(
     torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 

@@ -141,7 +141,6 @@ class Gen3CConfig(PipelineConfig):
 
         self._vae_latent_dim = 16
 
-        # Validate frame buffer configuration matches DiT
         if hasattr(self.dit_config, 'arch_config'):
             arch_config = self.dit_config.arch_config
             if (hasattr(arch_config, 'frame_buffer_max') and arch_config.frame_buffer_max != self.frame_buffer_max):
@@ -157,7 +156,6 @@ class Gen3CConfig(PipelineConfig):
 class Gen3CInferenceConfig(Gen3CConfig):
     """Configuration for GEN3C inference with optimized defaults."""
 
-    # Use smaller batch sizes for inference
     batch_size: int = 1
 
     # Enable gradient checkpointing for memory efficiency

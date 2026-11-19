@@ -123,7 +123,6 @@ def _apply_rotary_emb(
     head_size = x.shape[-1]
     rope_dim = cos.shape[-1]
 
-    # Check if cos/sin are full head_dim (rotate_half style) or half (traditional style)
     if rope_dim == head_size:
         # Full head_dim - use rotate_half style (HunyuanVideo)
         # x * cos + rotate_half(x) * sin
@@ -258,17 +257,14 @@ def get_meshgrid_nd(start: int | tuple[int, ...], *args: int | tuple[int, ...], 
         grid (np.ndarray): [dim, ...]
     """
     if len(args) == 0:
-        # start is grid_size
         num = _to_tuple(start, dim=dim)
         start = (0, ) * dim
         stop = num
     elif len(args) == 1:
-        # start is start, args[0] is stop, step is 1
         start = _to_tuple(start, dim=dim)
         stop = _to_tuple(args[0], dim=dim)
         num = tuple(stop[i] - start[i] for i in range(dim))
     elif len(args) == 2:
-        # start is start, args[0] is stop, args[1] is num
         start = _to_tuple(start, dim=dim)  # Left-Top       eg: 12,0
         stop = _to_tuple(args[0], dim=dim)  # Right-Bottom   eg: 20,32
         num = _to_tuple(args[1], dim=dim)  # Target Size    eg: 32,124
@@ -381,35 +377,27 @@ def get_nd_rotary_pos_embed(
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: (cos, sin) tensors of shape [HW, D] if use_real, [HW, D/2] otherwise
     """
-    # Get the full grid
     full_grid = get_meshgrid_nd(start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
 
     if start_frame > 0:
         full_grid[0] += start_frame
 
-    # Shard the grid if using sequence parallelism (sp_world_size > 1)
     assert shard_dim < len(
         rope_dim_list), f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
     if sp_world_size > 1:
-        # Get the shape of the full grid
         grid_shape = list(full_grid.shape[1:])
 
-        # Ensure the dimension to shard is divisible by sp_world_size
         assert grid_shape[shard_dim] % sp_world_size == 0, (
             f"Dimension {shard_dim} with size {grid_shape[shard_dim]} is not divisible "
             f"by sequence parallel world size {sp_world_size}")
 
-        # Compute the start and end indices for this rank's shard
         shard_size = grid_shape[shard_dim] // sp_world_size
         start_idx = sp_rank * shard_size
         end_idx = (sp_rank + 1) * shard_size
 
-        # Create slicing indices for each dimension
         slice_indices = [slice(None) for _ in range(len(grid_shape))]
         slice_indices[shard_dim] = slice(start_idx, end_idx)
 
-        # Shard the grid
-        # Update grid shape for the sharded dimension
         grid_shape[shard_dim] = grid_shape[shard_dim] // sp_world_size
         grid = torch.empty((len(rope_dim_list), ) + tuple(grid_shape), dtype=full_grid.dtype)
         for i in range(len(rope_dim_list)):
@@ -431,7 +419,6 @@ def get_nd_rotary_pos_embed(
     assert len(interpolation_factor) == len(
         rope_dim_list), "len(interpolation_factor) should equal to len(rope_dim_list)"
 
-    # use 1/ndim of dimensions to encode grid_axis
     embs = []
     for i in range(len(rope_dim_list)):
         emb = get_1d_rotary_pos_embed(
@@ -506,7 +493,6 @@ def get_rotary_pos_embed(
 
     assert sum(rope_dim_list) == head_dim, "sum(rope_dim_list) should equal to head_dim of attention layer"
 
-    # Get SP info
     if do_sp_sharding:
         sp_group = get_sp_group()
         sp_rank = sp_group.rank_in_group

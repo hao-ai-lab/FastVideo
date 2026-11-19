@@ -44,7 +44,6 @@ def test_ltx2_5_metadata_variant_selects_preset(tmp_path) -> None:
     import json
     from pathlib import Path
 
-    # Create a local directory with LTX2Pipeline _class_name and distilled variant metadata
     distilled_dir = tmp_path / "ltx2_5_distilled_local"
     distilled_dir.mkdir()
     model_index = {
@@ -57,7 +56,6 @@ def test_ltx2_5_metadata_variant_selects_preset(tmp_path) -> None:
     assert preset == "ltx2_5_distilled_two_stage"
     assert family == "ltx2"
 
-    # Create a local directory with LTX2Pipeline _class_name and dev variant metadata
     dev_dir = tmp_path / "ltx2_5_dev_local"
     dev_dir.mkdir()
     model_index = {

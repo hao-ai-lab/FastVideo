@@ -93,12 +93,10 @@ def get_diffusers_config(model: str, ) -> dict[str, Any]:
         config_file = os.path.join(model, config_name)
         if os.path.exists(config_file):
             try:
-                # Load the config directly from the file
                 with open(config_file) as f:
                     config_dict: dict[str, Any] = json.load(f)
                 if "_diffusers_version" in config_dict:
                     config_dict.pop("_diffusers_version")
-                # TODO(will): apply any overrides from inference args
                 return config_dict
             except Exception as e:
                 raise RuntimeError(f"Failed to load diffusers config from {config_file}: {e}") from e

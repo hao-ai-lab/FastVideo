@@ -6,8 +6,6 @@ import numpy as np
 from tqdm import tqdm
 
 from .utils import generate_block_sparse_mask_for_function, create_full_mask_from_block_mask
-# Use installed package
-# from fastvideo_kernel import video_sparse_attn as block_sparse_attn
 
 BLOCK_M = 64
 BLOCK_N = 64
@@ -118,10 +116,7 @@ def check_correctness(h, d, num_blocks, k, num_iterations=20, error_mode='all'):
         V = generate_tensor((1, h, S, d), torch.bfloat16, device)
         dO = generate_tensor((1, h, S, d), torch.bfloat16, device)
 
-        # print(Q.shape, K.shape, V.shape, dO.shape)
 
-        # dO_padded = torch.zeros_like(dO_padded)
-        # dO_padded[:, :, non_pad_index, :] = dO
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
         bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes,
@@ -190,7 +185,6 @@ def check_correctness_qkdiff(h, d, num_q_blocks, num_kv_blocks, k, num_iteration
         V = generate_tensor((1, h, S_kv, d), torch.bfloat16, device)
         dO = generate_tensor((1, h, S_q, d), torch.bfloat16, device)
 
-        # print(Q.shape, K.shape, V.shape, dO.shape)
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
         bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), kv_variable_block_sizes,

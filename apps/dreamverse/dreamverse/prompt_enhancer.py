@@ -325,7 +325,6 @@ def _parse_json_response(content: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Handle fenced blocks like ```json ... ``` with optional prose around it.
     fence_pattern = re.compile(
         r"```(?:json)?\s*([\s\S]*?)```",
         flags=re.IGNORECASE,

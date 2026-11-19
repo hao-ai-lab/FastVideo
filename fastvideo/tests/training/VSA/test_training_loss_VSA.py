@@ -6,10 +6,7 @@ import json
 from huggingface_hub import snapshot_download
 import torch
 
-# Force VSA to use Triton implementation even on H100 / when CUDA extension is available
-# os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
 
-# Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 import fastvideo.envs as envs
 from fastvideo.training.runner import main
@@ -23,10 +20,8 @@ NUM_GPUS_PER_NODE = "2"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
-    # Create and populate args
     parser = build_parser()
 
-    # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
         "--pipeline_class", "WanTrainingPipeline",
         "--pipeline_module", "fastvideo.training.wan_training_pipeline",
@@ -47,7 +42,6 @@ def run_worker():
         "1", "--VSA_sparsity", "0.9"
     ])
     
-    # Call the main training function
     main(args)
 
 
@@ -62,10 +56,8 @@ def test_distributed_training():
                           repo_type="dataset",
                           local_dir_use_symlinks=False)
 
-    # Get the current file path
     current_file = Path(__file__).resolve()
 
-    # Run torchrun command
     cmd = ["torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, str(current_file)]
 
     # The torchrun workers select VSA when the training pipeline initializes attention.

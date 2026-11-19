@@ -74,22 +74,18 @@ def process_folder(args):
     print(f"Found {len(video_files)} videos")
     print(f"Target: {args.width}x{args.height} at {args.fps}fps")
 
-    # Prepare arguments for parallel processing
     process_args = [(video_file, output_path, args.width, args.height, args.fps) for video_file in video_files]
 
     successful = 0
     skipped = 0
     failed = []
 
-    # Use ProcessPoolExecutor instead of ThreadPoolExecutor
     with tqdm(total=len(video_files), desc="Converting videos", dynamic_ncols=True) as pbar:
-        # Use max_workers as specified or default to CPU count
         max_workers = args.max_workers
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_file = {executor.submit(resize_video, arg): arg[0] for arg in process_args}
 
-            # Process completed tasks
             for future in as_completed(future_to_file):
                 filename, status, message = future.result()
                 if status == "success":

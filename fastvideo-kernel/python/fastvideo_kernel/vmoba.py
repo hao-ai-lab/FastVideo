@@ -5,7 +5,7 @@ import random
 import time
 import torch
 try:
-    from flash_attn import flash_attn_varlen_func  # Use the new flash attention function
+    from flash_attn import flash_attn_varlen_func
     from flash_attn.flash_attn_interface import _flash_attn_varlen_forward, _flash_attn_varlen_backward
 except ImportError:
 
@@ -46,7 +46,6 @@ def calc_chunks(cu_seqlen, moba_chunk_size):
     chunk_to_batch[cu_num_chunk[1:-1]] = 1
     chunk_to_batch = chunk_to_batch.cumsum(dim=0, dtype=torch.int32)
 
-    # Do not filter out any chunk
     filtered_chunk_indices = torch.arange(num_chunk, device=cu_seqlen.device, dtype=torch.int32)
     num_filtered_chunk = num_chunk
 
@@ -66,7 +65,7 @@ def _select_threshold_query_head(gate: torch.Tensor, valid_gate_mask: torch.Tens
     eps = 1e-6
 
     # LSE‐style normalization per <head, query> (across chunks)
-    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)  # Use -inf for max
+    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)
     gate_min_val = torch.where(valid_gate_mask, gate, torch.inf)  # Use +inf for min
 
     row_min = gate_min_val.amin(dim=0)  # (H, S)
@@ -127,7 +126,7 @@ def _select_threshold_block(gate: torch.Tensor, valid_gate_mask: torch.Tensor, g
     eps = 1e-6
 
     # LSE‐style normalization per block (across heads and queries)
-    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)  # Use -inf for max
+    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)
     gate_min_val = torch.where(valid_gate_mask, gate, torch.inf)  # Use +inf for min
 
     block_max = gate_masked.amax(dim=(1, 2), keepdim=True)  # (C, 1, 1)
@@ -193,7 +192,7 @@ def _select_threshold_overall(gate: torch.Tensor, valid_gate_mask: torch.Tensor,
     eps = 1e-6
 
     # LSE‐style normalization globally across all valid entries
-    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)  # Use -inf for max
+    gate_masked = torch.where(valid_gate_mask, gate, -torch.inf)
     gate_min_val = torch.where(valid_gate_mask, gate, torch.inf)  # Use +inf for min
 
     overall_max = gate_masked.max()  # scalar
@@ -251,7 +250,7 @@ def _select_threshold_overall(gate: torch.Tensor, valid_gate_mask: torch.Tensor,
 
     # 8) create the mask in the original flat shape
     others_mask_flat = torch.zeros_like(others_flat, dtype=torch.bool)  # (C*H*S,)
-    if selected_other_indices.numel() > 0:  # Check if any 'other' indices were selected
+    if selected_other_indices.numel() > 0:
         others_mask_flat[selected_other_indices] = True
     others_mask = others_mask_flat.view(C, H, S)  # (C, H, S)
 
@@ -349,8 +348,6 @@ class MixedAttention(torch.autograd.Function):
         ctx.moba_chunk_size = moba_chunk_size
         ctx.softmax_scale = softmax_scale = q.shape[-1]**(-0.5)
 
-        # Non-causal self-attention branch
-        # return out, softmax_lse, S_dmask, rng_state
         self_attn_out_sh, self_attn_lse_hs, _, _ = _flash_attn_varlen_forward(
             q=q,
             k=k,
@@ -532,12 +529,10 @@ def moba_attn_varlen(
     kv = torch.stack((k, v), dim=1)
     seqlen, num_head, head_dim = q.shape
 
-    # Compute chunk boundaries.
     cu_chunk, filtered_chunk_indices, num_filtered_chunk, chunk_to_batch = calc_chunks(cu_seqlens, moba_chunk_size)
 
     self_attn_cu_seqlen = cu_chunk
 
-    # Update top-k selection to include the self chunk.
     moba_topk = min(moba_topk, num_filtered_chunk)
 
     # --- Build filtered KV from chunks ---
@@ -553,16 +548,13 @@ def moba_attn_varlen(
     gathered = kv[indices.view(-1)].view(num_filtered_chunk, max_chunk_len, *kv.shape[1:])
     gathered = gathered * valid_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).type_as(gathered)
 
-    # Compute key_gate_weight over valid tokens.
     key_values = gathered[:, :, 0].float()  # [num_filtered_chunk, max_chunk_len, num_head, head_dim]
     valid_mask_exp = valid_mask.unsqueeze(-1).unsqueeze(-1)
     key_sum = (key_values * valid_mask_exp).sum(dim=1)
     divisor = valid_mask.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
     key_gate_weight = key_sum / divisor  # [num_filtered_chunk, num_head, head_dim]
 
-    # Compute gate logits between key_gate_weight and queries.
     q_float = q.float()
-    # gate = torch.einsum("nhd,shd->nhs", key_gate_weight, q_float)  # [num_filtered_chunk, num_head, seqlen]
     gate = torch.bmm(key_gate_weight.permute(1, 0, 2), q_float.permute(1, 0, 2).transpose(1, 2)).permute(1, 0, 2)
 
     # Amplify the diagonal (self chunk) contributions.
@@ -650,7 +642,6 @@ def moba_attn_varlen(
     moba_q_sh_indices = (moba_q_indices % seqlen) * num_head + (moba_q_indices // seqlen)
     moba_q = rearrange(q, "s h d -> (h s) d").index_select(0, moba_q_indices).unsqueeze(1)
 
-    # Build cumulative sequence lengths for the selected queries.
     moba_seqlen_q = gate_mask.sum(dim=-1).flatten()
     q_zero_mask = moba_seqlen_q == 0
     valid_expert_mask = ~q_zero_mask
@@ -814,7 +805,6 @@ def test_attn_varlen_moba_speed(batch,
                                 simsum_threshold=0.25,
                                 threshold_type='query_head'):
     """Speed test comparing flash_attn vs moba_attention"""
-    # Get data
     q, k, v, cu_seqlen, max_seqlen = generate_data(batch, seqlen, head, head_dim, dtype)
     print(
         f"batch:{batch} head:{head} seqlen:{seqlen} chunk:{moba_chunk_size} topk:{moba_topk} select_mode: {select_mode} simsum_threshold:{simsum_threshold}"

@@ -180,8 +180,6 @@ class DecodingStage(PipelineStage):
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
-            # if fastvideo_args.vae_sp:
-            #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
             # Flux2's image VAE expects 4D (B, C, H, W); squeeze the singleton T
@@ -206,7 +204,6 @@ class DecodingStage(PipelineStage):
             if squeezed_for_vae:
                 image = image.unsqueeze(2)
 
-        # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
         return image
 
@@ -241,7 +238,6 @@ class DecodingStage(PipelineStage):
 
         latents = self._denormalize_latents(latents, fastvideo_args)
 
-        # Initialize cache if needed
         if cache is None:
             cache = self.vae.get_streaming_cache()
 
@@ -253,7 +249,6 @@ class DecodingStage(PipelineStage):
                 latents = latents.to(vae_dtype)
             image, cache = self.vae.streaming_decode(latents, cache, is_first_chunk)
 
-        # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
         assert cache is not None, "cache should not be None after streaming_decode"
         return image, cache
@@ -288,7 +283,6 @@ class DecodingStage(PipelineStage):
                 - output: Decoded frames (batch, channels, frames, height, width) as CPU float32
                 - trajectory_decoded (if requested): List of decoded frames per timestep
         """
-        # load vae if not already loaded (used for memory constrained devices)
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["vae"]:
             loader = VAELoader()
@@ -317,10 +311,8 @@ class DecodingStage(PipelineStage):
                 decoded_frames = self.decode(cur_latent, fastvideo_args)
                 batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
-        # Convert to float32 for compatibility
         frames = frames.to(torch.float32)
 
-        # Update batch with decoded image
         batch.output = frames
 
         # Offload models if needed

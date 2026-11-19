@@ -8,7 +8,6 @@ from collections.abc import Iterable
 import torch
 import torch.nn as nn
 
-# from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, CLIPVisionConfig)
 from fastvideo.distributed import divide, get_tp_world_size
@@ -18,8 +17,6 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import ImageEncoder, TextEncoder
 from fastvideo.models.encoders.vision import resolve_visual_encoder_outputs
-# TODO: support quantization
-# from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.models.loader.weight_utils import default_weight_loader
 
 logger = init_logger(__name__)
@@ -167,7 +164,6 @@ class CLIPAttention(nn.Module):
 
         qkv_states, _ = self.qkv_proj(hidden_states)
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
-        # use flash_attn_func
         query_states = query_states.reshape(query_states.shape[0], query_states.shape[1], self.num_heads_per_partition,
                                             self.head_dim)
         key_states = key_states.reshape(key_states.shape[0], key_states.shape[1], self.num_heads_per_partition,
@@ -342,19 +338,10 @@ class CLIPTextTransformer(nn.Module):
         #     input_shape, hidden_states.dtype, device=hidden_states.device
         # )
 
-        # # expand attention_mask
-        # if attention_mask is not None and not self._use_flash_attention_2:
-        #     raise NotImplementedError("attention_mask is not supported for CLIPTextTransformer")
-        #     # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-        #     attention_mask = _prepare_4d_attention_mask(attention_mask, hidden_states.dtype)
 
         encoder_outputs = self.encoder(
             inputs_embeds=hidden_states,
-            # attention_mask=attention_mask,
-            # causal_attention_mask=causal_attention_mask,
-            # output_attentions=output_attentions,
             return_all_hidden_states=output_hidden_states,
-            # return_dict=return_dict,
         )
 
         last_hidden_state = encoder_outputs[-1]
@@ -363,7 +350,6 @@ class CLIPTextTransformer(nn.Module):
         if self.eos_token_id == 2:
             # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
             # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
-            # ------------------------------------------------------------
             # text_embeds.shape = [batch_size, sequence_length, transformer.width]
             # take features from the eot embedding (eot_token is the highest number in each sequence)
             # casting to torch.int for onnx compatibility: argmax doesn't support int64 inputs with opset 14
@@ -385,7 +371,6 @@ class CLIPTextTransformer(nn.Module):
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
             hidden_states=encoder_outputs,
-            # attentions=encoder_outputs.attentions,
         )
 
 
@@ -418,7 +403,6 @@ class CLIPTextModel(TextEncoder):
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
 
-        # Define mapping for stacked parameters
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
@@ -440,7 +424,6 @@ class CLIPTextModel(TextEncoder):
         for name, loaded_weight in weights:
             if needs_text_model_prefix:
                 name = f"text_model.{name}"
-            # Handle q_proj, k_proj, v_proj -> qkv_proj mapping
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name in name:
                     # Replace the weight name with the parameter name
@@ -453,7 +436,6 @@ class CLIPTextModel(TextEncoder):
                         loaded_params.add(model_param_name)
                     break
             else:
-                # Use default weight loader for all other parameters
                 if name in params_dict:
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader", default_weight_loader)
@@ -558,7 +540,6 @@ class CLIPVisionTransformer(nn.Module):
         if not return_all_hidden_states:
             encoder_outputs = encoder_outputs[0]
 
-        # Handle post-norm (if applicable) and stacks feature layers if needed
         encoder_outputs = resolve_visual_encoder_outputs(encoder_outputs, feature_sample_layers, self.post_layernorm,
                                                          self.config.num_hidden_layers)
 

@@ -635,7 +635,6 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             elif type(param) in (RowvLLMParameter, BasevLLMParameter):
                 param.load_merged_column_weight(loaded_weight=loaded_weight)
                 return
-            # TODO: @dsikka - move to parameter.py
             self._load_fused_module_from_checkpoint(param, loaded_weight)
             return
 
@@ -645,20 +644,6 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
 
         if isinstance(param, BlockQuantScaleParameter):
             raise NotImplementedError("FP8 is not implemented yet")
-            # FIXME(will): add fp8 support
-            # from vllm.model_executor.layers.quantization.fp8 import (
-            #     Fp8LinearMethod, Fp8MoEMethod)
-            # assert self.quant_method is not None
-            # assert isinstance(self.quant_method,
-            #                   (Fp8LinearMethod, Fp8MoEMethod))
-            # weight_block_size = self.quant_method.quant_config.weight_block_size
-            # assert weight_block_size is not None
-            # block_n, _ = weight_block_size[0], weight_block_size[1]
-            # shard_offset = (
-            #     (sum(self.output_sizes[:loaded_shard_id]) + block_n - 1) //
-            #     block_n) // tp_size
-            # shard_size = ((self.output_sizes[loaded_shard_id] + block_n - 1) //
-            #               block_n // tp_size)
         else:
             shard_offset = sum(self.output_sizes[:loaded_shard_id]) // tp_size
             shard_size = self.output_sizes[loaded_shard_id] // tp_size
@@ -810,7 +795,6 @@ class QKVParallelLinear(ColumnParallelLinear):
             elif type(param) in (RowvLLMParameter, BasevLLMParameter):
                 param.load_qkv_weight(loaded_weight=loaded_weight)
                 return
-            # TODO: @dsikka - move to parameter.py
             self._load_fused_module_from_checkpoint(param, loaded_weight)
             return
 

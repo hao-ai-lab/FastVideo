@@ -3,8 +3,6 @@ import pytest
 import sys
 import os
 
-# Ensure local package is imported
-# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../python")))
 
 try:
     from fastvideo_kernel._C import fastvideo_kernel_ops
@@ -65,20 +63,13 @@ class TestTurboDiffusion:
         M, N, K = 32, 64, 128
         x = torch.randn(M, K, dtype=dtype, device="cuda")
 
-        # Create weights
-        # For simplicity in testing, let's create random int8 weights and scales
         w_q = torch.randint(-127, 127, (N, K), dtype=torch.int8, device="cuda")
 
-        # Scale shape: The Int8Linear class uses:
-        # row_blocks = cdiv(out_features, b=128)
-        # col_blocks = cdiv(in_features, b=128)
-        # scale shape: (row_blocks, col_blocks)
 
         row_blocks = (N + 127) // 128
         col_blocks = (K + 127) // 128
         w_s = torch.randn(row_blocks, col_blocks, dtype=torch.float32, device="cuda").abs()
 
-        # Run int8_linear
         output = turbodiffusion_ops.int8_linear(x, w_q, w_s)
 
         assert output.shape == (M, N)
@@ -92,7 +83,6 @@ class TestTurboDiffusion:
         M, N, K = 32, 64, 128
         x = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
 
-        # Weights (frozen)
         w_q = torch.randint(-127, 127, (N, K), dtype=torch.int8, device="cuda")
         row_blocks = (N + 127) // 128
         col_blocks = (K + 127) // 128
@@ -100,7 +90,6 @@ class TestTurboDiffusion:
 
         bias = torch.randn(N, dtype=dtype, device="cuda", requires_grad=True)
 
-        # Use Int8LinearFunction
         output = turbodiffusion_ops.Int8LinearFunction.apply(x, w_q, w_s, bias)
         loss = output.sum()
         loss.backward()
@@ -109,7 +98,6 @@ class TestTurboDiffusion:
         assert bias.grad is not None
         assert x.grad.shape == (M, K)
 
-        # Check correctness against dequantized weight
         w_float = turbodiffusion_ops.dequantize_weight(w_q, w_s, dtype)
 
         # Reference

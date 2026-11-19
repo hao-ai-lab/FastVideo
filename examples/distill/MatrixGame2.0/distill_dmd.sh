@@ -7,7 +7,6 @@ export TOKENIZERS_PARALLELISM=false
 RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
-# Model paths for Self-Forcing DMD distillation.
 GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers"
 REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"  # Teacher
 FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"  # Critic
@@ -16,7 +15,6 @@ DATA_DIR="data/matrixgame2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 NUM_GPUS=1
 
-# Training arguments
 training_args=(
   --tracker_project_name "matrixgame2_sf"
   --output_dir "checkpoints/matrixgame2_sf_${RUN_NAME}"
@@ -32,12 +30,8 @@ training_args=(
   --simulate_generator_forward
   --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
-  # --enable_gradient_masking
-  # --gradient_mask_last_n_frames 21
-  # --init_weights_from_safetensors "path/to/generator_ema.safetensors"
 )
 
-# Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
@@ -47,7 +41,7 @@ parallel_args=(
 )
 
 model_args=(
-  --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
+  --model_path $GENERATOR_MODEL_PATH
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
   --real_score_model_path $REAL_SCORE_MODEL_PATH
   --fake_score_model_path $FAKE_SCORE_MODEL_PATH
@@ -58,7 +52,6 @@ dataset_args=(
   --dataloader_num_workers 4
 )
 
-# Validation arguments
 validation_args=(
   --log_validation
   --log_visualization
@@ -69,7 +62,6 @@ validation_args=(
   --validation_guidance_scale "6.0"
 )
 
-# Optimizer arguments
 optimizer_args=(
   --learning_rate 3e-6
   --mixed_precision "bf16"
@@ -80,7 +72,6 @@ optimizer_args=(
   --max_grad_norm 1.0
 )
 
-# Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3

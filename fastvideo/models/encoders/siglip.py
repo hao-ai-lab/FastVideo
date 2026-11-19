@@ -312,7 +312,6 @@ class SiglipVisionTransformer(nn.Module):
         if not return_all_hidden_states:
             encoder_outputs = encoder_outputs[0]
 
-        # Apply post-layernorm
         if self.post_layernorm is not None:
             if isinstance(encoder_outputs, list):
                 encoder_outputs[-1] = self.post_layernorm(encoder_outputs[-1])
@@ -359,11 +358,9 @@ class SiglipVisionModel(ImageEncoder):
         layer_count = len(self.vision_model.encoder.layers)
 
         for name, loaded_weight in weights:
-            # Skip projection layers if any
             if name.startswith("visual_projection"):
                 continue
 
-            # Skip head if any
             if "head" in name:
                 continue
 
@@ -377,7 +374,6 @@ class SiglipVisionModel(ImageEncoder):
                 if layer_idx >= layer_count:
                     continue
 
-            # Handle QKV projection weight mapping
             for (param_name, weight_name, shard_id) in self.config.arch_config.stacked_params_mapping:
                 if weight_name not in name:
                     continue

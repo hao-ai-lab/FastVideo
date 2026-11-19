@@ -69,17 +69,6 @@ class Worker:
         self.rank = rank
         self.distributed_init_method = distributed_init_method
 
-        # Init request dispatcher
-        # TODO(will): add request dispatcher: use TypeBasedDispatcher from
-        # utils.py
-        # self._request_dispatcher = TypeBasedDispatcher(
-        #     [
-        # (RpcReqInput, self.handle_rpc_request),
-        # (GenerateRequest, self.handle_generate_request),
-        # (ExpertDistributionReq, self.expert_distribution_handle),
-        #     ]
-        # )
-
     def init_device(self) -> None:
         """Initialize the device for the worker."""
 
@@ -138,7 +127,6 @@ class Worker:
         device_id = self.device.index if self.device.index is not None else 0
         self.fastvideo_args.finalize_device_offload_policy(device_id)
 
-        # Initialize the distributed environment.
         dist_timeout = (timedelta(
             seconds=self.fastvideo_args.dist_timeout) if self.fastvideo_args.dist_timeout is not None else None)
         sp_size = self.fastvideo_args.sp_size
@@ -194,9 +182,7 @@ class Worker:
     def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
         logger.info("Worker %d shutting down...", self.rank, local_main_process_only=False)
-        # Clean up resources
         if hasattr(self, 'pipeline') and self.pipeline is not None:
-            # Clean up pipeline resources if needed
             pass
 
         # Destroy the distributed environment

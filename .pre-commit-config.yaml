@@ -24,7 +24,7 @@ repos:
     require_serial: true
     args: [--in-place, --verbose]
     language_version: python3.12
-    additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
+    additional_dependencies: [toml]
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.11.12
   hooks:
@@ -36,10 +36,6 @@ repos:
   - id: codespell
     additional_dependencies: ['tomli']
     args: ['--toml', 'pyproject.toml']
-# - repo: https://github.com/PyCQA/isort
-#   rev: 6.0.1
-#   hooks:
-#   - id: isort
 - repo: https://github.com/jackdewinter/pymarkdown
   rev: v0.9.30
   hooks:

@@ -54,15 +54,12 @@ describe('DatasetSidebar', () => {
   it('lists dataset files after loading', async () => {
     render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
 
-    // The first file's caption is rendered once loading resolves.
     expect(await screen.findByDisplayValue('cap a')).toBeInTheDocument();
     expect(mockedApi.getDatasetFiles).toHaveBeenCalledWith('ds-1');
 
-    // One caption editor per returned file.
     const captionFields = screen.getAllByPlaceholderText('Caption');
     expect(captionFields).toHaveLength(2);
 
-    // Media URLs are requested per visible file.
     expect(mockedApi.getDatasetMediaUrl).toHaveBeenCalledWith('ds-1', 'a.mp4');
     expect(mockedApi.getDatasetMediaUrl).toHaveBeenCalledWith('ds-1', 'b.mp4');
   });

@@ -168,7 +168,6 @@ def apply_memory_limits(
 
             mx_module = mx
 
-        # Apply each limit independently; record failures without stopping.
         limits = [
             ("mlx_memory_limit", memory_bytes, mx_module.set_memory_limit),
             ("mlx_cache_limit", cache_bytes, mx_module.set_cache_limit),

@@ -65,9 +65,7 @@ def _batch(num_frames: int, *, fps=None) -> types.SimpleNamespace:
     )
 
 
-# --------------------------------------------------------------------------------------------------
 # P5: num_frames rounds to the nearest 4k+1 (floor for a non-exact multiple, round up for an exact one)
-# --------------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("requested,expected", [
@@ -89,9 +87,7 @@ def test_num_frames_rounds_to_nearest_4k_plus_1(cpu_device, requested, expected)
     assert out.latents.shape[1] == (expected - 1) // 4 + 1
 
 
-# --------------------------------------------------------------------------------------------------
 # P17: audio latent length follows batch.fps
-# --------------------------------------------------------------------------------------------------
 
 
 def test_audio_latent_length_follows_the_requested_fps_not_the_pipeline_default(cpu_device):

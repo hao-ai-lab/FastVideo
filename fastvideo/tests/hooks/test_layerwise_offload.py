@@ -89,10 +89,8 @@ def test_layerwise_offload_basic():
     seq_len = 16
     num_blocks = 4
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
-    # Get reference output without offloading
     input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device)
     with torch.no_grad():
         reference_output = model(input_tensor.clone())
@@ -100,17 +98,14 @@ def test_layerwise_offload_basic():
     # Enable layerwise offloading
     enable_layerwise_offload(model)
 
-    # Verify parameters are offloaded to CPU
     for block in model.blocks:
         for param in block.parameters():
             # Parameters should be placeholder tensors (empty)
             assert param.numel() == 0, ("Parameters should be offloaded (empty tensors)")
 
-    # Run forward pass with offloading
     with torch.no_grad():
         offloaded_output = model(input_tensor.clone())
 
-    # Check output correctness
     assert torch.allclose(reference_output, offloaded_output, rtol=1e-4,
                           atol=1e-5), "Output with offloading should match reference output"
 
@@ -127,10 +122,8 @@ def test_layerwise_offload_bf16():
     seq_len = 32
     num_blocks = 3
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.bfloat16).to(device)
 
-    # Get reference output without offloading
     input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device, dtype=torch.bfloat16)
     with torch.no_grad():
         reference_output = model(input_tensor.clone())
@@ -138,11 +131,9 @@ def test_layerwise_offload_bf16():
     # Enable layerwise offloading
     enable_layerwise_offload(model)
 
-    # Run forward pass with offloading
     with torch.no_grad():
         offloaded_output = model(input_tensor.clone())
 
-    # Check output correctness (looser tolerance for bf16)
     assert torch.allclose(reference_output, offloaded_output, rtol=1e-2,
                           atol=1e-3), "Output with offloading should match reference output for bf16"
 
@@ -160,10 +151,8 @@ def test_layerwise_offload_multiple_forward_passes():
     num_blocks = 3
     num_iterations = 5
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
-    # Get reference outputs without offloading
     torch.manual_seed(42)
     reference_outputs = []
     for i in range(num_iterations):
@@ -174,14 +163,12 @@ def test_layerwise_offload_multiple_forward_passes():
     # Enable layerwise offloading
     enable_layerwise_offload(model)
 
-    # Run multiple forward passes with offloading
     torch.manual_seed(42)
     for i in range(num_iterations):
         input_tensor = torch.randn(batch_size, seq_len, hidden_size, device=device)
         with torch.no_grad():
             offloaded_output = model(input_tensor.clone())
 
-        # Check output correctness for each iteration
         assert torch.allclose(reference_outputs[i], offloaded_output, rtol=1e-4,
                               atol=1e-5), f"Output mismatch in iteration {i}"
 
@@ -195,10 +182,8 @@ def test_layerwise_offload_parameter_integrity():
     hidden_size = 128
     num_blocks = 2
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
-    # Store original parameter values per block
     original_params_per_block = []
     for block in model.blocks:
         block_params = {}
@@ -209,18 +194,15 @@ def test_layerwise_offload_parameter_integrity():
     # Enable layerwise offloading
     enable_layerwise_offload(model)
 
-    # Create hook managers and verify they exist
     for block_idx, block in enumerate(model.blocks):
         manager = ModuleHookManager.get_from(block)
         assert manager is not None, "Hook manager should be attached to blocks"
         hook: LayerwiseOffloadHook | None = manager.get_forward_hook("LayerwiseOffloadHook")
         assert hook is not None, "LayerwiseOffloadHook should be registered"
 
-        # Verify parameters are stored in CPU
         state = hook.state
         assert len(state.cpu_named_parameters) > 0, ("CPU parameters should be stored")
 
-        # Verify CPU parameters match original values for this block
         original_params = original_params_per_block[block_idx]
         for name, cpu_param in state.cpu_named_parameters.items():
             assert name in original_params, (f"CPU parameter {name} not found in original params for block {block_idx}")
@@ -263,7 +245,6 @@ def test_layerwise_offload_memory_reduction():
     batch_size = 1
     seq_len = 64
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
     # Measure initial GPU memory
@@ -276,7 +257,6 @@ def test_layerwise_offload_memory_reduction():
 
     memory_without_offload = torch.cuda.max_memory_allocated()
 
-    # Reset model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
     # Enable offloading
@@ -313,7 +293,6 @@ def test_layerwise_offload_gradient_disabled():
     seq_len = 16
     num_blocks = 3
 
-    # Create model
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
     model.eval()
 
@@ -346,7 +325,6 @@ def test_layerwise_offload_different_batch_sizes():
 
     model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size, dtype=torch.float32).to(device)
 
-    # Get reference model without offloading
     reference_model = SimpleModelWithModuleList(num_blocks=num_blocks, hidden_size=hidden_size,
                                                 dtype=torch.float32).to(device)
     reference_model.load_state_dict(model.state_dict())
@@ -369,7 +347,6 @@ def test_layerwise_offload_different_batch_sizes():
 
 
 if __name__ == "__main__":
-    # Run tests manually for debugging
     if torch.cuda.is_available():
         print("Running layerwise offloading tests...")
         test_layerwise_offload_basic()

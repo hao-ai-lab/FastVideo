@@ -213,7 +213,6 @@ class Gen3CAdaLayerNormZero(nn.Module):
         Returns:
             normalized_hidden_states: Modulated normalized hidden states
         """
-        # Apply layer norm and modulation
         hidden_states = self.norm(hidden_states)
         hidden_states = hidden_states * (1 + scale) + shift
         return hidden_states
@@ -267,7 +266,6 @@ class Gen3CSelfAttention(nn.Module):
             rope_emb: Tuple of (cos, sin) for RoPE
             original_seq_len: Original (unpadded) full sequence length
         """
-        # Get QKV
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(hidden_states)
         value, _ = self.to_v(hidden_states)
@@ -277,11 +275,9 @@ class Gen3CSelfAttention(nn.Module):
         key = key.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
         value = value.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
 
-        # Apply QK normalization
         query = self.norm_q(query)
         key = self.norm_k(key)
 
-        # Apply RoPE if provided (query/key are now in (B, H, S, D_h) format)
         if rope_emb is not None:
             cos, sin = rope_emb
             query = apply_rotary_emb(query, (cos, sin), use_real=True, use_real_unbind_dim=-2)
@@ -350,7 +346,6 @@ class Gen3CCrossAttention(nn.Module):
             hidden_states: (B, S, D)
             encoder_hidden_states: (B, N, D_text)
         """
-        # Get QKV
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(encoder_hidden_states)
         value, _ = self.to_v(encoder_hidden_states)
@@ -360,7 +355,6 @@ class Gen3CCrossAttention(nn.Module):
         key = key.unflatten(-1, (self.num_heads, self.head_dim))
         value = value.unflatten(-1, (self.num_heads, self.head_dim))
 
-        # Apply QK normalization
         query = self.norm_q(query)
         key = self.norm_k(key)
 
@@ -460,13 +454,11 @@ class Gen3CTransformerBlock(nn.Module):
             extra_pos_emb: Optional learnable positional embeddings (B, S, D)
             original_seq_len: Original (unpadded) full sequence length
         """
-        # Add extra positional embeddings if provided
         if extra_pos_emb is not None:
             hidden_states = hidden_states + extra_pos_emb
 
         B, S, D = hidden_states.shape
 
-        # Compute modulation parameters
         if self.use_adaln_lora and adaln_lora is not None:
             shift_self_attn, scale_self_attn, gate_self_attn = (
                 _run_linear_stack(self.adaln_modulation_self_attn, affine_emb) + adaln_lora).chunk(3, dim=-1)
@@ -560,7 +552,6 @@ class Gen3CRotaryPosEmbed(nn.Module):
         batch_size, T, H, W, input_dim = hidden_states.shape
         device = hidden_states.device
 
-        # Generate frequency scales with NTK
         h_theta = 10000.0 * self.h_ntk_factor
         w_theta = 10000.0 * self.w_ntk_factor
         t_theta = 10000.0 * self.t_ntk_factor
@@ -578,7 +569,6 @@ class Gen3CRotaryPosEmbed(nn.Module):
         w_spatial_freqs = 1.0 / (w_theta**dim_w_range)
         temporal_freqs = 1.0 / (t_theta**dim_t_range)
 
-        # Generate positional embeddings
         half_emb_h = torch.outer(seq[:H], h_spatial_freqs)
         half_emb_w = torch.outer(seq[:W], w_spatial_freqs)
 
@@ -639,7 +629,6 @@ class Gen3CLearnablePositionalEmbed(nn.Module):
 
         emb = emb_t + emb_h + emb_w
 
-        # Normalize
         norm = torch.linalg.vector_norm(emb, dim=-1, keepdim=True, dtype=torch.float32)
         norm = torch.add(self.eps, norm, alpha=np.sqrt(norm.numel() / emb.numel()))
         return (emb / norm).type_as(hidden_states)
@@ -693,7 +682,6 @@ class Gen3CFinalLayer(nn.Module):
             affine_emb: (B, D)
             adaln_lora: (B, 3D) or None
         """
-        # Generate modulation parameters
         modulation = _run_linear_stack(self.adaln_modulation, affine_emb)
 
         if self.use_adaln_lora and adaln_lora is not None:
@@ -701,7 +689,6 @@ class Gen3CFinalLayer(nn.Module):
 
         shift, scale = modulation.chunk(2, dim=-1)
 
-        # Apply normalization and modulation
         hidden_states = self.norm(hidden_states)
 
         # Broadcast over all non-channel dimensions. Supports both:

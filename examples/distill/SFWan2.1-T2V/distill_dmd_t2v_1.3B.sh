@@ -33,8 +33,6 @@ FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
 DATA_DIR=your_data_dir
 VALIDATION_DATASET_FILE=your_validation_data_dir
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
 
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  
@@ -64,7 +62,7 @@ parallel_args=(
 )
 
 model_args=(
-  --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
+  --model_path $GENERATOR_MODEL_PATH
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
   --real_score_model_path $REAL_SCORE_MODEL_PATH
   --fake_score_model_path $FAKE_SCORE_MODEL_PATH

@@ -40,7 +40,6 @@ def _get_nd_rotary_pos_embed_matrixgame(
         theta_rescale_factor=theta_rescale_factor,
         dtype=torch.float32,
     )
-    # convert from [S, D/2] to [S, D] format
     cos = cos.repeat_interleave(2, dim=1)
     sin = sin.repeat_interleave(2, dim=1)
     return cos, sin
@@ -223,7 +222,6 @@ class MatrixGame3ActionModule(nn.Module):
         if rope_dim_list is None:
             rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
         assert sum(rope_dim_list) == head_dim, ("sum(rope_dim_list) should equal to head_dim of attention layer")
-        # Use Matrix-Game wrapper for FastVideo's function
         freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame(
             rope_dim_list,
             rope_sizes,

@@ -99,17 +99,14 @@ class RotaryPositionalEmbedding3D(nn.Module):
         dim_h = 2 * (self.head_dim // 6)
         dim_w = 2 * (self.head_dim // 6)
 
-        # Compute frequency bands for each dimension
         freqs_t = 1.0 / (self.base**(torch.arange(0, dim_t, 2)[:(dim_t // 2)].float() / dim_t))
         freqs_h = 1.0 / (self.base**(torch.arange(0, dim_h, 2)[:(dim_h // 2)].float() / dim_h))
         freqs_w = 1.0 / (self.base**(torch.arange(0, dim_w, 2)[:(dim_w // 2)].float() / dim_w))
 
-        # Create position grids
         grid_t = torch.arange(num_frames, dtype=torch.float32)
         grid_h = torch.arange(height, dtype=torch.float32)
         grid_w = torch.arange(width, dtype=torch.float32)
 
-        # Compute frequencies for each position
         freqs_t = torch.einsum("..., f -> ... f", grid_t, freqs_t)
         freqs_h = torch.einsum("..., f -> ... f", grid_h, freqs_h)
         freqs_w = torch.einsum("..., f -> ... f", grid_w, freqs_w)
@@ -151,18 +148,15 @@ class RotaryPositionalEmbedding3D(nn.Module):
         Returns:
             (q_rotated, k_rotated): Rotated query and key tensors
         """
-        # Register grid size if not cached
         if grid_size not in self.freqs_dict:
             self.register_grid_size(grid_size)
 
-        # Get cached frequencies
         freqs_cis = self.freqs_dict[grid_size].to(q.device)
 
         # Cast to float32 for precision
         q_, k_ = q.float(), k.float()
         freqs_cis = freqs_cis.float()
 
-        # Compute cos and sin
         cos = freqs_cis.cos()
         sin = freqs_cis.sin()
 
@@ -170,7 +164,6 @@ class RotaryPositionalEmbedding3D(nn.Module):
         cos = rearrange(cos, "n d -> 1 1 n d")
         sin = rearrange(sin, "n d -> 1 1 n d")
 
-        # Apply rotation
         q_ = (q_ * cos) + (rotate_half(q_) * sin)
         k_ = (k_ * cos) + (rotate_half(k_) * sin)
 

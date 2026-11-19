@@ -347,7 +347,6 @@ class JobRunner:
         self._mp_manager = get_mp_context().Manager()
         atexit.register(self._shutdown)
 
-        # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
 
@@ -704,7 +703,6 @@ class JobRunner:
             raise ValueError("Job is already running")
         if job.status == JobStatus.COMPLETED:
             raise ValueError("Job already completed. Delete and re-create to run again.")
-        # Reset state for re-run
         job.status = JobStatus.PENDING
         job.error = None
         job.output_path = None
@@ -713,8 +711,8 @@ class JobRunner:
         job.finished_at = None
         job._stop_event.clear()
         job._log_buf = JobLogBuffer()  # fresh log buffer
-        job.log_file_handler = None  # Reset file handler
-        job._process = None  # Reset subprocess handle
+        job.log_file_handler = None
+        job._process = None
 
         # Wrap _run_job in an additional safety layer to catch any exceptions
         # that might escape (though they shouldn't with our comprehensive handling)
@@ -841,7 +839,6 @@ class JobRunner:
                 except Exception:
                     logger.debug("Shutdown of the dead generator failed", exc_info=True)
 
-        # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
 
         logger.info(
@@ -1022,7 +1019,6 @@ class JobRunner:
         os.makedirs(os.path.join(self.output_dir, job.id), exist_ok=True)
         job.log_file_path = _job_log_path(self.output_dir, job.id)
 
-        # Add file handler to persist logs
         file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
         file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         job.log_file_handler = file_handler
@@ -1043,7 +1039,6 @@ class JobRunner:
                                                         respect_handler_level=True)
         queue_listener.start()
 
-        # Set output directory, create if it doesn't exist
         job_output_dir = os.path.join(self.output_dir, job.id)
         os.makedirs(job_output_dir, exist_ok=True)
 
@@ -1158,7 +1153,6 @@ class JobRunner:
 
         finally:
             queue_listener.stop()
-            # Remove handlers and close file
             fastvideo_logger.removeHandler(buffer_handler)
             fastvideo_logger.removeHandler(file_handler)
             file_handler.flush()

@@ -42,13 +42,11 @@ class CpuCommunicator(DeviceCommunicatorBase):
         world_size = self.world_size
         assert -input_.dim() <= dim < input_.dim(), (f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
         if dim < 0:
-            # Convert negative dim to positive.
             dim += input_.dim()
 
         # Allocate output tensor.
         gather_list = [torch.empty_like(input_) for _ in range(world_size)] if self.rank_in_group == dst else None
 
-        # Gather.
         self.dist_module.gather(input_, gather_list, dst=self.ranks[dst], group=self.device_group)
 
         output_tensor = torch.cat(gather_list, dim=dim) if self.rank_in_group == dst else None
@@ -56,7 +54,6 @@ class CpuCommunicator(DeviceCommunicatorBase):
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         if dim < 0:
-            # Convert negative dim to positive.
             dim += input_.dim()
         input_size = input_.size()
         # NOTE: we have to use concat-style all-gather here,

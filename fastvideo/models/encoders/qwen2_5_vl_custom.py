@@ -579,9 +579,6 @@ class Qwen2_5_VLRotaryEmbedding(nn.Module):
         #     self.register_buffer("inv_freq", inv_freq, persistent=False)
         #     self.max_seq_len_cached = seq_len
 
-        # if seq_len < self.original_max_seq_len and self.max_seq_len_cached > self.original_max_seq_len:  # reset
-        #     self.register_buffer("inv_freq", self.original_inv_freq, persistent=False)
-        #     self.max_seq_len_cached = self.original_max_seq_len
 
     @torch.no_grad()
     def forward(self, x, position_ids):
@@ -753,7 +750,6 @@ class Qwen2_5_VLAttention(nn.Module):
             }  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # repeat k/v heads if n_kv_heads < n_heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
@@ -842,7 +838,6 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
             }  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # repeat k/v heads if n_kv_heads < n_heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
         dropout_rate = 0.0 if not self.training else self.attention_dropout
@@ -854,7 +849,6 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
         if input_dtype == torch.float32:
             if torch.is_autocast_enabled():
                 target_dtype = torch.get_autocast_gpu_dtype()
-            # Handle the case where the model is quantized
             elif hasattr(self.config, "_pre_quantization_dtype"):
                 target_dtype = self.config._pre_quantization_dtype
             else:
@@ -1196,7 +1190,6 @@ class Qwen2_5_VLModel(nn.Module):
 
         hidden_states = inputs_embeds
 
-        # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         # decoder layers
@@ -1260,7 +1253,6 @@ class Qwen2_5_VLModel(nn.Module):
 
         hidden_states = self.norm(hidden_states)
 
-        # add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states, )
 
