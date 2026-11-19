@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN, flex_attention, nablaT_v2
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
+from fastvideo.layers import triton_fused_norm
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
@@ -433,6 +434,15 @@ class Kandinsky5OutLayer(nn.Module):
         return x
 
 
+def _residual_norm(norm: LayerNormScaleShift, residual: torch.Tensor, x: torch.Tensor, gate: torch.Tensor,
+                   shift: torch.Tensor, scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    if triton_fused_norm.fused_path_supported(residual, x, gate, shift, scale, norm.norm):
+        out, residual = triton_fused_norm.fused_residual_norm_mod(residual, x, gate, shift, scale, norm.norm)
+        return out.type_as(residual), residual
+    residual = (residual.float() + gate.float() * x.float()).type_as(residual)
+    return norm(residual.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(residual), residual
+
+
 class Kandinsky5TransformerEncoderBlock(nn.Module):
 
     def __init__(self,
@@ -475,11 +485,9 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
         out = self.self_attention_norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
         out = self.self_attention(out, rotary_emb=rope)
-        x = (x.float() + gate.float() * out.float()).type_as(x)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        out = self.feed_forward_norm(x.float(), shift=ff_shift, scale=ff_scale,
-                                     convert_modulation_dtype=True).type_as(x)
+        out, x = _residual_norm(self.feed_forward_norm, x, out, gate, ff_shift, ff_scale)
         out = self.feed_forward(out)
         x = (x.float() + ff_gate.float() * out.float()).type_as(x)
 
@@ -550,25 +558,15 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
         visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params)
-        visual_embed = (visual_embed.float() + self_gate.float() * visual_out.float()).type_as(visual_embed)
 
         cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params, 3, dim=-1)
-        visual_out = self.cross_attention_norm(
-            visual_embed.float(),
-            shift=cross_shift,
-            scale=cross_scale,
-            convert_modulation_dtype=True,
-        ).type_as(visual_embed)
+        visual_out, visual_embed = _residual_norm(self.cross_attention_norm, visual_embed, visual_out, self_gate,
+                                                  cross_shift, cross_scale)
         visual_out = self.cross_attention(visual_out, encoder_hidden_states=text_embed)
-        visual_embed = (visual_embed.float() + cross_gate.float() * visual_out.float()).type_as(visual_embed)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        visual_out = self.feed_forward_norm(
-            visual_embed.float(),
-            shift=ff_shift,
-            scale=ff_scale,
-            convert_modulation_dtype=True,
-        ).type_as(visual_embed)
+        visual_out, visual_embed = _residual_norm(self.feed_forward_norm, visual_embed, visual_out, cross_gate,
+                                                  ff_shift, ff_scale)
         visual_out = self.feed_forward(visual_out)
         visual_embed = (visual_embed.float() + ff_gate.float() * visual_out.float()).type_as(visual_embed)
 
