@@ -209,6 +209,14 @@ to those larger stacks. Set 1344x768 for native 768p with the same 124 frames.
 See [the resident release recipe](spark_performance.md#fasth3-v2-nvfp4-on-one-spark)
 for checkpoint contents and the timing protocol.
 
+## Open-H3-Regenerate-2K on the pair
+
+`--parallel-vae` above sets `FASTVIDEO_VAE_PARALLEL_DECODE` for FastH3. The 2K
+upscaler on the same Ray pair has its own opt-ins: the peer Sol-Attn exchange,
+the `to_out` pad, a resident DiT with released adapter factors, and the split
+fast-decoder decode. They are listed, with their accuracy tier, in
+[Two Sparks](../../inference/open_h3_regenerate_2k.md#two-sparks).
+
 ## FastH3 frame counts
 
 H3 is 24 fps. Legal `num_frames` values are `17n+5`. The pipeline rejects

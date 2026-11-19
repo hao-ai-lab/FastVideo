@@ -13,6 +13,7 @@ from safetensors.torch import load_file
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import DTensor
 
+from fastvideo import envs
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.hooks import ModuleHookManager
@@ -161,6 +162,59 @@ def _on_unified_memory(device: torch.device | None) -> bool:
         return bool(current_platform.has_unified_memory(device.index or 0))
     except Exception:  # a platform probe must never break adapter loading
         return False
+
+
+def _reject_if_adapter_factors_released(pipeline: Any, action: str) -> None:
+    """Raise before any layer changes when ``FASTVIDEO_H3_RELEASE_LORA_ADAPTER`` dropped merged factors.
+
+    A released layer can no longer reverse its merge, so clearing, unmerging or switching would fail part-way: the
+    layers visited first would already be back at their base weights (side branches without their factors) when the
+    released layer raises, leaving a partly applied adapter behind.
+    """
+    for transformer_lora_layers in getattr(pipeline, "lora_layers", {}).values():
+        for _module, layers in transformer_lora_layers.lora_layers_by_block():
+            if any(getattr(layer, "lora_factors_released", False) for layer in layers.values()):
+                raise RuntimeError(f"Cannot {action}: the merged LoRA adapter factors were released "
+                                   "(FASTVIDEO_H3_RELEASE_LORA_ADAPTER), so the merge cannot be reversed. "
+                                   "Restart without that setting to change adapters.")
+
+
+def _maybe_release_adapter_factors(pipeline: Any, lora_nickname: str) -> None:
+    """Drop the in-memory adapter factors once they have been merged and packed.
+
+    On unified memory the wrapped linear's ``lora_A``/``lora_B`` share storage with
+    ``pipeline.lora_adapters``, so a 12.4 GB adapter is resident a second time next to the packed
+    weights. A server that keeps the DiT resident never unmerges, so those factors are dead weight
+    that competes with the 2K fast-decoder decode. Released layers can no longer unmerge or switch
+    adapters: on unified memory the merge is reversed from these factors, so such a call raises.
+    """
+    if not envs.FASTVIDEO_H3_RELEASE_LORA_ADAPTER.get() or pipeline.training_mode:
+        return
+    if not pipeline._setting_constructor_adapter or pipeline._runtime_adapter is not None:
+        # Runtime adapters are reapplied from memory when a lazy transformer reloads, so keep them.
+        return
+    released = 0
+    for transformer_lora_layers in pipeline.lora_layers.values():
+        for _module, layers in transformer_lora_layers.lora_layers_by_block():
+            for layer in layers.values():
+                if layer.side_branch or getattr(layer, "lora_A", None) is None:
+                    continue
+                layer.lora_A = None
+                layer.lora_B = None
+                layer.lora_factors_released = True
+                released += 1
+    if released == 0:
+        return
+    adapter = pipeline.lora_adapters.pop(lora_nickname, None)
+    if adapter is not None:
+        adapter.clear()
+    pipeline.lora_adapter_paths.pop(lora_nickname, None)
+    pipeline.cur_adapter_name = ""
+    pipeline.cur_adapter_path = ""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.info("Released merged LoRA adapter factors for %s: %d layers, adapter tensors freed", lora_nickname,
+                released)
 
 
 class LoRAPipeline(ComposedPipelineBase):
@@ -592,6 +646,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                  and self.cur_adapter_strength == strength and not accumulate)
         if exact_current_adapter:
             return
+        _reject_if_adapter_factors_released(self, "switch adapters")
 
         if not self.lora_initialized:
             self.convert_to_lora_layers()
@@ -770,6 +825,10 @@ class LoRAPipeline(ComposedPipelineBase):
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
         if not self._setting_constructor_adapter and not accumulate:
             self._runtime_adapter = (lora_nickname, strength)
+        # The loader's locals alias the adapter tensors on unified memory; drop them so the release frees memory.
+        raw_state_dict = lora_state_dict = to_merge_params = None  # type: ignore[assignment]  # noqa: F841
+        weight = sorted_tensors = lora_A = lora_B = None  # type: ignore[assignment]  # noqa: F841
+        _maybe_release_adapter_factors(self, lora_nickname)
 
     def merge_lora_weights(self) -> None:
         """Merge LoRA weights, then repack the packed quantized buffers for the merged state."""
@@ -796,6 +855,7 @@ class LoRAPipeline(ComposedPipelineBase):
         factors, so the result does not depend on which adapter, if any, the layers hold or how a change failed.
         Loaded adapters stay in memory for a later ``set_lora_adapter``.
         """
+        _reject_if_adapter_factors_released(self, "clear the LoRA adapter")
         for transformer_lora_layers in self.lora_layers.values():
             for module, layers in transformer_lora_layers.lora_layers_by_block():
                 with _get_hook_ctx(module):
@@ -815,6 +875,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def unmerge_lora_weights(self) -> None:
         """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state."""
+        _reject_if_adapter_factors_released(self, "unmerge the LoRA adapter")
         for (
                 transformer_name,
                 transformer_lora_layers,
