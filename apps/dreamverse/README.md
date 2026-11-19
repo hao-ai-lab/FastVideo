@@ -147,6 +147,22 @@ export CEREBRAS_API_KEY=...
 export GROQ_API_KEY=...
 ```
 
+To use Atlas Cloud instead of the default Cerebras/Groq pair, select it
+explicitly and supply its key:
+
+```bash
+export FASTVIDEO_PROMPT_PROVIDER=atlascloud
+export ATLASCLOUD_API_KEY=...
+export FASTVIDEO_PROMPT_MODEL=openai/gpt-4.1-mini
+```
+
+This mode only sends prompt enhancement and rewrite requests to
+`https://api.atlascloud.ai/v1`. It does not require Cerebras or Groq keys,
+does not change video generation, and disables SDK request retries.
+Use a model ID from the Atlas Cloud catalog, including its namespace.
+Unset `FASTVIDEO_PROMPT_PROVIDER` and `FASTVIDEO_PROMPT_MODEL` to return to
+the default provider pair and model.
+
 If you built the optional native FFmpeg binary above, source its environment
 file in the same shell before starting the backend:
 
