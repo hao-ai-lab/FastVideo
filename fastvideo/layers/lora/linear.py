@@ -133,8 +133,7 @@ class BaseLayerWithLoRA(nn.Module):
         # Unmerged inference stages earlier adapters as non-persistent buffers
         # so module moves and layerwise offloading manage their storage.
         self._active_loras: list[LoRAContribution] = []
-        # NVFP4 replay references the active stack when merged; it does not own a
-        # separately accumulated history. None keeps the existing eligibility policy.
+        # NVFP4 replay aliases the active stack rather than keeping its own history.
         self._merged_loras: list[LoRAContribution] | None = (self._active_loras
                                                              if self._should_save_merged_loras() else None)
         self._unmerged_lora_A = OffloadableBufferList()
@@ -291,7 +290,7 @@ class BaseLayerWithLoRA(nn.Module):
             if A.shape[1] != input_size or B.shape[0] != output_size:
                 raise ValueError("LoRA factor dimensions do not match the base weight")
         if not training_mode and not self.side_branch:
-            if accumulate and self.lora_A is not None and not self.disable_lora:
+            if accumulate and self._active_loras:
                 if not self.merged:
                     self.merge_lora_weights()
                 elif self.base_layer.weight is None:
@@ -342,10 +341,29 @@ class BaseLayerWithLoRA(nn.Module):
         # A normal merge replays the stack once. Explicit accumulation adds another
         # copy of the current adapter, matching set_lora_weights(accumulate=True).
         previous = self._active_loras if accumulate else self._active_loras[:-1]
-        contributions = [*previous, current]
-        self._reset_to_base_weight()
-        for contribution in contributions:
-            self._merge_lora_contribution(contribution)
+        self._replay_lora_contributions([*previous, current])
+
+    @torch.no_grad()
+    def _replay_lora_contributions(self, contributions: list[LoRAContribution]) -> None:
+        """Merge ``contributions`` onto the base weight, keeping the previous state until all of them succeed.
+
+        A failure part-way (e.g. CUDA OOM) must not lose the history: a retry would replay only the current
+        adapter, and a layer without a base snapshot could no longer reverse its partially merged weight.
+        """
+        base_layer, weight = self.base_layer, self.base_layer.weight
+        data = None if weight is None else weight.data
+        state = (self.merged, self._active_loras, self._merged_loras, self._unmerged_lora_A, self._unmerged_lora_B)
+        try:
+            self._reset_to_base_weight()
+            for contribution in contributions:
+                self._merge_lora_contribution(contribution)
+        except BaseException:
+            self.base_layer = base_layer
+            base_layer.weight = weight
+            if weight is not None:
+                weight.data = data
+            (self.merged, self._active_loras, self._merged_loras, self._unmerged_lora_A, self._unmerged_lora_B) = state
+            raise
         self._active_loras = contributions
         if self._merged_loras is not None:
             self._merged_loras = self._active_loras
@@ -457,6 +475,8 @@ class BaseLayerWithLoRA(nn.Module):
 
     def _clear_lora_history(self) -> None:
         self._active_loras = []
+        if self._merged_loras is not None:
+            self._merged_loras = self._active_loras
         self._unmerged_lora_A = OffloadableBufferList()
         self._unmerged_lora_B = OffloadableBufferList()
 
@@ -481,7 +501,6 @@ class BaseLayerWithLoRA(nn.Module):
             if self.training_mode:
                 raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
             if self.base_layer.weight is not None and not isinstance(self.base_layer.weight, DTensor):
-                # Before the first merge, or after unmerging, this is already the base tensor.
                 if not self.merged:
                     return
                 if self._active_loras:

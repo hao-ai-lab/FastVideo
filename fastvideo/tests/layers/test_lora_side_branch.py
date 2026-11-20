@@ -605,8 +605,6 @@ def test_checkpoint_reload_with_same_base_and_adapter_configuration(unmerged) ->
         if unmerged:
             source.unmerge_lora_weights()
             target.unmerge_lora_weights()
-        # Loading restores tensor values; base model, adapter stack and mode were
-        # configured through the runtime APIs above, not inferred from a checkpoint.
         checkpoint = io.BytesIO()
         torch.save(source.state_dict(), checkpoint)
         checkpoint.seek(0)
@@ -624,7 +622,6 @@ def test_unmerged_checkpoint_load_does_not_require_staged_target_buffers() -> No
     source.unmerge_lora_weights()
     target, _ = _accumulated_dense_layer()
     target.load_state_dict(source.state_dict(), strict=True)
-    # The caller reconstructs merge mode through the runtime API.
     target.unmerge_lora_weights()
     with torch.no_grad():
         torch.testing.assert_close(target(x)[0], source(x)[0], rtol=0, atol=0)
@@ -665,6 +662,49 @@ def test_unmerged_forward_does_not_transfer_cpu_history_each_call(monkeypatch) -
             assert torch.equal(layer(x)[0], torch.full_like(x, 68))
     layer.merge_lora_weights()
     assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
+
+
+@pytest.mark.parametrize("unmerged", [False, True])
+@pytest.mark.parametrize("snapshot", [True, False])
+def test_failed_merge_part_way_keeps_previous_weight_and_history(monkeypatch, snapshot, unmerged) -> None:
+    if not snapshot:
+        monkeypatch.setattr(lora_linear, "_skips_unmerge_snapshot", lambda base_layer: True)
+    layer, x = _accumulated_dense_layer(adapters=3)
+    assert (layer.cpu_weight is not None) == snapshot
+    if unmerged:
+        layer.unmerge_lora_weights()
+    weight = layer.base_layer.weight.detach().clone()
+    history = layer._active_loras
+    staged = [list(layer._unmerged_lora_A), list(layer._unmerged_lora_B)]
+    real_merge = layer._merge_lora_contribution
+    merged = 0
+
+    def fail_on_second_contribution(contribution):
+        nonlocal merged
+        merged += 1
+        if merged == 2:
+            raise RuntimeError("injected merge failure")
+        real_merge(contribution)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(layer, "_merge_lora_contribution", fail_on_second_contribution)
+        with pytest.raises(RuntimeError, match="injected merge failure"):
+            layer.merge_lora_weights()
+
+    assert merged == 2
+    assert torch.equal(layer.base_layer.weight, weight)
+    assert layer.merged != unmerged
+    assert layer._active_loras is history and len(history) == 3
+    assert [list(layer._unmerged_lora_A), list(layer._unmerged_lora_B)] == staged
+    with torch.no_grad():
+        assert torch.equal(layer(x)[0], torch.full_like(x, 80))
+
+    layer.merge_lora_weights()
+    assert torch.equal(layer.base_layer.weight, torch.full_like(weight, 20))
+    layer.unmerge_lora_weights()
+    assert torch.equal(layer.base_layer.weight, torch.full_like(weight, 10))
+    with torch.no_grad():
+        assert torch.equal(layer(x)[0], torch.full_like(x, 80))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Accumulated adapter offloading requires one CUDA GPU")

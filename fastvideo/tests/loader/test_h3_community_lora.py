@@ -381,12 +381,16 @@ class _RecordingLoRALayer(torch.nn.Module):
         super().__init__()
         self.disable_lora = False
         self.applied = False
+        self._active_loras: list = []
 
     def set_lora_weights(self, *args, **kwargs) -> None:
         self.applied = True
 
     def unmerge_lora_weights(self) -> None:
         pass
+
+    def _clear_lora_history(self) -> None:
+        self._active_loras = []
 
 
 def test_layers_without_adapter_weights_log_one_summary_warning(monkeypatch: pytest.MonkeyPatch) -> None:

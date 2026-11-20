@@ -75,13 +75,12 @@ def test_stacked_accumulate_preserves_forward_across_unmerge_remerge():
         layer.merge_lora_weights()
         outputs.append(layer(x)[0].item())
 
-        # (base 10 + adapter X 2 + adapter Y 5) * input 2 = 34 in every state.
-        assert outputs == [34.0, 34.0, 34.0], f"Merged, unmerged, remerged outputs: {outputs}"
+        expected = (10 + 2 + 5) * 2.0
+        assert outputs == [expected] * 3, f"Merged, unmerged, remerged outputs: {outputs}"
 
 
 @pytest.fixture(params=[False, True], ids=["snapshot", "snapshot_free"])
 def scalar_stack(request, monkeypatch):
-    # Exercise the unified-memory lifecycle on CPU without requiring a CUDA platform.
     monkeypatch.setattr(lora_linear, "_skips_unmerge_snapshot", lambda _base: request.param)
     with (torch.no_grad(), torch._dynamo.config.patch(disable=True), envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False)):
         dtype = torch.bfloat16
@@ -101,13 +100,13 @@ def test_update_stacked_adapters_preserves_rank_scale_and_replacement(scalar_sta
     if unmerge_before_update:
         layer.unmerge_lora_weights()
 
-    # A different rank and negative scale: B @ A = 2, alpha / rank * strength = -1.
     layer.set_lora_weights(torch.ones(2, 1, dtype=x.dtype),
                            torch.ones(1, 2, dtype=x.dtype),
                            lora_alpha=4,
                            strength=-0.5,
                            accumulate=accumulate)
-    expected = 30.0 if accumulate else 16.0
+    update = 2 * (4 / 2) * -0.5
+    expected = (10 + 2 + 5 + update) * 2 if accumulate else (10 + update) * 2
     for _ in range(2):
         assert layer(x)[0].item() == expected
         layer.unmerge_lora_weights()

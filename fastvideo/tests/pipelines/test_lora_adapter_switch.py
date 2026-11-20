@@ -89,6 +89,82 @@ def test_accumulating_keeps_the_earlier_adapter_where_the_new_one_has_nothing(se
     assert torch.equal(transformer.second.base_layer.weight, merged)
 
 
+def _delta(seed: int) -> torch.Tensor:
+    factors = _factors(seed)
+    return factors["lora_B"] @ factors["lora_A"]
+
+
+def _output(layer: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    return layer(x)[0]
+
+
+def test_accumulating_onto_a_layer_an_earlier_accumulation_skipped_keeps_its_adapters(setup) -> None:
+    pipeline, transformer = setup
+    pipeline.lora_adapters["c"] = _adapter(["second"], 3)
+    original = transformer.second.weight.detach().clone()
+    expected = original + _delta(1) + _delta(3)
+    x = torch.randn(4, DIM)
+
+    pipeline.set_lora_adapter("a", strength=1.0)
+    second = transformer.second
+    pipeline.set_lora_adapter("b", strength=1.0, accumulate=True)
+    pipeline.set_lora_adapter("c", strength=1.0, accumulate=True)
+
+    assert second.merged and len(second._active_loras) == 2
+    torch.testing.assert_close(second.base_layer.weight, expected)
+    merged_output = _output(second, x)
+    pipeline.unmerge_lora_weights()
+    torch.testing.assert_close(second.base_layer.weight, original)
+    torch.testing.assert_close(_output(second, x), merged_output)
+    pipeline.merge_lora_weights()
+    torch.testing.assert_close(second.base_layer.weight, expected)
+
+
+def test_accumulating_after_a_skipping_accumulation_while_unmerged_keeps_its_adapters(setup) -> None:
+    pipeline, transformer = setup
+    pipeline.lora_adapters["c"] = _adapter(["second"], 3)
+    original = transformer.second.weight.detach().clone()
+    x = torch.randn(4, DIM)
+
+    pipeline.set_lora_adapter("a", strength=1.0)
+    second = transformer.second
+    with_a = _output(second, x)
+    pipeline.unmerge_lora_weights()
+    pipeline.set_lora_adapter("b", strength=1.0, accumulate=True)
+    torch.testing.assert_close(_output(second, x), with_a)
+    pipeline.set_lora_adapter("c", strength=1.0, accumulate=True)
+
+    torch.testing.assert_close(second.base_layer.weight, original + _delta(1) + _delta(3))
+
+
+def test_accumulating_after_a_replacement_skipped_the_layer_drops_the_replaced_adapter(setup) -> None:
+    pipeline, transformer = setup
+    pipeline.lora_adapters["c"] = _adapter(["second"], 3)
+    original = transformer.second.weight.detach().clone()
+
+    pipeline.set_lora_adapter("a", strength=1.0)
+    second = transformer.second
+    pipeline.set_lora_adapter("b", strength=1.0)
+    assert second._active_loras == []
+    pipeline.set_lora_adapter("c", strength=1.0, accumulate=True)
+
+    torch.testing.assert_close(second.base_layer.weight, original + _delta(3))
+    assert len(second._active_loras) == 1
+
+
+def test_replacing_restores_a_layer_an_earlier_accumulation_skipped(setup) -> None:
+    pipeline, transformer = setup
+    original = transformer.second.weight.detach().clone()
+
+    pipeline.set_lora_adapter("a", strength=1.0)
+    second = transformer.second
+    pipeline.set_lora_adapter("b", strength=1.0, accumulate=True)
+    pipeline.set_lora_adapter("b", strength=0.5)
+
+    assert torch.equal(second.base_layer.weight, original)
+    assert not second.merged and second._active_loras == []
+
+
 def test_clear_restores_base_weights_after_an_adapter(setup) -> None:
     pipeline, transformer = setup
     original = {name: getattr(transformer, name).weight.detach().clone() for name in ("first", "second")}
