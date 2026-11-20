@@ -26,6 +26,28 @@ planned blocks must use an adapter that explicitly declares
 before the plan is exported or any model is loaded. The Wan adapter applies
 the plan before FSDP wrapping.
 
+## Choosing a budget for a physical GPU
+
+The budget constrains *allocated* bytes at each profiled event. The caching
+allocator's *reserved* pool is larger — fragmentation keeps freed blocks from
+being returned — and the driver and context consume physical memory as well.
+In the measured 17-frame run, a 23.498 GiB allocated peak corresponded to a
+31.727 GiB reserved peak. The gap depends on the workload and allocator
+settings rather than being a fixed ratio.
+
+Size the budget against reserved headroom, not the bare allocated figure:
+
+1. Start from a budget around 60-70% of the device's physical memory.
+2. Run the complete training workload once and compare its peak reserved
+   bytes with physical capacity, leaving room for the driver and the
+   dataloader.
+3. Raise the budget in small steps while the reserved peak still fits.
+
+`expandable_segments:True` reduces fragmentation on long runs (the DMD2
+measurements use it). If the budget cannot cover the profile's fixed storage,
+planning fails before any model loads — an infeasible plan never reaches a
+mid-training OOM.
+
 ## Profiles and role lifetimes
 
 A `MemoryProfile` contains ordered execution events, fixed device storage at
@@ -125,21 +147,23 @@ state tensors exactly. A two-rank automatic-plan checkpoint after ten updates
 reloads and generates a finite 17-frame video with public UMT5 conditions and
 VAE. Export and generation are outside the training timing interval.
 
-[Raw measurements](../../examples/train/activation_memory/measurements_910b2c.json)
-include every final step, rank-local measurements, frozen profiles, selected
-plans, and independent manual-tuning decisions. The profiling examples reproduce
-the workload and separate profile acquisition, planning, and steady-state timing.
+Every measurement run retains each final step, rank-local measurements, frozen
+profiles, selected plans, and the independent manual-tuning decisions. The
+profiling examples regenerate all of this data locally — machine-specific
+measurement files are not committed to the repository. They reproduce the
+workload and separate profile acquisition, planning, and steady-state timing.
 Multi-rank DMD2 reports retain every rank's records and take the maximum step
 time, allocated memory, and reserved memory across ranks for each step.
 
 ## Limitations
 
 CI runs the CPU correctness tests; it does not rerun the Ascend profiling
-examples or regenerate the performance tables. Those tables use the committed
-measurements; reproducing them requires the documented Ascend workloads.
+examples or regenerate the performance tables. Those tables are reported from
+the documented Ascend runs; reproducing them requires the documented Ascend
+workloads.
 
-The budget constrains profiled allocated bytes. Reserved allocator storage and
-driver allocations also consume physical memory. Workspace or shape changes
+The budget constrains profiled allocated bytes; the reserved/physical gap is
+covered in the budget-selection section above. Workspace or shape changes
 require a matching profile. The solver's objective sums measured block times; transfer
 overlap can change actual step time. In the measured DMD2 workload, both
 isolated-block costs and calibrated single-role increments mis-rank the joint
