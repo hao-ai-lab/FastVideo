@@ -96,8 +96,7 @@ A dense bf16 checkpoint that FastVideo quantizes at load time (for example `tran
 export) still merges the adapter first and quantizes afterwards, so the quantized weight includes the adapter.
 If the NVFP4 layer releases its working weight after packing, its merge-mode LoRA wrapper can restore it from
 the original unsharded CPU snapshot. Changing a pure low-rank adapter rebuilds the packed weights and scales.
-Accumulating another adapter first reapplies the previous contributions in order. Unmerging multiple accumulated
-adapters currently drops earlier contributions from inference ([#2096](https://github.com/hao-ai-lab/FastVideo/issues/2096)).
+Accumulating another adapter first reapplies the previous contributions in order.
 
 To change strength on a dense checkpoint without remerging, set `FASTVIDEO_LORA_SIDE_BRANCH=1`. The
 adapter then runs as a side branch on supported layers, at the cost of the extra matmuls. See

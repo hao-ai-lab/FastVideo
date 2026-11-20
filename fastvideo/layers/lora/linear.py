@@ -10,6 +10,7 @@ from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
 from torch.distributed.tensor import DTensor
 
 import fastvideo.envs as envs
+from fastvideo.hooks.layerwise_offload import OffloadableBufferList
 from fastvideo.distributed import (get_local_torch_device, get_tp_rank, split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
 from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase, MergedColumnParallelLinear, QKVParallelLinear,
@@ -125,12 +126,18 @@ class BaseLayerWithLoRA(nn.Module):
         # Training never merges adapters; retaining every H3 projection here
         # otherwise adds several GiB of host memory per HSDP rank. On unified
         # memory that host copy is a second allocation in the same physical
-        # pool (see _unified_memory_weight), so skip it there and keep only the merge.
-        # Such a layer unmerges by reversing the delta, so the adapter factors must survive the merge.
+        # pool, so reverse the saved adapter contributions instead of retaining it.
         keep_snapshot = not training_mode and not self.side_branch and not _skips_unmerge_snapshot(base_layer)
         self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True) if keep_snapshot else None
-        # None disables history; [] starts an eligible layer.
-        self._merged_loras: list[LoRAContribution] | None = [] if self._should_save_merged_loras() else None
+        # Immutable CPU replay history must not retain GPU storage in merged mode.
+        # Unmerged inference stages earlier adapters as non-persistent buffers
+        # so module moves and layerwise offloading manage their storage.
+        self._active_loras: list[LoRAContribution] = []
+        # NVFP4 replay aliases the active stack rather than keeping its own history.
+        self._merged_loras: list[LoRAContribution] | None = (self._active_loras
+                                                             if self._should_save_merged_loras() else None)
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -229,25 +236,32 @@ class BaseLayerWithLoRA(nn.Module):
 
     @torch.compile()
     def _add_adapter(self, out: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        lora_A = self.lora_A
-        lora_B = self.lora_B
-        if isinstance(lora_B, DTensor):
-            lora_B = lora_B.to_local()
-            lora_A = lora_A.to_local()
-        lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
-        lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
         alpha_over_rank = 1.0
         if self.lora_alpha != self.lora_rank:
             alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
-        if self.side_branch:
-            # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
-            _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
-            return out
-        scale = float(self.lora_strength) * alpha_over_rank
-        delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
-        if scale != 1.0:
-            delta = delta * scale
-        return out + delta
+        # Use live parameters for the current adapter so training retains gradients.
+        scale = alpha_over_rank if self.side_branch else float(self.lora_strength) * alpha_over_rank
+        current = LoRAContribution(lora_A=self.lora_A, lora_B=self.lora_B, scale=scale)
+        previous = [
+            LoRAContribution(lora_A=adapter_a, lora_B=adapter_b, scale=saved.scale) for adapter_a, adapter_b, saved in
+            zip(self._unmerged_lora_A, self._unmerged_lora_B, self._active_loras[:-1], strict=True)
+        ]
+        contributions = [*previous, current]
+        for contribution in contributions:
+            adapter_a, adapter_b = contribution.lora_A, contribution.lora_B
+            if isinstance(adapter_b, DTensor):
+                adapter_a, adapter_b = adapter_a.to_local(), adapter_b.to_local()
+            adapter_a = self.slice_lora_a_weights(adapter_a.to(x, non_blocking=True))
+            adapter_b = self.slice_lora_b_weights(adapter_b.to(x, non_blocking=True))
+            if self.side_branch:
+                # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
+                _add_low_rank_inplace(out, x, adapter_a, adapter_b, self._side_branch_strength, contribution.scale)
+            else:
+                delta = x @ adapter_a.transpose(0, 1) @ adapter_b.transpose(0, 1)
+                if contribution.scale != 1.0:
+                    delta = delta * contribution.scale
+                out = out + delta
+        return out
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -275,9 +289,12 @@ class BaseLayerWithLoRA(nn.Module):
                 input_size, output_size = self.base_layer.input_size, self.base_layer.output_size
             if A.shape[1] != input_size or B.shape[0] != output_size:
                 raise ValueError("LoRA factor dimensions do not match the base weight")
-        if not training_mode and not self.side_branch and self.base_layer.weight is None:
-            if accumulate and self.merged:
-                self._restore_merged_weight()
+        if not training_mode and not self.side_branch:
+            if accumulate and self._active_loras:
+                if not self.merged:
+                    self.merge_lora_weights()
+                elif self.base_layer.weight is None:
+                    self._restore_merged_weight()
             else:
                 self._reset_to_base_weight()
         if self.side_branch:
@@ -286,10 +303,6 @@ class BaseLayerWithLoRA(nn.Module):
                                  "forced side branch); load one adapter at a time.")
             # Kept in bf16 so the branch matches the activation dtype of a packed base layer.
             A, B = A.to(torch.bfloat16), B.to(torch.bfloat16)
-        if not training_mode and not self.side_branch and self.merged and not accumulate:
-            # Reverse the current merge while its own factors are still in place: a snapshot-less unified-memory
-            # layer subtracts the delta, and merge_lora_weights would run after the factors below are replaced.
-            self.unmerge_lora_weights()
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -305,28 +318,58 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_path = lora_path
             return
         if not training_mode:
-            self.merge_lora_weights(accumulate=accumulate)
+            contribution = self._current_lora_contribution()
+            self._merge_lora_contribution(contribution)
+            self._active_loras.append(contribution)
+            if self._merged_loras is not None:
+                self._merged_loras = self._active_loras
         self.lora_path = lora_path
+
+    def _current_lora_contribution(self) -> LoRAContribution:
+        assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return LoRAContribution(lora_A=self.lora_A.detach().to("cpu", copy=True),
+                                lora_B=self.lora_B.detach().to("cpu", copy=True),
+                                scale=scale * self.lora_strength)
 
     @torch.no_grad()
     def merge_lora_weights(self, accumulate: bool = False) -> None:
         if self.disable_lora or self.side_branch:
             return
 
-        assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
-        if self.merged and not accumulate:
-            self.unmerge_lora_weights()
-        elif self.base_layer.weight is None:
-            if self.merged:
-                self._restore_merged_weight()
-            else:
-                self._reset_to_base_weight()
-        contribution = None
+        current = self._current_lora_contribution()
+        # A normal merge replays the stack once. Explicit accumulation adds another
+        # copy of the current adapter, matching set_lora_weights(accumulate=True).
+        previous = self._active_loras if accumulate else self._active_loras[:-1]
+        self._replay_lora_contributions([*previous, current])
+
+    @torch.no_grad()
+    def _replay_lora_contributions(self, contributions: list[LoRAContribution]) -> None:
+        """Merge ``contributions`` onto the base weight, keeping the previous state until all of them succeed.
+
+        A failure part-way (e.g. CUDA OOM) must not lose the history: a retry would replay only the current
+        adapter, and a layer without a base snapshot could no longer reverse its partially merged weight.
+        """
+        base_layer, weight = self.base_layer, self.base_layer.weight
+        data = None if weight is None else weight.data
+        state = (self.merged, self._active_loras, self._merged_loras, self._unmerged_lora_A, self._unmerged_lora_B)
+        try:
+            self._reset_to_base_weight()
+            for contribution in contributions:
+                self._merge_lora_contribution(contribution)
+        except BaseException:
+            self.base_layer = base_layer
+            base_layer.weight = weight
+            if weight is not None:
+                weight.data = data
+            (self.merged, self._active_loras, self._merged_loras, self._unmerged_lora_A, self._unmerged_lora_B) = state
+            raise
+        self._active_loras = contributions
         if self._merged_loras is not None:
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-            contribution = LoRAContribution(lora_A=self.lora_A.detach().to("cpu", copy=True),
-                                            lora_B=self.lora_B.detach().to("cpu", copy=True),
-                                            scale=scale * self.lora_strength)
+            self._merged_loras = self._active_loras
+
+    @torch.no_grad()
+    def _merge_lora_contribution(self, contribution: LoRAContribution) -> None:
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             unsharded_base_layer = ReplicatedLinear(
@@ -342,7 +385,7 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device()).full_tensor()
 
-            unsharded_base_layer.weight = nn.Parameter(self._merged_weight(data).to(current_device))
+            unsharded_base_layer.weight = nn.Parameter(self._merged_weight(data, contribution).to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(get_local_torch_device(),
@@ -359,11 +402,9 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
-            self.base_layer.weight.data = self._merged_weight(data).to(current_device, non_blocking=True)
+            self.base_layer.weight.data = self._merged_weight(data, contribution).to(current_device, non_blocking=True)
 
         self.merged = True
-        if contribution is not None:
-            self._merged_loras.append(contribution)
 
     def _merged_weight(self, weight: torch.Tensor, contribution: LoRAContribution | None = None) -> torch.Tensor:
         """``weight`` plus the scaled adapter delta, in ``weight``'s dtype.
@@ -401,16 +442,18 @@ class BaseLayerWithLoRA(nn.Module):
         self.merged = True
 
     def _unmerged_weight(self, weight: torch.Tensor) -> torch.Tensor:
-        """``weight`` minus the scaled adapter delta, for a layer merged without a snapshot.
+        """Reverse saved merges in order for a layer without a base snapshot.
 
-        Only used where ``cpu_weight`` was skipped (unified memory), and it needs the adapter factors, so the
-        pipeline must not release them for a layer that can still be unmerged.
+        Use the factors and scales that were actually merged, even if the live
+        current adapter has since changed. As with any snapshot-free unmerge,
+        subtraction cannot recover precision lost when the merges were rounded.
         """
-        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
-        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
-        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
-        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
-        return (weight.to(accumulate_dtype) - (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
+        for contribution in reversed(self._active_loras):
+            inverse = LoRAContribution(lora_A=contribution.lora_A,
+                                       lora_B=contribution.lora_B,
+                                       scale=-contribution.scale)
+            weight = self._merged_weight(weight, inverse)
+        return weight
 
     @torch.no_grad()
     # @torch.compile(dynamic=True)
@@ -423,14 +466,30 @@ class BaseLayerWithLoRA(nn.Module):
                 return
             raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
-        self._reset_to_base_weight()
+        self._reset_to_base_weight(preserve_adapters=True)
+        device = self.base_layer.weight.device
+        self._unmerged_lora_A = OffloadableBufferList(
+            [contribution.lora_A.to(device=device, copy=True) for contribution in self._active_loras[:-1]])
+        self._unmerged_lora_B = OffloadableBufferList(
+            [contribution.lora_B.to(device=device, copy=True) for contribution in self._active_loras[:-1]])
+
+    def _clear_lora_history(self) -> None:
+        self._active_loras = []
+        if self._merged_loras is not None:
+            self._merged_loras = self._active_loras
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
 
     @torch.no_grad()
-    def _reset_to_base_weight(self) -> None:
+    def _reset_to_base_weight(self, *, preserve_adapters: bool = False) -> None:
         self._restore_base_weight()
         self.merged = False
         if self._merged_loras is not None:
             self._merged_loras = []
+        self._unmerged_lora_A = OffloadableBufferList()
+        self._unmerged_lora_B = OffloadableBufferList()
+        if not preserve_adapters:
+            self._active_loras = []
 
     @torch.no_grad()
     def _restore_base_weight(self) -> None:
@@ -439,16 +498,16 @@ class BaseLayerWithLoRA(nn.Module):
         The pipeline calls this inside the block's offload mutation scope; the placement buffer follows its weights.
         """
         if self.cpu_weight is None:
-            if (self.merged and self.lora_A is not None and self.lora_B is not None
-                    and self.base_layer.weight is not None and not isinstance(self.base_layer.weight, DTensor)):
-                # Unified-memory layers keep no full-weight snapshot; reverse the merge from the adapter factors,
-                # which therefore must outlive the merge.
-                device = self.base_layer.weight.data.device
-                data = self.base_layer.weight.data.to(get_local_torch_device())
-                self.base_layer.weight.data = self._unmerged_weight(data).to(device, non_blocking=True)
-                return
             if self.training_mode:
                 raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
+            if self.base_layer.weight is not None and not isinstance(self.base_layer.weight, DTensor):
+                if not self.merged:
+                    return
+                if self._active_loras:
+                    device = self.base_layer.weight.data.device
+                    data = self.base_layer.weight.data.to(get_local_torch_device())
+                    self.base_layer.weight.data = self._unmerged_weight(data).to(device, non_blocking=True)
+                    return
             raise RuntimeError("LoRA layer has no unmerge snapshot and no adapter factors to reverse the merge")
         if self.base_layer.weight is None:
             if isinstance(self.cpu_weight, DTensor):
