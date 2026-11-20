@@ -9,7 +9,7 @@
 **FastVideo is a unified post-training and real-time inference framework for accelerated video generation.**
 
 ## Recent news
-- `2026/11/20`: Release [Dreamverse Harness](https://github.com/fastvideo-project/dreamverse-harness), a harness for running Dreamverse on GPU workers. Read the [blog](https://haoailab.com/blogs/dreamverse-harness/).
+- `2026/11/20`: Release [Dreamverse Harness](https://github.com/fastvideo-project/dreamverse-harness): open-source AI filmmaking on your own GPUs. Read the [blog](https://haoailab.com/blogs/dreamverse-harness/).
 - `2026/11/10`: Day-0 support for [PAN 2](https://huggingface.co/IFM/PAN2), a world model from IFM. See the [cookbook](https://haoailab.com/FastVideo/cookbook/pan/pan2/).
 - `2026/10/21`: Release [FastH3 Omni](https://huggingface.co/FastVideo/FastVideo-FastH3-Omni-8-Step-V1) (Ref2VA): reference-conditioned video-and-audio generation from a prompt plus ordered image, video and audio references, in eight fused forwards. It runs on consumer Blackwell (RTX 5090, RTX PRO 6000, DGX Spark — [NVFP4 QAD](https://huggingface.co/FastVideo/FastH3-OmniRef-NVFP4-QAD)), on RTX 4090 (FP8) and on Apple Silicon (MLX). See the [cookbook](https://haoailab.com/FastVideo/cookbook/minimax-h3/) and the [inference guide](https://haoailab.com/FastVideo/inference/fasth3_omniref/).
 - `2026/10/06`: FastVideo now supports [Kandinsky 6](https://x.com/kandinskylab_ai/status/2107374635218055345) from Kandinsky Lab: text- and image-to-video with synchronized audio (base and 10-step distilled pi-Flow checkpoints) plus video super-resolution up to 4x. See the [Kandinsky 6 recipes](https://haoailab.com/FastVideo/cookbook/kandinsky6/).
