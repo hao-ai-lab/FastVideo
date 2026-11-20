@@ -31,6 +31,11 @@ explicit compatibility exports.
 - Keep `EntryClass = WanTransformer3DModel` in `transformer.py` only. Registry
   architecture names, state-dict keys, layer names, and mappings are compatibility
   contracts.
+- Keep `EntryClass = WanVACETransformer3DModel` in `vace_transformer.py` only.
+  VACE arch and checkpoint mappings live in `vace_config.py`; do not duplicate
+  them in `transformer.py` or add a parallel `dits/wanvace.py` shim. VACE
+  declares only dense attention backends and rejects sparse requests before
+  constructing weight-bearing layers.
 - Keep `EntryClass = CausalWanTransformer3DModel` in `causal_transformer.py`
   only; `dits/causal_wanvideo.py` is an alias. Preserve cache layout, sink
   eviction, absolute/relativistic RoPE, and the global-attention window limit.
@@ -38,8 +43,8 @@ explicit compatibility exports.
   normalization, first-frame handling, cache reset, streaming, tiling, and
   encoder/decoder compile conditions. Do not merge the separate Cosmos25,
   Gen3C, or LingBotWorld2 VAE adapters into this implementation.
-- `config.py`, `vae_config.py`, `pipeline_config.py`, `definition.py`, and
-  `__init__.py` are pre-commit checked;
+- `config.py`, `vae_config.py`, `vace_config.py`, `pipeline_config.py`,
+  `definition.py`, and `__init__.py` are pre-commit checked;
   `transformer.py` and `vae.py` retain the existing model-code exclusion.
   Avoid unrelated reformatting.
 - `WanTransformer3DModel.forward` shards the flattened spatiotemporal token
@@ -58,6 +63,7 @@ dependencies even when a check needs no weights.
 
 ```bash
 pytest fastvideo/tests/api/test_wan_definitions.py -q
+pytest fastvideo/tests/api/test_wan_vace_definitions.py -q
 pytest fastvideo/tests/loader/test_wan_family_imports.py -q
 pytest fastvideo/tests/contract/test_merge_ci_plan.py -q
 pytest fastvideo/tests/vaes/test_wan_vae_compile.py -q

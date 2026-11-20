@@ -81,6 +81,36 @@
       "expected_artifact": "MP4 videos under video_samples_wan2_2_5B_ti2v/"
     },
     {
+      "id": "wan21-vace-1-3b",
+      "family": "wan",
+      "stage": "inference",
+      "task": "Controllable video generation",
+      "label": "Wan2.1 VACE 1.3B",
+      "summary": "Generate a video from a prompt and reference images with the Wan2.1-VACE 1.3B checkpoint, using the maintained example with CPU offload enabled.",
+      "model": "Wan-AI/Wan2.1-VACE-1.3B-diffusers",
+      "source": "examples/inference/basic/basic_wan_vace.py",
+      "command": "python examples/inference/basic/basic_wan_vace.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video at outputs/wan_vace/official_1_3b_480.mp4"
+    },
+    {
+      "id": "wan21-vace-14b",
+      "family": "wan",
+      "stage": "inference",
+      "task": "Controllable video generation",
+      "label": "Wan2.1 VACE 14B",
+      "summary": "Generate a video from a prompt and reference images with the Wan2.1-VACE 14B checkpoint, using the maintained example with CPU offload enabled.",
+      "model": "Wan-AI/Wan2.1-VACE-14B-diffusers",
+      "source": "examples/inference/basic/basic_wan_vace.py",
+      "command": "python examples/inference/basic/basic_wan_vace.py --model_path Wan-AI/Wan2.1-VACE-14B-diffusers --output_path outputs/wan_vace/official_14b.mp4",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video at outputs/wan_vace/official_14b.mp4"
+    },
+    {
       "id": "fastmetal-1-3b-mlx",
       "family": "wan",
       "stage": "inference",
