@@ -106,9 +106,9 @@ def load_fv_transformer(model_dir: Path,
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import TransformerLoader
 
-    pipeline_config = config_cls()
-    pipeline_config.dit_precision = "fp32" if dtype == torch.float32 else "bf16"
-    args = FastVideoArgs(model_path=str(model_dir), pipeline_config=pipeline_config)
+    args = FastVideoArgs(model_path=str(model_dir), pipeline_config=config_cls())
+    # Component-only comparison: the pipeline guard allows bf16 only, so widen it after validation.
+    args.pipeline_config.dit_precision = "fp32" if dtype == torch.float32 else "bf16"
     args.device = device
     transformer = TransformerLoader().load(str(model_dir / "transformer"), args)
     return transformer.to(device).eval()

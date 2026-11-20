@@ -115,6 +115,19 @@ def _named_module_by_prefix(module: nn.Module,
     return prefix_list + [(None, none_list)]  # type: ignore
 
 
+def _lora_block_list(transformer_module: nn.Module) -> list[tuple[str, nn.Module]]:
+    """Blocks whose weights layerwise offload swaps in and out, named ``<list>.<index>``.
+
+    Offload schedules every list in ``layerwise_offload_module_lists`` (default: the first ``nn.ModuleList``),
+    and LoRA must restore each of those blocks before it touches their weights.
+    """
+    children = dict(transformer_module.named_children())
+    list_names = getattr(transformer_module, "layerwise_offload_module_lists", None)
+    if list_names is None:
+        list_names = [name for name, child in children.items() if isinstance(child, nn.ModuleList)][:1]
+    return [(f"{name}.{i}", block) for name in list_names for i, block in enumerate(children[name])]
+
+
 class LoRAModelLayers:
 
     def __init__(self, block_list: list[tuple[str, nn.Module]]) -> None:
@@ -471,12 +484,7 @@ class LoRAPipeline(ComposedPipelineBase):
         excluded_lora_layers = self._exclude_lora_layers_for(transformer_name, transformer_module)
         # Fresh instance after a lazy rematerialize must not keep the previous
         # block mapping — those modules pin the released DiT and never get freed.
-        block_list = []
-        for name, submodule in transformer_module.named_children():
-            if isinstance(submodule, nn.ModuleList):
-                block_list = [(f"{name}.{i}", m) for i, m in enumerate(submodule)]
-                break
-        self.lora_layers[transformer_name] = LoRAModelLayers(block_list)
+        self.lora_layers[transformer_name] = LoRAModelLayers(_lora_block_list(transformer_module))
         logger.info("Converting %s to LoRA Transformer", transformer_name)
         converted_count = 0
         for block_name, block_modules in _named_module_by_prefix(
