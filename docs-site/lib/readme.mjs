@@ -1,4 +1,4 @@
-const NEWS_HEADINGS = ["news", "recent updates", "what's new", "latest news", "announcements"];
+const NEWS_HEADINGS = ["news", "recent news", "recent updates", "what's new", "latest news", "announcements"];
 
 const PROJECT_HEADINGS = [
   "awesome work using fastvideo or our research projects",

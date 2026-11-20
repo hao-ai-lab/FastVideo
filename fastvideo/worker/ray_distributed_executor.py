@@ -516,6 +516,18 @@ class RayDistributedExecutor(Executor):
 
         return ray_worker_outputs
 
+    @property
+    def healthy(self) -> bool:
+        """Read actor state without queuing an RPC behind an active generation."""
+        if not self.workers:
+            return False
+        try:
+            from ray._private.state import actors
+            return all(actors(worker._actor_id.hex()).get("State") == "ALIVE" for worker in self.workers)
+        except Exception as error:
+            logger.warning("Could not inspect Ray generation workers: %s", error)
+            return False
+
     def shutdown(self) -> None:
         logger.info("Shutting down Ray distributed executor. If you see error log "
                     "from logging.cc regarding SIGTERM received, please ignore because "

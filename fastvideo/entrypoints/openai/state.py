@@ -8,11 +8,13 @@ All modules that need the generator or server args should import from here.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from contextvars import ContextVar
 
 from fastvideo.api.schema import DEFAULT_MEDIA_REFERENCE_MAX_BYTES
 from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 
 if TYPE_CHECKING:
+    from fastvideo.entrypoints.openai.model_catalog import ModelProfile
     from fastvideo.api.schema import GenerationRequest
     from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine, ServingGenerator
     from fastvideo.fastvideo_args import FastVideoArgs
@@ -27,6 +29,13 @@ _served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
 _media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES
 _media_policy: MediaPolicy = MediaPolicy()
+request_model_profile: ContextVar[ModelProfile | None] = ContextVar("fastvideo_request_model_profile", default=None)
+
+
+def _profile() -> ModelProfile | None:
+    selected = request_model_profile.get()
+    manager = getattr(_serving_engine, "model_manager", None)
+    return selected or (manager.active if manager is not None else None)
 
 
 def get_generator() -> ServingGenerator:
@@ -44,7 +53,8 @@ def get_serving_engine() -> OpenAIServingEngine:
 def get_server_args() -> FastVideoArgs:
     """Return the global FastVideoArgs (set during startup)."""
     assert _fastvideo_args is not None, "Server not initialized — args is None"
-    return _fastvideo_args
+    profile = _profile()
+    return profile.args if profile is not None else _fastvideo_args
 
 
 def get_output_dir() -> str:
@@ -54,6 +64,9 @@ def get_output_dir() -> str:
 
 def get_served_model_name() -> str:
     """Return the public model id advertised by the OpenAI server."""
+    profile = _profile()
+    if profile is not None:
+        return profile.model
     args = get_server_args()
     if args.lora_path:
         return args.lora_nickname
@@ -62,7 +75,8 @@ def get_served_model_name() -> str:
 
 def get_default_request() -> GenerationRequest | None:
     """Return the ServeConfig.default_request set at startup, if any."""
-    return _default_request
+    profile = _profile()
+    return profile.config.default_request if profile is not None else _default_request
 
 
 def get_media_reference_max_bytes() -> int:

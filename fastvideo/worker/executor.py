@@ -73,6 +73,11 @@ class Executor(ABC):
         raise ValueError(f"Unsupported distributed executor backend: {backend}")
 
     @property
+    def healthy(self) -> bool:
+        """Whether the executor can accept work, without scheduling a generation RPC."""
+        return True
+
+    @property
     def is_output_rank(self) -> bool:
         """Whether this process owns user-facing generated outputs."""
         return True

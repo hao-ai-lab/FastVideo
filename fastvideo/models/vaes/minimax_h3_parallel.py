@@ -43,7 +43,7 @@ output is bitwise equal to serial ``decode_to_pixels``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import torch
 
@@ -194,6 +194,8 @@ def decode_to_pixels_parallel(
     output: torch.Tensor | None,
     group: "GroupCoordinator",
     strategy: str = DEFAULT_DECODE_GATHER_STRATEGY,
+    *,
+    idle_callback: Callable[[], None] | None = None,
 ) -> torch.Tensor | None:
     """Chunk-parallel ``decode_to_pixels`` across a sequence-parallel group.
 
@@ -202,10 +204,14 @@ def decode_to_pixels_parallel(
     group's first rank, which assembles bitwise the serial
     ``decode_to_pixels`` result into ``output``. Only the first rank passes
     ``output`` (validated exactly like the serial API); other ranks pass
-    ``None`` and receive ``None``.
+    ``None`` and receive ``None``. An optional callback runs once on a rank
+    with no chunk in the final round (single-item batches only). It must not
+    issue collectives; the normal round rendezvous follows it on every rank.
     """
     if strategy not in DECODE_GATHER_STRATEGIES:
         raise ValueError(f"Unknown parallel-decode strategy {strategy!r}; expected one of {DECODE_GATHER_STRATEGIES}.")
+    if idle_callback is not None and z.shape[0] != 1:
+        raise ValueError("An idle decode callback requires a single-item batch.")
     is_leader = group.rank_in_group == 0
     if is_leader:
         if output is None:
@@ -226,7 +232,7 @@ def decode_to_pixels_parallel(
                 slice_output = output[batch_index:batch_index + 1] if output is not None else None
                 _decode_single_parallel(vae, z_slice, slice_output, group, strategy)
         else:
-            _decode_single_parallel(vae, z, output, group, strategy)
+            _decode_single_parallel(vae, z, output, group, strategy, idle_callback=idle_callback)
     finally:
         # Drain the leader's async chunk copies before the caller (or an
         # exception handler) can read or release the pinned buffer.
@@ -386,6 +392,8 @@ def _decode_single_parallel(
     output: torch.Tensor | None,
     group: "GroupCoordinator",
     strategy: str,
+    *,
+    idle_callback: Callable[[], None] | None = None,
 ) -> None:
     if _decode_single_tile_parallel(vae, z, output, group, strategy):
         return
@@ -413,6 +421,9 @@ def _decode_single_parallel(
         for round_index in range(_num_rounds(num_chunks, world_size)):
             chunk_index = round_index * world_size + rank
             if chunk_index >= num_chunks:
+                if idle_callback is not None:
+                    idle_callback()
+                    idle_callback = None
                 segment = torch.zeros(segment_shape, dtype=segment_dtype, device=z.device)
             elif round_index == 0 and first_segment is not None:
                 segment = first_segment

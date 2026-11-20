@@ -20,8 +20,10 @@ def test_component_lane_stops_after_failed_golden(tmp_path, lane, expected, fail
     stub = tmp_path / "pytest"
     stub.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$WAN_TEST_LOG"\nexit "${WAN_TEST_EXIT:-0}"\n')
     stub.chmod(0o755)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "WAN_TEST_LOG": str(log),
-           "WAN_TEST_EXIT": "1" if fail_first else "0"}
+    # Drop the Spark backend flag so the lane's kernel sync stays a no-op here.
+    env = {name: value for name, value in os.environ.items() if name != "FASTVIDEO_CI_BACKEND"}
+    env.update({"PATH": f"{tmp_path}:{os.environ['PATH']}", "WAN_TEST_LOG": str(log),
+                "WAN_TEST_EXIT": "1" if fail_first else "0"})
     result = subprocess.run(["bash", f".buildkite/scripts/lanes/{lane}.sh"], cwd=ROOT, env=env, check=False)
     calls = log.read_text().splitlines()
     assert len(calls) == (1 if fail_first else len(expected))

@@ -21,6 +21,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 | Triton: STA, VSA block-sparse, SLA, fused compress+topk, FP4 QAT training, quant/norm utils | `python/fastvideo_kernel/triton_kernels/` | automatic fallback when the matching C++ op is absent (`ops.py`, `turbodiffusion_ops.py`) |
 | FA4 CuTe-DSL block-sparse forward/backward (VSA-128/256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
 | VMoBA `moba_attn_varlen` | `vmoba.py` | wraps flash-attn varlen |
+| Wan2.2 VAE decoder (TI2V-5B, 48 latent channels) at 704 x 1248 on `sm_100a` / `sm_103a`, on 1-8 GPUs of a node | `wan22_vae_decode/`, built from `wan22_vae_decode/solution/` on first use against `include/cutlass` | `wan22_vae_decode.WanVAEDecoder`; FastVideo's `WanVAEConfig.decode_kernel`, on for PAN2 sampling (see `wan22_vae_decode/README.md`) |
 
 ## What gets built where, and when
 

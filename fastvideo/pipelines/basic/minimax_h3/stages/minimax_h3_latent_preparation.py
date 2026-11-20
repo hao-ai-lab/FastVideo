@@ -36,9 +36,11 @@ from fastvideo.pipelines.basic.minimax_h3.reference import (
     trim_reference_num_frames,
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import MINIMAX_H3_TEXT_TOKEN_TAGS_KEY
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import keep_text_token_tags_for_bundle
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import (
     MINIMAX_H3_KEYFRAME_ANCHORS_KEY,
     MINIMAX_H3_KEYFRAMES_KEY,
+    uses_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -104,8 +106,6 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.not_none)
         result.add_check("latents", batch.latents, V.none_or_tensor)
         result.add_check("audio_latents", batch.audio_latents, V.none_or_tensor)
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -342,7 +342,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         if not isinstance(batch.num_frames, int):
             raise TypeError("MiniMax-H3 num_frames must be an integer.")
         num_audio_latents = audio_latent_num_frames(batch.num_frames)
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             references = list(batch.references or [])
             return build_ref2va_packed_sequence(
                 text_token_tags,
@@ -372,7 +372,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         video_noise = batch.latents
         audio_noise = batch.audio_latents
         device = get_local_torch_device()
-        if self.ref2va:
+        if uses_references(self.ref2va, batch):
             condition_video, condition_audio = self._encode_ref2va_conditions(batch, fastvideo_args, device)
         else:
             condition_video, condition_audio = self._encode_fl2va_conditions(batch, fastvideo_args, device)
@@ -421,7 +421,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         batch.latents = video_rows
         batch.audio_latents = audio_rows
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = layout
-        batch.extra.pop(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY, None)
+        keep_text_token_tags_for_bundle(batch.extra, batch.extra.pop(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY, None))
         batch.extra.pop(MINIMAX_H3_KEYFRAMES_KEY, None)
         batch.extra.pop(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, None)
         batch.references = None

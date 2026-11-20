@@ -980,6 +980,38 @@ def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_pat
     assert result["video_path"] is None
 
 
+@pytest.mark.parametrize(("preserve_space", "negative_prompt", "expected"), [
+    (False, " ", ""),
+    (True, " ", " "),
+    (True, " custom negative ", "custom negative"),
+])
+def test_generate_single_video_respects_single_space_negative_prompt_policy(
+        tmp_path, preserve_space, negative_prompt, expected):
+    output_batch = _single_video_output_batch(torch.zeros(1, 3, 2, 16, 16))
+    fastvideo_args = _single_video_args()
+    fastvideo_args.pipeline_config.preserve_single_space_negative_prompt = preserve_space
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    captured = {}
+
+    def execute_forward(batch, args):
+        captured["batch"] = batch
+        return output_batch
+
+    generator.executor.execute_forward = execute_forward
+    sampling = _small_sampling_param()
+    sampling.negative_prompt = negative_prompt
+    generator._prepare_output_path = lambda *args: str(tmp_path / "unused.mp4")
+
+    generator._generate_single_video(
+        prompt="negative prompt",
+        sampling_param=sampling,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert captured["batch"].negative_prompt == expected
+
+
 def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_path):
     audio = torch.ones(8)
     audio_latents = torch.ones(2)
@@ -1662,3 +1694,30 @@ def test_existing_image_extension_directory_receives_output(tmp_path, extension,
     result = generator._prepare_output_path(str(directory), "a cat")
     assert result == str(directory / ("a cat_1" + target_extension))
     assert existing.read_bytes() == b"existing image"
+
+
+def test_generate_single_video_writes_a_returned_draft_bundle(tmp_path):
+    from fastvideo.pipelines.basic.minimax_h3.draft_bundle import (BUNDLE_PATH_EXTRA_KEY, BUNDLE_PAYLOAD_EXTRA_KEY,
+                                                                   build_draft_bundle, load_draft_bundle)
+
+    latent = torch.randn(24, 2, 3, 4)
+    bundle = build_draft_bundle(latent=latent, prompt_embeds=None, text_token_tags=None, prompt="a fox",
+                                text_encoder=None)
+    output_batch = _single_video_output_batch(torch.ones((1, 3, 2, 16, 16)) * 0.5,
+                                              extra={BUNDLE_PAYLOAD_EXTRA_KEY: bundle})
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    target = tmp_path / "drafts" / "job.h3draft.pt"
+
+    generator._generate_single_video(
+        prompt="a fox",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+        _extra_overrides={BUNDLE_PATH_EXTRA_KEY: str(target)},
+    )
+
+    loaded = load_draft_bundle(str(target))
+    assert torch.equal(loaded["latent"], latent)
+    assert loaded["prompt"] == "a fox"
+    assert BUNDLE_PAYLOAD_EXTRA_KEY not in output_batch.extra

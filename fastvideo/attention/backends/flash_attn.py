@@ -233,8 +233,13 @@ def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> t
     elif attn_mask.dim() != 2:
         raise ValueError(f"Unsupported attn_mask shape for FLASH_ATTN: {attn_mask.shape}")
 
-    # SDPA additive mask convention: valid=0, masked=-inf/large negative.
-    key_padding_mask = attn_mask if attn_mask.dtype == torch.bool else attn_mask >= 0
+    # Integer masks follow tokenizer convention; floating masks are additive.
+    if attn_mask.dtype == torch.bool:
+        key_padding_mask = attn_mask
+    elif attn_mask.dtype.is_floating_point:
+        key_padding_mask = attn_mask >= 0
+    else:
+        key_padding_mask = attn_mask != 0
 
     if key_padding_mask.shape[-1] != key_len:
         raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
@@ -506,7 +511,11 @@ class FlashAttentionImpl(AttentionImpl):
                 raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
                                  f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}")
             attn_mask_padded = F.pad(key_padding_mask, (qkv.shape[1] - key_padding_mask.shape[-1], 0), value=True)
-            output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
+            output = flash_attn_no_pad(qkv,
+                                       attn_mask_padded,
+                                       causal=self.causal,
+                                       dropout_p=0,
+                                       softmax_scale=self.softmax_scale)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
 

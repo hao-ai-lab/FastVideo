@@ -34,6 +34,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3LatentPreparationStage,
     MiniMaxH3VideoDecodingStage,
 )
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import text_encoder_fingerprint
 from fastvideo.pipelines.basic.minimax_h3.encoder_split import (
     H3_DENOISE_MODULE_NAMES,
     H3_ENCODER_MODULE_NAMES,
@@ -222,6 +223,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     # Family subclasses override these to swap geometry and sampler stages
     # without copying the whole stage assembly.
     input_preparation_stage_cls: type[MiniMaxH3InputPreparationStage] = MiniMaxH3InputPreparationStage
+    conditioning_stage_cls: type[MiniMaxH3ConditioningStage] = MiniMaxH3ConditioningStage
     denoising_stage_cls: type[MiniMaxH3DenoisingStage] = MiniMaxH3DenoisingStage
     _required_config_modules = [
         "text_encoder",
@@ -715,11 +717,13 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         self._add_input_stage(fastvideo_args, ref2va=ref2va)
         self.add_stage(
             "conditioning_stage",
-            MiniMaxH3ConditioningStage(
+            self.conditioning_stage_cls(
                 conditioner=self.get_module("text_encoder"),
                 tokenizer=self.get_module("tokenizer"),
                 processor=self.get_module("processor"),
                 ref2va=ref2va,
+                text_conditioning_cache_max_bytes=getattr(fastvideo_args.pipeline_config,
+                                                          "text_conditioning_cache_max_bytes", 0),
                 # Sequential placement reuses one pinned encoder copy. A stage-level
                 # .to("cpu") would bypass it and allocate new host weights every request.
                 manage_cpu_offload=(h3_encoder_split_enabled(fastvideo_args)
@@ -758,9 +762,21 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 audio_scheduler=audio_scheduler,
             ),
         )
-        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae))
-        self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
+        audio_stage = MiniMaxH3AudioDecodingStage(audio_vae=audio_vae)
+        decoding = MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae, audio_stage=audio_stage)
+        decoding.text_encoder_fingerprint = self.text_encoder_fingerprint
+        self.add_stage("video_decoding_stage", decoding)
+        self.add_stage("audio_decoding_stage", audio_stage)
         self._denoise_stages_ready = True
+
+    def text_encoder_fingerprint(self) -> str | None:
+        """Fingerprint of the text encoder files this pipeline loads (see ``draft_bundle``); ``None`` if unknown."""
+        args = getattr(self, "fastvideo_args", None)
+        override = getattr(args, "override_text_encoder_safetensors", None)
+        if override is None and getattr(self, "model_path", None) is None:
+            return None
+        directory = override or self._component_load_target("text_encoder")[1]
+        return text_encoder_fingerprint(directory, getattr(args, "override_text_encoder_quant", None))
 
     def _add_stages(self, fastvideo_args: FastVideoArgs, *, ref2va: bool) -> None:
         self._ref2va = ref2va
