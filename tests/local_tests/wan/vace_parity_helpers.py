@@ -110,6 +110,8 @@ def load_fv_transformer(model_dir: Path,
     # Component-only comparison: the pipeline guard allows bf16 only, so widen it after validation.
     args.pipeline_config.dit_precision = "fp32" if dtype == torch.float32 else "bf16"
     args.device = device
+    # Offload swaps block weights for empty placeholders; the comparison needs them resident.
+    args.dit_layerwise_offload = False
     transformer = TransformerLoader().load(str(model_dir / "transformer"), args)
     return transformer.to(device).eval()
 
