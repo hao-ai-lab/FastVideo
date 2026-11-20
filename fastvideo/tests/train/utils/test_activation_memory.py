@@ -325,6 +325,59 @@ def test_builder_delivers_exported_policies_to_each_planned_role(budget_config, 
     assert method.role_models["teacher"].plan is None
 
 
+def _fingerprint_profile(metadata):
+    return memory.MemoryProfile(("backward",), (MIB,),
+                                (memory.BlockCosts("student", "blocks.0", (choice("save", 0, 3),)),), metadata)
+
+
+def test_fingerprint_matching_profile_passes_without_warnings():
+    profile = _fingerprint_profile({
+        "model": "wan-1.3b",
+        "world_size": 1,
+        "fastvideo_version": memory.__version__,
+    })
+    assert memory.check_profile_fingerprint(profile, model_paths={"student": "wan-1.3b"}, num_gpus=1) == []
+
+
+def test_fingerprint_rejects_different_world_size_or_model():
+    dual = _fingerprint_profile({"model": "wan-1.3b", "world_size": 2})
+    with pytest.raises(ValueError, match="world_size=2"):
+        memory.check_profile_fingerprint(dual, model_paths={"student": "wan-1.3b"}, num_gpus=1)
+    single = _fingerprint_profile({"model": "wan-1.3b", "world_size": 1})
+    with pytest.raises(ValueError, match=r"models\.student\.init_from"):
+        memory.check_profile_fingerprint(single, model_paths={"student": "wan-14b"}, num_gpus=1)
+
+
+def test_fingerprint_warns_when_metadata_missing_or_stale():
+    warnings = memory.check_profile_fingerprint(_fingerprint_profile({"input_shape": [1]}),
+                                                model_paths={"student": None},
+                                                num_gpus=1)
+    assert any("world_size" in message for message in warnings)
+    stale = _fingerprint_profile({"model": "wan-1.3b", "world_size": 1, "fastvideo_version": "0.0.0"})
+    warnings = memory.check_profile_fingerprint(stale, model_paths={"student": "wan-1.3b"}, num_gpus=1)
+    assert any("0.0.0" in message for message in warnings)
+
+
+def test_builder_rejects_profile_from_another_world_size(budget_config, tmp_path):
+    profile = memory.MemoryProfile.load(tmp_path / "profile.json")
+    profile = memory.MemoryProfile(profile.events, profile.fixed_device_bytes, profile.blocks,
+                                   {**profile.metadata, "world_size": 2})
+    profile.save(tmp_path / "profile.json")
+    with pytest.raises(ValueError, match="world_size=2"):
+        builder.build_from_config(budget_config)
+    assert not (tmp_path / "plan.json").exists()
+
+
+def test_builder_accepts_matching_profile_fingerprint(budget_config, tmp_path):
+    profile = memory.MemoryProfile.load(tmp_path / "profile.json")
+    profile = memory.MemoryProfile(profile.events, profile.fixed_device_bytes, profile.blocks,
+                                   {**profile.metadata, "world_size": 1})
+    profile.save(tmp_path / "profile.json")
+    _, method, _, _ = builder.build_from_config(budget_config)
+    assert (tmp_path / "plan.json").exists()
+    assert method.role_models["student"].plan is not None
+
+
 def test_builder_without_budget_preserves_existing_adapter_support(budget_config, tmp_path):
     budget_config.training.model = config.ModelTrainingConfig()
     budget_config.models["student"]["_target_"] = f"{__name__}.UnsupportedAdapter"

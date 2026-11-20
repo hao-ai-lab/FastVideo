@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from fastvideo.version import __version__
 
 if TYPE_CHECKING:
     import torch
@@ -165,6 +168,44 @@ def plan_activation_memory(
         raise RuntimeError("The solver returned a policy outside the integer-byte budget")
     return MemoryPlan(policies, tuple(device_bytes), tuple(host_bytes), time_ms, budget_bytes, host_budget_bytes,
                       profile.events, profile.metadata)
+
+
+def check_profile_fingerprint(profile: MemoryProfile, *, model_paths: Mapping[str, str | None],
+                              num_gpus: int | None) -> list[str]:
+    """Cross-check a measured profile against the training configuration.
+
+    Raises ``ValueError`` for hard mismatches that would silently invalidate
+    the plan: the profile was measured at a different world size, or a planned
+    role is configured to train a different model than the measured one.
+    Returns warnings for soft mismatches (fingerprint metadata missing, or the
+    profile predates the current fastvideo version) for the caller to log.
+    """
+    metadata = profile.metadata
+    warnings: list[str] = []
+    measured_world = metadata.get("world_size")
+    if num_gpus is not None and measured_world is not None and int(measured_world) != num_gpus:
+        raise ValueError(
+            f"The activation profile was measured with world_size={measured_world}, but training is configured "
+            f"for {num_gpus} GPU(s); measured costs do not transfer across world sizes, re-profile first")
+    measured_model = metadata.get("model")
+    if measured_model is not None:
+        for role, configured in sorted(model_paths.items()):
+            if configured and str(configured) != str(measured_model):
+                raise ValueError(
+                    f"models.{role}.init_from ({configured}) does not match the model recorded in the activation "
+                    f"profile ({measured_model}); re-profile against the model being trained")
+    missing = [key for key in ("world_size", "model") if key not in metadata]
+    if missing:
+        warnings.append(
+            f"The activation profile lacks {', '.join(missing)} metadata; re-measure with the current collector "
+            "so the planner can verify it matches the training configuration")
+    else:
+        version = metadata.get("fastvideo_version")
+        if version is not None and version != __version__:
+            warnings.append(
+                f"The activation profile was measured with fastvideo {version}, the checkout is {__version__}; "
+                "costs drift across versions, re-profile if memory or step time looks off")
+    return warnings
 
 
 def apply_activation_memory_plan(module: torch.nn.Module, policies: dict[str, str]) -> torch.nn.Module:

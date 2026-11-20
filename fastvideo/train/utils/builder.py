@@ -6,11 +6,14 @@ from __future__ import annotations
 import inspect
 from typing import Any, TYPE_CHECKING
 
+from fastvideo.logger import init_logger
 from fastvideo.train.utils.instantiate import (
     instantiate,
     resolve_target,
 )
 from fastvideo.train.utils.config import RunConfig
+
+logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -33,7 +36,8 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     if memory_config.activation_memory_budget_gib is not None:
         import torch.distributed as dist
 
-        from fastvideo.train.utils.activation_memory import MemoryProfile, plan_activation_memory
+        from fastvideo.train.utils.activation_memory import (MemoryProfile, check_profile_fingerprint,
+                                                             plan_activation_memory)
 
         profile = MemoryProfile.load(memory_config.activation_memory_profile)
         unknown_roles = {block.role for block in profile.blocks} - set(cfg.models)
@@ -49,6 +53,14 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
             ):
                 raise ValueError(f"models.{role}._target_ ({target}) must explicitly accept "
                                  "activation_memory_plan to use an activation memory budget")
+        fingerprint_warnings = check_profile_fingerprint(
+            profile,
+            model_paths={role: cfg.models[role].get("init_from")
+                         for role in {block.role
+                                      for block in profile.blocks}},
+            num_gpus=cfg.training.distributed.num_gpus)
+        for message in fingerprint_warnings:
+            logger.warning("%s", message)
         host_budget = memory_config.activation_memory_host_budget_gib
         plan = plan_activation_memory(
             profile,

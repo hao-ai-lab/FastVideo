@@ -31,6 +31,7 @@ from fastvideo.train.utils.activation_memory import (
     plan_activation_memory,
 )
 from fastvideo.train.utils.training_config import DistributedConfig, TrainingConfig
+from fastvideo.version import __version__
 
 def policy_for(model, policy, checkpoint_every=2, save_count=None):
     count = len(model.blocks)
@@ -317,7 +318,7 @@ def calibrate(args: argparse.Namespace, model: WanModel, step: TrainingStep) -> 
         'text_tokens': step.batch.conditional_dict['encoder_hidden_states'].shape[1],
         'training_sample': args.training_sample, 'block_measurements': costs,
         'calibration_peaks': observed, 'master_dtype': 'float32', 'autocast_dtype': 'bfloat16',
-        'optimizer': 'AdamW foreach=False', 'world_size': 1,
+        'optimizer': 'AdamW foreach=False', 'world_size': 1, 'fastvideo_version': __version__,
         'event_accounting': 'continuous pre-hook-to-pre-hook intervals',
         'calibration_references': [{'policy': 'recompute', 'calibration_peaks': observed}]
     })
