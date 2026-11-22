@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from typing import Any
+
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.layers.quantization.nvfp4_config import H3_NVFP4_DIT_EXPORT_FILENAME
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.kandinsky6 import (
@@ -15,6 +19,9 @@ from fastvideo.pipelines.stages.kandinsky6 import (
     Kandinsky6TextEncodingStage,
 )
 from fastvideo.pipelines.stages.timestep_preparation import TimestepPreparationStage
+from fastvideo.utils import verify_model_config_and_directory
+
+NVFP4_TRANSFORMER_DIR = "nvfp4/transformer"
 
 
 class Kandinsky6TI2VAPipeline(ComposedPipelineBase):
@@ -42,6 +49,30 @@ class Kandinsky6TI2VAPipeline(ComposedPipelineBase):
         "audio_vae",
         "vocoder",
     ]
+
+    @classmethod
+    def nvfp4_component_dirs(cls) -> tuple[str, ...]:
+        """Components from a model snapshot that shares assets across precisions."""
+        return tuple(NVFP4_TRANSFORMER_DIR if name == "transformer" else name
+                     for name in cls._required_config_modules)
+
+    def _load_config(self, model_path: str) -> dict[str, Any]:
+        packed_transformer = os.path.join(model_path, NVFP4_TRANSFORMER_DIR)
+        quant_config = self.fastvideo_args.pipeline_config.dit_config.quant_config
+        if (getattr(quant_config, "layer_profile", None) == "kandinsky6"
+                and os.path.isfile(os.path.join(packed_transformer, H3_NVFP4_DIT_EXPORT_FILENAME))):
+            config = verify_model_config_and_directory(
+                model_path,
+                required_component_dirs=self.nvfp4_component_dirs(),
+            )
+            # An absolute path preserves dispatch to the standard TransformerLoader.
+            self._extra_config_module_map = {
+                **self._extra_config_module_map,
+                "transformer": os.path.abspath(packed_transformer),
+            }
+        else:
+            config = super()._load_config(model_path)
+        return config
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
