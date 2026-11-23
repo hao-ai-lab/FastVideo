@@ -39,18 +39,16 @@ class Kandinsky6ArchConfig(DiTArchConfig):
     # Text-tower attn is self-attention; decoder self/cross-attention names are unchanged.
     param_names_mapping: dict = field(
         default_factory=lambda: {
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.video_dec_block\.feed_forward\.net\.0\.proj\.(weight|bias)$":
-            r"visual_transformer_blocks.\1.videoT.feed_forward.mlp.fc_in.\2",
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.video_dec_block\.feed_forward\.net\.2\.(weight|bias)$":
-            r"visual_transformer_blocks.\1.videoT.feed_forward.mlp.fc_out.\2",
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.video_dec_block\.(.*)$": r"visual_transformer_blocks.\1.videoT.\2",
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.audio_dec_block\.feed_forward\.net\.0\.proj\.(weight|bias)$":
-            r"visual_transformer_blocks.\1.audioT.feed_forward.mlp.fc_in.\2",
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.audio_dec_block\.feed_forward\.net\.2\.(weight|bias)$":
-            r"visual_transformer_blocks.\1.audioT.feed_forward.mlp.fc_out.\2",
-            r"^(?:visual_transformer_blocks|visual_blocks)\.(\d+)\.audio_dec_block\.(.*)$": r"visual_transformer_blocks.\1.audioT.\2",
-            r"^visual_blocks\.(.*)$": r"visual_transformer_blocks.\1",
-            r"^audio_outLayer\.(.*)$": r"audio_out_layer.\1",
+            r"^(visual_transformer_blocks\.\d+)\.video_dec_block\.feed_forward\.net\.0\.proj\.(weight|bias)$":
+            r"\1.videoT.feed_forward.mlp.fc_in.\2",
+            r"^(visual_transformer_blocks\.\d+)\.video_dec_block\.feed_forward\.net\.2\.(weight|bias)$":
+            r"\1.videoT.feed_forward.mlp.fc_out.\2",
+            r"^(visual_transformer_blocks\.\d+)\.video_dec_block\.(.*)$": r"\1.videoT.\2",
+            r"^(visual_transformer_blocks\.\d+)\.audio_dec_block\.feed_forward\.net\.0\.proj\.(weight|bias)$":
+            r"\1.audioT.feed_forward.mlp.fc_in.\2",
+            r"^(visual_transformer_blocks\.\d+)\.audio_dec_block\.feed_forward\.net\.2\.(weight|bias)$":
+            r"\1.audioT.feed_forward.mlp.fc_out.\2",
+            r"^(visual_transformer_blocks\.\d+)\.audio_dec_block\.(.*)$": r"\1.audioT.\2",
             r"^((?:video|audio)_text_transformer_blocks\.\d+)\.attn\.(.*)$": r"\1.self_attention.\2",
             r"^((?:video|audio)_text_transformer_blocks\.\d+)\.attn_norm\.(.*)$": r"\1.self_attention_norm.\2",
             r"^((?:video|audio)_time_embeddings)\.timestep_embedder\.linear_1\.(weight|bias)$": r"\1.in_layer.\2",
