@@ -255,11 +255,26 @@ def _group_norm_per_frame(x, weight, bias, *, num_groups: int, eps: float, silu:
 
 
 def _rms_norm_no_affine(x, eps: float):
-    return x / mx.sqrt(mx.mean(x * x, axis=-1, keepdims=True) + eps)
+    return mx.fast.rms_norm(x, None, eps)
 
 
 def _silu(x):
     return x * (mx.sigmoid(x))
+
+
+def _swiglu_impl(value, gate):
+    return value * (gate * mx.sigmoid(gate))
+
+
+_compiled_swiglu: Any = None
+_compiled_rotate_half: Any = None
+
+
+def _swiglu(value, gate):
+    global _compiled_swiglu
+    if _compiled_swiglu is None:
+        _compiled_swiglu = mx.compile(_swiglu_impl, shapeless=True)
+    return _compiled_swiglu(value, gate)
 
 
 def _linear(x, weight, bias=None):
@@ -285,19 +300,27 @@ def _rotary_cos_sin(position_ids, *, rotary_dim: int, theta: float):
     return mx.cos(angles), mx.sin(angles)
 
 
+def _rotate_half_fp32(x, cos, sin):
+    """fp32 half-split rotation of a rotary prefix; cast back to the input dtype."""
+    x_rot = x.astype(mx.float32)
+    first, second = mx.split(x_rot, 2, axis=-1)
+    return (x_rot * cos + mx.concatenate([-second, first], axis=-1) * sin).astype(x.dtype)
+
+
 def _apply_rotary(query, key, cos, sin):
-    """Half-split rotation on the rotary prefix of each head (fp32)."""
+    """Apply half-split RoPE in fp32 using a compiled MLX graph.
+
+    Fuses elementwise operations to reduce intermediate materialization and
+    kernel dispatch overhead.
+    """
+    global _compiled_rotate_half
+    if _compiled_rotate_half is None:
+        _compiled_rotate_half = mx.compile(_rotate_half_fp32)
     rotary_dim = cos.shape[-1]
-    q_rot, q_pass = query[..., :rotary_dim], query[..., rotary_dim:]
-    k_rot, k_pass = key[..., :rotary_dim], key[..., rotary_dim:]
-    q_rot = q_rot.astype(mx.float32)
-    k_rot = k_rot.astype(mx.float32)
-    q_first, q_second = mx.split(q_rot, 2, axis=-1)
-    k_first, k_second = mx.split(k_rot, 2, axis=-1)
-    q_out = q_rot * cos + mx.concatenate([-q_second, q_first], axis=-1) * sin
-    k_out = k_rot * cos + mx.concatenate([-k_second, k_first], axis=-1) * sin
-    return (mx.concatenate([q_out.astype(query.dtype), q_pass],
-                           axis=-1), mx.concatenate([k_out.astype(key.dtype), k_pass], axis=-1))
+    q_out = _compiled_rotate_half(query[..., :rotary_dim], cos, sin)
+    k_out = _compiled_rotate_half(key[..., :rotary_dim], cos, sin)
+    return (mx.concatenate([q_out, query[..., rotary_dim:]],
+                           axis=-1), mx.concatenate([k_out, key[..., rotary_dim:]], axis=-1))
 
 
 def _attention(block: dict[str, Any], x, cos, sin, *, num_heads: int, head_dim: int, eps: float):
@@ -311,8 +334,8 @@ def _attention(block: dict[str, Any], x, cos, sin, *, num_heads: int, head_dim: 
     q = q.reshape(seq_len, batch, num_heads, head_dim)
     k = k.reshape(seq_len, batch, num_heads, head_dim)
     v = v.reshape(seq_len, batch, num_heads, head_dim)
-    q = _rms_norm_no_affine(q.astype(mx.float32), eps).astype(x.dtype)
-    k = _rms_norm_no_affine(k.astype(mx.float32), eps).astype(x.dtype)
+    q = _rms_norm_no_affine(q, eps)
+    k = _rms_norm_no_affine(k, eps)
     if cos is not None:
         q, k = _apply_rotary(q, k, cos, sin)
     # -> (B, H, S, Dh); contiguous() matters: some MLX builds silently
@@ -328,20 +351,22 @@ def _attention(block: dict[str, Any], x, cos, sin, *, num_heads: int, head_dim: 
 def _feed_forward(block: dict[str, Any], x):
     hidden = _linear(x, block["ff.net.0.proj.weight"], block["ff.net.0.proj.bias"])
     value, gate = mx.split(hidden, 2, axis=-1)
-    return _linear(value * _silu(gate), block["ff.net.2.weight"], block["ff.net.2.bias"])
+    return _linear(_swiglu(value, gate), block["ff.net.2.weight"], block["ff.net.2.bias"])
 
 
 def _transformer_block(block: dict[str, Any], x, scale1, scale2, cos, sin, *, num_heads: int, head_dim: int,
                        norm_eps: float, qk_norm_eps: float):
     """x: (S, B, D) sequence-major like the torch reference."""
-    normed = _rms_norm_affine(x.astype(mx.float32), block["norm1.weight"], norm_eps).astype(x.dtype)
+    normed = _rms_norm_affine(x, block["norm1.weight"], norm_eps)
     x = x + _attention(block, normed, cos, sin, num_heads=num_heads, head_dim=head_dim, eps=qk_norm_eps) * scale1
-    normed = _rms_norm_affine(x.astype(mx.float32), block["norm2.weight"], norm_eps).astype(x.dtype)
+    normed = _rms_norm_affine(x, block["norm2.weight"], norm_eps)
     return x + _feed_forward(block, normed) * scale2
 
 
-def _rms_norm_affine(x_fp32, weight, eps: float):
-    return x_fp32 / mx.sqrt(mx.mean(x_fp32 * x_fp32, axis=-1, keepdims=True) + eps) * weight
+def _rms_norm_affine(x, weight, eps: float):
+    if weight.dtype != x.dtype:
+        weight = weight.astype(x.dtype)
+    return mx.fast.rms_norm(x, weight, eps)
 
 
 def _resnet_block(weights: dict[str, Any], prefix: str, x, *, num_groups: int, eps: float):
