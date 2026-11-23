@@ -180,6 +180,7 @@ def main() -> None:
                                  warmup=args.warmup,
                                  repetitions=args.steps,
                                  training_sample=args.training_sample)
+        profile.metadata['block_cost_profile'] = args.calibrate_from
         profile.metadata['calibration_ms'] = (time.perf_counter() - started) * 1000
         profile.metadata['allocator_config'] = os.environ.get('PYTORCH_NPU_ALLOC_CONF', '')
         profile.save(args.output)

@@ -155,12 +155,28 @@ workload and separate profile acquisition, planning, and steady-state timing.
 Multi-rank DMD2 reports retain every rank's records and take the maximum step
 time, allocated memory, and reserved memory across ranks for each step.
 
+## H200 validation
+
+A CUDA port of the profiling examples calibrated Wan2.1-1.3B on one H200
+with PyTorch 2.9.1+cu128. Each row is one process with five warmup updates
+and five measured updates. Peaks cover the measured updates.
+
+| Workload | Budget (GiB) | Peak allocated (GiB) | Peak reserved (GiB) | Mean step (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Single role, 17 frames | 24 | 23.544 | 29.855 | 555.14 |
+| Single role, 33 frames | 28 | 27.666 | 34.943 | 570.51 |
+| DMD2, 17 frames | 54 | 53.514 | 66.160 | 1222.07 |
+
+All three solver plans met the allocated-memory budget. The DMD2 plan saved
+24 student blocks and 30 critic blocks. Its reserved peak exceeded the
+allocated budget by 12.160 GiB. The measurements use a device-local profile
+for each workload and shape.
+[H200 profiles, plans and step records](https://github.com/Gxj230958/FastVideo/tree/125aae85a57a083979ac357e49fad3dd21705054/meas_h200).
+
 ## Limitations
 
-CI runs the CPU correctness tests; it does not rerun the Ascend profiling
-examples or regenerate the performance tables. Those tables are reported from
-the documented Ascend runs; reproducing them requires the documented Ascend
-workloads.
+CI exercises the CPU correctness tests. Reproducing the performance tables
+requires the corresponding accelerator, training inputs and profiling configuration.
 
 The budget constrains profiled allocated bytes; the reserved/physical gap is
 covered in the budget-selection section above. Workspace or shape changes

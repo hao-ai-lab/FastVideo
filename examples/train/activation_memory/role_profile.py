@@ -113,12 +113,15 @@ def calibrate_dmd2(method: Any, step: Callable[..., Any], template: MemoryProfil
     fixed = tuple(max(0, actual - selected) for actual, selected in zip(observed, reference, strict=True))
     return MemoryProfile(
         events, fixed, tuple(blocks), {
-            **template.metadata,
+            **{key: template.metadata[key] for key in
+               ('model', 'world_size', 'fastvideo_version', 'input_shape', 'text_tokens',
+                'master_dtype', 'autocast_dtype', 'block_measurements') if key in template.metadata},
             'executor': 'FastVideo DMD2Method / WanModel / FSDP2',
             'method': 'DMD2 data_latent',
             'training_sample': training_sample,
             'optimizer': 'AdamW with FastVideo optimizer configuration',
             'calibration_peaks': observed,
+            'calibration_references': [{'policy': 'recompute', 'calibration_peaks': observed}],
             'event_accounting': 'continuous pre-hook intervals including FSDP transitions',
             'teacher_trainable': False,
         })

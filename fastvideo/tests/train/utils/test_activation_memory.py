@@ -426,3 +426,26 @@ def test_dmd_measurements_include_each_rank_and_step_maxima(tmp_path, world_size
             "peak_reserved_bytes": 3 * MIB + step,
             "losses": {"student": 0.5},
         } for step in range(2)]
+
+
+def test_role_calibration_records_its_own_reference(monkeypatch):
+    role_profile = load_source('activation_memory_role_profile', 'examples/train/activation_memory/role_profile.py')
+    monkeypatch.setattr(torch, 'npu', Mock(max_memory_allocated=Mock(return_value=100)), raising=False)
+    method = Mock()
+    for role in (method.student, method.critic, method.teacher):
+        role.transformer.blocks = [torch.nn.Identity()]
+    costs = {'recompute': dict(saved_bytes=1, forward_peak=2, backward_peak=3, time_ms=4)}
+    template = memory.MemoryProfile(('wan',), (10,), (), {
+        'model': 'wan', 'block_measurements': costs, 'reference_profile': 'single-role.json',
+        'incremental_calibration_ms': 500, 'memory_model': 'envelope',
+        'calibration_references': [{'policy': 'save', 'calibration_peaks': [10]}],
+    })
+    profile = role_profile.calibrate_dmd2(method, lambda observe: observe('clipping'), template,
+                                          warmup=0, repetitions=1, training_sample='sample.pt')
+    peaks = profile.metadata['calibration_peaks']
+    assert peaks[profile.events.index('clipping')] == 100
+    assert len(peaks) == len(profile.events)
+    assert profile.metadata['calibration_references'] == [{'policy': 'recompute', 'calibration_peaks': peaks}]
+    assert profile.metadata['model'] == 'wan'
+    assert profile.metadata['block_measurements'] == costs
+    assert {'reference_profile', 'incremental_calibration_ms', 'memory_model'}.isdisjoint(profile.metadata)
