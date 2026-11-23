@@ -119,7 +119,6 @@ def export_checkpoint(
                         module, _, field = mapped.rpartition(".")
                         value = reader.get_tensor(source_key)
 
-                        # Preserve the original keys and dtypes of biases, norms and other dense tensors.
                         if field != "weight" or not is_kandinsky6_nvfp4_linear_prefix(module):
                             size = value.numel() * value.element_size()
                             if dense and pending_bytes + size > dense_shard_bytes:

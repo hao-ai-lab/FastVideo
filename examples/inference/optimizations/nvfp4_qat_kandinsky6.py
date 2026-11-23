@@ -46,7 +46,6 @@ def main() -> None:
     if args.steps < 1:
         parser.error("--steps must be positive")
 
-    # Use the upstream unit activation scale and stream packed DiT buffers.
     os.environ.pop("FASTVIDEO_NVFP4_ACT_AMAX", None)
     os.environ.pop("FASTVIDEO_NVFP4_DYNAMIC_ACT", None)
     os.environ["FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS"] = "1"
