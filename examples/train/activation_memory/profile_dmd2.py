@@ -177,6 +177,8 @@ def main() -> None:
         profile = calibrate_dmd2(method,
                                  step,
                                  template,
+                                 model_path=args.model,
+                                 world_size=world,
                                  warmup=args.warmup,
                                  repetitions=args.steps,
                                  training_sample=args.training_sample)

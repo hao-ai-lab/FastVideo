@@ -7,11 +7,18 @@ from typing import Any
 
 import torch
 
-from fastvideo.train.utils.activation_memory import BlockCosts, MemoryProfile, PolicyCost
+from fastvideo.logger import init_logger
+from fastvideo.train.utils.activation_memory import BlockCosts, MemoryProfile, PolicyCost, check_profile_fingerprint
+from fastvideo.version import __version__
+
+logger = init_logger(__name__)
 
 
 def calibrate_dmd2(method: Any, step: Callable[..., Any], template: MemoryProfile, *,
-                   warmup: int, repetitions: int, training_sample: str) -> MemoryProfile:
+                   model_path: str, world_size: int, warmup: int, repetitions: int,
+                   training_sample: str) -> MemoryProfile:
+    for warning in check_profile_fingerprint(template, model_paths={'student': model_path}, num_gpus=world_size):
+        logger.warning(warning)
     costs = template.metadata['block_measurements']
     count = len(method.student.transformer.blocks)
     events = tuple([f'student.forward.{index}' for index in range(count)] +
@@ -114,8 +121,11 @@ def calibrate_dmd2(method: Any, step: Callable[..., Any], template: MemoryProfil
     return MemoryProfile(
         events, fixed, tuple(blocks), {
             **{key: template.metadata[key] for key in
-               ('model', 'world_size', 'fastvideo_version', 'input_shape', 'text_tokens',
-                'master_dtype', 'autocast_dtype', 'block_measurements') if key in template.metadata},
+               ('input_shape', 'text_tokens', 'master_dtype', 'autocast_dtype', 'block_measurements')
+               if key in template.metadata},
+            'model': model_path,
+            'world_size': world_size,
+            'fastvideo_version': __version__,
             'executor': 'FastVideo DMD2Method / WanModel / FSDP2',
             'method': 'DMD2 data_latent',
             'training_sample': training_sample,

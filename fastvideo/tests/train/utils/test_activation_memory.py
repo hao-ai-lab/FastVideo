@@ -436,16 +436,36 @@ def test_role_calibration_records_its_own_reference(monkeypatch):
         role.transformer.blocks = [torch.nn.Identity()]
     costs = {'recompute': dict(saved_bytes=1, forward_peak=2, backward_peak=3, time_ms=4)}
     template = memory.MemoryProfile(('wan',), (10,), (), {
-        'model': 'wan', 'block_measurements': costs, 'reference_profile': 'single-role.json',
+        'block_measurements': costs, 'reference_profile': 'single-role.json',
         'incremental_calibration_ms': 500, 'memory_model': 'envelope',
         'calibration_references': [{'policy': 'save', 'calibration_peaks': [10]}],
     })
     profile = role_profile.calibrate_dmd2(method, lambda observe: observe('clipping'), template,
-                                          warmup=0, repetitions=1, training_sample='sample.pt')
+                                          model_path='wan', world_size=1, warmup=0, repetitions=1,
+                                          training_sample='sample.pt')
     peaks = profile.metadata['calibration_peaks']
     assert peaks[profile.events.index('clipping')] == 100
     assert len(peaks) == len(profile.events)
     assert profile.metadata['calibration_references'] == [{'policy': 'recompute', 'calibration_peaks': peaks}]
     assert profile.metadata['model'] == 'wan'
+    assert profile.metadata['world_size'] == 1
+    assert profile.metadata['fastvideo_version'] == memory.__version__
+    assert memory.check_profile_fingerprint(profile, model_paths={'student': 'wan'}, num_gpus=1) == []
+    with pytest.raises(ValueError, match='world_size=1'):
+        memory.check_profile_fingerprint(profile, model_paths={'student': 'wan'}, num_gpus=2)
     assert profile.metadata['block_measurements'] == costs
     assert {'reference_profile', 'incremental_calibration_ms', 'memory_model'}.isdisjoint(profile.metadata)
+
+
+@pytest.mark.parametrize(('model', 'ranks', 'message'), [
+    ('wan', 2, 'world_size=2'),
+    ('other-model', 1, 'does not match'),
+])
+def test_role_calibration_rejects_incompatible_block_template(model, ranks, message):
+    role_profile = load_source('activation_memory_role_profile', 'examples/train/activation_memory/role_profile.py')
+    template = _fingerprint_profile({'model': model, 'world_size': ranks})
+    step = Mock()
+    with pytest.raises(ValueError, match=message):
+        role_profile.calibrate_dmd2(Mock(), step, template, model_path='wan', world_size=1,
+                                    warmup=1, repetitions=1, training_sample='sample.pt')
+    step.assert_not_called()
