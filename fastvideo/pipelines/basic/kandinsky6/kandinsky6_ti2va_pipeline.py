@@ -53,8 +53,7 @@ class Kandinsky6TI2VAPipeline(ComposedPipelineBase):
     @classmethod
     def nvfp4_component_dirs(cls) -> tuple[str, ...]:
         """Components from a model snapshot that shares assets across precisions."""
-        return tuple(NVFP4_TRANSFORMER_DIR if name == "transformer" else name
-                     for name in cls._required_config_modules)
+        return tuple(NVFP4_TRANSFORMER_DIR if name == "transformer" else name for name in cls._required_config_modules)
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         packed_transformer = os.path.join(model_path, NVFP4_TRANSFORMER_DIR)
@@ -66,7 +65,7 @@ class Kandinsky6TI2VAPipeline(ComposedPipelineBase):
                 required_component_dirs=self.nvfp4_component_dirs(),
             )
             # An absolute path preserves dispatch to the standard TransformerLoader.
-            self._extra_config_module_map = {
+            self._extra_config_module_map: dict[str, str] = {
                 **self._extra_config_module_map,
                 "transformer": os.path.abspath(packed_transformer),
             }

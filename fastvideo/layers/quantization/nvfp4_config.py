@@ -175,14 +175,12 @@ _KANDINSKY6_NVFP4_LINEAR = re.compile(
     r"|feed_forward\.mlp\.(?:fc_in|fc_out))"
     r"|(?:va_cross_attention|av_cross_attention)\.(?:to_query|to_key|to_value|out_layer))"
     r"|(?:video|audio)_text_transformer_blocks\.\d+\.(?:self_attention\.(?:to_query|to_key|to_value|out_layer)"
-    r"|feed_forward\.mlp\.(?:fc_in|fc_out)))$"
-)
+    r"|feed_forward\.mlp\.(?:fc_in|fc_out)))$")
 
 
 def is_kandinsky6_nvfp4_linear_prefix(prefix: str) -> bool:
     """Recognize native FastVideo module names, with an optional model prefix."""
     return _KANDINSKY6_NVFP4_LINEAR.fullmatch(prefix) is not None
-
 
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:

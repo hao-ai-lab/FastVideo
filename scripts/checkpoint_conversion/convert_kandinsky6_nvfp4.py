@@ -9,6 +9,32 @@ import tempfile
 from pathlib import Path
 
 
+SHARD_INDEX_NAME = "diffusion_pytorch_model.safetensors.index.json"
+
+
+def _source_shards(transformer: Path) -> list[Path]:
+    index_path = transformer / SHARD_INDEX_NAME
+    if not index_path.is_file():
+        return sorted(transformer.glob("*.safetensors"))
+
+    weight_map = json.loads(index_path.read_text()).get("weight_map")
+    if not isinstance(weight_map, dict) or not weight_map or any(
+        not isinstance(name, str) for name in weight_map.values()
+    ):
+        raise ValueError(f"Expected a non-empty tensor-to-shard weight_map in {index_path}.")
+
+    shards = []
+    for name in sorted(set(weight_map.values())):
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix != ".safetensors":
+            raise ValueError(f"Invalid shard path {name!r} in {index_path}.")
+        shard = transformer / relative
+        if not shard.is_file():
+            raise FileNotFoundError(f"Shard listed in {index_path} does not exist: {shard}")
+        shards.append(shard)
+    return shards
+
+
 def export_checkpoint(
     source_model: Path,
     destination: Path,
@@ -53,8 +79,8 @@ def export_checkpoint(
     class_name = config.get("_class_name") or index_class
     if class_name != "Kandinsky6Transformer3DModel":
         raise ValueError(f"Expected a Kandinsky6Transformer3DModel transformer, got {class_name!r}.")
-    shards = sorted(transformer.glob("*.safetensors"))
-    if not shards or (transformer / H3_NVFP4_DIT_EXPORT_FILENAME).exists():
+    shards = _source_shards(transformer)
+    if not shards or any(shard.name == H3_NVFP4_DIT_EXPORT_FILENAME for shard in shards):
         raise ValueError("The input must contain dense transformer safetensors.")
 
     device = torch.device(device_name)
@@ -129,7 +155,7 @@ def export_checkpoint(
             name = f"diffusion_pytorch_model-{number:05d}-of-{len(shard_keys):05d}.safetensors"
             (output / f"part-{number:05d}.safetensors").rename(output / name)
             weight_map.update(dict.fromkeys(keys, name))
-        (output / "diffusion_pytorch_model.safetensors.index.json").write_text(
+        (output / SHARD_INDEX_NAME).write_text(
             json.dumps({"metadata": {"total_size": total_dense_bytes}, "weight_map": weight_map}, indent=2) + "\n"
         )
         shutil.copy2(config_path, output / "config.json")

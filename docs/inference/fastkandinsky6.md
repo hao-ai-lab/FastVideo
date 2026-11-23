@@ -13,6 +13,7 @@ and the prebuilt CUDA 13 `fastvideo-kernel` wheel that includes
 ## Export the BF16 checkpoint
 
 Run from the FastVideo checkout with the `uv` environment active. Download the
+[kandinskylab/FastKandinsky-6.0-Pro-NVPF4-QAD](https://huggingface.co/kandinskylab/FastKandinsky-6.0-Pro-NVPF4-QAD)
 BF16 checkpoint and convert it once on the Blackwell GPU.
 
 ```bash
