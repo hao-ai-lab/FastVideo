@@ -37,4 +37,3 @@ and 18 were measured on Cosmos. The winning 24+16 layout averaged 1300.42 ms
 in three independent hiker processes at 53.142 GiB peak allocated memory.
 The additive solver averaged 2757.26 ms and the tuned manual layout averaged
 1318.19 ms on that evaluation workload.
-[Experiment report](https://github.com/Gxj230958/FastVideo/blob/d4dc0a2351c239384c8d5086df13d6730f7b2e9d/examples/train/activation_memory/PROJECT_REPORT.md).

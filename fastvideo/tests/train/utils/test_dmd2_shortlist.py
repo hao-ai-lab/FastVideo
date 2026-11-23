@@ -6,13 +6,7 @@ import sys
 
 import pytest
 
-
-@pytest.fixture
-def selector(monkeypatch):
-    examples = Path(__file__).resolve().parents[4] / 'examples/train/activation_memory'
-    monkeypatch.syspath_prepend(str(examples))
-    import select_joint_plan
-    return select_joint_plan
+from examples.train.activation_memory import select_joint_plan as selector
 
 
 def profile():
@@ -27,7 +21,7 @@ def profile():
     return {'fixed_device_bytes': [8, 4], 'blocks': blocks, 'metadata': {'world_size': 1, 'model': 'wan'}}
 
 
-def test_filter_checks_uniform_positions_and_each_event(selector):
+def test_filter_checks_uniform_positions_and_each_event():
     rows = {(r['student'], r['critic']): r for r in selector.candidates(profile(), 8)}
     assert len(rows) == 56
     assert rows[15, 4]['feasible']  # Odd student blocks, both events exactly at budget.
@@ -37,7 +31,7 @@ def test_filter_checks_uniform_positions_and_each_event(selector):
 
 
 @pytest.mark.parametrize('wrong_position', [False, True])
-def test_cli_selects_measured_feasible_layout(selector, tmp_path, monkeypatch, wrong_position):
+def test_cli_selects_measured_feasible_layout(tmp_path, monkeypatch, wrong_position):
     monkeypatch.setattr(selector, 'STUDENT_COUNTS', (0, 15))
     monkeypatch.setattr(selector, 'CRITIC_COUNTS', (0,))
     source = tmp_path / 'profile.json'
