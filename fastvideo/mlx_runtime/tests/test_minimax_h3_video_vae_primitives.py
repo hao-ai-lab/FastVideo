@@ -15,6 +15,7 @@ def _as_f32(array) -> np.ndarray:
 
 @pytest.mark.parametrize("dtype,rtol,atol", [
     (mx.float32, 1e-5, 1e-5),
+    (mx.float16, 2**-9, 2e-3),
     (mx.bfloat16, 2**-6, 1e-2),
 ])
 def test_rms_norm_primitives_match_eager(dtype, rtol: float, atol: float) -> None:
@@ -37,18 +38,20 @@ def test_rms_norm_primitives_match_eager(dtype, rtol: float, atol: float) -> Non
     np.testing.assert_allclose(_as_f32(actual_h), _as_f32(expected_h), rtol=rtol, atol=atol)
 
 
-def test_rms_norm_affine_handles_mixed_weight_dtype() -> None:
+@pytest.mark.parametrize("dtype", [mx.float16, mx.bfloat16])
+def test_rms_norm_affine_handles_mixed_weight_dtype(dtype) -> None:
     rng = np.random.default_rng(19)
-    hidden = mx.array(rng.standard_normal((11, 1, 64)).astype(np.float32)).astype(mx.bfloat16)
+    hidden = mx.array(rng.standard_normal((11, 1, 64)).astype(np.float32)).astype(dtype)
     weight_fp32 = mx.array((1.0 + rng.standard_normal((64, )) * 0.1).astype(np.float32))
     out = vae._rms_norm_affine(hidden, weight_fp32, 1e-5)
-    assert out.dtype == mx.bfloat16
-    ref = mx.fast.rms_norm(hidden, weight_fp32.astype(mx.bfloat16), 1e-5)
+    assert out.dtype == dtype
+    ref = mx.fast.rms_norm(hidden, weight_fp32.astype(dtype), 1e-5)
     np.testing.assert_array_equal(_as_f32(out), _as_f32(ref))
 
 
 @pytest.mark.parametrize("dtype,rtol,atol", [
     (mx.float32, 1e-5, 1e-6),
+    (mx.float16, 2**-10, 1e-4),
     (mx.bfloat16, 2**-7, 0.0),
 ])
 @pytest.mark.parametrize("seq_len", [17, 29])
@@ -75,6 +78,7 @@ def test_compiled_rotary_matches_eager(dtype, rtol: float, atol: float, seq_len:
 
 @pytest.mark.parametrize("dtype,rtol,atol", [
     (mx.float32, 1e-5, 1e-6),
+    (mx.float16, 2**-10, 1e-4),
     (mx.bfloat16, 2**-7, 0.0),
 ])
 @pytest.mark.parametrize("seq_len", [11, 37])
@@ -133,7 +137,6 @@ def test_transformer_block_matches_eager_fp32() -> None:
         qk_norm_eps=eps,
     )
 
-    # Eager fp32 reference without mx.fast.rms_norm or mx.compile.
     def eager_rms(t, w=None):
         norm = t / mx.sqrt(mx.mean(t * t, axis=-1, keepdims=True) + eps)
         return norm * w if w is not None else norm
