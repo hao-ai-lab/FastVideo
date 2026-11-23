@@ -19,8 +19,11 @@ Each candidate runs in a fresh process with two warmups and five timed updates.
 For a host with a device availability check, pass its shell script with
 `--launcher`. Use a separate output directory per tuning run. The matrix
 records predicted feasibility for every pair and observed timing and memory
-for each executed pair. The winner has the lowest mean complete-step time
-among executed layouts whose observed peak also satisfies the budget.
+for each successful run. When a benchmark exits with a nonzero code, the matrix
+records its failure, exit code and log path, and tuning continues. The winner has the lowest mean complete-step time
+among successful runs whose observed peak also satisfies the budget. If none
+qualify, the matrix retains all results with a null winner and the selector exits
+with status 1.
 
 Freeze the winning counts and evaluate on a separate sample and its matching
 parquet, using the same model and allocator settings.

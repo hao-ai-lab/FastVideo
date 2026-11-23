@@ -13,7 +13,6 @@ CRITIC_COUNTS = (0, 4, 8, 12, 16, 20, 24, 30)
 
 
 def uniform_layout(saved_count):
-    # profile_wan.policy_for(..., 'uniform') selects the midpoint of each interval.
     saved = {int((i + 0.5) * 30 / saved_count) for i in range(saved_count)}
     return {f'blocks.{i}': 'save' if i in saved else 'recompute' for i in range(30)}
 
@@ -41,11 +40,15 @@ def measure(args, row):
     student, critic = row['student'], row['critic']
     target = args.output.parent / f'candidate_{student}_{critic}.json'
     command = ['bash', args.launcher] if args.launcher else [sys.executable]
-    with target.with_suffix('.log').open('w') as log:
-        subprocess.run([*command, str(Path(__file__).with_name('profile_dmd2.py')), '--model', args.model,
-                        '--training-sample', args.training_sample, '--data', args.data, '--policy', 'uniform',
-                        '--save-count', str(student), '--critic-save-count', str(critic), '--warmup', '2',
-                        '--steps', '5', '--output', str(target)], check=True, stdout=log, stderr=subprocess.STDOUT)
+    log_path = target.with_suffix('.log')
+    with log_path.open('w') as log:
+        process = subprocess.run(
+            [*command, str(Path(__file__).with_name('profile_dmd2.py')), '--model', args.model,
+             '--training-sample', args.training_sample, '--data', args.data, '--policy', 'uniform',
+             '--save-count', str(student), '--critic-save-count', str(critic), '--warmup', '2',
+             '--steps', '5', '--output', str(target)], check=False, stdout=log, stderr=subprocess.STDOUT)
+    if process.returncode:
+        return dict(status='failed', returncode=process.returncode, log=log_path.name)
     run = json.loads(target.read_text())
     if run['manual_policies'] != policies(student, critic):
         raise ValueError(f'Measured block positions differ from the profiled layout in {target}')
@@ -76,7 +79,7 @@ def main():
     for row in feasible:
         row.update(measure(args, row))
         args.output.write_text(json.dumps(result, indent=2) + '\n')
-    measured = [r for r in feasible if r['peak_bytes'] <= budget]
+    measured = [r for r in feasible if 'peak_bytes' in r and r['peak_bytes'] <= budget]
     if measured:
         result['winner'] = min(measured, key=lambda r: r['mean_ms'])
     args.output.write_text(json.dumps(result, indent=2) + '\n')
