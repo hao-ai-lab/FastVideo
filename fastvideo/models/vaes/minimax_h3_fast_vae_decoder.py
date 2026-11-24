@@ -146,6 +146,7 @@ class NonCausalViTDecoder(nn.Module):
         self.pos_embed = RotaryEmbeddingND(int(dim_head * rope_dim_ratio), rope_theta)
         self.heads, self.dh = heads, dim_head
         self.attn_no_mask = bool(envs.FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK.get())
+        self.token_chunk = int(envs.FASTVIDEO_H3_FAST_VAE_TOKEN_CHUNK.get())
         self.register_buffer("latents_mean", torch.as_tensor(latents_mean, dtype=torch.float32), persistent=False)
         self.register_buffer("latents_std", torch.as_tensor(latents_std, dtype=torch.float32), persistent=False)
 
@@ -266,9 +267,63 @@ class NonCausalViTDecoder(nn.Module):
             og = F.scaled_dot_product_attention(qgh, Kg, Vg, attn_mask=gm).transpose(1, 2).reshape(B, nb, S, -1)
         x = x + blk.attn.to_out(o) * blk.scale1
         g = g + blk.attn.to_out(og) * blk.scale1
-        x = x + blk.ff(blk.norm2(x.float()).to(x.dtype)) * blk.scale2
+        x = x + self._ffn(blk, x) * blk.scale2
         g = g + blk.ff(blk.norm2(g.float()).to(g.dtype)) * blk.scale2
         return x, g
+
+    def _ffn(self, blk, x):
+        """The block feed-forward on flat tokens, sliced when ``token_chunk`` is set.
+
+        The norm and both linears act on each row independently, so slicing is exact; it caps the
+        ``w1`` activation (``2 * 4 * dim`` per token, the decoder's largest single transient) at
+        ``token_chunk`` rows instead of the whole ``T*H*W`` sequence. The exception is
+        ``FASTVIDEO_H3_FAST_VAE_FP8`` with dynamic activation scales: each slice then gets its own
+        per-tensor scale, so the result is approximate (as that FP8 tier already is).
+        """
+        if self.token_chunk <= 0:
+            return blk.ff(blk.norm2(x.float()).to(x.dtype))
+        shape = x.shape
+        xf = x.reshape(-1, shape[-1])
+        if xf.shape[0] <= self.token_chunk:
+            return blk.ff(blk.norm2(x.float()).to(x.dtype))
+        chunks = []
+        for start in range(0, xf.shape[0], self.token_chunk):
+            part = xf[start:start + self.token_chunk]
+            chunks.append(blk.ff(blk.norm2(part.float()).to(x.dtype)))
+        return torch.cat(chunks, dim=0).view(shape)
+
+    def _project_pixels(self, x, B, T, H, W):
+        """``norm_out`` + ``proj_out`` + the patch reshape/trim, sliced by latent frame when chunked."""
+        spans = []
+        for t0 in range(0, T, self.block):
+            start = t0 * PATCH_T + self.frames_to_trim
+            end = min((t0 + self.block) * PATCH_T, T * PATCH_T)
+            if end > start:
+                spans.append((start, end))
+        n_keep = sum(end - start for start, end in spans)
+        if self.token_chunk <= 0:
+            t_chunk = T
+        else:
+            t_chunk = max(self.block, (self.token_chunk // (H * W * self.block)) * self.block)
+        result = None
+        position = 0
+        for t0 in range(0, T, t_chunk):
+            t1 = min(t0 + t_chunk, T)
+            out = self.norm_out(x[:, t0:t1])
+            with torch.autocast("cuda", enabled=False):
+                out = self.proj_out(out.float())
+            out = out.view(B, t1 - t0, H, W, OUT_CH, PATCH_T, PATCH, PATCH).permute(0, 4, 1, 5, 2, 6, 3, 7)
+            out = out.reshape(B, OUT_CH, (t1 - t0) * PATCH_T, H * PATCH, W * PATCH)
+            if result is None:
+                result = out.new_empty((B, OUT_CH, n_keep, H * PATCH, W * PATCH))
+            src0, src1 = t0 * PATCH_T, t1 * PATCH_T
+            for start, end in spans:
+                low, high = max(start, src0), min(end, src1)
+                if high <= low:
+                    continue
+                result[:, :, position:position + (high - low)] = out[:, :, low - src0:high - src0]
+                position += high - low
+        return result
 
     # ------------------------------------------------------------------ forward
     def forward(self, z):
@@ -289,12 +344,4 @@ class NonCausalViTDecoder(nn.Module):
         self._geom = (B, T, H, W, nb, S)
         for li, blk in enumerate(self.blocks):
             x, g = self._layer(li, blk, x, g)
-        x = self.norm_out(x)
-        with torch.autocast("cuda", enabled=False):
-            out = self.proj_out(x.float())                                  # B,T,H,W,3*4*16*16
-        out = out.view(B, T, H, W, OUT_CH, PATCH_T, PATCH, PATCH).permute(0, 4, 1, 5, 2, 6, 3, 7)
-        out = out.reshape(B, OUT_CH, T * PATCH_T, H * PATCH, W * PATCH)
-        keep = torch.ones(T * PATCH_T, dtype=torch.bool, device=dev)
-        for t in range(0, T, tb):
-            keep[t * PATCH_T: t * PATCH_T + self.frames_to_trim] = False
-        return out[:, :, keep]
+        return self._project_pixels(x, B, T, H, W)

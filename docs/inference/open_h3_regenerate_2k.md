@@ -109,7 +109,27 @@ are released between stages and a later request pays a host-to-device reload.
 
 `FASTVIDEO_H3_PROMPT_EMBEDS_CACHE` and `FASTVIDEO_H3_DRAFT_LATENT_CACHE` reuse the text-encoder output and the draft VAE
 encode across identical requests. The prompt-embeds cache is disabled when the text encoder is tensor-parallel, so a
-per-rank hit cannot make one rank skip the encoder while its peers wait in the encoder's collectives.
+per-rank hit cannot make one rank skip the encoder while its peers wait in the encoder's collectives. Under
+`FASTVIDEO_VAE_PARALLEL_ENCODE` the draft-latent cache is used only when every rank hits.
+
+### Two Sparks
+
+With `sp_size=2` over the QSFP link (Ray, `examples/inference/optimizations/spark_pair_env.sh`), Sol-Attn runs on each
+rank's half of the heads over the full sequence. These opt-ins, on top of the `sol_engine_fast` + MXFP8 + fast-decoder
+preset, keep the DiT resident and hide most of the exchange:
+
+| Variable | Effect |
+|---|---|
+| `FASTVIDEO_H3_SOLSP_EXCHANGE=peer` | Two-rank `batch_isend_irecv` of only the peer's head slice instead of the generic all-to-all (no cat or head-major transposes). Exact. |
+| `FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE=1` | Post Q's exchange while K and V still project. Exact. `FASTVIDEO_H3_SOLSP_QKV_CHUNKS` is the sequence-split variant; it is slower on the MXFP8 path. |
+| `FASTVIDEO_H3_SOLSP_OUT_PAD_M=80000` | Pad the `to_out` rows past the sm_121 MXFP8 tile threshold (58 vs 182 TFLOPS at the halved M); the padded rows are dropped. Exact up to the tile's reduction order. |
+| `FASTVIDEO_H3_RELEASE_LORA_ADAPTER=1` | Drop the merged adapter factors (~11.6 GiB) so `FASTVIDEO_H3_KEEP_DIT_RESIDENT=1` fits next to the 2K decode. Released layers cannot unmerge or switch adapters, so use it for a fixed-adapter server. |
+| `FASTVIDEO_VAE_PARALLEL_DECODE=1` | With the fast decoder, each rank decodes its native blocks plus a one-block halo (~41 dB vs the single-rank decode, inside the pipeline's cross-process spread). |
+| `FASTVIDEO_VAE_PARALLEL_ENCODE=1` | Split the draft encode's clips across the ranks. Exact. |
+
+On a new FastH3 768p draft handed over as a bundle, with `draft_bundle_prompt_embeds="always"`, a 2560x1440, 124-frame
+refine takes 158 s warm and 270 s cold (one Spark, without the bundle or a resident DiT: 510 s warm). About 12.6 s per request of the exchange is not yet
+overlapped.
 
 ## NVFP4 video decoder
 

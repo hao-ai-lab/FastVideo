@@ -494,6 +494,39 @@ FASTVIDEO_H3_SOL_ATTN = EnvChoice(
     doc="Open-H3-Regenerate-2K refine attention through NVlabs' training-free Sol-Attn block-sparse kernel (needs the "
     "optional sol_attn package). sol_engine: step 0 dense, steps 1-2 tau 1.0; sol_engine_fast: every step tau 1.75; "
     "the _tau0 variants run step 0 sparse at tau 0.0. Approximate tier; off keeps dense attention.")
+FASTVIDEO_H3_SOLSP_EXCHANGE = EnvChoice(
+    "legacy",
+    choices=("legacy", "peer"),
+    category="performance",
+    doc="Transport for the sequence-parallel Sol-Attn QKV/output exchange. 'legacy' runs the generic AllToAll4D "
+    "(cat + head-major transpose + all_to_all_single + cat/transpose back, ~12 GB of copies per block at 2K). "
+    "'peer' uses a two-rank batch_isend_irecv of only the peer's attention-head slice, so no cat and no transposes "
+    "are materialized. Exact tier: identical BF16 values; only two ranks and head_dim=128 are supported, otherwise "
+    "the legacy path runs.")
+FASTVIDEO_H3_SOLSP_QKV_CHUNKS = EnvInt(
+    1,
+    category="performance",
+    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, split the local sequence shard into this many pieces and post each "
+    "piece's QKV batch_isend_irecv as soon as its projection finishes, so the NCCL high-priority stream drains "
+    "chunk c while the compute stream runs chunk c+1's projection. 1 keeps the monolithic peer path. Exact tier: "
+    "same BF16 projection/norm/RoPE values and the same exchange; only the launch order changes. Runs only when "
+    "the QKV input quantization is row-independent (BF16, MXFP8, per-token FP8, unit or calibrated NVFP4 scales); "
+    "per-tensor dynamic FP8 or dynamic NVFP4 activation scales keep the monolithic peer path.")
+FASTVIDEO_H3_SOLSP_QKV_TENSOR_PIPE = EnvBool(
+    False,
+    category="performance",
+    doc="With FASTVIDEO_H3_SOLSP_EXCHANGE=peer, compute the Q/K/V projections one at a time and post each tensor's "
+    "batch_isend_irecv as soon as it is ready, so the Q exchange drains while K/V still project. Unlike a sequence "
+    "split this keeps the full GEMM M dimension. Exact tier: same BF16 projection/norm/RoPE values and the same "
+    "exchange; only the launch order changes.")
+FASTVIDEO_H3_SOLSP_OUT_PAD_M = EnvInt(
+    0,
+    category="performance",
+    doc="On the peer Sol-Attn exchange paths, pad the attention output's M dimension up to at least this many rows "
+    "before to_out (the ordinary, tensor-pipelined and chunked peer routes). On sm_121 F.scaled_mm selects a ~3x "
+    "slower tile for the H3 to_out shape (K=7168, N=5376) when M is below ~80000, so padding to 80000 makes the "
+    "fast tile run and the extra rows are dropped. Row-independent, so exact up to the tile's K-reduction order. 0 "
+    "disables the pad.")
 FASTVIDEO_H3_FAST_VAE_DECODER = EnvPath(
     None,
     category="performance",
@@ -539,6 +572,15 @@ FASTVIDEO_H3_FAST_VAE_ATTN_NOMASK = EnvBool(
     "the softmax denominator; the maskless output times exp(lse)/(exp(lse)-n_invalid) equals the masked output. On "
     "sm_121 the bool mask forces the sm_80 memory-efficient kernel (2.3x slower than flash at the decoder's window "
     "shape). Exact tier: same math at bf16 rounding. Requires FASTVIDEO_H3_FAST_VAE_COMPILE for the full gain.")
+FASTVIDEO_H3_FAST_VAE_TOKEN_CHUNK = EnvInt(
+    0,
+    category="performance",
+    doc="Token chunk for the FASTVIDEO_H3_FAST_VAE_DECODER feed-forward and final output projection. 0 keeps the "
+    "layer whole, which on GB10 holds the decoder at its ~35 GiB peak; a positive value (e.g. 32768) runs the same "
+    "linears on flat token slices, which cuts the 2K decode peak enough to fit next to a resident DiT under the "
+    "unified-memory watchdog. Exact tier in BF16 and with FASTVIDEO_H3_FAST_VAE_FP8_STATIC (row-independent); with "
+    "FASTVIDEO_H3_FAST_VAE_FP8 and dynamic activation scales each slice gets its own per-tensor scale, so that "
+    "combination is approximate.")
 FASTVIDEO_H3_MXFP8_RELEASE_BF16 = EnvBool(
     False,
     category="performance",
@@ -932,6 +974,16 @@ FASTVIDEO_H3_KEEP_VAE_RESIDENT = EnvBool(False,
                                          "across requests instead of releasing it after the video-decoding "
                                          "stage. Saves the ~76 s host-to-device reload the Spark pays before "
                                          "every draft encode, at the cost of ~9.7 GiB held during the refine.")
+FASTVIDEO_H3_RELEASE_LORA_ADAPTER = EnvBool(
+    False,
+    category="performance",
+    doc="After the constructor LoRA adapter is merged and its packed weights rebuilt, drop the in-memory "
+    "low-rank factors (the wrapped linear's lora_A/lora_B and the pipeline's adapter dict, ~11.6 GiB for the "
+    "Open-H3-Regenerate-2K 12.4 GB adapter). On unified memory the factors are a second resident copy of the "
+    "delta beside the packed weights; an inference server that keeps the DiT resident never unmerges, so "
+    "releasing them gives the 2K fast-decoder decode the headroom to coexist with "
+    "FASTVIDEO_H3_KEEP_DIT_RESIDENT. Exact tier: the merged weights are already baked into the packed buffers. "
+    "Released layers cannot unmerge or switch adapters (that raises), so use it only for a fixed-adapter server.")
 FASTVIDEO_H3_PROMPT_EMBEDS_CACHE = EnvStr(
     "",
     category="performance",
