@@ -37,10 +37,10 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
 At tile256, FA4 CuTe or the Triton 256-to-64 expansion implements attention.
 Tile64 uses Triton by default; ``FASTVIDEO_VSA_PTX_BLACKWELL=1`` opts into
 native Blackwell forward and its registered autograd operator for training.
-Tile128 requires the native Blackwell forward and, when gradients are tracked,
-the native128 backward. Missing support fails explicitly; no64-token fallback
-can implement128-token masks. ``FASTVIDEO_VSA_TRITON=1`` keeps tile64 training
-on Triton and is incompatible with tile128 training.
+Tile128 training requires the native Blackwell forward and the native128
+backward, and fails explicitly without them; tile128 inference also has a
+Triton fallback (below). ``FASTVIDEO_VSA_TRITON=1`` keeps tile64 training on
+Triton and is incompatible with tile128 training.
 
 An odd native64/128 tile count gets one internal, zero-valid partner tile.
 Selection, compression, and returned rows retain the logical geometry. Training
@@ -804,7 +804,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             ptx_blackwell_requested = grad_mode and envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
         else:
             ptx_blackwell_requested = envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
-        # Tile 128 has no route other than the ptx_blackwell CUDA kernel.
+        # Tile 128 prefers the ptx_blackwell CUDA kernel; inference falls back to split Triton tile-64 halves.
         ptx_blackwell_route = attn_metadata.tile_elems == 128 or (attn_metadata.tile_elems == 64
                                                                   and ptx_blackwell_requested)
         if regional_compiling:
