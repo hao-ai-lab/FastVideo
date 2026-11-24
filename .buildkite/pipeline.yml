@@ -51,68 +51,20 @@ steps:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
 
-  - label: ":microscope: Unit Tests"
-    key: "unit"
+  - label: ":microscope: Transformer Tests"
+    key: "transformer"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,unit,/) ||
+       build.env("MERGE_TEST_PLAN") =~ /,transformer,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "unit_test" || build.env("TEST_TYPE") == "unit_test_ci"))
-    command: "/opt/fastvideo-ci-runner/run-unit"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "unit_test_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-      backend: "${FV_SPARK_BACKEND:-slurm}"
-
-  - label: ":microscope: Kernel Tests"
-    key: "kernel-tests"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
+       (build.env("TEST_TYPE") == "transformer" || build.env("TEST_TYPE") == "transformer_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
     timeout_in_minutes: 90
     env:
-      TEST_TYPE: "kernel_tests_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-      backend: "${FV_SPARK_BACKEND:-slurm}"
-
-  - label: ":microscope: DreamVerse App Tests"
-    key: "dreamverse"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,dreamverse,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "dreamverse_app" || build.env("TEST_TYPE") == "dreamverse_app_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "dreamverse_app_ci"
+      TEST_TYPE: "transformer_ci"
     retry:
       automatic:
         - exit_status: 128
@@ -147,6 +99,30 @@ steps:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
 
+  - label: ":microscope: Unit Tests"
+    key: "unit"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,unit,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "unit_test" || build.env("TEST_TYPE") == "unit_test_ci"))
+    command: "/opt/fastvideo-ci-runner/run-unit"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "unit_test_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
+
   - label: ":microscope: VAE Tests"
     key: "vae"
     if: |
@@ -171,20 +147,44 @@ steps:
       queue: "ci-runner"
       backend: "${FV_SPARK_BACKEND:-slurm}"
 
-  - label: ":microscope: Transformer Tests"
-    key: "transformer"
+  - label: ":microscope: DreamVerse App Tests"
+    key: "dreamverse"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,transformer,/) ||
+       build.env("MERGE_TEST_PLAN") =~ /,dreamverse,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "transformer" || build.env("TEST_TYPE") == "transformer_ci"))
+       (build.env("TEST_TYPE") == "dreamverse_app" || build.env("TEST_TYPE") == "dreamverse_app_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
     timeout_in_minutes: 90
     env:
-      TEST_TYPE: "transformer_ci"
+      TEST_TYPE: "dreamverse_app_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+      backend: "${FV_SPARK_BACKEND:-slurm}"
+
+  - label: ":microscope: Kernel Tests"
+    key: "kernel-tests"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "kernel_tests_ci"
     retry:
       automatic:
         - exit_status: 128
