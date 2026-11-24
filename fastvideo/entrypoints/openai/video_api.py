@@ -10,7 +10,7 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
@@ -40,10 +40,13 @@ from fastvideo.entrypoints.openai.state import (
     get_served_model_name,
     get_server_args,
     get_serving_engine,
+    request_model_profile,
 )
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 from fastvideo.entrypoints.openai.utils import parse_size, save_image_to_path
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.basic.minimax_h3.draft_bundle import BUNDLE_MEDIA_TYPE, BUNDLE_SUFFIX
+from fastvideo.registry import get_preset_selection
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
@@ -155,9 +158,15 @@ def _media_type_for_path(path: str) -> str:
     return "audio/wav" if path.lower().endswith(".wav") else "video/mp4"
 
 
+def _draft_bundle_path(file_path: str) -> str:
+    """The draft bundle a MiniMax-H3 request writes beside its video (``{request_id}.h3draft.pt``)."""
+    stem = os.path.splitext(os.path.basename(file_path))[0]
+    return os.path.join(os.path.dirname(file_path), f"{stem}{BUNDLE_SUFFIX}")
+
+
 def _remove_artifact(file_path: str | None) -> None:
     if file_path:
-        discard_materialized_media([file_path])
+        discard_materialized_media([file_path, _draft_bundle_path(file_path)])
 
 
 def _remove_artifacts(file_path: str | None, materialized: list[str]) -> None:
@@ -307,6 +316,9 @@ def _parse_json_form_value(name: str, value: Any) -> Any:
 
 
 async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
+    cached = getattr(raw_request.state, "parsed_catalog_video", None)
+    if cached is not None:
+        return cached
     content_type = raw_request.headers.get("content-type", "").lower()
     if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
         form = await raw_request.form()
@@ -383,8 +395,36 @@ async def _adapt_request(request_id: str,
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-@router.post("", response_model=VideoResponse)
-@router.post("/generations", response_model=VideoResponse, include_in_schema=False)
+async def _catalog_profile(raw_request: Request):
+    manager = get_serving_engine().model_manager
+    if manager is None:
+        yield
+        return
+    request = await _parse_video_request(raw_request)
+    try:
+        profile = manager.catalog.resolve(request.model, request.task)
+        if not profile.installed:
+            raise ValueError(f"Model {profile.model} is not installed locally")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    # The catalog uses `task` as a profile key; the request-level task selector is only defined
+    # for MiniMax-H3, so drop it for other families before the adapter applies its model-specific check.
+    _, model_family = get_preset_selection(profile.config.generator.model_path)
+    if request.task is not None and model_family != "minimax_h3":
+        request = request.model_copy(update={"task": None})
+    raw_request.state.parsed_catalog_video = request
+    token = request_model_profile.set(profile)
+    try:
+        yield
+    finally:
+        request_model_profile.reset(token)
+
+
+@router.post("", response_model=VideoResponse, dependencies=[Depends(_catalog_profile)])
+@router.post("/generations",
+             response_model=VideoResponse,
+             include_in_schema=False,
+             dependencies=[Depends(_catalog_profile)])
 async def create_video(raw_request: Request) -> VideoResponse:
     """Create an asynchronous video generation job."""
     request = await _parse_video_request(raw_request)
@@ -403,10 +443,14 @@ async def create_video(raw_request: Request) -> VideoResponse:
     return VideoResponse(**job)
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(_catalog_profile)])
 async def create_video_sync(raw_request: Request) -> FileResponse:
     """Generate synchronously and return the generated media with vLLM headers."""
     request = await _parse_video_request(raw_request)
+    if request.return_draft_bundle:
+        raise HTTPException(status_code=400,
+                            detail="return_draft_bundle is not supported on /v1/videos/sync; submit POST /v1/videos "
+                            "and download GET /v1/videos/{id}/draft_bundle.")
     request_id = f"video_sync-{generate_request_id()}"
     generation_request, materialized_media, lora = await _adapt_request(request_id, request)
     started = time.perf_counter()
@@ -523,11 +567,30 @@ async def download_video_content(video_id: str = Path(...), variant: str | None 
                         filename=os.path.basename(file_path))
 
 
+@router.get("/{video_id}/draft_bundle")
+async def download_draft_bundle(video_id: str = Path(...)) -> FileResponse:
+    """The MiniMax-H3 draft bundle of a completed job created with ``return_draft_bundle``."""
+    job = await VIDEO_STORE.get(video_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    status = VideoGenerationStatus(job.get("status", VideoGenerationStatus.QUEUED))
+    file_path = job.get("file_path")
+    if status is not VideoGenerationStatus.COMPLETED or not file_path:
+        raise HTTPException(status_code=404, detail="Generation is not complete")
+    bundle_path = _draft_bundle_path(file_path)
+    if not os.path.exists(bundle_path):
+        raise HTTPException(status_code=404,
+                            detail="No draft bundle for this video; create it with "
+                            "return_draft_bundle=true on a MiniMax-H3 server")
+    return FileResponse(path=bundle_path, media_type=BUNDLE_MEDIA_TYPE, filename=os.path.basename(bundle_path))
+
+
 __all__ = [
     "_build_generation_kwargs",
     "create_video",
     "create_video_sync",
     "delete_video",
+    "download_draft_bundle",
     "download_video_content",
     "list_videos",
     "retrieve_video",

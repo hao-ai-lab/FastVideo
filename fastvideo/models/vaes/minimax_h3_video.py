@@ -714,6 +714,9 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         )
         # The released encoder and decoder stay in FP32 for both weights and compute.
         self.float()
+        # Lazily installed fixed-shape CUDA-graph encoder-tile graph (opt-in via
+        # ``FASTVIDEO_H3_VAE_COMPILE_ENCODER``); ``None`` keeps the encoder eager.
+        self._compiled_encode_tile: Callable[[torch.Tensor], torch.Tensor] | None = None
 
     def to(self, *args, **kwargs) -> "AutoencoderKLMiniMaxH3":
         device, dtype, non_blocking, memory_format = torch._C._nn._parse_to(*args, **kwargs)
@@ -859,9 +862,42 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         """Project one spatial latent tile into the decoder input channels."""
         return self.post_quant_conv(tile)
 
+    def _encode_tile_eager(self, tile: torch.Tensor) -> torch.Tensor:
+        """One encoder tile: causal-3D-CNN encoder followed by the 1x1 quant conv."""
+        return self.quant_conv(self.encoder(tile))
+
+    def _ensure_encode_tile_compiled(self) -> None:
+        """Install the opt-in fixed-shape CUDA-graph encoder-tile graph.
+
+        Every tile of the encoder grid has the same shape (``_split_tiles`` always
+        emits full tiles), so one ``mode="reduce-overhead"`` graph serves the whole
+        encode.  Called lazily on the first ``_encode_clip`` so the VAE weights are
+        already on the accelerator.
+        """
+        if getattr(self, "_compiled_encode_tile", None) is not None:
+            return
+        if not envs.FASTVIDEO_H3_VAE_COMPILE_ENCODER.get():
+            return
+        self._compiled_encode_tile = torch.compile(
+            self._encode_tile_eager,
+            backend="inductor",
+            mode="reduce-overhead",
+            dynamic=False,
+        )
+
+    def _encode_tile(self, tile: torch.Tensor) -> torch.Tensor:
+        compiled = getattr(self, "_compiled_encode_tile", None)
+        if compiled is None:
+            return self._encode_tile_eager(tile)
+        # The reduce-overhead graph writes into a CUDA-graph-pooled output buffer
+        # that the next replay reuses; hand callers owned storage (as the
+        # _stitch_tiles contract does) before the tile is retained.
+        return compiled(tile).clone()
+
     def _encode_clip(self, x: torch.Tensor) -> torch.Tensor:
+        self._ensure_encode_tile_compiled()
         if not self.use_tiling:
-            return self.quant_conv(self.encoder(x))
+            return self._encode_tile(x)
         height, width = x.shape[-2:]
         y_indices, y_lengths, y_overlaps = self._split_tiles(
             height,
@@ -884,14 +920,14 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             encoded: list[torch.Tensor] = []
             for start in range(0, len(tiles), per_call):
                 batch = torch.cat(tiles[start:start + per_call], dim=0)
-                encoded.extend(self.quant_conv(self.encoder(batch)).split(x.shape[0], dim=0))
+                encoded.extend(self._encode_tile(batch).split(x.shape[0], dim=0))
             columns = len(x_indices)
             rows = [encoded[index:index + columns] for index in range(0, len(encoded), columns)]
         for y_position, y_length in zip(y_indices, y_lengths) if not rows else ():
             row = []
             for x_position, x_length in zip(x_indices, x_lengths):
                 tile = x[..., y_position:y_position + y_length, x_position:x_position + x_length]
-                row.append(self.quant_conv(self.encoder(tile)))
+                row.append(self._encode_tile(tile))
             rows.append(row)
         latent_y_overlaps = [overlap // self.spatial_compression_ratio for overlap in y_overlaps]
         latent_x_overlaps = [overlap // self.spatial_compression_ratio for overlap in x_overlaps]

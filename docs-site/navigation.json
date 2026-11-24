@@ -136,6 +136,10 @@
         "display": "group"
       },
       {
+        "label": "FastKandinsky 6.0 NVFP4",
+        "href": "/inference/fastkandinsky6"
+      },
+      {
         "label": "PAN 2 text/image to video",
         "href": "/inference/pan2"
       },

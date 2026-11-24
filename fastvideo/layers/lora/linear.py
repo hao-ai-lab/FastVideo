@@ -51,6 +51,36 @@ def _add_low_rank_inplace_fake(out: torch.Tensor, x: torch.Tensor, lora_a: torch
     return None
 
 
+def _unified_memory_weight(weight: torch.Tensor) -> bool:
+    """Whether ``weight`` lives in a unified CPU/GPU pool (DGX Spark, GB10).
+
+    On those parts a host copy is a second allocation from the *same* physical memory as the device
+    weights, so the per-layer unmerge snapshot is not the cheap insurance it is on a discrete GPU: the
+    six H3 projections per block total about 38 GiB at 2K and are what push the dense refine over the
+    112 GiB cgroup cap. Inference there applies one constructor-time adapter and never unmerges it.
+    """
+    if weight.device.type != "cuda":
+        return False
+    try:
+        from fastvideo.platforms import current_platform
+        return bool(current_platform.has_unified_memory(weight.device.index or 0))
+    except Exception:  # pragma: no cover - a platform probe must never break weight loading
+        return False
+
+
+def _skips_unmerge_snapshot(base_layer: nn.Module) -> bool:
+    """Whether a unified-memory layer merges without a CPU snapshot.
+
+    NVFP4 layers keep it: they drop their dense weight after packing and rebuild it exactly from the snapshot when
+    an adapter changes, which reversing the delta cannot reproduce.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    if isinstance(getattr(base_layer, "quant_method", None), NVFP4QuantizeMethod):
+        return False
+    return _unified_memory_weight(base_layer.weight)
+
+
 def requires_side_branch(layer: nn.Module) -> bool:
     """Return whether an adapter must run beside ``layer`` instead of being merged into it.
 
@@ -93,11 +123,12 @@ class BaseLayerWithLoRA(nn.Module):
         self.side_branch: bool = (self.supports_side_branch and not training_mode and requires_side_branch(base_layer))
         # A frozen CPU snapshot is needed only to undo inference-time merging.
         # Training never merges adapters; retaining every H3 projection here
-        # otherwise adds several GiB of host memory per HSDP rank.
-        if training_mode or self.side_branch:
-            self.cpu_weight = None
-        else:
-            self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True)
+        # otherwise adds several GiB of host memory per HSDP rank. On unified
+        # memory that host copy is a second allocation in the same physical
+        # pool (see _unified_memory_weight), so skip it there and keep only the merge.
+        # Such a layer unmerges by reversing the delta, so the adapter factors must survive the merge.
+        keep_snapshot = not training_mode and not self.side_branch and not _skips_unmerge_snapshot(base_layer)
+        self.cpu_weight = base_layer.weight.detach().to("cpu", copy=True) if keep_snapshot else None
         # None disables history; [] starts an eligible layer.
         self._merged_loras: list[LoRAContribution] | None = [] if self._should_save_merged_loras() else None
         # indicates adapter weights don't contain this layer
@@ -255,6 +286,10 @@ class BaseLayerWithLoRA(nn.Module):
                                  "forced side branch); load one adapter at a time.")
             # Kept in bf16 so the branch matches the activation dtype of a packed base layer.
             A, B = A.to(torch.bfloat16), B.to(torch.bfloat16)
+        if not training_mode and not self.side_branch and self.merged and not accumulate:
+            # Reverse the current merge while its own factors are still in place: a snapshot-less unified-memory
+            # layer subtracts the delta, and merge_lora_weights would run after the factors below are replaced.
+            self.unmerge_lora_weights()
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -365,6 +400,18 @@ class BaseLayerWithLoRA(nn.Module):
             raise
         self.merged = True
 
+    def _unmerged_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """``weight`` minus the scaled adapter delta, for a layer merged without a snapshot.
+
+        Only used where ``cpu_weight`` was skipped (unified memory), and it needs the adapter factors, so the
+        pipeline must not release them for a layer that can still be unmerged.
+        """
+        accumulate_dtype = torch.promote_types(weight.dtype, self.lora_A.dtype)
+        lora_B = self.slice_lora_b_weights(self.lora_B.to(device=weight.device, dtype=accumulate_dtype))
+        lora_A = self.slice_lora_a_weights(self.lora_A.to(device=weight.device, dtype=accumulate_dtype))
+        scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+        return (weight.to(accumulate_dtype) - (lora_B @ lora_A) * (scale * self.lora_strength)).to(weight.dtype)
+
     @torch.no_grad()
     # @torch.compile(dynamic=True)
     def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
@@ -392,7 +439,17 @@ class BaseLayerWithLoRA(nn.Module):
         The pipeline calls this inside the block's offload mutation scope; the placement buffer follows its weights.
         """
         if self.cpu_weight is None:
-            raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
+            if (self.merged and self.lora_A is not None and self.lora_B is not None
+                    and self.base_layer.weight is not None and not isinstance(self.base_layer.weight, DTensor)):
+                # Unified-memory layers keep no full-weight snapshot; reverse the merge from the adapter factors,
+                # which therefore must outlive the merge.
+                device = self.base_layer.weight.data.device
+                data = self.base_layer.weight.data.to(get_local_torch_device())
+                self.base_layer.weight.data = self._unmerged_weight(data).to(device, non_blocking=True)
+                return
+            if self.training_mode:
+                raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
+            raise RuntimeError("LoRA layer has no unmerge snapshot and no adapter factors to reverse the merge")
         if self.base_layer.weight is None:
             if isinstance(self.cpu_weight, DTensor):
                 raise RuntimeError("Restoring a removed LoRA weight requires an unsharded CPU base snapshot.")

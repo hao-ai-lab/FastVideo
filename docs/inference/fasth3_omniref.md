@@ -193,6 +193,8 @@ The profiles set these; set them yourself when driving the YAML recipes.
 | `FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P` | `1` on QAD profiles | the P quantizer QAD trained with |
 | `FASTVIDEO_H3_VSA_FP4_K_SMOOTH` | `1` on QAD profiles | subtract the per-head key mean before FP4 quantization, as QAD trained |
 | `FASTVIDEO_H3_GATE_CHUNK_ROWS` | `8192` on QAD profiles | bit-identical gate chunking; caps the 768p10 transient |
+| `FASTVIDEO_H3_ADALN_CACHE` | `1` on Spark | exact resident per-timestep AdaLN cache; it also enables the cross-block fused driver |
+| `FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4` | optional, `1` on GB10 | approximate dense NVFP4 prefix attention: 1.38x Omni on one Spark at 20.5-23.7 dB frames |
 | `FASTVIDEO_H3_VSA_FINE_ATTENTION` | `emulator-bf16` on the 4090 | bf16 VSA on sm_89 |
 | `FASTVIDEO_H3_VAE_NVFP4_DECODER` | path to `decoder-nvfp4.safetensors` | the pre-packed NVFP4 decoder |
 | `FASTVIDEO_MINIMAX_H3_FUSIONS` | `all` | bit-exact fused kernels |

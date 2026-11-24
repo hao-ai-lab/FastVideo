@@ -264,6 +264,7 @@ It does not use frame dropping or spatial upscaling.
 FASTVIDEO_H3_VSA_FP4=1 \
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
 FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
+FASTVIDEO_H3_ADALN_CACHE=1 \
 FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
@@ -391,6 +392,16 @@ Row splitting is off globally. The single-Spark cuDNN recipe opts into
 off on other GPUs unless a matched benchmark validates the split there.
 
 ### Optional NVFP4 video decoder
+
+The published decoders are in `FastVideo/FastH3-NVFP4-VAE-Decoder`. The
+FastH3-QAD-v2 Spark recipes select the fast 8-layer one:
+
+```bash
+hf download FastVideo/FastH3-NVFP4-VAE-Decoder --include 'fast-8L/decoder-nvfp4.safetensors' --local-dir ./fasth3-nvfp4-vae
+```
+
+On a Spark pair, download it on both machines to the same absolute path;
+each worker loads the decoder from `FASTVIDEO_H3_VAE_NVFP4_DECODER` itself.
 
 `FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
 decoder distilled with quantization-aware training and exported by

@@ -40,6 +40,8 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "vsa_mode",
         "vsa_dense_first_n_steps",
         "vsa_dense_layers",
+        # MiniMax-H3 draft-bundle output path, set by the server (rejected from HTTP extra_params).
+        "h3_draft_bundle_path",
         # Kandinsky6 SR request options and inputs (Kandinsky6SROptions, read by the stages in
         # fastvideo/pipelines/stages/kandinsky6_sr.py). validate_request_batch_extra rejects them for every other
         # model. The raw-latent input and audio override are SR-prefixed so a bare "audio"/"audio_sample_rate"
@@ -52,6 +54,9 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "sr_lr_latent",
         "sr_audio",
         "sr_audio_sample_rate",
+        # MiniMax-H3 draft handoff: the bundle a generator saved, read by Open-H3-Regenerate-2K as its draft
+        # (fastvideo/pipelines/basic/minimax_h3/draft_bundle.py).
+        "h3_draft_bundle_path",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 

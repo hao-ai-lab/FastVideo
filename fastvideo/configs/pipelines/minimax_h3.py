@@ -183,6 +183,9 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     vae_precision: str = "fp32"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
     vae_sp: bool = False
+    # Retained CPU tensor bytes for repeated pure T2VA text conditioning.
+    # Zero disables reuse; multi-rank and reference-conditioned runs do not use it.
+    text_conditioning_cache_max_bytes: int = 0
     # Parallel Decoding Distillation (PDD) students: fine-grid node indices of
     # the fused blocks, one transformer forward each. resolve_checkpoint_settings
     # sets it from the checkpoint's fastvideo_inference.json; None means the
@@ -195,6 +198,8 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
 
     def check_pipeline_config(self) -> None:
         super().check_pipeline_config()
+        if type(self.text_conditioning_cache_max_bytes) is not int or self.text_conditioning_cache_max_bytes < 0:
+            raise ValueError("text_conditioning_cache_max_bytes must be a non-negative integer.")
         if self.flow_shift is not None:
             raise ValueError("MiniMax-H3 uses separate checkpoint-defined video/audio scheduler shifts; "
                              "flow_shift must remain unset.")

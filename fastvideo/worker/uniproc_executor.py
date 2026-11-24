@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import gc
 import logging
 import logging.handlers
 from collections.abc import Callable
@@ -255,6 +256,42 @@ class UniprocExecutor(Executor):
                 logger.error("Error during UniprocExecutor shutdown: %s", e)
             self.driver_worker = None
         logger.info("UniprocExecutor shutdown complete")
+
+    def detach_model(self, components: tuple[str, ...]) -> dict[str, Any]:
+        """Release this worker's pipeline, retaining only the named shared objects.
+
+        The serving engine must serialize this operation with generation.
+        Distributed groups remain initialized for the next single-device model.
+        """
+        if getattr(self, "_generation_open", False):
+            raise RuntimeError("Cannot detach a model during generation")
+        worker = self.driver_worker.worker
+        if worker is None:
+            raise RuntimeError("Single-device worker has shut down")
+        pipeline = getattr(worker, "pipeline", None)
+        retained = {name: pipeline.modules[name] for name in components if name in pipeline.modules} if pipeline else {}
+        worker.pipeline = None
+        del pipeline
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return retained
+
+    def attach_model(self, fastvideo_args: FastVideoArgs, components: dict[str, Any]) -> None:
+        """Build one pipeline in the existing worker from compatible shared objects."""
+        if fastvideo_args.num_gpus != 1 or fastvideo_args.tp_size != 1 or fastvideo_args.sp_size != 1:
+            raise ValueError("Model replacement supports one device with tp_size=sp_size=1")
+        worker = self.driver_worker.worker
+        if worker is None or getattr(worker, "pipeline", None) is not None:
+            raise RuntimeError("Detach the old model before attaching its replacement")
+        from fastvideo.pipelines import build_pipeline
+
+        fastvideo_args.finalize_device_offload_policy(0)
+        worker.pipeline = build_pipeline(fastvideo_args, loaded_modules=components)
+        worker.fastvideo_args = fastvideo_args
+        self.driver_worker.fastvideo_args = fastvideo_args
+        # setattr keeps mypy's inference of the attribute (declared by Executor.__init__) on that declaration.
+        setattr(self, "fastvideo_args", fastvideo_args)  # noqa: B010
 
     def __del__(self):
         self.shutdown()

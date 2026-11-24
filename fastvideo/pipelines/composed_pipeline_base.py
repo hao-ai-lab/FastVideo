@@ -713,6 +713,22 @@ class ComposedPipelineBase(ABC):
             self._lazy_release_hooks_installed = True
             return
         schedule = self._build_lazy_release_schedule()
+        keep_resident: set[str] = set()
+        if envs.FASTVIDEO_H3_KEEP_VAE_RESIDENT.get():
+            keep_resident.add("vae")
+        if envs.FASTVIDEO_H3_KEEP_DIT_RESIDENT.get():
+            keep_resident.add("transformer")
+        if keep_resident:
+            held = sorted({name for names in schedule.values() for name in names if name in keep_resident})
+            if held:
+                schedule = {
+                    index: [name for name in names if name not in keep_resident]
+                    for index, names in schedule.items()
+                }
+                schedule = {index: names for index, names in schedule.items() if names}
+                logger.info(
+                    "FASTVIDEO_H3_KEEP_RESIDENT: %s stay materialized across requests instead of "
+                    "being released after their last stage", held)
         for index, stage in enumerate(self._stages):
             stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
 

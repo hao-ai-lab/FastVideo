@@ -28,6 +28,8 @@ def _query_pool_kernel(
     codes_ptr=None,
     scales_ptr=None,
     PACK_FP4: tl.constexpr = False,
+    PACK_STRIDE: tl.constexpr = 0,
+    PACK_PREFIX_FP8: tl.constexpr = False,
     START: tl.constexpr = 0,
     input_index_ptr=None,
     INPUT_ROWS: tl.constexpr = 0,
@@ -37,6 +39,7 @@ def _query_pool_kernel(
     PREFIX: tl.constexpr = 0,
     PREFIX_ONLY: tl.constexpr = False,
     PREFIX_FP8: tl.constexpr = False,
+    SKIP_PREFIX_STORE: tl.constexpr = False,
 ):
     # int64, like the sibling kernels: with int32 program ids,
     # ``row * head_dim`` wraps once the flattened input reaches 2**31
@@ -89,17 +92,18 @@ def _query_pool_kernel(
     output = tl.where(rotary_mask, rotary_output, normalized)
     if PREFIX_ONLY:
         output_offset = ((current_batch * PREFIX + seq_index) * num_heads + current_head) * head_dim
-        if PREFIX_FP8:
-            if tile * ROWS_PER_PROGRAM < PREFIX:
-                prefix_value = output.to(tl.bfloat16).to(tl.float32)
-                scale8 = tl.max(tl.abs(prefix_value), 1) / 448.0
-                inv8 = tl.where(scale8 == 0, 0, 1.0 / scale8)
-                prefix_value = tl.minimum(tl.maximum(prefix_value * inv8[:, None], -448.0), 448.0)
-                prefix_value = prefix_value.to(tl.float8e4nv).to(tl.float32) * scale8[:, None]
-                tl.store(out_ptr + output_offset + cols, prefix_value, mask=head_mask & (seq_index < PREFIX))
-        else:
-            tl.store(out_ptr + output_offset + cols, output.to(out_ptr.dtype.element_ty),
-                     mask=head_mask & (seq_index < PREFIX))
+        if not SKIP_PREFIX_STORE:
+            if PREFIX_FP8:
+                if tile * ROWS_PER_PROGRAM < PREFIX:
+                    prefix_value = output.to(tl.bfloat16).to(tl.float32)
+                    scale8 = tl.max(tl.abs(prefix_value), 1) / 448.0
+                    inv8 = tl.where(scale8 == 0, 0, 1.0 / scale8)
+                    prefix_value = tl.minimum(tl.maximum(prefix_value * inv8[:, None], -448.0), 448.0)
+                    prefix_value = prefix_value.to(tl.float8e4nv).to(tl.float32) * scale8[:, None]
+                    tl.store(out_ptr + output_offset + cols, prefix_value, mask=head_mask & (seq_index < PREFIX))
+            else:
+                tl.store(out_ptr + output_offset + cols, output.to(out_ptr.dtype.element_ty),
+                         mask=head_mask & (seq_index < PREFIX))
     else:
         tl.store(out_ptr + row_offset + cols, output.to(out_ptr.dtype.element_ty), mask=head_mask)
     rounded_pool = output.to(tl.bfloat16).to(tl.float32)
@@ -108,7 +112,21 @@ def _query_pool_kernel(
     pool_offset = ((current_batch * (seq_len // ROWS_PER_PROGRAM) + tile) * num_heads + current_head) * 128
     tl.store(pool_ptr + pool_offset + tl.arange(0, 128), tl.div_rn(total, count))
     if PACK_FP4:
-        rounded = output.to(tl.bfloat16).to(tl.float32)
+        if PACK_PREFIX_FP8:
+            # The dense-prefix kernel consumes the FP8-roundtripped BF16 prefix the
+            # caller stores in ``out_ptr``; quantize that same value here so the codes
+            # match ``scale_and_quant_fp4(prefix.transpose(1, 2))`` bit-for-bit
+            # (verified against fp4quant_cuda.scaled_fp4_quant on the real shape).
+            pv = output.to(tl.bfloat16).to(tl.float32)
+            scale8 = tl.max(tl.abs(pv), 1) / 448.0
+            inv8 = tl.where(scale8 == 0, 0, 1.0 / scale8)
+            pv = tl.minimum(tl.maximum(pv * inv8[:, None], -448.0), 448.0)
+            pv = pv.to(tl.float8e4nv).to(tl.float32) * scale8[:, None]
+            # ``out_ptr`` stores ``pv`` as bf16; quantize that rounded value, exactly
+            # like the consumer reading the stored prefix back.
+            rounded = pv.to(tl.bfloat16).to(tl.float32)
+        else:
+            rounded = output.to(tl.bfloat16).to(tl.float32)
         grouped = tl.reshape(rounded, (ROWS_PER_PROGRAM, BLOCK_SIZE // 16, 16))
         maximum = tl.max(tl.abs(grouped), 2)
         sf = (maximum * (1.0 / 6.0)).to(tl.float8e4nv)
@@ -123,13 +141,13 @@ def _query_pool_kernel(
         batch = row // (seq_len * num_heads)
         head = row % num_heads
         c4 = tl.arange(0, BLOCK_SIZE // 2)[None, :]
-        offset = ((batch * num_heads + head) * (seq_len - START) + seq_index - START) * (head_dim // 2)
+        offset = ((batch * num_heads + head) * PACK_STRIDE + seq_index - START) * (head_dim // 2)
         tl.store(codes_ptr + offset + c4, packed, (row < ROWS) & (seq_index >= START) & (c4 < head_dim // 2))
         group = tl.arange(0, BLOCK_SIZE // 16)[None, :]
         qi = seq_index - START
         si = ((qi // 64) * (64 * head_dim // 16) + (group // 4) * 256 + group % 4
               + (qi % 64 // 16) * 4 + (qi % 16) * 16)
-        scale_offset = (batch * num_heads + head) * (seq_len - START) * (head_dim // 16) + si
+        scale_offset = (batch * num_heads + head) * PACK_STRIDE * (head_dim // 16) + si
         tl.store(scales_ptr + scale_offset, sf,
                  (row < ROWS) & (seq_index >= START) & (group < head_dim // 16))
 
@@ -139,9 +157,11 @@ def _query_pool_kernel(
 def prepare_pooled_queries(
     x: torch.Tensor, weight: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, eps: float,
     input_index: torch.Tensor | None, valid: torch.Tensor, prefix_rows: int, *, tile_elems: int = 64,
-    prefix_fp8: bool = False, split_prefix: bool = False,
-) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
-    """Return BF16 prefix queries, FP4 video queries, and exact FP32 tile means.
+    prefix_fp8: bool = False, split_prefix: bool = False, prefix_fp4: bool = False,
+    skip_prefix_store: bool = False,
+) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], torch.Tensor,
+           tuple[torch.Tensor, torch.Tensor] | None]:
+    """Return BF16 prefix queries, FP4 video queries, exact FP32 tile means and optional FP4 prefix.
 
     The native suffix starts at the preceding 128-token boundary, so its FP4
     data also includes a half-prefix block when the prefix ends on tile 64.
@@ -151,6 +171,11 @@ def prepare_pooled_queries(
     and prefix stores while retaining every consumed value and tile sum.
     Pooling and native codes always use the original BF16-normalized queries.
     No BF16 video-query intermediate is needed by either attention branch.
+
+    ``prefix_fp4`` additionally emits the dense-prefix FP4 query codes/scales
+    (``[B, H, prefix_rows, 64]`` + ``[B, H, prefix_rows, 8]``) from the same
+    kernel, bit-identical to ``scale_and_quant_fp4(prefix.transpose(1, 2))``,
+    so the dense Omni prefix path no longer re-quantizes Q in the consumer.
     """
     from .qknorm_rope import _validate_inputs
 
@@ -172,23 +197,40 @@ def prepare_pooled_queries(
         raise RuntimeError("Pooled query preparation requires eager inference")
     if split_prefix and (tile_elems != 128 or not prefix_fp8):
         raise ValueError("Split query preparation requires tile-128 FP8 prefix queries")
+    if prefix_fp4 and (not split_prefix or not prefix_fp8):
+        raise ValueError("Prefix FP4 query packing requires split tile-128 FP8 prefix queries")
+    if skip_prefix_store and not prefix_fp4:
+        raise ValueError("Skipping the BF16 prefix store requires the FP4 prefix query emission")
     x, weight, cos, sin = (t.contiguous() for t in (x, weight, cos, sin))
     start = prefix_rows // 128 * 128
     prefix = torch.empty((batch, prefix_rows, heads, dim), device=x.device, dtype=x.dtype)
     codes = torch.empty((batch, heads, rows - start, 64), device=x.device, dtype=torch.uint8)
     scales = torch.empty((batch, heads, rows - start, 8), device=x.device, dtype=torch.float8_e4m3fn)
     pooled = torch.empty((batch, rows // tile_elems, heads, dim), device=x.device, dtype=torch.float32)
-    launches = ((0, rows // tile_elems, True, prefix_fp8, prefix_rows),)
+    pcodes = pscales = None
+    # (first_tile, tiles, pack, fp8, keep_prefix, pack_start, pack_stride, codes, scales, pack_prefix_fp8)
+    launches = ((0, rows // tile_elems, True, prefix_fp8, prefix_rows, start, rows - start,
+                 codes, scales, False),)
     if split_prefix:
         prefix_tiles = prefix_rows // tile_elems
-        launches = ((0, prefix_tiles, False, True, prefix_rows),
-                    (prefix_tiles, rows // tile_elems - prefix_tiles, True, False, 0))
-    for first_tile, tiles, pack, fp8, keep_prefix in launches:
+        if prefix_fp4:
+            pcodes = torch.empty((batch, heads, prefix_rows, 64), device=x.device, dtype=torch.uint8)
+            pscales = torch.empty((batch, heads, prefix_rows, 8), device=x.device,
+                                  dtype=torch.float8_e4m3fn)
+        launches = ((0, prefix_tiles, prefix_fp4, True, prefix_rows, 0, prefix_rows,
+                     codes if pcodes is None else pcodes, scales if pscales is None else pscales, prefix_fp4),
+                    (prefix_tiles, rows // tile_elems - prefix_tiles, True, False, 0,
+                     start, rows - start, codes, scales, False))
+    for (first_tile, tiles, pack, fp8, keep_prefix, pack_start, pack_stride, cptr, sptr,
+         pack_prefix_fp8) in launches:
         _query_pool_kernel[(tiles, heads, batch)](
             prefix, x, weight, cos, sin, dim, rotary_dim, rotary_dim // 2, heads, rows, eps,
             BLOCK_SIZE=128, ROWS=batch * rows * heads, ROWS_PER_PROGRAM=tile_elems, TILE_START=first_tile,
-            codes_ptr=codes, scales_ptr=scales, PACK_FP4=pack, START=start,
+            codes_ptr=cptr, scales_ptr=sptr, PACK_FP4=pack, START=pack_start, PACK_STRIDE=pack_stride,
+            PACK_PREFIX_FP8=pack_prefix_fp8,
             input_index_ptr=input_index, INPUT_ROWS=x.shape[1], GATHER_INPUT=input_index is not None,
-            pool_ptr=pooled, valid_ptr=valid, PREFIX=keep_prefix, PREFIX_ONLY=True, PREFIX_FP8=fp8, num_warps=8,
+            pool_ptr=pooled, valid_ptr=valid, PREFIX=keep_prefix, PREFIX_ONLY=True, PREFIX_FP8=fp8,
+            SKIP_PREFIX_STORE=skip_prefix_store, num_warps=8,
         )
-    return prefix, (codes, scales), pooled.permute(0, 2, 1, 3)
+    prefix_fp4_result = None if pcodes is None else (pcodes, pscales)
+    return prefix, (codes, scales), pooled.permute(0, 2, 1, 3), prefix_fp4_result

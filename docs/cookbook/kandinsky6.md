@@ -2,6 +2,11 @@
 
 <RecipeFamily family="kandinsky6" />
 
+## FastKandinsky 6.0 NVFP4
+
+See the [FastKandinsky 6.0 NVFP4 guide](../inference/fastkandinsky6.md) to
+convert the BF16 checkpoint and generate video with audio in eight pi-Flow steps.
+
 <details  id="cookbook-setup">
   <summary>Setup</summary>
   <div >

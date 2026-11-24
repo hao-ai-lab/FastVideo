@@ -317,7 +317,7 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
         else:
             full, packed = qknorm_rope_quantize_fp4(x, weight, cos, sin, 1e-6, prefix_rows // 128 * 128)
         expected_pool = _pool_tiles(full, valid, tile)
-        prefix, actual_packed, pool = prepare_pooled_queries(
+        prefix, actual_packed, pool, _prefix_q = prepare_pooled_queries(
             x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
         )
     assert prefix.shape == (batch, prefix_rows, heads, 128)
@@ -328,7 +328,7 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
     if tile == 128:
         for split_prefix in (False, True):
             with torch.inference_mode():
-                prefix8, packed8, pool8 = prepare_pooled_queries(
+                prefix8, packed8, pool8, _prefix_q = prepare_pooled_queries(
                     x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
                     prefix_fp8=True, split_prefix=split_prefix,
                 )
@@ -337,6 +337,32 @@ def test_pooled_queries_match_full_materialization(batch, heads, rotary_dim, pre
             assert torch.equal(packed8[0], packed[0])
             assert torch.equal(packed8[1].view(torch.uint8), packed[1].view(torch.uint8))
             assert torch.equal(pool8.contiguous().view(torch.int32), expected_pool.contiguous().view(torch.int32))
+        try:
+            import attn_qat_infer.api as _api
+        except ImportError:
+            _api = None
+        if _api is not None:
+            with torch.inference_mode():
+                prefix8, _packed8, _pool8, prefix_q = prepare_pooled_queries(
+                    x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
+                    prefix_fp8=True, split_prefix=True, prefix_fp4=True,
+                )
+                expected_q = _api.scale_and_quant_fp4(prefix8.transpose(1, 2))
+            assert prefix_q is not None
+            assert torch.equal(prefix_q[0], expected_q[0])
+            assert torch.equal(prefix_q[1].view(torch.uint8), expected_q[1].view(torch.uint8))
+            # Pass-20: under the same gate the BF16 prefix store is dead weight
+            # (the dense kernel reads only q.shape when q_prequant is present);
+            # skipping it must not change the emitted FP4 codes/scales.
+            with torch.inference_mode():
+                prefix_skip, _packed8s, _pool8s, prefix_q_skip = prepare_pooled_queries(
+                    x, weight, cos, sin, 1e-6, inverse, valid, prefix_rows, tile_elems=tile,
+                    prefix_fp8=True, split_prefix=True, prefix_fp4=True, skip_prefix_store=True,
+                )
+            assert prefix_skip.shape == prefix8.shape
+            assert prefix_q_skip is not None
+            assert torch.equal(prefix_q_skip[0], prefix_q[0])
+            assert torch.equal(prefix_q_skip[1].view(torch.uint8), prefix_q[1].view(torch.uint8))
 
 
 
@@ -377,13 +403,35 @@ def test_combined_kv_preserves_separate_prefix_pool_and_native_bytes(batch, head
         )
     for actual, expected in ((actual_key[0][0], expected_key[0][0]),
                              (actual_key[0][1], expected_key[0][1]),
-                             (actual_key[1], expected_key[1]), (actual_key[2], expected_key[2]),
                              (actual_key[3], expected_key[3]), (actual_value[0], expected_value[0]),
                              (actual_value[1][0], expected_value[1][0]),
                              (actual_value[1][1], expected_value[1][1])):
         assert torch.equal(actual.contiguous().view(torch.uint8), expected.contiguous().view(torch.uint8))
-    assert actual_key[1].transpose(1, 2).is_contiguous()
-    assert actual_key[2].transpose(1, 2).is_contiguous()
+    # The dense prefix K/V are padded with zero rows to the FP4 kernel's 128-row block.
+    n_valid = valid_index.numel()
+    for padded, expected in ((actual_key[1], expected_key[1]), (actual_key[2], expected_key[2])):
+        assert padded.shape[1] == (n_valid + 127) // 128 * 128
+        assert torch.equal(padded[:, :n_valid].contiguous().view(torch.uint8),
+                           expected.contiguous().view(torch.uint8))
+        assert not padded[:, n_valid:].any()
+        assert padded.transpose(1, 2).is_contiguous()
+    if tile != 128 or torch.cuda.get_device_capability() != (12, 1):
+        return
+    api = pytest.importorskip("attn_qat_infer.api")
+    with torch.inference_mode():
+        dense_key, dense_value = pool_quantize_prefix_kv(
+            key, value, mean, inverse, n_valid, valid, source, tile_elems=tile,
+            dense_k=True, emit_bf16_k=False, dense_v=True, emit_bf16_v=False, valid_index=valid_index,
+        )
+        expected_k4 = api.scale_and_quant_fp4_permute(actual_key[1].transpose(1, 2))
+        expected_v4 = api.scale_and_quant_fp4_transpose(actual_key[2].transpose(1, 2))
+    assert dense_key[1] is None and dense_key[2] is None
+    for actual, expected in ((dense_key[0][0], actual_key[0][0]), (dense_key[0][1], actual_key[0][1]),
+                             (dense_key[3], actual_key[3]), (dense_value[0], actual_value[0]),
+                             (dense_value[1][0], actual_value[1][0]), (dense_value[1][1], actual_value[1][1]),
+                             (dense_key[4][0], expected_k4[0]), (dense_key[4][1], expected_k4[1]),
+                             (dense_value[2][0], expected_v4[0]), (dense_value[2][1], expected_v4[1])):
+        assert torch.equal(actual.contiguous().view(torch.uint8), expected.contiguous().view(torch.uint8))
 
 
 @pytest.mark.parametrize("batch", [1, 2])
@@ -401,3 +449,56 @@ def test_preconverted_prefix_queries_preserve_dense_attention(batch):
         actual = _prefix_dense_attention(_fp8_per_token(q[:, :128]), k, v, 128, 256, positions, "fp8",
                                           key_is_smoothed=True, prepared_kv=prepared, query_is_fp8=True)
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("two_level_p,single_level", [(True, False), (False, True)])
+def test_dense_fp4_prefix_follows_the_resolved_p_scheme(monkeypatch, two_level_p, single_level):
+    import fastvideo.envs as envs
+    from fastvideo.models.dits import minimax_h3_vsa_fp4
+    from fastvideo.models.dits.minimax_h3_fusions import prefix_attention
+
+    seen = {}
+
+    def fake_dense(q, *args, **kwargs):
+        seen.update(kwargs)
+        return torch.zeros_like(q)
+
+    monkeypatch.setattr(prefix_attention, "dense_fp4_prefix_attention", fake_dense)
+    query = torch.zeros((1, 128, 2, 128), dtype=torch.bfloat16)
+    prepared = (query, query, None, None, None)
+    with envs.FASTVIDEO_H3_VSA_PREFIX_DENSE_FP4.override(True), \
+            envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.override(not two_level_p):
+        minimax_h3_vsa_fp4._prefix_dense_attention(query, query, query, 128, 128, torch.arange(128), "fp8",
+                                                   key_is_smoothed=True, prepared_kv=prepared,
+                                                   two_level_p=two_level_p)
+    assert seen["single_level_p_quant"] is single_level
+    assert seen["kv_len"] == 128
+
+
+@pytest.mark.parametrize("single_level", [False, True])
+@pytest.mark.parametrize("prequantized", [False, True])
+@torch.inference_mode()
+def test_padded_dense_fp4_prefix_matches_unpadded_attention(single_level, prequantized):
+    if torch.cuda.get_device_capability() != (12, 1):
+        pytest.skip("dense NVFP4 prefix attention runs on GB10")
+    api = pytest.importorskip("attn_qat_infer.api")
+    from fastvideo.attention.backends.attn_qat_infer import _get_attn_qat_infer
+    from fastvideo.models.dits.minimax_h3_fusions.prefix_attention import dense_fp4_prefix_attention
+
+    torch.manual_seed(2107)
+    heads, nq, nk = 4, 256, 300
+    padded = (nk + 127) // 128 * 128
+    q = torch.randn((1, heads, nq, 128), device="cuda", dtype=torch.bfloat16)
+    k = torch.randn((1, heads, nk, 128), device="cuda", dtype=torch.bfloat16)
+    k = k - k.mean(dim=2, keepdim=True)
+    v = torch.randn((1, heads, nk, 128), device="cuda", dtype=torch.bfloat16)
+    k_pad = torch.zeros((1, heads, padded, 128), device="cuda", dtype=torch.bfloat16)
+    v_pad = torch.zeros_like(k_pad)
+    k_pad[:, :, :nk], v_pad[:, :, :nk] = k, v
+    expected = _get_attn_qat_infer()(q, k, v, is_causal=False, per_block_mean=False,
+                                     single_level_p_quant=single_level)
+    k_fp4 = api.scale_and_quant_fp4_permute(k_pad) if prequantized else None
+    v_fp4 = api.scale_and_quant_fp4_transpose(v_pad) if prequantized else None
+    actual = dense_fp4_prefix_attention(q, None if prequantized else k_pad, None if prequantized else v_pad,
+                                        k_fp4, v_fp4, kv_len=nk, single_level_p_quant=single_level)
+    assert torch.equal(actual.contiguous().view(torch.int16), expected.contiguous().view(torch.int16))
