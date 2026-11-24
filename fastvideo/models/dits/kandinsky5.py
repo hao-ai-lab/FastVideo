@@ -9,9 +9,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.attention import LocalAttention
+from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN, flex_attention, nablaT_v2
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
+from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
+                                                    sequence_model_parallel_shard)
+from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
@@ -267,6 +270,7 @@ class Kandinsky5Attention(nn.Module):
         prefix: str = "",
         use_nabla: bool = False,
         quant_config: QuantizationConfig | None = None,
+        sequence_parallel: bool = False,
     ):
         super().__init__()
         assert num_channels % head_dim == 0
@@ -300,6 +304,17 @@ class Kandinsky5Attention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
+        self.distributed_attention = None
+        sp_size = get_sp_world_size() if model_parallel_is_initialized() else 1
+        if sequence_parallel and sp_size > 1:
+            if self.num_heads % sp_size:
+                raise ValueError(f"Kandinsky5 attention heads ({self.num_heads}) must be divisible by sp_size ({sp_size})")
+            if self.local_attention.backend not in (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA):
+                raise ValueError("Kandinsky5 sequence parallelism currently supports dense FLASH_ATTN and TORCH_SDPA")
+            self.distributed_attention = DistributedAttention(
+                num_heads=self.num_heads, head_size=head_dim, causal=False,
+                supported_attention_backends=supported_attention_backends, prefix=f"{prefix}.sp")
+
         # NABLA checkpoints get a second attention layer whose backend defaults
         # to NABLA_ATTN; FASTVIDEO_ATTENTION_BACKEND still overrides it.
         self.nabla_attention = None
@@ -318,6 +333,7 @@ class Kandinsky5Attention(nn.Module):
         encoder_hidden_states: torch.Tensor | None = None,
         sparse_params: dict[str, Any] | None = None,
         rotary_emb: torch.Tensor | None = None,
+        original_seq_len: int | None = None,
     ) -> torch.Tensor:
         query, _ = self.to_query(hidden_states)
 
@@ -343,7 +359,11 @@ class Kandinsky5Attention(nn.Module):
             query = _apply_rotary(query, rotary_emb).type_as(query)
             key = _apply_rotary(key, rotary_emb).type_as(key)
 
-        if sparse_params is not None:
+        if self.distributed_attention is not None:
+            if sparse_params is not None:
+                raise ValueError("Kandinsky5 sequence parallelism does not support NABLA sparse attention")
+            hidden_states, _ = self.distributed_attention(query, key, value, original_seq_len=original_seq_len)
+        elif sparse_params is not None:
             if self.nabla_attention is None:
                 raise RuntimeError("sparse_params passed to an attention layer built without use_nabla; "
                                    "this checkpoint/config combination is inconsistent.")
@@ -512,6 +532,7 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
                                                   supported_attention_backends=supported_attention_backends,
                                                   prefix=f"{prefix}.self_attention",
                                                   use_nabla=use_nabla,
+                                                  sequence_parallel=True,
                                                   quant_config=quant_config)
 
         self.cross_attention_norm = LayerNormScaleShift(model_dim,
@@ -538,7 +559,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
                                                   quant_config=quant_config)
 
     def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor, time_embed: torch.Tensor,
-                rope: torch.Tensor, sparse_params: dict[str, Any] | None) -> torch.Tensor:
+                rope: torch.Tensor, sparse_params: dict[str, Any] | None,
+                original_seq_len: int | None = None) -> torch.Tensor:
         self_attn_params, cross_attn_params, ff_params = torch.chunk(
             self.visual_modulation(time_embed).unsqueeze(dim=1), 3, dim=-1)
 
@@ -549,7 +571,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             scale=self_scale,
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
-        visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params)
+        visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params,
+                                         original_seq_len=original_seq_len)
         visual_embed = (visual_embed.float() + self_gate.float() * visual_out.float()).type_as(visual_embed)
 
         cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params, 3, dim=-1)
@@ -604,6 +627,9 @@ class Kandinsky5Transformer3DModel(BaseDiT):
         self.patch_size = arch.patch_size
         self.visual_cond = arch.visual_cond
         self.attention_type = arch.attention_type
+        self.sp_size = get_sp_world_size() if model_parallel_is_initialized() else 1
+        if self.sp_size > 1 and self.attention_type == "nabla":
+            raise ValueError("Kandinsky5 sequence parallelism currently supports dense checkpoints only")
 
         visual_embed_dim = (2 * arch.in_visual_dim + 1) if arch.visual_cond else arch.in_visual_dim
 
@@ -694,6 +720,15 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope, visual_shape, block_mask=to_fractal)
 
+        original_seq_len = visual_embed.shape[1]
+        if self.sp_size > 1:
+            if torch.is_grad_enabled():
+                raise RuntimeError("Kandinsky5 sequence parallelism currently supports inference only")
+            # Shard tokens and their 2x2 RoPE matrices together. Text stays replicated;
+            # cross-attention evaluates local queries against the full text sequence.
+            visual_embed, original_seq_len = sequence_model_parallel_shard(visual_embed, dim=1)
+            visual_rope, _ = sequence_model_parallel_shard(visual_rope, dim=1)
+
         for visual_transformer_block in self.visual_transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 visual_embed = torch.utils.checkpoint.checkpoint(visual_transformer_block,
@@ -702,6 +737,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                                                  time_embed,
                                                                  visual_rope,
                                                                  sparse_params,
+                                                                 original_seq_len,
                                                                  use_reentrant=False)
             else:
                 visual_embed = visual_transformer_block(
@@ -710,8 +746,11 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                     time_embed,
                     visual_rope,
                     sparse_params,
+                    original_seq_len,
                 )
 
+        if self.sp_size > 1:
+            visual_embed = sequence_model_parallel_all_gather_with_unpad(visual_embed, original_seq_len, dim=1)
         visual_embed = fractal_unflatten(visual_embed, visual_shape, block_mask=to_fractal)
         x = self.out_layer(visual_embed, time_embed)
 
