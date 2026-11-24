@@ -3,6 +3,8 @@ import pytest
 import torch
 from torch import nn
 
+from fastvideo import envs
+from fastvideo.layers.linear import ReplicatedLinear
 import fastvideo.layers.lora.linear as lora_linear
 from fastvideo.layers.lora.linear import BaseLayerWithLoRA
 
@@ -51,3 +53,119 @@ def test_stacked_accumulate_sums_deltas():
     layer.set_lora_weights(A2.clone(), B2.clone(), lora_alpha=1, strength=1.0, accumulate=True)
     expected = (B1 @ A1) + (B2 @ A2)
     torch.testing.assert_close(layer.base_layer.weight.data.cpu(), expected)
+
+
+def test_stacked_accumulate_preserves_forward_across_unmerge_remerge():
+    # Issue #2096: unmerging must preserve every active adapter's contribution.
+    with (torch.no_grad(), torch._dynamo.config.patch(disable=True), envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False)):
+        dtype = torch.bfloat16
+        base = ReplicatedLinear(1, 1, bias=False, params_dtype=dtype)
+        base.weight.fill_(10)
+        layer = BaseLayerWithLoRA(base)
+        x = torch.tensor([[2]], dtype=dtype)
+        A = torch.ones(1, 1, dtype=dtype)
+
+        layer.set_lora_weights(A, torch.tensor([[2]], dtype=dtype))
+        layer.set_lora_weights(A, torch.tensor([[5]], dtype=dtype), accumulate=True)
+        outputs = [layer(x)[0].item()]
+
+        layer.unmerge_lora_weights()
+        outputs.append(layer(x)[0].item())
+
+        layer.merge_lora_weights()
+        outputs.append(layer(x)[0].item())
+
+        expected = (10 + 2 + 5) * 2.0
+        assert outputs == [expected] * 3, f"Merged, unmerged, remerged outputs: {outputs}"
+
+
+@pytest.fixture(params=[False, True], ids=["snapshot", "snapshot_free"])
+def scalar_stack(request, monkeypatch):
+    monkeypatch.setattr(lora_linear, "_skips_unmerge_snapshot", lambda _base: request.param)
+    with (torch.no_grad(), torch._dynamo.config.patch(disable=True), envs.FASTVIDEO_LORA_SIDE_BRANCH.override(False)):
+        dtype = torch.bfloat16
+        base = ReplicatedLinear(1, 1, bias=False, params_dtype=dtype)
+        base.weight.fill_(10)
+        layer = BaseLayerWithLoRA(base)
+        A = torch.ones(1, 1, dtype=dtype)
+        layer.set_lora_weights(A, torch.tensor([[2]], dtype=dtype), lora_alpha=2, strength=0.5)
+        layer.set_lora_weights(A, torch.tensor([[5]], dtype=dtype), accumulate=True)
+        yield layer, torch.tensor([[2]], dtype=dtype)
+
+
+@pytest.mark.parametrize("unmerge_before_update", [False, True])
+@pytest.mark.parametrize("accumulate", [False, True])
+def test_update_stacked_adapters_preserves_rank_scale_and_replacement(scalar_stack, unmerge_before_update, accumulate):
+    layer, x = scalar_stack
+    if unmerge_before_update:
+        layer.unmerge_lora_weights()
+
+    layer.set_lora_weights(torch.ones(2, 1, dtype=x.dtype),
+                           torch.ones(1, 2, dtype=x.dtype),
+                           lora_alpha=4,
+                           strength=-0.5,
+                           accumulate=accumulate)
+    update = 2 * (4 / 2) * -0.5
+    expected = (10 + 2 + 5 + update) * 2 if accumulate else (10 + update) * 2
+    for _ in range(2):
+        assert layer(x)[0].item() == expected
+        layer.unmerge_lora_weights()
+        assert layer.base_layer.weight.item() == 10.0
+        assert layer(x)[0].item() == expected
+        layer.merge_lora_weights()
+        layer.merge_lora_weights()
+        assert layer(x)[0].item() == expected
+    if layer.cpu_weight is not None:
+        assert layer.cpu_weight.item() == 10.0
+
+
+@pytest.mark.parametrize("unmerge_before_update", [False, True])
+def test_direct_accumulating_merge_preserves_stack(scalar_stack, unmerge_before_update):
+    layer, x = scalar_stack
+    if unmerge_before_update:
+        layer.unmerge_lora_weights()
+
+    layer.merge_lora_weights(accumulate=True)
+    assert layer(x)[0].item() == 44.0
+    layer.unmerge_lora_weights()
+    assert layer(x)[0].item() == 44.0
+    layer.merge_lora_weights()
+    assert layer(x)[0].item() == 44.0
+
+
+def test_unmerged_stack_supports_fullgraph_capture(scalar_stack):
+    layer, x = scalar_stack
+    layer.unmerge_lora_weights()
+    with torch._dynamo.config.patch(disable=False):
+        compiled = torch.compile(layer, backend="eager", fullgraph=True)
+        assert compiled(x)[0].item() == 34.0
+
+
+@pytest.mark.parametrize("change, expected", [("strength", 29.0), ("factors", 36.0)])
+def test_unmerged_stack_uses_live_current_adapter(scalar_stack, change, expected):
+    layer, x = scalar_stack
+    layer.unmerge_lora_weights()
+    if change == "strength":
+        layer.lora_strength = 0.5
+    else:
+        layer.lora_B.fill_(6)
+    assert layer(x)[0].item() == expected
+
+
+@pytest.mark.parametrize("change", ["strength", "factors"])
+def test_unmerge_uses_saved_merged_contributions(scalar_stack, change):
+    layer, x = scalar_stack
+    if change == "strength":
+        layer.lora_strength = 0.5
+        expected = 29.0
+    else:
+        layer.lora_B.fill_(6)
+        expected = 36.0
+
+    layer.unmerge_lora_weights()
+    assert layer.base_layer.weight.item() == 10.0
+    assert layer(x)[0].item() == expected
+    layer.merge_lora_weights()
+    assert layer(x)[0].item() == expected
+    layer.unmerge_lora_weights()
+    assert layer.base_layer.weight.item() == 10.0

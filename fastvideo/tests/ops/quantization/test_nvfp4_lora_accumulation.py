@@ -51,6 +51,7 @@ def test_accumulation_replays_multiple_adapters_with_original_dtype_and_scale(cp
         expected = _reference_update(expected, factors, alpha=alpha, strength=strength)
         _install(pipeline, name, factors, alpha=alpha, strength=strength)
         _assert_cpu_packed_weight(wrapped, expected, False)
+        assert wrapped._merged_loras is wrapped._active_loras
 
     records = wrapped._merged_loras
     assert len(records) == 4
@@ -65,6 +66,7 @@ def test_accumulation_replays_multiple_adapters_with_original_dtype_and_scale(cp
     _install(pipeline, "replacement", third, alpha=3.5, strength=-0.75, accumulate=False)
     _assert_cpu_packed_weight(wrapped, _reference_update(original, third, alpha=3.5, strength=-0.75), False)
     assert len(wrapped._merged_loras) == 1
+    assert wrapped._merged_loras is wrapped._active_loras
 
 
 def test_direct_accumulating_merge_after_each_purge_keeps_previous_updates(cpu_nvfp4_lifecycle):
@@ -122,6 +124,7 @@ def test_accumulated_round_trip_repacking_matches_dense_lifecycle(cpu_nvfp4_life
         LoRAPipeline.merge_lora_weights(pipeline)
         assert wrapped.merged == dense.merged
         _assert_cpu_packed_weight(wrapped, dense.base_layer.weight, False)
+        assert wrapped._merged_loras is wrapped._active_loras
 
 
 def test_replay_rounds_to_bf16_after_each_contribution(cpu_nvfp4_lifecycle):
@@ -265,7 +268,7 @@ def test_failed_replay_restores_previous_state_and_can_be_retried(cpu_nvfp4_life
 
 
 @pytest.mark.parametrize("mode", ["bf16", "mxfp8", "nvfp4_retained", "nvfp4_refine", "training", "side_branch"])
-def test_other_paths_do_not_keep_cpu_contribution_snapshots(cpu_nvfp4_lifecycle, mode):
+def test_other_paths_do_not_keep_nvfp4_replay_snapshots(cpu_nvfp4_lifecycle, mode):
     base = ReplicatedLinear(32, 32, bias=False, params_dtype=torch.bfloat16)
     base.weight.data.fill_(0.125)
     if mode == "mxfp8":

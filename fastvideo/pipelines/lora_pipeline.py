@@ -736,8 +736,13 @@ class LoRAPipeline(ComposedPipelineBase):
                             untouched.append(name)
                             if not accumulate:
                                 # An earlier adapter may be merged here; disabling alone would keep its delta.
+                                # unmerge_lora_weights is a no-op on a disabled layer.
+                                layer.disable_lora = False
                                 layer.unmerge_lora_weights()
-                            layer.disable_lora = True
+                                layer._clear_lora_history()
+                                layer.disable_lora = True
+                            elif not layer._active_loras:
+                                layer.disable_lora = True
                     # Repack inside the offload scope, while the block's parameters are resident.
                     repack_scope = [module] if module is not None else list(layers.values())
                     _convert_quantized_weights_after_lora_change(repack_scope,
@@ -804,6 +809,7 @@ class LoRAPipeline(ComposedPipelineBase):
                         layer.unmerge_lora_weights()
                         layer.lora_A = None
                         layer.lora_B = None
+                        layer._clear_lora_history()
                     # Repack inside the offload scope, while the block's parameters are resident.
                     repack_scope = [module] if module is not None else list(layers.values())
                     _convert_quantized_weights_after_lora_change(repack_scope,

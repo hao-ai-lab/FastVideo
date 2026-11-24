@@ -9,6 +9,8 @@ parameter and a populated ``_nvfp4_weight`` buffer.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -534,3 +536,220 @@ def test_unmerge_after_a_second_merge_restores_the_original_weight() -> None:
     layer.unmerge_lora_weights()
 
     assert torch.equal(layer.base_layer.weight, original)
+
+
+def _accumulated_dense_layer(device="cpu", adapters=2):
+    with torch.no_grad():
+        base = ReplicatedLinear(4, 4, bias=False, params_dtype=torch.bfloat16).to(device)
+        base.weight.fill_(10)
+        layer = get_lora_layer(base)
+        for index, update in enumerate([2, 5, 3, 4][:adapters]):
+            layer.set_lora_weights(torch.ones(1, 4, dtype=torch.bfloat16, device=device),
+                                   torch.full((4, 1), update, dtype=torch.bfloat16, device=device),
+                                   accumulate=index > 0)
+    return layer, torch.ones(2, 4, dtype=torch.bfloat16, device=device)
+
+
+def test_merged_adapter_history_keeps_only_cpu_snapshots() -> None:
+    layer, _ = _accumulated_dense_layer()
+    assert len(layer._active_loras) == 2
+    assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
+    layer.to("meta")
+    assert all(parameter.device.type == "meta" for parameter in layer.parameters())
+    assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+               for tensor in (contribution.lora_A, contribution.lora_B))
+
+
+def test_unmerged_history_follows_module_moves_and_is_visible_to_offloader(env_overrides) -> None:
+    from fastvideo.hooks.layerwise_offload import _offload_tensors
+
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(False))
+    layer, x = _accumulated_dense_layer()
+    layer.unmerge_lora_weights()
+    managed = dict(_offload_tensors(layer))
+    for name in ("_unmerged_lora_A.0", "_unmerged_lora_B.0"):
+        assert name in managed
+        assert name in dict(layer.named_buffers())
+        assert name not in dict(layer.named_parameters())
+        assert name not in layer.state_dict()
+        assert not managed[name].requires_grad
+    layer.to(dtype=torch.float64)
+    with torch.no_grad():
+        torch.testing.assert_close(layer(x.double())[0], torch.full((2, 4), 68.0, dtype=torch.float64), rtol=0, atol=0)
+    assert all(parameter.dtype == torch.float64 for parameter in layer._unmerged_lora_A)
+    layer.to("meta")
+    assert all(parameter.device.type == "meta" for parameter in layer.parameters())
+    assert all(buffer.device.type == "meta" for buffer in layer.buffers())
+    assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+               for tensor in (contribution.lora_A, contribution.lora_B))
+
+
+@pytest.mark.parametrize("adapters", [1, 2, 4])
+def test_checkpoint_tensor_keys_do_not_depend_on_unmerged_staging(adapters) -> None:
+    layer, _ = _accumulated_dense_layer(adapters=adapters)
+    expected = {"base_layer.weight", "lora_A", "lora_B"}
+    assert set(layer.state_dict()) == expected
+    layer.unmerge_lora_weights()
+    assert set(layer.state_dict()) == expected
+    layer.merge_lora_weights()
+    assert set(layer.state_dict()) == expected
+
+
+@pytest.mark.parametrize("unmerged", [False, True])
+def test_checkpoint_reload_with_same_base_and_adapter_configuration(unmerged) -> None:
+    source, x = _accumulated_dense_layer()
+    target, _ = _accumulated_dense_layer()
+    with torch.no_grad():
+        source.lora_B.fill_(6)
+        source.merge_lora_weights()
+        if unmerged:
+            source.unmerge_lora_weights()
+            target.unmerge_lora_weights()
+        checkpoint = io.BytesIO()
+        torch.save(source.state_dict(), checkpoint)
+        checkpoint.seek(0)
+        target.load_state_dict(torch.load(checkpoint, weights_only=True), strict=True)
+        expected = source(x)[0]
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+        target.unmerge_lora_weights()
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+        target.merge_lora_weights()
+        torch.testing.assert_close(target(x)[0], expected, rtol=0, atol=0)
+
+
+def test_unmerged_checkpoint_load_does_not_require_staged_target_buffers() -> None:
+    source, x = _accumulated_dense_layer()
+    source.unmerge_lora_weights()
+    target, _ = _accumulated_dense_layer()
+    target.load_state_dict(source.state_dict(), strict=True)
+    target.unmerge_lora_weights()
+    with torch.no_grad():
+        torch.testing.assert_close(target(x)[0], source(x)[0], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("offload_buffers", [False, True])
+def test_runtime_buffer_lists_offload_without_changing_ordinary_buffer_policy(offload_buffers) -> None:
+    from fastvideo.hooks.layerwise_offload import OffloadableBufferList, _offload_tensors
+
+    module = torch.nn.Module()
+    module.nested = torch.nn.Module()
+    module.nested.history = OffloadableBufferList([torch.ones(1)])
+    module.register_buffer("ordinary", torch.ones(1), persistent=False)
+    module.register_buffer("ordinary_large", torch.ones(1 << 20, dtype=torch.uint8), persistent=False)
+    with envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(offload_buffers):
+        managed = dict(_offload_tensors(module))
+        expected = {"nested.history.0", "ordinary_large"} if offload_buffers else {"nested.history.0"}
+        assert set(managed) == expected
+        assert not module.state_dict()
+        module.nested.history.get_buffer("0").data = torch.empty(0)
+        assert set(dict(_offload_tensors(module, managed))) == expected
+
+
+def test_unmerged_forward_does_not_transfer_cpu_history_each_call(monkeypatch) -> None:
+    layer, x = _accumulated_dense_layer()
+    layer.unmerge_lora_weights()
+    snapshot_ids = {id(tensor) for contribution in layer._active_loras
+                    for tensor in (contribution.lora_A, contribution.lora_B)}
+    tensor_to = torch.Tensor.to
+
+    def checked_to(tensor, *args, **kwargs):
+        assert id(tensor) not in snapshot_ids, "CPU replay history must be staged before forward"
+        return tensor_to(tensor, *args, **kwargs)
+
+    with monkeypatch.context() as patch, torch.no_grad():
+        patch.setattr(torch.Tensor, "to", checked_to)
+        for _ in range(2):
+            assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+    layer.merge_lora_weights()
+    assert not layer._unmerged_lora_A and not layer._unmerged_lora_B
+
+
+@pytest.mark.parametrize("unmerged", [False, True])
+@pytest.mark.parametrize("snapshot", [True, False])
+def test_failed_merge_part_way_keeps_previous_weight_and_history(monkeypatch, snapshot, unmerged) -> None:
+    if not snapshot:
+        monkeypatch.setattr(lora_linear, "_skips_unmerge_snapshot", lambda base_layer: True)
+    layer, x = _accumulated_dense_layer(adapters=3)
+    assert (layer.cpu_weight is not None) == snapshot
+    if unmerged:
+        layer.unmerge_lora_weights()
+    weight = layer.base_layer.weight.detach().clone()
+    history = layer._active_loras
+    staged = [list(layer._unmerged_lora_A), list(layer._unmerged_lora_B)]
+    real_merge = layer._merge_lora_contribution
+    merged = 0
+
+    def fail_on_second_contribution(contribution):
+        nonlocal merged
+        merged += 1
+        if merged == 2:
+            raise RuntimeError("injected merge failure")
+        real_merge(contribution)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(layer, "_merge_lora_contribution", fail_on_second_contribution)
+        with pytest.raises(RuntimeError, match="injected merge failure"):
+            layer.merge_lora_weights()
+
+    assert merged == 2
+    assert torch.equal(layer.base_layer.weight, weight)
+    assert layer.merged != unmerged
+    assert layer._active_loras is history and len(history) == 3
+    assert [list(layer._unmerged_lora_A), list(layer._unmerged_lora_B)] == staged
+    with torch.no_grad():
+        assert torch.equal(layer(x)[0], torch.full_like(x, 80))
+
+    layer.merge_lora_weights()
+    assert torch.equal(layer.base_layer.weight, torch.full_like(weight, 20))
+    layer.unmerge_lora_weights()
+    assert torch.equal(layer.base_layer.weight, torch.full_like(weight, 10))
+    with torch.no_grad():
+        assert torch.equal(layer(x)[0], torch.full_like(x, 80))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Accumulated adapter offloading requires one CUDA GPU")
+def test_accumulated_adapters_follow_real_layerwise_offload(monkeypatch) -> None:
+    from fastvideo.hooks.hooks import ModuleHookManager
+    from fastvideo.hooks.layerwise_offload import LayerwiseOffloadHook, LayerwiseOffloadState
+
+    device = torch.device("cuda", torch.cuda.current_device())
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: device)
+    layer, x = _accumulated_dense_layer(device)
+    state = LayerwiseOffloadState(torch.cuda.Stream(), device)
+    hook = LayerwiseOffloadHook(state)
+    manager = ModuleHookManager.get_from_or_default(layer)
+    manager.append_forward_hook(hook)
+    try:
+        with hook.mutate_params_scope():
+            layer.unmerge_lora_weights()
+        assert "_unmerged_lora_A.0" in state.cpu_named_parameters
+        assert "_unmerged_lora_B.0" in state.cpu_named_parameters
+        for _ in range(2):
+            with torch.no_grad():
+                assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+            assert not state.gpu_named_parameters
+            assert all(parameter.numel() == 0 for parameter in layer.parameters())
+            assert all(buffer.numel() == 0 for buffer in layer.buffers())
+            assert all(tensor.device.type == "cpu" for contribution in layer._active_loras
+                       for tensor in (contribution.lora_A, contribution.lora_B))
+        with hook.mutate_params_scope():
+            layer.merge_lora_weights()
+        assert not any(name.startswith("_unmerged_lora_") for name in state.cpu_named_parameters)
+        with torch.no_grad():
+            assert torch.equal(layer(x)[0], torch.full_like(x, 68))
+    finally:
+        manager.remove_forward_hook(hook.name())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Inductor and CUDA Graph execution require one CUDA GPU")
+@pytest.mark.parametrize("adapters", [1, 2, 4])
+def test_accumulated_adapters_run_with_cuda_inductor(monkeypatch, adapters) -> None:
+    device = torch.device("cuda", torch.cuda.current_device())
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: device)
+    layer, x = _accumulated_dense_layer(device, adapters)
+    layer.unmerge_lora_weights()
+    expected = torch.full_like(x, 4 * (10 + sum([2, 5, 3, 4][:adapters])))
+    with torch.no_grad(), torch._dynamo.config.patch(disable=False):
+        compiled = torch.compile(layer, backend="inductor", fullgraph=True, mode="reduce-overhead")
+        for _ in range(3):
+            assert torch.equal(compiled(x)[0], expected)
