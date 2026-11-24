@@ -310,7 +310,6 @@ def _cached_get_attn_backend(
     if selected_backend is None and default_backend is not None:
         selected_backend = default_backend
 
-    # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
     if (selected_backend is not None and selected_backend not in supported_attention_backends):

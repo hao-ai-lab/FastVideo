@@ -55,7 +55,6 @@ def test_writer_flush_and_remainder(tmp_path: Path):
     total_rows = sum(pq.read_table(str(f)).num_rows for f in files)
     assert total_rows == 20
 
-    # Append remainder to complete another chunk
     extra = records_to_table([{"id": str(i)} for i in range(5)], schema)
     writer.append_table(extra)
     written2 = writer.flush(num_workers=1)
@@ -99,7 +98,6 @@ def test_writer_parallel_workers(tmp_path: Path):
     written = writer.flush(num_workers=2)
     assert written == 40
 
-    # Ensure files exist under worker subdirs
     worker_dirs = [p for p in out_dir.iterdir() if p.is_dir() and p.name.startswith("worker_")]
     assert len(worker_dirs) >= 1
     files = sorted(out_dir.rglob("*.parquet"))

@@ -88,9 +88,7 @@ class MiniMaxH3AudioVAEConfigView:
 
 ACTIVATION_RATIO = 2
 
-# ---------------------------------------------------------------------------
 # Primitives (torch layout (B, C, L); convs run channels-last internally)
-# ---------------------------------------------------------------------------
 
 
 def _wn_weight(weight_v, weight_g):
@@ -235,11 +233,6 @@ def _activation1d(x, alpha, beta, up_filter, down_filter, ratio: int = ACTIVATIO
     x = _up_sample(x, up_filter, ratio, up_filter.shape[0])
     x = _snake_beta(x, alpha, beta)
     return _low_pass(x, down_filter, ratio)
-
-
-# ---------------------------------------------------------------------------
-# The MLX H3 audio VAE
-# ---------------------------------------------------------------------------
 
 
 class MLXMiniMaxH3AudioVAE:

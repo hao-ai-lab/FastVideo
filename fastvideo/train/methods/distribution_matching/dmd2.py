@@ -63,7 +63,6 @@ class DMD2Method(TrainingMethod):
             self._score_max_timestep,
         ) = self._parse_score_timestep_bounds()
 
-        # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
 
         self._init_optimizers_and_schedulers()

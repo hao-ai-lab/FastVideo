@@ -11,7 +11,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.validators import V  # Import validators
+from fastvideo.pipelines.stages.validators import V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
 
@@ -67,23 +67,18 @@ class EncodingStage(PipelineStage):
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        # Normalize input to [-1, 1] range (reverse of decoding normalization)
         latents = (batch.latents * 2.0 - 1.0).clamp(-1, 1)
 
-        # Move to appropriate device and dtype
         latents = latents.to(get_local_torch_device())
 
         # Encode image to latents
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
-            # if fastvideo_args.vae_sp:
-            #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
             latents = self.vae.encode(latents).mean
 
-        # Update batch with encoded latents
         batch.latents = latents
 
         # Offload models if needed

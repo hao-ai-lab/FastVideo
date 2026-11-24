@@ -13,8 +13,6 @@ from fastvideo.distributed.communication_op import (sequence_model_parallel_all_
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
-# from torch.nn import RMSNorm
-# TODO: RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (PatchEmbed, WanCamControlPatchEmbedding)
@@ -138,7 +136,6 @@ class LingBotWorldTransformerBlock(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # assert orig_dtype != torch.float32
 
         if temb.dim() == 4:
             # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
@@ -297,7 +294,6 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames, post_patch_height, post_patch_width),
@@ -320,7 +316,6 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
 
-        # Shard c2ws_plucker_emb
         if c2ws_plucker_emb is not None:
             c2ws_plucker_emb, _ = sequence_model_parallel_shard(c2ws_plucker_emb, dim=1)
 
@@ -375,7 +370,6 @@ class LingBotWorldTransformer3DModel(BaseDiT):
 
         hidden_states = self.norm_out(hidden_states, shift, scale)
 
-        # Gather and unpad in one operation
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.proj_out(hidden_states)
 

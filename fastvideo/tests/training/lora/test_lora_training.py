@@ -29,7 +29,6 @@ def test_lora_training():
                           repo_type="dataset",
                           local_dir_use_symlinks=False)
 
-    # Run torchrun command directly on the training pipeline like the shell script
     cmd = [
         "torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, "--master_port",
         os.environ["MASTER_PORT"], "fastvideo/training/wan_training_pipeline.py", "--model_path",
@@ -63,10 +62,8 @@ def test_lora_training():
 
     wandb_summary = json.load(open(summary_file))
 
-    # Define thresholds for LoRA training based on the provided console outputs
     fields_and_thresholds = {
         'avg_step_time': 30.0,  # something up with modal
-        # 'grad_norm': 0.05,      # too volatile for now. TODO: fix nondeterminism in training
         'step_time': 30.0,  # something up with modal
         'train_loss': 0.05
     }

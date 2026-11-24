@@ -15,7 +15,6 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

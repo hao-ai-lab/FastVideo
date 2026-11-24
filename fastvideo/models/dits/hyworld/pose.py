@@ -95,7 +95,6 @@ def parse_pose_string(
 
         num_frames = int(duration)
 
-        # Parse action and create motion dicts
         if action == "w":
             # Forward
             for _ in range(num_frames):
@@ -184,14 +183,11 @@ def pose_to_input(
             - intrinsics: Normalized camera intrinsics [T, 3, 3]
             - action_labels: Action labels for each frame [T]
     """
-    # Handle different input types
     if isinstance(pose_data, str):
         if pose_data.endswith(".json"):
-            # Load from JSON file
             with open(pose_data, "r") as f:
                 pose_json = json.load(f)
         else:
-            # Parse pose string
             pose_json = pose_string_to_json(pose_data)
     elif isinstance(pose_data, dict):
         pose_json = pose_data
@@ -212,7 +208,6 @@ def pose_to_input(
         w2c = np.linalg.inv(c2w)
         w2c_list.append(w2c)
 
-        # Normalize intrinsics
         intrinsic = np.array(pose_json[t_key]["K"])
         intrinsic[0, 0] /= intrinsic[0, 2] * 2
         intrinsic[1, 1] /= intrinsic[1, 2] * 2
@@ -223,14 +218,12 @@ def pose_to_input(
     w2c_list = np.array(w2c_list)
     intrinsic_list = torch.tensor(np.array(intrinsic_list))
 
-    # Compute relative camera-to-world transforms
     c2ws = np.linalg.inv(w2c_list)
     C_inv = np.linalg.inv(c2ws[:-1])
     relative_c2w = np.zeros_like(c2ws)
     relative_c2w[0, ...] = c2ws[0, ...]
     relative_c2w[1:, ...] = C_inv @ c2ws[1:, ...]
 
-    # Initialize one-hot action encodings
     trans_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
     rotate_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
 
@@ -242,7 +235,7 @@ def pose_to_input(
         if move_norms > move_norm_valid:  # threshold for movement
             move_norm_dirs = move_dirs / move_norms
             angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
-            trans_angles_deg = angles_rad * (180.0 / np.pi)  # convert to degrees
+            trans_angles_deg = angles_rad * (180.0 / np.pi)
         else:
             trans_angles_deg = np.zeros(3)
 
@@ -276,7 +269,6 @@ def pose_to_input(
     trans_one_hot = torch.tensor(trans_one_hot)
     rotate_one_hot = torch.tensor(rotate_one_hot)
 
-    # Convert one-hot to single-dimension labels
     trans_one_label = one_hot_to_one_dimension(trans_one_hot)
     rotate_one_label = one_hot_to_one_dimension(rotate_one_hot)
     action_one_label = trans_one_label * 9 + rotate_one_label
@@ -363,7 +355,6 @@ def parse_pose_string_to_actions(pose_string: str, fps: int = 24) -> list[dict]:
         else:
             raise ValueError(f"Unknown action: {action}")
 
-        # Add frame-level actions
         for _ in range(num_frames):
             frame_actions.append(action_values.copy())
 

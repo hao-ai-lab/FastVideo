@@ -100,7 +100,6 @@ class ServiceManager:
             "port": self.args.backend_port
         }
 
-        # Add I2V parameters if provided
         if self.args.i2v_model_paths:
             backend_args["i2v_model_paths"] = self.args.i2v_model_paths
         if self.args.i2v_model_replicas:
@@ -117,7 +116,6 @@ class ServiceManager:
             "port": self.args.frontend_port
         }
 
-        # Add I2V parameters if provided
         if self.args.i2v_model_paths:
             frontend_args["i2v_model_paths"] = self.args.i2v_model_paths
 

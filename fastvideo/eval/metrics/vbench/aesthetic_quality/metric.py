@@ -68,7 +68,6 @@ class AestheticQualityMetric(BaseMetric):
         )
         self._clip_model.eval()
 
-        # Load LAION aesthetic head
         ckpt_path = ensure_checkpoint(
             "sa_0_4_vit_l_14_linear.pth",
             source=_AESTHETIC_URL,

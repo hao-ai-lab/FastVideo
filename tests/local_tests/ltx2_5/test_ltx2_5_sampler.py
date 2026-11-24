@@ -86,7 +86,6 @@ def test_ancestral_step_captures_noise_from_stage_forward(monkeypatch) -> None:
         mock_step,
     )
 
-    # Create a minimal stage with a mock transformer
     mock_transformer = MagicMock()
     mock_transformer.return_value = (torch.zeros(1, 12, 4), torch.zeros(1, 18, 4))
     stage = LTX2DenoisingStage(
@@ -95,7 +94,6 @@ def test_ancestral_step_captures_noise_from_stage_forward(monkeypatch) -> None:
         num_inference_steps_override=1,
     )
 
-    # Create a batch with video and audio latents matching expected shapes
     batch = ForwardBatch(
         latents=torch.randn(1, 4, 3, 2, 2),  # video: (B, C, T, H, W)
         extra={
@@ -113,10 +111,8 @@ def test_ancestral_step_captures_noise_from_stage_forward(monkeypatch) -> None:
         ltx2_use_ancestral_sampler=True,
     )
 
-    # Run the stage forward to generate ancestral noise
     stage.forward(batch, args)
 
-    # Verify we captured noise tensors (one per ancestral step)
     assert len(captured_noises) == 1
     noise = captured_noises[0]
 
@@ -125,7 +121,6 @@ def test_ancestral_step_captures_noise_from_stage_forward(monkeypatch) -> None:
     # Combined flattened noise should have 48 + 24 = 72 elements
     assert noise.numel() == 48 + 24
 
-    # Verify reproducibility with the seeded offset
     expected_seed = 17 + ANCESTRAL_NOISE_SEED_OFFSET
     generator = torch.Generator(device="cpu").manual_seed(expected_seed)
     video_noise_expected = torch.randn((1, 4, 3, 2, 2), generator=generator)

@@ -1,6 +1,5 @@
 
 
-# Basic info
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
@@ -11,15 +10,13 @@ export NODE_RANK=0
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
-export WANDB_API_KEY="your_wandb_api_key_here" # TODO: Replace with your actual key or load from a secure location
+export WANDB_API_KEY="your_wandb_api_key_here"
 
-# Configs
 NUM_GPUS=4
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE=examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
 
-# Core training arguments
 core_training_args=(
   --tracker_project_name wan_t2v_VSA
   --output_dir "checkpoints/wan_t2v_finetune_VSA"
@@ -31,14 +28,12 @@ core_training_args=(
   --enable_gradient_checkpointing_type "full" # if OOM enable this
 )
 
-# Validation generation shape arguments (used during training validation)
 validation_generation_shape_args=(
   --num_height 448
   --num_width 832
   --num_frames 77
 )
 
-# Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
@@ -47,19 +42,16 @@ parallel_args=(
   --hsdp_shard_dim 1
 )
 
-# Model arguments
 model_args=(
   --model_path "$MODEL_PATH"
   --pretrained_model_name_or_path "$MODEL_PATH"
 )
 
-# Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
   --dataloader_num_workers 4
 )
 
-# Validation arguments
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
@@ -68,7 +60,6 @@ validation_args=(
   --validation_guidance_scale "5.0"
 )
 
-# Optimizer arguments
 optimizer_args=(
   --learning_rate 1e-6
   --mixed_precision "bf16"
@@ -78,7 +69,6 @@ optimizer_args=(
   --max_grad_norm 1.0
 )
 
-# Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
@@ -89,7 +79,6 @@ miscellaneous_args=(
   --seed 1000
 )
 
-# VSA arguments
 vsa_args=(
   --VSA_decay_rate 0.03
   --VSA_decay_interval_steps 50

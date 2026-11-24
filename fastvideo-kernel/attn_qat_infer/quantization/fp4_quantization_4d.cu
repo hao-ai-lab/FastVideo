@@ -125,7 +125,6 @@
    using Type = __nv_bfloat162;
  };
  
- // Define a 32 bytes packed data type.
  template <class Type>
  struct PackedVec {
    typename TypeConverter<Type>::Type elts[8];
@@ -152,7 +151,6 @@
  
    constexpr uint32_t NUM_THREADS_PER_TOKEN = head_dim / CVT_FP4_ELTS_PER_THREAD;
  
-   // load input
    const int token_id = token_block_id * BLOCK_SIZE + threadIdx.x / NUM_THREADS_PER_TOKEN;
    
    int load_token_id;
@@ -183,7 +181,6 @@
                                            (threadIdx.x % NUM_THREADS_PER_TOKEN) * CVT_FP4_ELTS_PER_THREAD)[0]; // feature dim
    }
  
-   // calculate max of every consecutive 16 elements
    auto localMax = __habs2(in_vec.elts[0]);
    #pragma unroll
    for (int i = 1; i < CVT_FP4_ELTS_PER_THREAD / 2; i++) { // local max
@@ -204,7 +201,6 @@
  
    float SFValueInv = (SFValue == 0.0f) ? 0.0f : 1.0f / SFValue;
  
-   // convert input to float2 and apply scale
    float2 fp2Vals[CVT_FP4_ELTS_PER_THREAD / 2];
  
    #pragma unroll
@@ -218,7 +214,6 @@
      fp2Vals[i].y = fp2Vals[i].y * SFValueInv;
    }
  
-   // convert to e2m1
    uint32_t e2m1Vals[CVT_FP4_ELTS_PER_THREAD / 8];
    #pragma unroll
    for (int i = 0; i < CVT_FP4_ELTS_PER_THREAD / 8; i++) {
@@ -229,7 +224,6 @@
    // is not a multiple of BLOCK_SIZE (out-of-bounds write fix).
    if (token_id >= num_tokens) return;
 
-   // save
    if constexpr (CVT_FP4_ELTS_PER_THREAD == 8) {
      reinterpret_cast<uint32_t*>(output + 
                                  batch_id * stride_bz_output +
@@ -284,7 +278,6 @@
    constexpr uint32_t NUM_THREADS_PER_TOKEN = head_dim / CVT_FP4_ELTS_PER_THREAD;
    constexpr uint32_t NUM_THREADS_PER_SEQ = BLOCK_SIZE / CVT_FP4_ELTS_PER_THREAD;
  
-   // load input
    const int token_id = token_block_id * BLOCK_SIZE + threadIdx.x / NUM_THREADS_PER_TOKEN;
 
    PackedVec in_vec;
@@ -312,7 +305,6 @@
      in_vec.elts[i].y = shared_input[(threadIdx.x / NUM_THREADS_PER_SEQ) + ((threadIdx.x % NUM_THREADS_PER_SEQ) * CVT_FP4_ELTS_PER_THREAD + 2 * i + 1) * head_dim];
    }
  
-   // calculate max of every consecutive 16 elements
    auto localMax = __habs2(in_vec.elts[0]);
    #pragma unroll
    for (int i = 1; i < CVT_FP4_ELTS_PER_THREAD / 2; i++) { // local max
@@ -333,7 +325,6 @@
  
    float SFValueInv = (SFValue == 0.0f) ? 0.0f : 1.0f / SFValue;
  
-   // convert input to float2 and apply scale
    float2 fp2Vals[CVT_FP4_ELTS_PER_THREAD / 2];
  
    #pragma unroll
@@ -347,7 +338,6 @@
      fp2Vals[i].y = fp2Vals[i].y * SFValueInv;
    }
  
-   // convert to e2m1
    uint32_t e2m1Vals[CVT_FP4_ELTS_PER_THREAD / 8];
    #pragma unroll
    for (int i = 0; i < CVT_FP4_ELTS_PER_THREAD / 8; i++) {
@@ -360,7 +350,6 @@
        (threadIdx.x % NUM_THREADS_PER_SEQ) * CVT_FP4_ELTS_PER_THREAD;
    if (write_token_id >= num_tokens) return;
 
-   // save
    if constexpr (CVT_FP4_ELTS_PER_THREAD == 8) {
      reinterpret_cast<uint32_t*>(output + 
                                  batch_id * stride_bz_output +

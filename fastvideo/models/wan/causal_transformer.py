@@ -146,7 +146,6 @@ class CausalWanSelfAttention(nn.Module):
                                value=padded_v[:, :, head_slice].transpose(2, 1),
                                block_mask=block_mask)[:, :, :q.shape[1]].transpose(2, 1)
             if sp_world_size > 1:
-                # Gather per-rank head outputs back to the full head dimension.
                 x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
         else:
             current_end = current_start + q.shape[1]
@@ -188,12 +187,10 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
-                # Assign new keys/values directly up to current_end
                 local_end_index = local_end_index_prev + current_end - global_end_index
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"] = kv_cache["k"].detach()
                 kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
                 kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             key_window = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
@@ -208,7 +205,6 @@ class CausalWanSelfAttention(nn.Module):
             x = self.attn(roped_query[:, :, head_slice], key_window[:, :, head_slice],
                           value_window[:, :, head_slice])
             if sp_world_size > 1:
-                # Gather per-rank head outputs back to the full head dimension.
                 x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
@@ -274,8 +270,6 @@ class CausalWanTransformerBlock(nn.Module):
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32)
 
-        # 2. Cross-attention
-        # Only T2V for now
         self.attn2 = WanT2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                          norm_type="layer",
@@ -314,13 +308,11 @@ class CausalWanTransformerBlock(nn.Module):
             frame_seqlen = int(frame_seqlen)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb
         # e.shape: [batch_size, temb_seq_len, 6, inner_dim]
         assert e.shape == (bs, temb_seq_len, 6, self.hidden_dim)
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=2)
         # *_msa.shape: [batch_size, temb_seq_len, 1, inner_dim]
-        # assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
         norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(temb_seq_len, tokens_per_temb)) *
@@ -481,7 +473,6 @@ class CausalWanTransformer3DModel(BaseDiT):
             else:
                 return ((kv_idx < ends[q_idx]) &
                         (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))) | (q_idx == kv_idx)
-            # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
 
         block_mask = create_block_mask(attention_mask,
                                        B=None,
@@ -495,15 +486,7 @@ class CausalWanTransformer3DModel(BaseDiT):
             print(f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
             print(block_mask)
 
-        # import imageio
-        # import numpy as np
-        # from torch.nn.attention.flex_attention import create_mask
 
-        # mask = create_mask(attention_mask, B=None, H=None, Q_LEN=total_length +
-        #                    padded_length, KV_LEN=total_length + padded_length, device=device)
-        # import cv2
-        # mask = cv2.resize(mask[0, 0].cpu().float().numpy(), (1024, 1024))
-        # imageio.imwrite("mask_%d.jpg" % (0), np.uint8(255. * mask))
 
         return block_mask
 
@@ -611,7 +594,6 @@ class CausalWanTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         if self.rope_cache_policy == "relativistic":
@@ -721,7 +703,6 @@ class CausalWanTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
@@ -855,7 +836,6 @@ class CausalWanTransformer3DModel(BaseDiT):
         for u, v in zip(x, grid_sizes.tolist()):
             u = u[:math.prod(v)].view(*v, *self.patch_size, c)
             u = u.permute(6, 0, 3, 1, 4, 2, 5)
-            # u = torch.einsum('fhwpqrc->cfphqwr', u.contiguous())
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
         return out

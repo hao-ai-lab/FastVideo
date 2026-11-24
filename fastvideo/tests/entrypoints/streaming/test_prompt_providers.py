@@ -89,9 +89,6 @@ def _install_fake_httpx(
     return captured
 
 
-# ----------------------------------------------------------------------
-# Cerebras
-# ----------------------------------------------------------------------
 
 
 class TestCerebrasProvider:
@@ -141,7 +138,6 @@ class TestCerebrasProvider:
         assert result.content == "enhanced"
         assert result.provider == "cerebras"
         assert result.model == "gpt-oss-120b"
-        # Verify the HTTP request was shaped correctly.
         body = captured[0]["json"]
         assert body["model"] == "gpt-oss-120b"
         assert body["messages"] == [{"role": "user", "content": "a fox"}]
@@ -251,9 +247,6 @@ class TestCerebrasProvider:
             asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
 
-# ----------------------------------------------------------------------
-# Groq
-# ----------------------------------------------------------------------
 
 
 class TestGroqProvider:

@@ -45,9 +45,6 @@ training:
     checkpoints_total_limit: 3
     resume_from_checkpoint: latest
 
-  # tracker:
-  #   project_name: fastvideo
-  #   run_name: matrixgame2_i2v_finetune
   tracker:
     trackers: [none]
     project_name: ""

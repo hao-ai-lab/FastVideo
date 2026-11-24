@@ -150,7 +150,6 @@ class VideoGenerator:
                     except Exception as e:
                         print(f"Error sending interrupt signal: {e}")
 
-                # Set the interrupt event to notify other threads
                 self._interrupt_event.set()
                 break
             time.sleep(0.5)
@@ -203,17 +202,14 @@ class VideoGenerator:
     ):
         print('Running FastVideo inference')
 
-        # Reset interruption flag and event
         self._generation_interrupted = False
         self._interrupt_event.clear()
         self._generation_result = None
         self._generation_exception = None
 
-        # Load pipeline config from model path
         pipeline_config = PipelineConfig.from_pretrained(model_path)
         print('pipeline_config', pipeline_config)
 
-        # Update configs with provided config dictionaries
         if dit_config is not None:
             update_config_from_args(pipeline_config.dit_config, dit_config)
 
@@ -223,7 +219,6 @@ class VideoGenerator:
         if text_encoder_config is not None:
             update_config_from_args(pipeline_config.text_encoder_configs, text_encoder_config)
 
-        # Update top-level pipeline config with remaining arguments
         raw_pipeline_args = {}
         if embedded_cfg_scale is not None:
             raw_pipeline_args['embedded_cfg_scale'] = embedded_cfg_scale
@@ -264,13 +259,11 @@ class VideoGenerator:
 
         print('inference_args', inference_args)
 
-        # Start a thread to run the generation
         self._generation_thread = threading.Thread(target=self._run_generation,
                                                    args=(prompt, output_path, inference_args),
                                                    daemon=True)
         self._generation_thread.start()
 
-        # Start a background thread to monitor for interruptions
         self._generation_active = True
         self._interrupt_thread = threading.Thread(target=self._monitor_for_interruption, daemon=True)
         self._interrupt_thread.start()

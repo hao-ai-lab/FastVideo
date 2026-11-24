@@ -35,24 +35,20 @@ def generate_camera_trajectory_local(motions):
     poses.append(T.copy())
 
     for move in motions:
-        # Rotate (Left or Right)
         if "yaw" in move:
             R = rot_y(move["yaw"])
             T[:3, :3] = T[:3, :3] @ R
 
-        # Rotate (Up or Down)
         if "pitch" in move:
             R = rot_x(move["pitch"])
             T[:3, :3] = T[:3, :3] @ R
 
-        # Translation (Z-direction of the camera's local coordinate system)
         forward = move.get("forward", 0.0)
         if forward != 0:
             local_t = np.array([0, 0, forward])
             world_t = T[:3, :3] @ local_t
             T[:3, 3] += world_t
 
-        # Translation (Z-direction of the camera's local coordinate system)
         right = move.get("right", 0.0)
         if right != 0:
             local_t = np.array([right, 0, 0])

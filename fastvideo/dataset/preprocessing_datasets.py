@@ -130,12 +130,10 @@ class DataValidationStage(DatasetFilterStage):
         Returns:
             True if valid, False if invalid
         """
-        # Check for caption
         if batch.cap is None:
             return False
 
         if batch.is_video:
-            # Validate video-specific fields
             if batch.duration is None or batch.fps is None:
                 return False
         elif not batch.is_image:
@@ -163,7 +161,6 @@ class FrameSamplingStage(DatasetFilterStage):
         self.speed_factor = speed_factor
         self.video_length_tolerance_range = video_length_tolerance_range
         self.drop_short_ratio = drop_short_ratio
-        # Create a seeded random generator for deterministic sampling
         self.rng = random.Random(seed)
 
     def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
@@ -184,7 +181,6 @@ class FrameSamplingStage(DatasetFilterStage):
 
         num_frames = math.ceil(batch.fps * batch.duration)
 
-        # Check if video is too long
         if (num_frames / batch.fps
                 > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor)):
             return False
@@ -313,7 +309,6 @@ class TextEncodingStage(DatasetStage):
         self.tokenizer = tokenizer
         self.text_max_length = text_max_length
         self.cfg_rate = cfg_rate
-        # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
 
     def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
@@ -397,7 +392,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
         self.temporal_sample = temporal_sample
         self.seed = seed
 
-        # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
         tokenizer = None
         if os.path.exists(tokenizer_path):
@@ -406,10 +400,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
             except (ValueError, OSError):
                 pass
 
-        # Initialize processing stages
         self._init_stages(args, transform, transform_topcrop, tokenizer)
 
-        # Process metadata
         self.processed_batches = self._process_metadata()
 
     def _init_stages(self, args, transform, transform_topcrop, tokenizer) -> None:
@@ -433,7 +425,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
 
     def _load_raw_data(self) -> list[dict]:
         """Load raw data from JSON files."""
-        # Read folder-annotation pairs
         with open(self.data_merge_path) as f:
             folder_anno_pairs = [line.strip().split(",") for line in f if line.strip()]
         assert len(folder_anno_pairs) == 1, "Only support one folder-annotation pair"
@@ -444,7 +435,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
         with open(annotation_file) as f:
             data_items = json.load(f)
 
-        # Update paths with folder prefix
         for item in data_items:
             item["path"] = opj(folder, item["path"])
             if "action_path" in item and item["action_path"]:
@@ -457,7 +447,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
         raw_data = self._load_raw_data()
         processed_batches = []
 
-        # Initialize counters
         filter_counts = {"validation_failed": 0, "frame_sampling_failed": 0}
         sample_num_frames: list[int] = []
 
@@ -469,11 +458,9 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
                                     duration=item.get("duration"),
                                     action_path=item.get("action_path"))
 
-            # Apply filtering stages
             if not self._apply_filter_stages(batch, filter_counts):
                 continue
 
-            # Apply frame sampling processing
             batch = self.frame_sampling_stage.process(batch, temporal_sample_fn=self.temporal_sample)
 
             processed_batches.append(batch)
@@ -515,13 +502,11 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
         """Get a single processed data item."""
         batch = replace(self.processed_batches[idx])
 
-        # Apply transformation stages
         batch = self.video_transform_stage.process(batch)
         batch = self.image_transform_stage.process(batch)
         if self.text_encoding_stage is not None:
             batch = self.text_encoding_stage.process(batch)
 
-        # Build result dictionary
         result = {
             "pixel_values": batch.pixel_values,
             "path": batch.path,
@@ -532,11 +517,9 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
             result["input_ids"] = batch.input_ids
             result["cond_mask"] = batch.cond_mask
 
-        # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})
 
-        # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
 
@@ -570,17 +553,14 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
         self.args = args
         self.seed = seed
 
-        # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=args.cache_dir)
 
-        # Initialize text encoding stage
         self.text_encoding_stage = TextEncodingStage(tokenizer=tokenizer,
                                                      text_max_length=args.text_max_length,
                                                      cfg_rate=getattr(args, 'training_cfg_rate', 0.0),
                                                      seed=self.seed)
 
-        # Process text data
         self.processed_batches = self._process_text_data()
 
     def _load_text_data(self) -> list[str]:
@@ -589,7 +569,7 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
         with open(self.data_merge_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line:  # Skip empty lines
+                if line:
                     prompts.append(line)
 
         logger.info(f"Loaded {len(prompts)} text prompts from {self.data_merge_path}")
@@ -619,7 +599,6 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
 
     def __iter__(self):
         """Iterator for the dataset."""
-        # Set up distributed sampling if needed
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             rank = torch.distributed.get_rank()
             world_size = torch.distributed.get_world_size()
@@ -627,7 +606,6 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
             rank = 0
             world_size = 1
 
-        # Calculate chunk for this rank
         total_items = len(self.processed_batches)
         items_per_rank = math.ceil(total_items / world_size)
         start_idx = rank * items_per_rank + self.start_idx
@@ -642,7 +620,6 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
         """Get a single processed text item."""
         batch = self.processed_batches[idx]
 
-        # Apply text encoding stage
         batch = self.text_encoding_stage.process(batch)
 
         # Build result dictionary for text-only processing with required schema fields

@@ -46,7 +46,6 @@ def t5_large_model_paths_and_config():
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_t5_encoder(t5_model_paths_and_config):
-    # Initialize the two model implementations
     text_encoder_path, tokenizer_path, pipeline_config = t5_model_paths_and_config
     hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
@@ -68,11 +67,9 @@ def test_t5_encoder(t5_model_paths_and_config):
     params1 = dict(model1.named_parameters())
     params2 = dict(model2.named_parameters())
 
-    # Check number of parameters
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
 
-    # check if embed_tokens are the same
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", \
@@ -100,17 +97,12 @@ def test_t5_encoder(t5_model_paths_and_config):
             tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
                                return_tensors="pt").to(device)
 
-            # Get outputs from HuggingFace implementation
-            # filter out padding input_ids
-            # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
-            # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
             outputs1 = model1(input_ids=tokens.input_ids,
                               attention_mask=tokens.attention_mask,
                               output_hidden_states=True).last_hidden_state
             print("--------------------------------")
             logger.info("Testing model2")
 
-            # Get outputs from our implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
@@ -126,7 +118,6 @@ def test_t5_encoder(t5_model_paths_and_config):
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_t5_large_encoder(t5_large_model_paths_and_config):
-    # Initialize the two model implementations
     text_encoder_path, tokenizer_path, pipeline_config = t5_large_model_paths_and_config
     hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
@@ -148,7 +139,6 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     params1 = dict(model1.named_parameters())
     params2 = dict(model2.named_parameters())
 
-    # Check number of parameters
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
 
@@ -161,7 +151,6 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     for name in sorted(params2.keys()):
         logger.info("  %s: %s", name, params2[name].shape)
 
-    #check if embed_tokens are the same
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi.weight", \
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", "encoder.final_layer_norm.weight"]
@@ -188,17 +177,12 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
             tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
                                return_tensors="pt").to(device)
 
-            # Get outputs from HuggingFace implementation
-            # filter out padding input_ids
-            # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
-            # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
             outputs1 = model1(input_ids=tokens.input_ids,
                               attention_mask=tokens.attention_mask,
                               output_hidden_states=True).last_hidden_state
             print("--------------------------------")
             logger.info("Testing model2 with T5LargeConfig")
 
-            # Get outputs from our implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(
                     input_ids=tokens.input_ids,

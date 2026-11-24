@@ -127,11 +127,9 @@ def bench_kineto(fn,
                 if not using_nsys:
                     profiler.step()
 
-    # Return 1 if using Nsight Systems
     if using_nsys:
         return 1
 
-    # Parse the profiling table
     assert isinstance(kernel_names, str) or isinstance(kernel_names, tuple)
     is_tupled = isinstance(kernel_names, tuple)
     prof_lines = profiler.key_averages().table(sort_by='cuda_time_total', max_name_column_width=100).split('\n')
@@ -140,11 +138,9 @@ def bench_kineto(fn,
     for name in kernel_names:
         assert sum([name in line for line in prof_lines]) == 1, f'Errors of the kernel {name} in the profiling table'
 
-    # Save chrome traces
     if trace_path is not None:
         profiler.export_chrome_trace(trace_path)
 
-    # Return average kernel times
     units = {'ms': 1e3, 'us': 1e6}
     kernel_times = []
     for name in kernel_names:

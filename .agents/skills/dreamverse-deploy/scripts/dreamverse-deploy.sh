@@ -77,9 +77,6 @@ if [[ "${1:-}" == "--stop" ]]; then
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Args
-# ---------------------------------------------------------------------------
 
 usage() {
   cat <<USAGE
@@ -168,9 +165,6 @@ esac
 REPO_ROOT="${DREAMVERSE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 LOG_DIR="${DREAMVERSE_LOG_DIR:-/tmp/opencode/dreamverse-deploy}"
 
-# ---------------------------------------------------------------------------
-# Prereq checks
-# ---------------------------------------------------------------------------
 
 bail() { echo "error: $*" >&2; exit 3; }
 
@@ -234,9 +228,6 @@ echo "        python:        ${CONDA_ENV_PYTHON}"
 
 mkdir -p "${LOG_DIR}"
 
-# ---------------------------------------------------------------------------
-# Teardown anything on target ports
-# ---------------------------------------------------------------------------
 
 echo "[1/8] killing any existing deploy on ports ${BACKEND_PORT}/${FRONTEND_PORT} and GPU ${GPU}..."
 
@@ -281,9 +272,6 @@ done
 gpu_mem="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 0)"
 echo "        ports cleared; GPU${GPU} at ${gpu_mem} MiB"
 
-# ---------------------------------------------------------------------------
-# Launch backend
-# ---------------------------------------------------------------------------
 
 echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP} torch_compile=${TORCH_COMPILE} nvenc=${NVENC})..."
 
@@ -367,9 +355,6 @@ fi
 
 echo "[4/8] backend /readyz OK"
 
-# ---------------------------------------------------------------------------
-# Launch frontend
-# ---------------------------------------------------------------------------
 
 echo "[5/8] launching frontend on port ${FRONTEND_PORT}..."
 
@@ -403,7 +388,6 @@ fi
 
 echo "        frontend pid=${frontend_pid} log=${frontend_log}"
 
-# Poll FE root
 echo "[6/8] polling http://127.0.0.1:${FRONTEND_PORT}/ ..."
 fe_ready=0
 for i in $(seq 1 30); do
@@ -428,9 +412,6 @@ fi
 
 echo "[7/8] frontend / OK"
 
-# ---------------------------------------------------------------------------
-# Print summary
-# ---------------------------------------------------------------------------
 
 cwd="$(readlink "/proc/${backend_pid}/cwd" 2>/dev/null || echo unknown)"
 gpu_mem_now="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 0)"

@@ -48,7 +48,6 @@ def split_tensor_along_last_dim(
         Returns:
             A list of Tensors
     """
-    # Get the size and dimension.
     last_dim = tensor.dim() - 1
     last_dim_size = divide(tensor.size()[last_dim], num_partitions)
     # Split.
@@ -105,11 +104,9 @@ def pad_sequence_tensor(
 
     padding_amount = target_seq_len - current_seq_len
 
-    # Create padding shape
     pad_shape = list(tensor.shape)
     pad_shape[seq_dim] = padding_amount
 
-    # Create padding tensor
     padding = torch.full(
         pad_shape,
         pad_value,
@@ -139,7 +136,6 @@ def unpad_sequence_tensor(
     Returns:
         Tensor: Unpadded tensor
     """
-    # Use slice to remove padding
     indices = [slice(None)] * tensor.dim()
     indices[seq_dim] = slice(0, original_seq_len)
 
@@ -184,7 +180,6 @@ class StatelessProcessGroup:
     def expire_data(self) -> None:
         """Expire data that is older than `data_expiration_seconds` seconds."""
         while self.entries:
-            # check the oldest entry
             key, timestamp = self.entries[0]
             if time.perf_counter() - timestamp > self.data_expiration_seconds:
                 self.store.delete_key(key)

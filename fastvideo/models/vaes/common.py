@@ -124,8 +124,6 @@ class ParallelTiledVAE(ABC):
                 The latent representation of the encoded videos.
         """
         _, _, _, height, width = x.shape
-        # latent_height = height // self.spatial_compression_ratio
-        # latent_width = width // self.spatial_compression_ratio
 
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
@@ -166,7 +164,6 @@ class ParallelTiledVAE(ABC):
         world_size, rank = get_sp_world_size(), get_sp_parallel_rank()
         B, C, T, H, W = z.shape
 
-        # Calculate parameters
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
         tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
@@ -177,45 +174,37 @@ class ParallelTiledVAE(ABC):
         blend_height = self.tile_sample_min_height - self.tile_sample_stride_height
         blend_width = self.tile_sample_min_width - self.tile_sample_stride_width
 
-        # Calculate tile dimensions
         num_t_tiles = (T + tile_latent_stride_num_frames - 1) // tile_latent_stride_num_frames
         num_h_tiles = (H + tile_latent_stride_height - 1) // tile_latent_stride_height
         num_w_tiles = (W + tile_latent_stride_width - 1) // tile_latent_stride_width
         total_spatial_tiles = num_h_tiles * num_w_tiles
         total_tiles = num_t_tiles * total_spatial_tiles
 
-        # Calculate tiles per rank and padding
         tiles_per_rank = (total_tiles + world_size - 1) // world_size
         start_tile_idx = rank * tiles_per_rank
         end_tile_idx = min((rank + 1) * tiles_per_rank, total_tiles)
 
         local_results = []
         local_dim_metadata = []
-        # Process assigned tiles
         for local_idx, global_idx in enumerate(range(start_tile_idx, end_tile_idx)):
             t_idx = global_idx // total_spatial_tiles
             spatial_idx = global_idx % total_spatial_tiles
             h_idx = spatial_idx // num_w_tiles
             w_idx = spatial_idx % num_w_tiles
 
-            # Calculate positions
             t_start = t_idx * tile_latent_stride_num_frames
             h_start = h_idx * tile_latent_stride_height
             w_start = w_idx * tile_latent_stride_width
 
-            # Extract and process tile
             tile = z[:, :, t_start:t_start + tile_latent_min_num_frames + 1, h_start:h_start + tile_latent_min_height,
                      w_start:w_start + tile_latent_min_width]
 
-            # Process tile
             tile = self._decode(tile)
 
             if t_start > 0:
                 tile = tile[:, :, 1:, :, :]
 
-            # Store metadata
             shape = tile.shape
-            # Store decoded data (flattened)
             decoded_flat = tile.reshape(-1)
             local_results.append(decoded_flat)
             local_dim_metadata.append(shape)
@@ -231,15 +220,12 @@ class ParallelTiledVAE(ABC):
         padded_results[:results.size(0)] = results
         del results
 
-        # Gather all results
         gathered_dim_metadata = [None] * world_size
         gathered_results = torch.zeros_like(padded_results).repeat(
             world_size, *[1] * len(padded_results.shape)).contiguous(
             )  # use contiguous to make sure it won't copy data in the following operations
-        # TODO (PY): use fastvideo distributed methods
         dist.all_gather_into_tensor(gathered_results, padded_results)
         dist.all_gather_object(gathered_dim_metadata, local_dim_metadata)
-        # Process gathered results
         data: list = [[[[] for _ in range(num_w_tiles)] for _ in range(num_h_tiles)] for _ in range(num_t_tiles)]
         for current_data, global_idx in self._parallel_data_generator(gathered_results, gathered_dim_metadata):
             t_idx = global_idx // total_spatial_tiles
@@ -290,8 +276,6 @@ class ParallelTiledVAE(ABC):
         """
 
         _, _, _, height, width = z.shape
-        # sample_height = height * self.spatial_compression_ratio
-        # sample_width = width * self.spatial_compression_ratio
 
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
@@ -317,7 +301,6 @@ class ParallelTiledVAE(ABC):
     def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
         _, _, num_frames, height, width = x.shape
 
-        # tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         tile_latent_stride_num_frames = self.tile_sample_stride_num_frames // self.temporal_compression_ratio
 
         row = []
@@ -448,7 +431,6 @@ class DiagonalGaussianDistribution:
                                                    dtype=self.parameters.dtype)
 
     def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
-        # make sure sample is on the same device as the parameters and has same dtype
         sample = randn_tensor(
             self.mean.shape,
             generator=generator,

@@ -51,8 +51,6 @@ LTX2_DISTILLED_PARAMS = {
     "fps": 24,
     "ltx2_vae_tiling": True,
 }
-# TODO: Regenerate LTX2-Distilled references for the new distilled defaults,
-# then remove these historical full-guidance pins.
 LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES = {
     "ltx2_modality_scale_video": 3.0,
     "ltx2_modality_scale_audio": 3.0,

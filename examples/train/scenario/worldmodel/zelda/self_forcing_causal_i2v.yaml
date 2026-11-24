@@ -33,7 +33,6 @@ method:
   enable_gradient_in_rollout: true
   start_gradient_frame: 0
 
-  # Critic optimizer
   fake_score_learning_rate: 3.0e-7
   fake_score_betas: [0.9, 0.95]
   fake_score_lr_scheduler: constant

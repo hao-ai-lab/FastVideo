@@ -17,7 +17,6 @@ def descriptor(name):
 
 
 def read_record(raw):
-    # Parse the TXXX UTF-8 value independently of the production serializer.
     assert raw[:3] == b"ID3" and raw[10:14] == b"TXXX" and raw[20] == 3
     description, value = raw[21:].split(b"\x00", 1)
     assert description == b"infinite-livestream"

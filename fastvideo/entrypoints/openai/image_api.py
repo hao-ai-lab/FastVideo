@@ -265,7 +265,6 @@ async def edits(
         enable_teacache=enable_teacache,
     )
 
-    # Save input images
     uploads_dir = os.path.join(get_output_dir(), "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
     image_list = merge_image_input_list(images, urls)

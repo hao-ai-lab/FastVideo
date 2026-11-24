@@ -198,8 +198,6 @@ def safetensors_weights_iterator(hf_weights_files: list[str],
                         shape = sl.get_shape()
                         dtype = SAFETENSORS_TO_TORCH_DTYPE[sl.get_dtype()]
                         param = torch.empty(shape, device=device, dtype=dtype)
-                    # broadcast to local ranks
-                    # TODO(Wenxuan): scatter instead of broadcast
                     if node_group.world_size > 1:
                         group = node_group.device_group
                         if async_broadcast:

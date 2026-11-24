@@ -128,7 +128,6 @@ def test_grad_and_inference_steps_share_one_builder_safely():
     xg = torch.randn(1, meta_grad.total_seq_length, 2, 8, requires_grad=True)
     impl.tile(xg, meta_grad)
 
-    # Then an inference step: the buffer is allocated and reused as usual.
     meta_inf, _ = _build(builder, step=1)
     x = torch.randn(1, meta_inf.total_seq_length, 2, 8)
     with torch.no_grad():

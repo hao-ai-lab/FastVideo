@@ -291,7 +291,6 @@ def _upsample_latents_numpy(
     x1 = np.minimum(x0 + 1, w - 1)
     wy = (ys - y0.astype(np.float32))[:, None]
     wx = (xs - x0.astype(np.float32))[None, :]
-    # Gather the four corners: shape (N, out_h, out_w).
     Ia = src[:, y0[:, None], x0[None, :]]
     Ib = src[:, y0[:, None], x1[None, :]]
     Ic = src[:, y1[:, None], x0[None, :]]

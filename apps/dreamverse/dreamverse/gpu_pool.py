@@ -307,7 +307,7 @@ def gpu_worker_process(
                         message=str(e),
                     ))
 
-            return True  # Continue loop
+            return True
 
         if first_cmd is not None:
             if first_cmd.type == CommandType.SHUTDOWN:
@@ -598,13 +598,11 @@ class GPUSlot:
         loop = asyncio.get_event_loop()
         future = loop.create_future()
 
-        # Register this request's pending future
         self._pending_futures[cmd.user_id] = future
 
         # Send command
         await loop.run_in_executor(None, self.command_queue.put, cmd)
 
-        # Ensure response reader is running
         await self._ensure_response_reader()
 
         # Wait for the response
@@ -916,7 +914,6 @@ class GPUPool:
         print(f"GPU pool: {gpu_id} ready "
               f"({sum(1 for s in self.slots.values() if s.ready)}/{len(self.gpu_ids)})")
 
-        # Check if anyone is waiting for a GPU
         async with self._pool_lock:
             slot = self.slots[gpu_id]
             if slot.is_available and self.waiting_list:
@@ -984,7 +981,6 @@ class GPUPool:
             except Exception as e:
                 print(f"[GPU {gpu_id}] Leave user failed: {e}")
 
-            # Assign to next waiting client if GPU has capacity
             if slot.is_available and self.waiting_list:
                 waiting_client_id, ready_event, _ = self.waiting_list.pop(0)
                 self.client_gpu_map[waiting_client_id] = gpu_id

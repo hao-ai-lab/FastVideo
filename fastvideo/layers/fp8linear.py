@@ -48,7 +48,6 @@ class _LinearFWD8BWD16Fn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, weight, bias, granularity="tensor"):
-        # assert/normalize activation dtype
         if x.dtype not in (torch.float16, torch.bfloat16):
             x = x.to(dtype=torch.bfloat16)
 
@@ -96,7 +95,6 @@ class _LinearFWD8BWD16Fn(torch.autograd.Function):
         if bias_cast is not None:
             out2d = out2d + bias_cast
 
-        # save tensors for backward (keep original dtypes)
         ctx.save_for_backward(x2d, weight, bias)
         ctx.n = n
         ctx.orig_shape = orig_shape

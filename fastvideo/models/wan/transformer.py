@@ -15,8 +15,6 @@ from fastvideo.distributed.communication_op import (sequence_model_parallel_all_
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
-# from torch.nn import RMSNorm
-# TODO: RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed, TimestepEmbedder)
@@ -320,7 +318,6 @@ class WanT2VCrossAttention(WanSelfAttention):
         """
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
 
         if crossattn_cache is not None:
@@ -337,7 +334,6 @@ class WanT2VCrossAttention(WanSelfAttention):
             k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
             v = self.to_v(context)[0].view(b, -1, n, d)
 
-        # compute attention
         x = self.attn(q, k, v) if k.size(1) > 0 else torch.zeros_like(q)
 
         # output
@@ -385,14 +381,12 @@ class WanI2VCrossAttention(WanSelfAttention):
         context = context[:, 257:]
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
         k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
         v = self.to_v(context)[0].view(b, -1, n, d)
         k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(b, -1, n, d)
         v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
         img_x = self.attn(q, k_img, v_img)
-        # compute attention
         x = self.attn(q, k, v) if k.size(1) > 0 else torch.zeros_like(q)
 
         # output
@@ -496,7 +490,6 @@ class WanTransformerBlock(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # assert orig_dtype != torch.float32
 
         if hidden_states.is_cuda and torch.compiler.is_compiling():
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
@@ -668,7 +661,6 @@ class WanTransformerBlock_VSA(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # assert orig_dtype != torch.float32
         if hidden_states.is_cuda and torch.compiler.is_compiling():
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
                 torch.ops.fastvideo._wan_modulation_forward(self.scale_shift_table, temb))
@@ -822,7 +814,6 @@ class WanTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames, post_patch_height, post_patch_width),
@@ -901,7 +892,6 @@ class WanTransformer3DModel(BaseDiT):
 
         hidden_states = self.norm_out(hidden_states, shift, scale)
 
-        # Gather and unpad in one operation
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.proj_out(hidden_states)
 

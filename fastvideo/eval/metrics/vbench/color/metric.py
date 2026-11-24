@@ -61,7 +61,6 @@ class ColorMetric(BaseMetric):
 
         prompt = sample.get("text_prompt") or ""
         color_key = aux["color"]
-        # Parse object name: remove "a ", "an ", and the color word
         object_key = prompt.replace("a ", "").replace("an ", "").replace(color_key, "").strip()
 
         frames_np = prepare_frames(video)

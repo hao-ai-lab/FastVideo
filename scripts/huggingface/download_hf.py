@@ -2,7 +2,6 @@ import argparse
 
 from huggingface_hub import hf_hub_download, snapshot_download
 
-# set args for repo_id, local_dir, repo_type,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download a dataset or model from the Hugging Face Hub")

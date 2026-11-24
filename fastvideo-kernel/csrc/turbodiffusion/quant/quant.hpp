@@ -109,7 +109,6 @@ public:
 
     float float_reg[NumElementPerThread];
 
-    // load float32 data
     Loader<InputDtype, BlockSize, BlockSize, NumThrPerCta, IsEvenM, IsEvenN> loader;
     loader.load(params.Iptr, float_reg, params.m, params.n, blk_m, blk_n, tidx);
     quantization(

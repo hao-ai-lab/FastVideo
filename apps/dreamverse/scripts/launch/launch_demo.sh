@@ -96,7 +96,6 @@ wait_for() {
   return 1
 }
 
-# --- backend ---
 echo "[launch-demo] backend logs: ${BE_LOG}"
 ( "${BE_SCRIPT}" "${BE_PORT_ARGS[@]}" >"${BE_LOG}" 2>&1 ) &
 BE_PID=$!
@@ -117,7 +116,6 @@ if [[ "${HEALTH_PATH}" != "${READY_PATH}" ]]; then
   fi
 fi
 
-# --- frontend ---
 if [[ "${NO_FRONTEND:-0}" != "1" ]]; then
   echo "[launch-demo] frontend logs: ${FE_LOG}"
   ( "${SCRIPT_DIR}/launch_frontend.sh" >"${FE_LOG}" 2>&1 ) &

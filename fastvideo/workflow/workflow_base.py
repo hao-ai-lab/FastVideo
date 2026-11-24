@@ -47,9 +47,6 @@ class WorkflowBase(ABC):
         """
         self.fastvideo_args = fastvideo_args
 
-        # TODO: pipeline_config should be: dict[str, PipelineConfig]
-        # pipeline_type should be included in the PipelineConfig
-        # pipeline_config[pipeline_name] = (pipeline_type, fastvideo_args)
         self._pipeline_configs: dict[str, tuple[PipelineType, FastVideoArgs]] = {}
         self._pipelines: dict[str, ComposedPipelineBase] = {}
         self._components: dict[str, Any] = {}

@@ -7,7 +7,6 @@ import sys
 import fastvideo.envs as envs
 from fastvideo.tests.utils import compute_video_ssim_torchvision
 
-# Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 NUM_NODES = "1"
@@ -32,7 +31,6 @@ LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
 
 
 def download_data():
-    # create the data dir if it doesn't exist
     data_dir = Path(DATA_DIR)
 
     print(f"Creating data directory at {data_dir}")
@@ -49,7 +47,6 @@ def download_data():
         )
         print(f"Download completed successfully. Files downloaded to: {result}")
 
-        # Verify the download
         if not LOCAL_RAW_DATA_DIR.exists():
             raise RuntimeError(f"Download appeared to succeed but {LOCAL_RAW_DATA_DIR} does not exist")
 
@@ -65,12 +62,10 @@ def download_data():
 
 
 def run_preprocessing():
-    # remove the local_preprocessed_data_dir if it exists
     if LOCAL_PREPROCESSED_DATA_DIR.exists():
         print(f"Removing local_preprocessed_data_dir: {LOCAL_PREPROCESSED_DATA_DIR}")
         shutil.rmtree(LOCAL_PREPROCESSED_DATA_DIR)
 
-    # Run torchrun command
     cmd = [
         "torchrun",
         "--nnodes",
@@ -214,11 +209,9 @@ def test_e2e_overfit_single_sample():
     final_validation_video_file = os.path.join(LOCAL_OUTPUT_DIR, "validation_step_900_inference_steps_50_video_0.mp4")
     print(f"final_validation_video_file: {final_validation_video_file}")
 
-    # Ensure both files exist
     assert os.path.exists(reference_video_file), f"Reference video not found at {reference_video_file}"
     assert os.path.exists(final_validation_video_file), f"Validation video not found at {final_validation_video_file}"
 
-    # Compute SSIM
     mean_ssim, min_ssim, max_ssim = compute_video_ssim_torchvision(
         reference_video_file,
         final_validation_video_file,

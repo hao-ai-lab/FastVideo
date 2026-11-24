@@ -61,10 +61,6 @@ from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Cache helpers
-# ---------------------------------------------------------------------------
-
 _COMPLETE_SENTINEL = "COMPLETE"
 _METADATA_FILE = "metadata.json"
 
@@ -156,11 +152,6 @@ class _KDPathCache:
             dist.barrier()
 
 
-# ---------------------------------------------------------------------------
-# Dataset for reading cached paths at training time
-# ---------------------------------------------------------------------------
-
-
 class _KDPathDataset(Dataset):
     """Reads per-sample ``.pt`` files from a completed KD cache.
 
@@ -185,11 +176,6 @@ class _KDPathDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         path = self._samples_dir / f"{idx:08d}.pt"
         return torch.load(path, weights_only=True, map_location="cpu")
-
-
-# ---------------------------------------------------------------------------
-# Lazy dataloader wrapper
-# ---------------------------------------------------------------------------
 
 
 class _KDDataLoaderWrapper:
@@ -257,11 +243,6 @@ def _kd_collate(samples: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
     """Stack a list of per-sample dicts into a batched dict."""
     keys = samples[0].keys()
     return {k: torch.stack([s[k] for s in samples]) for k in keys}
-
-
-# ---------------------------------------------------------------------------
-# KD Method
-# ---------------------------------------------------------------------------
 
 
 class KDMethod(TrainingMethod):
@@ -332,7 +313,6 @@ class KDMethod(TrainingMethod):
         self._kd_wrapper = _KDDataLoaderWrapper(self._source_loader)
         self.student.dataloader = self._kd_wrapper  # builder captures this
 
-        # --- Build SelfForcingFlowMatchScheduler for sigma lookups ---
         # num_inference_steps=1000 gives a dense grid accurate for any t.
         tc = self.training_config
         self._flow_shift = float(getattr(tc.pipeline_config, "flow_shift", 0.0) or 0.0)
@@ -347,10 +327,6 @@ class KDMethod(TrainingMethod):
 
         # --- Student optimizer / scheduler (same as FineTuneMethod) ---
         self._init_optimizers_and_schedulers()
-
-    # ------------------------------------------------------------------
-    # TrainingMethod abstract implementations
-    # ------------------------------------------------------------------
 
     @property
     def _optimizer_dict(self) -> dict[str, Any]:
@@ -367,10 +343,6 @@ class KDMethod(TrainingMethod):
     def get_lr_schedulers(self, iteration: int) -> list[Any]:
         del iteration
         return [self._student_lr_scheduler]
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     def on_train_start(self) -> None:
         super().on_train_start()  # sets CUDA RNG, calls student.on_train_start()
@@ -459,10 +431,6 @@ class KDMethod(TrainingMethod):
              for t in self._t_list[:-1]},
         )
 
-    # ------------------------------------------------------------------
-    # Path generation
-    # ------------------------------------------------------------------
-
     def _generate_paths(
         self,
         source_dataset: Any,
@@ -490,7 +458,6 @@ class KDMethod(TrainingMethod):
             if global_idx not in missing_set:
                 continue  # all ranks skip together — no FSDP divergence
 
-            # Load single sample by stable global index.
             raw = source_dataset.__getitems__([global_idx])
             raw = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in raw.items()}
 
@@ -547,7 +514,6 @@ class KDMethod(TrainingMethod):
         latents = training_batch.latents.to(dtype)
         B, T = latents.shape[:2]
 
-        # Build teacher's full ODE schedule.
         teacher_sched = SelfForcingFlowMatchScheduler(
             num_inference_steps=self._teacher_inference_steps,
             num_train_timesteps=int(self.student.num_train_timesteps),
@@ -558,7 +524,6 @@ class KDMethod(TrainingMethod):
         )
         teacher_t_list = [int(t.item()) for t in teacher_sched.timesteps]
 
-        # Start from pure noise at the highest teacher timestep.
         noise = torch.randn(
             latents.shape,
             device=device,
@@ -627,10 +592,6 @@ class KDMethod(TrainingMethod):
         idx = torch.argmin((timesteps - t).abs())
         return sigmas[idx].expand(numel).reshape(numel, 1, 1, 1)
 
-    # ------------------------------------------------------------------
-    # Training step
-    # ------------------------------------------------------------------
-
     def single_train_step(
         self,
         batch: dict[str, Any],
@@ -694,7 +655,6 @@ class KDMethod(TrainingMethod):
             attn_kind="dense",
         )  # [B, T, C, H, W]
 
-        # Convert predicted noise to predicted x0 using _sf_scheduler.
         timestep_bt = timestep_b.unsqueeze(1).expand(B, T)
         pred_x0 = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -740,10 +700,6 @@ class KDMethod(TrainingMethod):
             grad_accum_rounds=grad_accum_rounds,
         )
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _init_optimizers_and_schedulers(self) -> None:
         tc = self.training_config
         student_lr = float(tc.optimizer.learning_rate)
@@ -762,11 +718,6 @@ class KDMethod(TrainingMethod):
             betas=tc.optimizer.betas,
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
-
-
-# ---------------------------------------------------------------------------
-# Causal KD Method
-# ---------------------------------------------------------------------------
 
 
 class KDCausalMethod(KDMethod):
@@ -813,7 +764,6 @@ class KDCausalMethod(KDMethod):
         B, _S, T, C, H, W = batch["trajectory_latents"].shape
         K = self._num_steps  # number of student steps (excludes t=0)
 
-        # Gather the K relevant trajectory steps for t_list[:-1].
         traj_indices = torch.tensor(
             [self._t_to_traj_idx[t] for t in self._t_list[:-1]],
             dtype=torch.long,
@@ -824,7 +774,6 @@ class KDCausalMethod(KDMethod):
         # Sample per-frame step indices, block-quantized.
         indexes = self._sample_per_frame_step_idx(B, T, K, device)  # [B, T] in [0, K)
 
-        # Gather noisy_input per frame: [B, T, C, H, W]
         noisy_input = torch.gather(
             relevant,
             dim=1,

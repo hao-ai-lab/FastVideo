@@ -101,12 +101,10 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
     fetchJobsRef.current = fetchJobs;
   }, [fetchJobs]);
 
-  // Initial fetch + refetch whenever an external refresh is triggered.
   React.useEffect(() => {
     fetchJobs();
   }, [fetchJobs, nonce]);
 
-  // Poll every second while any job is running/pending; stop otherwise.
   const hasActive = jobs.some(
     (j) => j.status === 'running' || j.status === 'pending',
   );

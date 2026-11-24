@@ -53,12 +53,10 @@ class TimestepPreparationStage(PipelineStage):
         sigmas = batch.sigmas
         n_tokens = batch.n_tokens
 
-        # Prepare extra kwargs for set_timesteps
         extra_set_timesteps_kwargs = {}
         if n_tokens is not None and "n_tokens" in inspect.signature(scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
 
-        # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
             raise ValueError(
                 "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
@@ -85,7 +83,6 @@ class TimestepPreparationStage(PipelineStage):
             scheduler.set_timesteps(num_inference_steps, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
 
-        # Update batch with prepared timesteps
         batch.timesteps = timesteps
 
         return batch

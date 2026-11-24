@@ -13,11 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
-#
 # Modified from diffusers==0.29.2
-#
-# ==============================================================================
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -533,8 +529,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
     def _convert_to_karras(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
         """Constructs the noise schedule of Karras et al. (2022)."""
 
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -553,8 +547,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
     def _convert_to_exponential(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
         """Constructs an exponential noise schedule."""
 
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
@@ -573,8 +565,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
                          beta: float = 0.6) -> torch.Tensor:
         """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
 
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
         sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
         sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None

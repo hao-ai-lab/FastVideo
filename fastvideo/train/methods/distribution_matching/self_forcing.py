@@ -55,7 +55,6 @@ class SelfForcingMethod(DMD2Method):
             role_models=role_models,
         )
 
-        # Validate causal student.
         if not isinstance(self.student, CausalModelBase):
             raise ValueError("SelfForcingMethod requires a causal student "
                              "implementing CausalModelBase.")

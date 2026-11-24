@@ -99,7 +99,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
         target_h = latent_h * spatial_ratio
         target_w = latent_w * spatial_ratio
         num_iterations = self._infer_num_iterations(batch)
-        clip_frame = 56  # hardcode for now
+        clip_frame = 56
         first_clip_frame = clip_frame + 1
         past_frame = 16
 
@@ -246,7 +246,6 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                         (x_memory.shape[0], x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4))
             with self.progress_bar(total=len(timesteps)) as progress_bar:
                 for timestep in timesteps:
-                    # Stop if interrupted
                     if getattr(self, "interrupt", False):
                         break
                     latent_model_input = current_latents

@@ -80,7 +80,6 @@ class WanAnimateArchConfig(WanVideoArchConfig):
     image_dim: int | None = 1280
     added_kv_proj_dim: int | None = 5120
 
-    # --- Animate-specific (names match config.json keys exactly) ---
     # in_channels = 2 * latent_channels + 4 mask channels; asserted below.
     latent_channels: int = 16
     # None -> the model uses the LIA channel table keyed by feature-map size

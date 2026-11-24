@@ -7,7 +7,6 @@ import torch
 
 REFINE_SHIFT = 6.0
 DEFAULT_REFINE_STEPS = 3
-# Start noise of the two-step variant; the three-step grid starts at 0.909375.
 TWO_STEP_START_SIGMA = 0.7
 
 

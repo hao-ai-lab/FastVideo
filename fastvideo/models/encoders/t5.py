@@ -161,7 +161,6 @@ class T5Attention(nn.Module):
 
         self.inner_dim = self.n_heads * self.key_value_proj_dim
         # No GQA in t5.
-        # self.n_kv_heads = self.n_heads
 
         self.qkv_proj = QKVParallelLinear(
             self.d_model,
@@ -225,7 +224,6 @@ class T5Attention(nn.Module):
             relative_position = torch.abs(relative_position)
         else:
             relative_position = -torch.min(relative_position, torch.zeros_like(relative_position))
-        # now relative_position is in the range [0, inf)
 
         # half of the buckets are for exact increments in positions
         max_exact = num_buckets // 2
@@ -420,7 +418,6 @@ class T5Block(nn.Module):
         if self.is_decoder:
             hidden_states = self.layer[1](hidden_states=hidden_states, attn_metadata=attn_metadata)
 
-            # Apply Feed Forward layer
             hidden_states = self.layer[2](hidden_states)
         else:
             hidden_states = self.layer[1](hidden_states)

@@ -46,7 +46,6 @@ class IncrementalVideoWriter:
         frames_copy = [f.copy() for f in frames]
         self._pending_main = self._executor.submit(self._write_frames, frames_copy)
 
-        # Write block file if block_dir is set
         block_future = None
         if self._block_dir:
             self._block_idx += 1
@@ -132,7 +131,6 @@ class StreamingVideoGenerator(VideoGenerator):
             self.writer = None
         self.executor.execute_streaming_clear()
 
-        # Handle batch processing from text file
         if self.sampling_param is None:
             self.sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
 
@@ -144,7 +142,6 @@ class StreamingVideoGenerator(VideoGenerator):
 
         if "output_path" in kwargs:
             output_path = self._prepare_output_path(kwargs["output_path"], prompt)
-            # Create block directory for individual block files
             block_dir = output_path.replace(".mp4", "")
             os.makedirs(block_dir, exist_ok=True)
             self.block_dir = block_dir

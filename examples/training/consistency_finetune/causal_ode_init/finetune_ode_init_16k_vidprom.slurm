@@ -29,7 +29,6 @@ export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_API_KEY=your-wandb-api-key
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"

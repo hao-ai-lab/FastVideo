@@ -104,7 +104,6 @@ class FineTuneMethod(TrainingMethod):
                              "trainable")
         self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
 
-        # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
 
         self._init_optimizers_and_schedulers()

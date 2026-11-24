@@ -51,7 +51,6 @@ class PipelineType(str, Enum):
 @dataclass
 class _PipelineRegistry:
     # Keyed by pipeline_type -> pipeline_name
-    # pipelines[pipeline_type][pipeline_name] = pipeline_cls
     pipelines: dict[str, dict[str, type[ComposedPipelineBase] | None]] = field(default_factory=dict)
 
     def get_supported_pipelines(self, pipeline_type: PipelineType) -> Set[str]:

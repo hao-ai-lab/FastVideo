@@ -183,11 +183,9 @@ def _attn_bwd_preprocess(
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
-    # load
     o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
-    # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
 
 
@@ -255,13 +253,11 @@ def _attn_bwd_dkdv(
         pT = tl.where(mask[:, None], pT, 0.0)
 
         do = tl.load(do_ptrs + block_sparse_offset * stride_tok)
-        # Compute dV.
         ppT = pT
         ppT = ppT.to(tl.bfloat16)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
-        # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
         dsT = dsT.to(tl.bfloat16)
@@ -333,7 +329,6 @@ def _attn_bwd_dq(
         offs_in_block = half * step_n + tl.arange(0, BLOCK_N2)
         mask = offs_in_block < block_size
         p = tl.where(mask[None, :], p, 0.0)
-        # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.bfloat16)
@@ -392,7 +387,6 @@ def _attn_bwd(
     M += off_chz
     D += off_chz
 
-    # load scales
     offs_k = tl.arange(0, HEAD_DIM)
 
     start_n = pid * BLOCK_N1
@@ -403,7 +397,6 @@ def _attn_bwd(
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
     dk = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
 
-    # load K and V: they stay in SRAM throughout the inner loop.
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
@@ -438,7 +431,6 @@ def _attn_bwd(
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     tl.store(dv_ptrs, dv)
 
-    # Write back dK.
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     tl.store(dk_ptrs, dk)
@@ -481,7 +473,6 @@ def _attn_bwd(
         end_n,
         num_steps  #
     )
-    # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     dq *= sm_scale
     tl.store(dq_ptrs, dq)
@@ -557,7 +548,6 @@ def _attn_bwd_dkdv_kernel(
     start_n = kv_blk * BLOCK_N1
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
-    # load K and V: they stay in SRAM throughout the inner loop.
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 

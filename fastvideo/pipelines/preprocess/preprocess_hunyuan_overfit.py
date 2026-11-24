@@ -54,7 +54,6 @@ def load_video(path: str, num_frames: int) -> torch.Tensor:
     cap.release()
 
     if len(frames) < num_frames:
-        # Repeat last frame to fill
         while len(frames) < num_frames:
             frames.append(frames[-1])
 
@@ -73,7 +72,6 @@ def main() -> None:
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load captions
     with open(os.path.join(DATA_DIR, "videos2caption.json")) as f:
         caption_data = json.load(f)
 
@@ -177,10 +175,8 @@ def main() -> None:
         }
         records.append(record)
 
-    # Clean up encoders
     del llama_enc, llama_tok, clip_enc, clip_tok, vae
 
-    # Write parquet
     table = pa.table(
         {k: [r[k] for r in records]
          for k in records[0]},

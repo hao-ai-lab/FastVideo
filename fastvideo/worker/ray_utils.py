@@ -180,7 +180,6 @@ def initialize_ray_cluster(
         raise ValueError(f"current platform {current_platform.device_name} does not "
                          "support ray.")
 
-    # Create or get the placement group for worker processes
     current_placement_group = fastvideo_args.ray_placement_group or ray.util.get_current_placement_group()
 
     if current_placement_group:
@@ -188,7 +187,6 @@ def initialize_ray_cluster(
 
         # We are in a placement group
         bundles = current_placement_group.bundle_specs
-        # Verify that we can use the placement group.
         device_bundles = 0
         for bundle in bundles:
             bundle_devices = bundle.get(device_str, 0)
@@ -213,7 +211,6 @@ def initialize_ray_cluster(
             logger.warning(
                 "The number of required %ss exceeds the total "
                 "number of available %ss in the placement group.", device_str, device_str)
-        # Create a new placement group
         placement_group_specs: list[dict[str, float]] = ([{device_str: 1.0} for _ in range(fastvideo_args.num_gpus)])
 
         # FastVideo engine is also a worker to execute model with an accelerator,
@@ -237,7 +234,6 @@ def initialize_ray_cluster(
 
     assert current_placement_group is not None
     _verify_bundles(current_placement_group, fastvideo_args, device_str)
-    # Set the placement group in the fastvideo args
     fastvideo_args.ray_placement_group = current_placement_group
 
 

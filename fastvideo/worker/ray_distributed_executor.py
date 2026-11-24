@@ -170,8 +170,6 @@ class RayDistributedExecutor(Executor):
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
 
-        # Create the workers.
-        # use the first N bundles that have GPU resources.
         bundle_indices: list[int] = []
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
@@ -249,7 +247,6 @@ class RayDistributedExecutor(Executor):
             # Stamped before init_worker pickles the args to every worker.
             self._setup_h3_encoder_split([item.ip for item in sorted_worker_metadata])
 
-        # Get the set of GPU IDs used on each node.
         worker_node_and_gpu_ids = self._run_ray_workers("get_node_and_gpu_ids")
         node_workers = defaultdict(list)  # node id -> list of worker ranks
         node_gpus = defaultdict(list)  # node id -> list of gpu ids
@@ -278,7 +275,6 @@ class RayDistributedExecutor(Executor):
                                " environment variable, make sure it is unique for"
                                " each node.")
 
-        # Set environment variables for the driver and workers.
         all_args_to_update_environment_variables: list[dict[str, str]]
         if keep_raylet_devices:
             # The inherited device list stays; each worker gets its ordinal in it.
@@ -298,9 +294,7 @@ class RayDistributedExecutor(Executor):
             destination="workers",
         )
 
-        # Copy existing env vars to each worker's args
         for args in all_args_to_update_environment_variables:
-            # TODO: refactor platform-specific env vars
             for name in env_vars_to_copy:
                 if name in os.environ:
                     args[name] = os.environ[name]
@@ -314,7 +308,6 @@ class RayDistributedExecutor(Executor):
             driver_ip = get_loopback_ip()
         distributed_init_method = get_distributed_init_method(driver_ip, get_open_port())
 
-        # Initialize the actual workers inside worker wrapper.
         all_kwargs = []
         for rank, (node_id, _) in enumerate(worker_node_and_gpu_ids):
             local_rank = node_workers[node_id].index(rank)
@@ -507,11 +500,9 @@ class RayDistributedExecutor(Executor):
         sent_method = method if isinstance(method, str) else cloudpickle.dumps(method)
         del method
 
-        # Start the ray workers first.
         ray_workers = self.workers
         ray_worker_outputs = [worker.execute_method.remote(sent_method, *args, **kwargs) for worker in ray_workers]
 
-        # Get the results of the ray workers.
         ray_worker_outputs = ray.get(ray_worker_outputs)
 
         return ray_worker_outputs

@@ -165,7 +165,6 @@ def _compute_dequant(
         if dst_dtype == tl.float16:
             dst_scale = dst_scale.to(tl.float16)
 
-    # Now upcast the tensor.
     intermediate_dtype: tl.constexpr = tl.bfloat16 if dst_dtype == tl.float32 else dst_dtype
     if cuda_capability_geq(10, 0):
         assert is_fp4
@@ -215,7 +214,6 @@ def _compute_dequant(
         # 2) x is subnormal (x == 0bs001 where s is the sign): Map to +-0.5 in the dst type
         x0 = tl.where(em0 == 0x01, dst_0p5 | (x0 & 0x8000), x0)
         x1 = tl.where(em1 == 0x10, dst_0p5 | (x1 & 0x8000), x1)
-        # 3) x is zero, do nothing
         dst_tensor = tl.interleave(x0, x1).to(intermediate_dtype, bitcast=True)
 
     dst_tensor = dst_tensor.to(dst_dtype)

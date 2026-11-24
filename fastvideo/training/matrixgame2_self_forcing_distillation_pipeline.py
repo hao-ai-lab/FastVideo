@@ -166,7 +166,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         frame_seq_length = post_patch_height * post_patch_width
         self.frame_seq_length = frame_seq_length
 
-        # Get model configuration parameters - handle FSDP wrapping
         num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
         attention_head_dim = getattr(self.transformer, 'attention_head_dim', None)
 
@@ -199,7 +198,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 torch.tensor([0], dtype=torch.long, device=device)
             })
 
-        # Initialize cross-attention cache
         crossattn_cache = []
         for _ in range(num_transformer_blocks):
             crossattn_cache.append({
@@ -213,7 +211,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 False
             })
 
-        # Initialize action module KV caches
         action_heads_num = action_config.get('heads_num', 16) if action_config else 16
         mouse_hidden_dim = action_config.get('mouse_hidden_dim', 1024) if action_config else 1024
         keyboard_hidden_dim = action_config.get('keyboard_hidden_dim', 1024) if action_config else 1024
@@ -357,11 +354,9 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                              device=noise.device,
                              dtype=noise.dtype)
 
-        # Step 1: Initialize KV cache to all zeros
         (self.kv_cache1, self.crossattn_cache, self.kv_cache_mouse,
          self.kv_cache_keyboard) = self._initialize_simulation_caches(batch_size, dtype, self.device)
 
-        # Step 2: Temporal denoising loop
         current_start_frame = 0
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame:
@@ -373,7 +368,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame:current_start_frame + current_num_frames]
 
-            # Step 3.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
                 exit_flag = (index == exit_flags[0]) if self.same_step_across_blocks else (index
                                                                                            == exit_flags[block_index])
@@ -388,7 +382,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
                 if not exit_flag:
                     with torch.no_grad():
-                        # Build input kwargs
                         training_batch_temp = self._build_distill_input_kwargs(noisy_input,
                                                                                timestep,
                                                                                training_batch.conditional_dict,
@@ -468,10 +461,8 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                                                  0, pred_flow.shape[:2])
                     break
 
-            # Step 3.2: record the model's output
             output[:, current_start_frame:current_start_frame + current_num_frames] = denoised_pred
 
-            # Step 3.3: rerun with timestep zero to update the cache
             context_timestep = torch.ones_like(timestep) * self.context_noise
             denoised_pred = self.noise_scheduler.add_noise(denoised_pred.flatten(0, 1),
                                                            torch.randn_like(denoised_pred.flatten(0, 1)),
@@ -497,10 +488,8 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                               current_start=current_start_frame * self.frame_seq_length,
                               start_frame=current_start_frame)
 
-            # Step 3.4: update the start and end frame indices
             current_start_frame += current_num_frames
 
-        # Handle last 21 frames logic
         pred_image_or_video = output
 
         # Slice last 21 frames if we generated more
@@ -512,7 +501,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 # Decode to video
                 latent_to_decode = latent_to_decode.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
 
-                # Apply VAE scaling and shift factors
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
                     latent_to_decode = latent_to_decode / self.vae.scaling_factor.to(
                         latent_to_decode.device, latent_to_decode.dtype)
@@ -537,7 +525,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 
-        # Set up gradient mask if we generated more than minimum frames
         if num_generated_frames != min_num_frames:
             # Currently, we do not use gradient for the first chunk, since it contains image latents
             gradient_mask = torch.ones_like(pred_image_or_video_last_21, dtype=torch.bool)
@@ -546,24 +533,20 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             else:
                 gradient_mask[:, :self.num_frame_per_block] = False
 
-        # Apply gradient masking if needed
         final_output = pred_image_or_video_last_21.to(dtype)
         if gradient_mask is not None:
-            # Apply gradient masking: detach frames that shouldn't contribute gradients
             final_output = torch.where(
                 gradient_mask,
                 pred_image_or_video_last_21,  # Keep original values where gradient_mask is True
                 pred_image_or_video_last_21.detach()  # Detach where gradient_mask is False
             )
 
-        # Store visualization data
         training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.as_tensor(
             self.denoising_step_list[exit_flags[0]],
             dtype=torch.float32,
             device=self.device,
         ).detach().clone()
 
-        # Store gradient mask information for debugging
         if gradient_mask is not None:
             training_batch.dmd_latent_vis_dict["gradient_mask"] = gradient_mask.float()
             training_batch.dmd_latent_vis_dict["num_generated_frames"] = torch.tensor(num_generated_frames,
@@ -573,7 +556,6 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                                                                 dtype=torch.float32,
                                                                                 device=self.device)
 
-        # Clean up caches
         assert self.kv_cache1 is not None
         assert self.crossattn_cache is not None
         self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache, self.kv_cache_mouse, self.kv_cache_keyboard)
@@ -620,9 +602,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
             self.current_epoch += 1
-            # Reset iterator for next epoch
             self.train_loader_iter = iter(self.train_dataloader)
-            # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
         clip_feature = batch['clip_feature']

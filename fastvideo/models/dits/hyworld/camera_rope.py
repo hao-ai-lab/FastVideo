@@ -94,7 +94,6 @@ def prope_qkv(
     assert q.shape == k.shape == v.shape
     assert viewmats.shape == (batch, cameras, 4, 4)
     assert Ks is None or Ks.shape == (batch, cameras, 3, 3)
-    # assert seqlen == cameras * patches_x * patches_y
 
     apply_fn_q, apply_fn_kv, apply_fn_o = _prepare_apply_fns_all_dim(
         head_dim=head_dim,
@@ -134,7 +133,6 @@ def _prepare_apply_fns_all_dim(
     device = viewmats.device
     (batch, cameras, _, _) = viewmats.shape
 
-    # Normalize camera intrinsics.
     if Ks is not None:
         Ks_norm = torch.zeros_like(Ks)
         Ks_norm[..., 0, 0] = Ks[..., 0, 0]

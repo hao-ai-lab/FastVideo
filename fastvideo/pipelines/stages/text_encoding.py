@@ -61,7 +61,6 @@ class TextEncodingStage(PipelineStage):
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
 
-        # Skip encoding if precomputed prompt_embeds were provided
         if batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
             return batch
 
@@ -188,16 +187,13 @@ class TextEncodingStage(PipelineStage):
             indices = [encoder_index]
         else:
             indices = list(encoder_index)
-        # validate range
         num_encoders = len(self.text_encoders)
         for idx in indices:
             if idx < 0 or idx >= num_encoders:
                 raise IndexError(f"encoder index {idx} out of range [0, {num_encoders-1}]")
 
-        # Validate indices are within range
         num_encoders = len(self.text_encoders)
 
-        # Normalize input to list[str]
         assert isinstance(text, str | list)
         if isinstance(text, str):
             texts: list[str] = [text]

@@ -47,8 +47,6 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
         args_copy.inference_mode = True
         args_copy.dit_cpu_offload = True
-        # args_copy.pipeline_config.vae_config.load_encoder = False
-        # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
         self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(training_args.model_path,
                                                                            args=None,
                                                                            inference_mode=True,
@@ -66,9 +64,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         if batch is None:
             self.current_epoch += 1
             logger.info("Starting epoch %s", self.current_epoch)
-            # Reset iterator for next epoch
             self.train_loader_iter = iter(self.train_dataloader)
-            # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
         latents = batch['vae_latent']

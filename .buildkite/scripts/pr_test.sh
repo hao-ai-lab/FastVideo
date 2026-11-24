@@ -43,7 +43,6 @@ if ! python3 -m modal --version &> /dev/null; then
     # --break-system-packages preserves prior `pip install --user` semantics on PEP 668 agents.
     uv pip install --system --break-system-packages modal
 
-    # Verify installation
     if ! python3 -m modal --version &> /dev/null; then
         log "Error: Failed to install modal. Please install it manually."
         exit 1
@@ -52,7 +51,6 @@ fi
 
 log "modal version: $(python3 -m modal --version)"
 
-# Set up Modal authentication using Buildkite secrets
 log "Setting up Modal authentication from Buildkite secrets..."
 MODAL_TOKEN_ID=$(buildkite-agent secret get modal_token_id)
 MODAL_TOKEN_SECRET=$(buildkite-agent secret get modal_token_secret)

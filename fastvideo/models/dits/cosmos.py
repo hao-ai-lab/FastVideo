@@ -171,7 +171,6 @@ class CosmosSelfAttention(nn.Module):
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
-        # Get QKV
         query = self.to_q(hidden_states)
         key = self.to_k(encoder_hidden_states)
         value = self.to_v(encoder_hidden_states)
@@ -181,18 +180,15 @@ class CosmosSelfAttention(nn.Module):
         key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
         value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
 
-        # Apply normalization
         if self.norm_q is not None:
             query = self.norm_q(query)
         if self.norm_k is not None:
             key = self.norm_k(key)
 
-        # Apply RoPE if provided
         if image_rotary_emb is not None:
             query = apply_rotary_emb(query, image_rotary_emb, use_real=True, use_real_unbind_dim=-2)
             key = apply_rotary_emb(key, image_rotary_emb, use_real=True, use_real_unbind_dim=-2)
 
-        # Prepare for GQA (Grouped Query Attention)
         if torch.onnx.is_in_onnx_export():
             query_idx = torch.tensor(query.size(3), device=query.device)
             key_idx = torch.tensor(key.size(3), device=key.device)
@@ -252,7 +248,6 @@ class CosmosCrossAttention(nn.Module):
                 encoder_hidden_states: torch.Tensor,
                 attention_mask: torch.Tensor | None = None) -> torch.Tensor:
 
-        # Get QKV
         query = self.to_q(hidden_states)
         key = self.to_k(encoder_hidden_states)
         value = self.to_v(encoder_hidden_states)
@@ -262,13 +257,11 @@ class CosmosCrossAttention(nn.Module):
         key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
         value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
 
-        # Apply normalization
         if self.norm_q is not None:
             query = self.norm_q(query)
         if self.norm_k is not None:
             key = self.norm_k(key)
 
-        # Prepare for GQA (Grouped Query Attention)
         if torch.onnx.is_in_onnx_export():
             query_idx = torch.tensor(query.size(3), device=query.device)
             key_idx = torch.tensor(key.size(3), device=key.device)
@@ -462,7 +455,6 @@ class CosmosLearnablePositionalEmbed(nn.Module):
 class CosmosTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = CosmosVideoConfig()._fsdp_shard_conditions
     _compile_conditions = CosmosVideoConfig()._compile_conditions
-    # _supported_attention_backends = CosmosVideoConfig()._supported_attention_backends
     param_names_mapping = CosmosVideoConfig().param_names_mapping
     lora_param_names_mapping = CosmosVideoConfig().lora_param_names_mapping
 

@@ -12,7 +12,6 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any], prefix: str 
         prefix: Prefix for the configuration parameters in the args_dict.
                If None, assumes direct attribute mapping without prefix.
     """
-    # Handle top-level attributes (no prefix)
     args_not_to_remove = [
         'model_path',
     ]
@@ -27,7 +26,6 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any], prefix: str 
                 if pop_args:
                     args_to_remove.append(key)
     else:
-        # Handle nested attributes with prefix
         prefix_with_dot = f"{prefix}."
         for key, value in args_dict.items():
             if key.startswith(prefix_with_dot) and value is not None:

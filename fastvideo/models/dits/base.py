@@ -9,7 +9,6 @@ from fastvideo.configs.models import DiTConfig
 from fastvideo.platforms import AttentionBackendEnum
 
 
-# TODO
 class BaseDiT(nn.Module, ABC):
     _fsdp_shard_conditions: list = []
     _compile_conditions: list = []

@@ -9,7 +9,6 @@ export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 # Configs
 NUM_GPUS=1
@@ -18,8 +17,6 @@ REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR="data/crush-smol_processed_ti2v/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/validation.json"
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(

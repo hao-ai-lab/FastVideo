@@ -29,9 +29,7 @@ from typing import Any
 import torch
 from torch import nn
 
-# from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.attention import LocalAttention
-# from ..utils import (extract_layer_index)
 from fastvideo.configs.models.encoders import BaseEncoderOutput, LlamaConfig
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.activation import SiluAndMul
@@ -59,7 +57,6 @@ class LlamaMLP(nn.Module):
         self.gate_up_proj = MergedColumnParallelLinear(
             input_size=hidden_size,
             output_sizes=[intermediate_size] * 2,
-            # output_size=intermediate_size,
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.gate_up_proj",
@@ -98,7 +95,6 @@ class LlamaAttention(nn.Module):
                  bias_o_proj: bool = False,
                  prefix: str = "") -> None:
         super().__init__()
-        # layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
         tp_size = get_tp_world_size()
         self.total_num_heads = num_heads
@@ -172,18 +168,11 @@ class LlamaAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
-        # attn_output = self.attn(q, k, v)
-        # use flash_attn_func
-        # TODO (Attn abstraction and backend)
-        # from flash_attn import flash_attn_func
-        # reshape q, k, v to (batch_size, seq_len, num_heads, head_dim)
         batch_size = q.shape[0]
         seq_len = q.shape[1]
         q = q.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         k = k.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
         v = v.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
-        # import pdb; pdb.set_trace()
-        # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
         attn_output = self.attn(q, k, v)
         attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
 
@@ -319,23 +308,17 @@ class LlamaModel(TextEncoder):
         all_hidden_states: tuple[Any, ...] | None = () if output_hidden_states else None
         for layer in self.layers:
             if all_hidden_states is not None:
-                # TODO
                 all_hidden_states += (hidden_states, ) if residual is None else (hidden_states + residual, )
             hidden_states, residual = layer(position_ids, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
-        # add hidden states from the last decoder layer
         if all_hidden_states is not None:
             all_hidden_states += (hidden_states, )
 
-        # TODO(will): maybe unify the output format with other models and use
-        # our own class
         output = BaseEncoderOutput(
             last_hidden_state=hidden_states,
-            # past_key_values=past_key_values if use_cache else None,
             hidden_states=all_hidden_states,
-            # attentions=all_self_attns,
         )
 
         return output
@@ -351,17 +334,6 @@ class LlamaModel(TextEncoder):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
-            # if (self.quant_config is not None and
-            #     (scale_name := self.quant_config.get_cache_scale(name))):
-            #     # Loading kv cache quantization scales
-            #     param = params_dict[scale_name]
-            #     weight_loader = getattr(param, "weight_loader",
-            #                             default_weight_loader)
-            #     loaded_weight = (loaded_weight if loaded_weight.dim() == 0 else
-            #                      loaded_weight[0])
-            #     weight_loader(param, loaded_weight)
-            #     loaded_params.add(scale_name)
-            #     continue
             if "scale" in name:
                 # Remapping the name of FP8 kv-scale.
                 kv_scale_name: str | None = maybe_remap_kv_scale_name(name, params_dict)

@@ -178,7 +178,6 @@ def load_example_prompts():
             print(f"Warning: Could not read {filepath}: {e}")
         return prompts, labels
 
-    # Load prompts from prompts.txt
     examples, example_labels = load_from_file("examples/inference/gradio/serving/prompts.txt")
 
     if not examples:
@@ -187,7 +186,6 @@ def load_example_prompts():
         ]
         example_labels = ["Crowded rooftop bar at night"]
 
-    # Load image mappings from JSON file
     prompt_to_image = {}
     # Try to find the JSON file relative to project root
     possible_json_paths = [
@@ -217,7 +215,6 @@ def load_example_prompts():
         except Exception as e:
             print(f"Warning: Could not load image mappings from {json_path}: {e}")
 
-    # Create image paths list matching the prompts
     example_images = []
     for prompt in examples:
         # Try exact match first
@@ -245,17 +242,14 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
 
     def generate_video(prompt, negative_prompt, use_negative_prompt, guidance_scale, num_frames, height, width,
                        model_selection, input_image, progress):
-        # Use default seed value (randomize_seed disabled)
         seed = 1000
         randomize_seed = False
         if not client.check_health():
             return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}", ""
 
-        # Check if I2V model requires an image
         if is_i2v_model(model_selection) and not input_image:
             return None, "I2V models require an input image. Please upload an image.", ""
 
-        # Validate dimensions
         max_pixels = 720 * 1280
         if height * width > max_pixels:
             return None, f"Video dimensions too large. Maximum: 720x1280 pixels", ""
@@ -298,11 +292,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         if response.get("success", False):
             video_data = response.get("video_data", "")
             used_seed = response.get("seed", seed)
-            # inference_time = response.get("inference_time", 0.0)
-            # encoding_time = response.get("encoding_time", 0.0)
-            # total_time = response.get("total_time", 0.0)
-            # network_time = response.get("network_time", 0.0)
-            # stage_execution_times = response.get("stage_execution_times", [])
 
             # timing_details = create_timing_display(
             #     inference_time, encoding_time, network_time, total_time,
@@ -339,15 +328,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
     )
 
     def get_default_values(model_name):
-        # model_path = MODEL_PATH_MAPPING.get(model_name)
-        # if model_path and model_path in default_params:
-        #     params = default_params[model_path]
-        #     return {
-        #         'height': params.height,
-        #         'width': params.width,
-        #         'num_frames': params.num_frames,
-        #         'guidance_scale': params.guidance_scale,
-        #     }
 
         return {
             'height': 480,
@@ -355,13 +335,11 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             'num_frames': 73,
         }
 
-    # Get available models based on what's loaded
     available_models = []
     for model_name, model_path in MODEL_PATH_MAPPING.items():
         if model_path in default_params:
             available_models.append(model_name)
 
-    # Select first available model as default
     default_model = available_models[0] if available_models else "FastWan2.1-T2V-1.3B"
     initial_values = get_default_values(default_model)
     initial_show_image = is_i2v_model(default_model)
@@ -414,7 +392,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         with gr.Row():
             with gr.Column():
                 error_output = gr.Text(label="Error", visible=False)
-                # timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
 
         with gr.Row(equal_height=False):
             with gr.Column(scale=1):
@@ -459,7 +436,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                                     visible=False,
                                 )
 
-                            # randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
                             seed_output = gr.Number(label="Used Seed", value=1000)
 
             with gr.Column(scale=1):
@@ -612,12 +588,10 @@ def main():
 
     default_params = {}
 
-    # Load T2V model params
     t2v_paths = [p.strip() for p in args.t2v_model_paths.split(",") if p.strip()]
     for model_path in t2v_paths:
         default_params[model_path] = SamplingParam.from_pretrained(model_path)
 
-    # Load I2V model params
     i2v_paths = [p.strip() for p in args.i2v_model_paths.split(",") if p.strip()]
     for model_path in i2v_paths:
         default_params[model_path] = SamplingParam.from_pretrained(model_path)

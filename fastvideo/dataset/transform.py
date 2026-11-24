@@ -40,7 +40,6 @@ def center_crop_th_tw(clip, th, tw, top_crop) -> torch.Tensor:
     if not _is_tensor_video_clip(clip):
         raise ValueError("clip should be a 4D torch.tensor")
 
-    # import ipdb;ipdb.set_trace()
     h, w = clip.size(-2), clip.size(-1)
     tr = th / tw
     if h / w > tr:
@@ -67,7 +66,6 @@ def normalize_video(clip) -> torch.Tensor:
     _is_tensor_video_clip(clip)
     if not clip.dtype == torch.uint8:
         raise TypeError(f"clip tensor should have data type uint8. Got {clip.dtype}")
-    # return clip.float().permute(3, 0, 1, 2) / 255.0
     return clip.float() / 255.0
 
 

@@ -37,7 +37,6 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         self._timestep_index_range = (self._parse_timestep_index_range())
         self._training_weights = self._build_training_weights()
 
-        # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
 
         self._init_optimizers_and_schedulers()

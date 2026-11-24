@@ -31,9 +31,6 @@ from pathlib import Path
 
 import torch
 
-# ---------------------------------------------------------------------
-# Generation — make one LTX2 video to evaluate.
-# ---------------------------------------------------------------------
 
 PROMPT = ("A warm sunny backyard. The camera starts in a tight cinematic close-up "
           "of a woman and a man in their 30s, facing each other with serious "
@@ -71,9 +68,6 @@ def generate_one_ltx2_video() -> str:
     return OUTPUT_PATH
 
 
-# ---------------------------------------------------------------------
-# Eval — the point of the script.  4 lines from "two paths" to results.
-# ---------------------------------------------------------------------
 
 
 def _all_registered_metrics() -> list[str]:
@@ -110,7 +104,6 @@ def score_all_metrics(video_path: str) -> None:
     results = ev.evaluate(samples=samples)
     torch.cuda.synchronize()
     t_eval1 = time.perf_counter()
-    # ===================================
 
     peak_gb = torch.cuda.max_memory_allocated() / 1024**3
     peak_reserved_gb = torch.cuda.max_memory_reserved() / 1024**3
@@ -125,7 +118,7 @@ def score_all_metrics(video_path: str) -> None:
     for name in ev.metric_names:
         r = results[0].get(name)
         if r is None:
-            continue  # set metric, will show in corpus section
+            continue
         if r.score is None:
             print(f"  {name}: SKIPPED — {r.details.get('skipped', 'no score')}")
         else:
