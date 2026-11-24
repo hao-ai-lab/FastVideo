@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Bitwise parity for the fused VSA64 tile-to-BHSD Triton kernel.
 
-Production only routes SM100 here, but the kernel is plain Triton, so parity is
+Production routes SM100 and GB10 here, but the kernel is plain Triton, so parity is
 checked on any CUDA device.
 """
 
