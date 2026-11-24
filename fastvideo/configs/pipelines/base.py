@@ -32,6 +32,8 @@ def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
 @dataclass
 class PipelineConfig:
     """Base configuration for all pipeline architectures."""
+    # Opt in when the public generator needs a specific exporter for a bare model ID.
+    default_workload_type: ClassVar[str | None] = None
     model_path: str = ""
     pipeline_config_path: str | None = None
 
