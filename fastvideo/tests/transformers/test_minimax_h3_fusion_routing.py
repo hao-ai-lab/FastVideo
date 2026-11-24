@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 import torch
 
@@ -142,14 +144,19 @@ def test_all_minimax_h3_fusions_match_one_eager_block_under_fa4(
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("BF16 CUDA is required")
     pytest.importorskip("triton")
-    flash_attn = pytest.importorskip("flash_attn")
-    if "fa4" not in getattr(flash_attn, "__version__", "").lower():
-        pytest.skip("the focused integration test requires the FA4 environment")
+    try:
+        import flash_attn.cute.interface as flash_attn_cute
+    except ModuleNotFoundError as exc:
+        if exc.name in {"flash_attn", "flash_attn.cute", "flash_attn.cute.interface"}:
+            pytest.skip("the focused integration test requires the FA4 CuTe attention API")
+        raise
+    if not all(callable(getattr(flash_attn_cute, name, None)) for name in ("_flash_attn_fwd", "_flash_attn_bwd")):
+        pytest.skip("the focused integration test requires the FA4 CuTe attention API")
 
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
     env_overrides.enter_context(envs.FASTVIDEO_FA4.override(True))
     env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
-    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29573"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", os.environ.get("MASTER_PORT", "29573")))
     env_overrides.enter_context(envs.override_external("RANK", "0"))
     env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
@@ -241,7 +248,7 @@ def test_minimax_h3_fusions_engage_on_cuda_inference(monkeypatch: pytest.MonkeyP
 
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
-    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29574"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", os.environ.get("MASTER_PORT", "29574")))
     env_overrides.enter_context(envs.override_external("RANK", "0"))
     env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
