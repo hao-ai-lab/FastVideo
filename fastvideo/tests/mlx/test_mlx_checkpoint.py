@@ -81,6 +81,22 @@ def test_int8_checkpoint_round_trip_skips_requantization(distributed_setup, tmp_
     np.testing.assert_array_equal(before, after)
 
 
+@pytest.mark.parametrize("quantization", [None, "int8"])
+def test_load_reads_weights_before_first_forward(distributed_setup, tmp_path, quantization) -> None:
+    dit = mlx_dit_from_torch_model(build_torch_model(),
+                                   build_hf_config(build_tiny_wan_config()),
+                                   quantization=MLXQuantizationSpec.from_name(quantization))
+    before = _forward(dit)
+    checkpoint_dir = save_mlx_dit_checkpoint(dit, tmp_path / "ckpt")
+    loaded = load_mlx_dit_checkpoint(checkpoint_dir)
+
+    weights_path = checkpoint_dir / "mlx_dit.safetensors"
+    with open(weights_path, "r+b") as handle:
+        handle.write(bytes(weights_path.stat().st_size))
+
+    np.testing.assert_array_equal(before, _forward(loaded))
+
+
 def test_missing_checkpoint_raises_clear_error(tmp_path) -> None:
     with pytest.raises(FileNotFoundError, match="Not an MLX DiT checkpoint"):
         load_mlx_dit_checkpoint(tmp_path / "does-not-exist")
