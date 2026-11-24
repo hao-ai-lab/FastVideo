@@ -253,10 +253,6 @@ def expected_vsa_gate_keys(num_layers: int) -> tuple[str, ...]:
     return tuple(vsa_gate_key(index) for index in range(num_layers))
 
 
-def is_vsa_gate_key(key: str) -> bool:
-    return key.endswith(VSA_GATE_KEY_SUFFIX)
-
-
 def dense_only_vsa_error(checkpoint_dir: str | Any) -> DenseOnlyVSACheckpointError:
     return DenseOnlyVSACheckpointError(
         f"VSA was requested but {checkpoint_dir} is a dense-only MLX H3 checkpoint "

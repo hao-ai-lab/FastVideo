@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import argparse
 import os
 import subprocess
 import sys
@@ -8,12 +7,6 @@ import sys
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
-
-
-class RaiseNotImplementedAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        raise NotImplementedError(f"The {option_string} option is not yet implemented")
 
 
 def launch_distributed(num_gpus: int, args: list[str], master_port: int | None = None) -> int:

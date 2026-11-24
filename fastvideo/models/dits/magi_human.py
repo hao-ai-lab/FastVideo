@@ -41,7 +41,6 @@ For the full history and shape-by-shape verification notes, see
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Optional

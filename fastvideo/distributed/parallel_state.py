@@ -110,10 +110,6 @@ def all_reduce(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
     return group._all_reduce_out_place(tensor)
 
 
-def all_reduce_fake(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
-    return torch.empty_like(tensor)
-
-
 class GroupCoordinator:
     """
     PyTorch ProcessGroup wrapper for a group of processes.
@@ -732,11 +728,6 @@ def get_tp_group() -> GroupCoordinator:
 
 
 _ENABLE_CUSTOM_ALL_REDUCE = True
-
-
-def set_custom_all_reduce(enable: bool):
-    global _ENABLE_CUSTOM_ALL_REDUCE
-    _ENABLE_CUSTOM_ALL_REDUCE = enable
 
 
 def init_distributed_environment(

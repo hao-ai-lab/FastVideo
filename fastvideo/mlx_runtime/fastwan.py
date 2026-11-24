@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import math
 import statistics
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -146,83 +145,8 @@ def fastwan_shape_from_config(
     )
 
 
-def replace_tokens(shape: FastWanShape, tokens: int) -> FastWanShape:
-    return FastWanShape(**{**shape.__dict__, "tokens": tokens})
-
-
 def median_ms(samples: list[float]) -> float:
     return statistics.median(samples) * 1000.0
-
-
-def benchmark_mlx_attention(shape: FastWanShape, warmup: int, iters: int) -> float:
-    import mlx.core as mx
-
-    q = mx.random.normal((1, shape.num_heads, shape.tokens, shape.head_dim), dtype=mx.float16)
-    k = mx.random.normal((1, shape.num_heads, shape.tokens, shape.head_dim), dtype=mx.float16)
-    v = mx.random.normal((1, shape.num_heads, shape.tokens, shape.head_dim), dtype=mx.float16)
-    scale = shape.head_dim**-0.5
-
-    for _ in range(warmup):
-        y = mx.fast.scaled_dot_product_attention(q, k, v, scale=scale)
-        mx.eval(y)
-
-    samples = []
-    for _ in range(iters):
-        start = time.perf_counter()
-        y = mx.fast.scaled_dot_product_attention(q, k, v, scale=scale)
-        mx.eval(y)
-        samples.append(time.perf_counter() - start)
-    return median_ms(samples)
-
-
-def benchmark_mlx_linear(shape: FastWanShape, warmup: int, iters: int) -> float:
-    import mlx.core as mx
-
-    x = mx.random.normal((shape.tokens, shape.hidden_size), dtype=mx.float16)
-    w = mx.random.normal((shape.hidden_size, shape.hidden_size), dtype=mx.float16)
-    b = mx.zeros((shape.hidden_size, ), dtype=mx.float16)
-
-    for _ in range(warmup):
-        y = x @ w + b
-        mx.eval(y)
-
-    samples = []
-    for _ in range(iters):
-        start = time.perf_counter()
-        y = x @ w + b
-        mx.eval(y)
-        samples.append(time.perf_counter() - start)
-    return median_ms(samples)
-
-
-def benchmark_torch_mps_attention(shape: FastWanShape, warmup: int, iters: int) -> float | None:
-    try:
-        import torch
-        import torch.nn.functional as F
-    except ImportError:
-        return None
-
-    if not torch.backends.mps.is_available():
-        return None
-
-    device = torch.device("mps")
-    q = torch.randn((1, shape.num_heads, shape.tokens, shape.head_dim), device=device, dtype=torch.float16)
-    k = torch.randn((1, shape.num_heads, shape.tokens, shape.head_dim), device=device, dtype=torch.float16)
-    v = torch.randn((1, shape.num_heads, shape.tokens, shape.head_dim), device=device, dtype=torch.float16)
-
-    for _ in range(warmup):
-        y = F.scaled_dot_product_attention(q, k, v)
-        torch.mps.synchronize()
-        _ = y
-
-    samples = []
-    for _ in range(iters):
-        start = time.perf_counter()
-        y = F.scaled_dot_product_attention(q, k, v)
-        torch.mps.synchronize()
-        _ = y
-        samples.append(time.perf_counter() - start)
-    return median_ms(samples)
 
 
 def torch_to_mx(tensor) -> mx.array:
@@ -867,10 +791,6 @@ def mx_split_two(x, *, axis: int):
 
     left, right = mx.split(x, 2, axis=axis)
     return left, right
-
-
-def _load_safetensor_value(handle, name: str):
-    return handle.get_tensor(name)
 
 
 def _load_mx_array_from_safetensor(handle, name: str, dtype):

@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import json
 import math
-import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -750,17 +749,6 @@ def read_vision_index_header(component_dir: str | Path) -> dict[str, Any]:
         return {key: shard for key, shard in index.key_to_shard.items() if key.startswith("model.visual.")}
     finally:
         index.close()
-
-
-def safetensors_bf16_available(path: str | Path) -> bool:
-    """True when ``path`` is a readable safetensors shard (header probe)."""
-    try:
-        with open(path, "rb") as handle:
-            (header_len, ) = struct.unpack("<Q", handle.read(8))
-            json.loads(handle.read(header_len))
-        return True
-    except (OSError, ValueError, struct.error):
-        return False
 
 
 __all__ = [

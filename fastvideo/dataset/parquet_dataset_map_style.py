@@ -22,7 +22,6 @@ import tqdm
 # Dataset
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
-from fastvideo.platforms import current_platform
 
 from fastvideo.dataset.sequence_capacity import (
     select_sequence_capacity,

@@ -13,7 +13,6 @@ import hashlib
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 import torch
 import torch.nn.functional as F

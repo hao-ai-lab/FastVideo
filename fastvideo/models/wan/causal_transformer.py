@@ -3,7 +3,6 @@
 import math
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -15,13 +14,11 @@ from torch.nn.attention.flex_attention import BlockMask
 flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 import torch.distributed as dist
 
-import fastvideo.envs as envs
-from fastvideo.attention import (DistributedAttention, LocalAttention)
+from fastvideo.attention import LocalAttention
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
-from fastvideo.forward_context import get_forward_context
-from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
+from fastvideo.layers.layernorm import (LayerNormScaleShift, RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
