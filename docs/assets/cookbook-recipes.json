@@ -318,6 +318,37 @@
       "related": ["kandinsky6-ti2va-base", "kandinsky6-vsr-distilled"]
     },
     {
+      "id": "fastkandinsky6-qad-nvfp4",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Text to video with synchronized audio",
+      "label": "FastKandinsky QAD NVFP4 (8 steps)",
+      "summary": "Export the BF16 QAD checkpoint locally and generate video with synchronized audio in eight pi-Flow steps on SM120 Blackwell.",
+      "model": "./FastKandinsky-6.0-Pro-NVPF4-QAD",
+      "source": "examples/inference/optimizations/nvfp4_qat_kandinsky6.py",
+      "command": "if [ ! -f \"./FastKandinsky-6.0-Pro-NVPF4-QAD/nvfp4/transformer/nvfp4_weights.safetensors\" ]; then\n  hf download kandinskylab/FastKandinsky-6.0-Pro-NVPF4-QAD --local-dir \"./FastKandinsky-6.0-Pro-NVPF4-QAD\" &&\n    python scripts/checkpoint_conversion/convert_kandinsky6_nvfp4.py --src \"./FastKandinsky-6.0-Pro-NVPF4-QAD\"\nfi &&\npython examples/inference/optimizations/nvfp4_qat_kandinsky6.py --model-path \"./FastKandinsky-6.0-Pro-NVPF4-QAD\" --prompt \"A cat plays a piano with synchronized notes.\"",
+      "serving": {
+        "source": "examples/serving/openai_fastkandinsky6_qad_nvfp4.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "prepare": "if [ ! -f \"./FastKandinsky-6.0-Pro-NVPF4-QAD/nvfp4/transformer/nvfp4_weights.safetensors\" ]; then\n  hf download kandinskylab/FastKandinsky-6.0-Pro-NVPF4-QAD --local-dir \"./FastKandinsky-6.0-Pro-NVPF4-QAD\" &&\n    python scripts/checkpoint_conversion/convert_kandinsky6_nvfp4.py --src \"./FastKandinsky-6.0-Pro-NVPF4-QAD\"\nfi",
+        "env": "env -u FASTVIDEO_NVFP4_ACT_AMAX -u FASTVIDEO_NVFP4_DYNAMIC_ACT FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS=1",
+        "audio": true
+      },
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 with synchronized audio under outputs_video/kandinsky6_nvfp4/",
+      "related": [
+        "kandinsky6-ti2va-piflow"
+      ]
+    },
+    {
       "id": "kandinsky6-ti2va-lite",
       "family": "kandinsky6",
       "stage": "inference",

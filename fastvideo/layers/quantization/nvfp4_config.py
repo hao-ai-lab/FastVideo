@@ -168,6 +168,21 @@ def dense_transformer_safetensors(weight_paths: list[str]) -> list[str]:
     return [path for path in weight_paths if not is_minimax_h3_nvfp4_dit_export_path(path)]
 
 
+_KANDINSKY6_NVFP4_LINEAR = re.compile(
+    r"^(?:Kandinsky6\.)?(?:"
+    r"visual_transformer_blocks\.\d+\.(?:"
+    r"(?:videoT|audioT)\.(?:(?:self_attention|cross_attention)\.(?:to_query|to_key|to_value|out_layer)"
+    r"|feed_forward\.mlp\.(?:fc_in|fc_out))"
+    r"|(?:va_cross_attention|av_cross_attention)\.(?:to_query|to_key|to_value|out_layer))"
+    r"|(?:video|audio)_text_transformer_blocks\.\d+\.(?:self_attention\.(?:to_query|to_key|to_value|out_layer)"
+    r"|feed_forward\.mlp\.(?:fc_in|fc_out)))$")
+
+
+def is_kandinsky6_nvfp4_linear_prefix(prefix: str) -> bool:
+    """Recognize native FastVideo module names, with an optional model prefix."""
+    return _KANDINSKY6_NVFP4_LINEAR.fullmatch(prefix) is not None
+
+
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
     return any(prefix.endswith(suffix) for suffix in _LTX2_REFINE_ONLY_SUFFIXES)
 
@@ -785,9 +800,9 @@ class NVFP4Config(QuantizationConfig):
         if any(isinstance(b, bool) or not isinstance(b, int) or b < 0 for b in skip_blocks):
             raise ValueError(f"NVFP4Config.skip_blocks must be non-negative block indices, got {skip_blocks!r}")
         self.skip_blocks: tuple[int, ...] = tuple(sorted(set(skip_blocks)))
-        if layer_profile not in ("base", "refine", "h3_dit", "h3_dit_ffn", "h3_dit_vsa"):
+        if layer_profile not in ("base", "refine", "h3_dit", "h3_dit_ffn", "h3_dit_vsa", "kandinsky6"):
             raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', 'h3_dit', "
-                             f"'h3_dit_ffn', or 'h3_dit_vsa', got {layer_profile!r}")
+                             f"'h3_dit_ffn', 'h3_dit_vsa', or 'kandinsky6', got {layer_profile!r}")
         self.layer_profile = layer_profile
         # Original bf16 ``layer.weight`` retention after FP4 conversion.
         # Default (None/False): purge the purgeable originals -- every
@@ -840,6 +855,8 @@ class NVFP4Config(QuantizationConfig):
                       or _MINIMAX_H3_NVFP4_VSA_GATE_PREFIX.search(prefix) is not None)
         elif self.layer_profile == "h3_dit_ffn":
             tagged = is_minimax_h3_nvfp4_linear_prefix(prefix)
+        elif self.layer_profile == "kandinsky6":
+            tagged = is_kandinsky6_nvfp4_linear_prefix(prefix)
         else:
             tagged = is_ltx2_nvfp4_linear_prefix(prefix) or is_minimax_h3_nvfp4_linear_prefix(prefix)
         if tagged:

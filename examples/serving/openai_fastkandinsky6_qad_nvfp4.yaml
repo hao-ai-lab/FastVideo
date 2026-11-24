@@ -1,0 +1,41 @@
+generator:
+  model_path: ./FastKandinsky-6.0-Pro-NVPF4-QAD
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: kandinsky6
+    offload:
+      dit: false
+      dit_layerwise: true
+      text_encoder: true
+      vae: true
+      pin_cpu_memory: true
+    compile:
+      enabled: true
+  pipeline:
+    workload_type: t2v
+    experimental:
+      attention_backend: ATTN_QAT_INFER
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  output_dir: outputs/openai_fastkandinsky6_qad_nvfp4
+  served_model_name: fastkandinsky6-qad-nvfp4
+
+default_request:
+  sampling:
+    height: 512
+    width: 768
+    num_frames: 121
+    fps: 24
+    seed: 575431
+    num_inference_steps: 8
+    guidance_scale: 1.0
+  output:
+    return_frames: false
