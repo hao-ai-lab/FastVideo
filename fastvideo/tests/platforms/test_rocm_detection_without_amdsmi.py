@@ -32,14 +32,34 @@ def test_hip_torch_with_amd_device_node_is_rocm(monkeypatch, no_amdsmi):
 
 
 def test_hip_torch_without_amd_device_node_is_not_rocm(monkeypatch, no_amdsmi):
+    # On Linux the device nodes gate detection even when the HIP runtime sees a GPU.
     monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
     monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "posix")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     assert platforms.rocm_platform_plugin() is None
 
 
 def test_cuda_torch_is_not_rocm_even_with_the_device_node(monkeypatch, no_amdsmi):
     monkeypatch.setattr(torch.version, "hip", None, raising=False)
     monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: True)
+    assert platforms.rocm_platform_plugin() is None
+
+
+def test_windows_hip_torch_with_a_gpu_is_rocm(monkeypatch, no_amdsmi):
+    # Windows has no /dev/kfd, so the device-node probe always fails there.
+    monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
+    monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "nt")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert platforms.rocm_platform_plugin() == ROCM_PLATFORM
+
+
+def test_windows_hip_torch_without_a_gpu_is_not_rocm(monkeypatch, no_amdsmi):
+    monkeypatch.setattr(torch.version, "hip", "7.14.1", raising=False)
+    monkeypatch.setattr(platforms, "_rocm_device_node_accessible", lambda: False)
+    monkeypatch.setattr(platforms.os, "name", "nt")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert platforms.rocm_platform_plugin() is None
 
 
