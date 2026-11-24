@@ -1079,7 +1079,13 @@ class VAELoader(ComponentLoader):
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
         # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
-        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE", "AutoencoderKLQwenImage21"}
+        strict_load = class_name in {
+            "AutoencoderKL",
+            "AutoencoderKLMiniMaxH3",
+            "AutoencoderKLMiniMaxH3Image",
+            "Kandinsky6SRVAE",
+            "AutoencoderKLQwenImage21",
+        }
         vae.load_state_dict(loaded, strict=strict_load)
         del loaded
         if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:

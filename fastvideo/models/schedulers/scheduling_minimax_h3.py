@@ -26,6 +26,7 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
         shift: float = 12.0,
         stochastic_sampling: bool = False,
         shift_provided_sigmas: bool = False,
+        euler_update_form: str = "velocity",
     ) -> None:
         """H3's rectified-flow scheduler, with Pika's re-noise step as an option.
 
@@ -35,10 +36,14 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
         always returns ``x0`` without drawing noise.  ``shift_provided_sigmas``
         records that explicit sigmas are already shifted (Pika's release uses
         it); FastVideo always treats explicit ``set_timesteps(sigmas=...)``
-        values that way, so it is informational.
+        values that way, so it is informational. The image checkpoint also
+        publishes ``euler_update_form``; only ``velocity`` is implemented.
         """
         if shift <= 0:
             raise ValueError(f"`shift` must be positive, got {shift}.")
+        if euler_update_form != "velocity":
+            raise ValueError(f"MiniMaxH3Scheduler only implements euler_update_form='velocity', "
+                             f"got {euler_update_form!r}.")
         self.num_inference_steps: int | None = None
         self.sigmas: torch.Tensor | None = None
         self.timesteps: torch.Tensor | None = None

@@ -38,6 +38,7 @@ COOKBOOK_FAMILIES = {
     "pan2",
     "flux",
     "qwen_image21",
+    "minimax_h3_image",
     "sd35",
     "minimax_h3",
     "pika_h3_flex",
