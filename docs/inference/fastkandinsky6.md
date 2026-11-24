@@ -44,3 +44,16 @@ The script saves a 768 × 512 MP4 with audio at 24 fps under
 `outputs_video/kandinsky6_nvfp4/` by default. It uses FlashInfer for NVFP4
 linears and `ATTN_QAT_INFER` for native FP4 attention, with DiT compilation
 and layerwise offload enabled.
+
+## Serve over HTTP
+
+After exporting the checkpoint, run the server from the FastVideo checkout.
+The preset uses the same eight-step configuration and listens on
+`http://127.0.0.1:8000`. Set `--generator.model_path` to the model root if you
+exported the weights to a different directory.
+
+```bash
+env -u FASTVIDEO_NVFP4_ACT_AMAX -u FASTVIDEO_NVFP4_DYNAMIC_ACT \
+  FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS=1 \
+  fastvideo serve --config examples/serving/openai_fastkandinsky6_qad_nvfp4.yaml
+```
