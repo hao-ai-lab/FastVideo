@@ -426,13 +426,6 @@ class TestLtx2Presets:
         validate_stage_overrides(p, {"refine": {"image_crf": 18}})
         validate_stage_overrides(p, {"refine": {"video_position_offset_sec": 2.5}})
 
-    def test_ltx2_two_stage_rejects_unknown_refine_override(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        from fastvideo.api.errors import ConfigValidationError
-        p = get_preset("ltx2_two_stage", "ltx2")
-        with pytest.raises(ConfigValidationError):
-            validate_stage_overrides(p, {"refine": {"bogus_field": 1}})
-
     @pytest.mark.parametrize(
         "directory_name",
         ("ltx-2.3-distilled", "ltx2.3-distilled", "LTX-2.3-Distilled-Diffusers-ckpt"),

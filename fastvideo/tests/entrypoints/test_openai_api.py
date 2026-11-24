@@ -400,10 +400,10 @@ class TestDefaultRequestState:
         saved = state_mod._default_request
         try:
             dr = _make_default_request({"sampling": {"seed": 7}})
-            state_mod.set_state.__wrapped__ if False else None  # keep lint happy
-            state_mod._default_request = dr
+            state_mod.set_state(None, None, None, state_mod.DEFAULT_OUTPUT_DIR, default_request=dr)
             assert state_mod.get_default_request() is dr
         finally:
+            state_mod.clear_state()
             state_mod._default_request = saved
 
     def test_clear_state_resets_default_request(self):

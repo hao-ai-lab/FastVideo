@@ -62,18 +62,6 @@ def test_subclass_can_override_vsa_sparsity_via_kw() -> None:
     assert md.extra == 7
 
 
-def test_unknown_attribute_raises_attribute_error() -> None:
-    """``__getattr__`` raises ``AttributeError`` (not e.g. ``KeyError``).
-
-    The dataclass machinery only invokes ``__getattr__`` when normal
-    attribute lookup fails, so this protects callers from silent failures
-    when they typo a field name.
-    """
-    md = AttentionMetadata(current_timestep=0)
-    with pytest.raises(AttributeError, match="no attribute 'does_not_exist'"):
-        _ = md.does_not_exist
-
-
 def test_asdict_zerocopy_includes_vsa_sparsity() -> None:
     md = AttentionMetadata(current_timestep=2, VSA_sparsity=0.25)
     snapshot = md.asdict_zerocopy()

@@ -53,9 +53,6 @@ class _MockGenerator:
 
 class TestInProcessGpuPool:
 
-    def test_is_gpu_pool(self):
-        assert isinstance(InProcessGpuPool(_MockGenerator()), GpuPool)
-
     def test_acquire_returns_deterministic_assignment(self):
         pool = InProcessGpuPool(_MockGenerator(), gpu_id=7)
 

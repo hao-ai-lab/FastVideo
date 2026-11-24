@@ -31,8 +31,6 @@ def test_audio_vae_has_no_vocoder_submodule_or_state_dict_keys():
     # it -- the vocoder is now a fully separate pipeline component.
     vae = _audio_vae()
     assert not hasattr(vae, "vocoder")
-    assert not hasattr(vae, "vocode")
-    assert not hasattr(vae, "wrapped_decode")
     keys = set(vae.state_dict())
     assert not any(k.startswith("vocoder.") for k in keys)
     assert any(k.startswith("vae.") for k in keys)

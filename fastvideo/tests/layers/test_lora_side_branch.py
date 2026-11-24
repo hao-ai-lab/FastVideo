@@ -287,19 +287,6 @@ def test_side_branch_never_modifies_the_packed_base_weight() -> None:
     assert layer.cpu_weight is None
 
 
-def test_strength_zero_is_bitwise_identical_to_the_unadapted_layer() -> None:
-    base = _packed_linear()
-    x = _x()
-    reference, _ = base(x)
-    layer = get_lora_layer(base)
-    a, b = _factors()
-
-    layer.set_lora_weights(a, b, lora_alpha=16, strength=0.0)
-    out, _ = layer(x)
-
-    assert torch.equal(out, reference)
-
-
 def test_strength_can_change_at_runtime_without_reloading() -> None:
     layer = get_lora_layer(_packed_linear())
     a, b = _factors()

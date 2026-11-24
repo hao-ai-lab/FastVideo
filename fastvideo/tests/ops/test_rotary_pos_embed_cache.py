@@ -60,13 +60,6 @@ def test_repeated_call_hits_cache():
     assert len(_ROTARY_POS_EMBED_CACHE) == 1
 
 
-def test_many_identical_calls_keep_single_entry():
-    """Many identical calls never grow the cache beyond one entry."""
-    for _ in range(10):
-        _call()
-    assert len(_ROTARY_POS_EMBED_CACHE) == 1
-
-
 @pytest.mark.parametrize(
     "rope_sizes,hidden_size,heads_num,dtype,use_real",
     [

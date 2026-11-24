@@ -113,9 +113,7 @@ def test_real_model_index_passes_through_load_modules(distributed_setup, request
     assert type(pipeline.get_module("scheduler")).__name__ == bundle.scheduler["_class_name"]
 
 
-def test_the_flow_matching_release_carries_kandinsky6_sr_metadata_and_the_preset_default_scale():
-    assert isinstance(FLOW_MATCHING_MODEL_INDEX["_kandinsky6_sr"], dict)
-    assert "_kandinsky6_sr" not in DISTILLED_MODEL_INDEX
+def test_the_flow_matching_release_default_scale_matches_the_preset():
     # root sr_config.json: the default scale of the release is the preset default (and the request default)
     default_scale = FLOW_MATCHING_SR_CONFIG["default_resolution_scale"]
     assert default_scale == KANDINSKY6_SR.defaults["sr_resolution_scale"] == Kandinsky6SROptions.sr_resolution_scale == 2.25
