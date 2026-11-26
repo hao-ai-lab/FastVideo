@@ -5,6 +5,8 @@ on an image: one pipeline serves both, so pass `image_path` to condition on an i
 The audio is decoded by the checkpoint's audio VAE (mel decoder plus vocoder in one component) and muxed into the saved
 mp4 automatically. To upscale a generated clip, see [Kandinsky 6 Video SR](kandinsky6_sr.md).
 
+For packed NVFP4 generation, see [FastKandinsky 6.0 inference](fastkandinsky6.md).
+
 ## Models
 
 Kandinsky 6 comes in two sizes, Pro (30.1B-parameter DiT) and Lite (3.2B), each with a base and a pi-Flow distilled

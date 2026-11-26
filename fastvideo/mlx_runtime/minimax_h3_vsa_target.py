@@ -43,6 +43,9 @@ def h3_vsa_attention_target(
     ref_keep_rate: float | None = None,
 ):
     """query/gate_compress: [T, H, D] target rows; key/value: [S, H, D] packed. Returns [T, H, D]."""
+    if impl in ("sdpa", "nax"):
+        raise ValueError(
+            f"{impl.upper()} VSA does not support prefix K/V reuse; disable reuse or select another backend")
     import mlx.core as mx
 
     _, heads, dim = query.shape

@@ -31,6 +31,7 @@ class Kandinsky6ArchConfig(DiTArchConfig):
         AttentionBackendEnum.NABLA_ATTN,
         AttentionBackendEnum.FLASH_ATTN,
         AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.ATTN_QAT_INFER,
     )
 
     # Map the current Diffusers checkpoint names to native FastVideo layers. The loader applies only

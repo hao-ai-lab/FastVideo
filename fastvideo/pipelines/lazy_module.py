@@ -75,9 +75,18 @@ class LazyModule:
 
         transform = object.__getattribute__(self, "_lazy_materialize_transform")
         if transform is not None:
-            module = transform(module)
-            if module is None:
-                raise ValueError(f"Materialize transform for module {name} returned None")
+            # Publish the loaded instance before the transform runs: a transform
+            # may read attributes back through this proxy (the constructor LoRA
+            # adapter reads ``param_names_mapping``), and with nothing published
+            # that access re-enters ``materialize`` and reloads the component.
+            object.__setattr__(self, "_lazy_module", module)
+            try:
+                module = transform(module)
+                if module is None:
+                    raise ValueError(f"Materialize transform for module {name} returned None")
+            except BaseException:
+                object.__setattr__(self, "_lazy_module", None)
+                raise
         object.__setattr__(self, "_lazy_module", module)
 
         allocated = _cuda_allocated_gib()

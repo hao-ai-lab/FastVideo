@@ -386,9 +386,11 @@ def maybe_load_fsdp_model(
     packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
     weight_dir_list = dense_transformer_safetensors(weight_dir_list)
     quant_config = getattr(init_params.get("config"), "quant_config", None)
-    packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+    packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa", "kandinsky6")
     packed_layer_profile = getattr(quant_config, "layer_profile", None)
     packed_nvfp4_export = packed_candidate if packed_layer_profile in packed_profiles else None
+    if packed_layer_profile == "kandinsky6" and packed_nvfp4_export is None:
+        raise ValueError("Kandinsky6 NVFP4 requires a packed nvfp4_weights.safetensors file.")
     if packed_candidate is not None and packed_nvfp4_export is None:
         # A packed export leaves its quantized linears out of the dense shards, so
         # loading it with any other profile misses those weights.
@@ -865,6 +867,10 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any], *, 
 
     if compiled_count == 0:
         raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
+    # Regional compile rejects ``mode`` above but merges the caller's
+    # ``options``, so {"triton.cudagraphs": True} records graphs here too.
+    from fastvideo.fastvideo_args import DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs
+    setattr(model, DIT_COMPILE_CUDAGRAPHS_ATTR, compile_kwargs_record_cudagraphs(kwargs))
     logger.info(
         "Enabled regional torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
         compiled_count,

@@ -9,6 +9,28 @@ merge_protections:
       - check-success=fastcheck-passed
       - check-success=full-suite-passed
 
+  # Mirrors the `paths` filter of .github/workflows/ci-macos-mlx.yml so the
+  # required checks always exist whenever this protection applies.
+  - name: MLX smoke requirements
+    if:
+      - base = main
+      - or:
+          - files~=^\.github/workflows/ci-macos-mlx\.yml$
+          - files~=^fastvideo/mlx_runtime/
+          - files~=^fastvideo/tests/mlx/
+          - files~=^fastvideo/tests/platforms/test_mps_vsa_error\.py$
+          - files~=^fastvideo/tests/platforms/test_cpu_sdpa\.py$
+          - files~=^fastvideo/platforms/cpu\.py$
+          - files~=^fastvideo/platforms/mps\.py$
+          - files~=^fastvideo/platforms/__init__\.py$
+          - files~=^fastvideo/__init__\.py$
+          - files~=^examples/inference/basic/mlx_[^/]*\.py$
+          - files~=^fastvideo/benchmarks/mlx_[^/]*\.py$
+          - files~=^pyproject\.toml$
+    success_conditions:
+      - check-success=mlx-smoke
+      - check-success=mlx-smoke-linux-cpu
+
 pull_request_rules:
 
   # ============================================================

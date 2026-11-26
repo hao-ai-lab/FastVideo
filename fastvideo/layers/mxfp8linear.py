@@ -7,10 +7,26 @@ import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
-from quack.mx_utils import to_blocked, to_mx
+
+# Quack moved these helpers to quack.blockscaled.quantize, and some images ship neither.
+try:
+    from quack.mx_utils import to_blocked, to_mx
+except ImportError:
+    try:
+        from quack.blockscaled.quantize import to_blocked, to_mx
+    except ImportError:
+        to_blocked = None
+        to_mx = None
 
 MXFP8_BLOCK_SIZE = 32
 _BLOCKS_PER_PROGRAM = 16
+# The SwiGLU quantizer reads two 28672-wide bf16 streams and writes one fp8 stream, so it is
+# pure LPDDR5x traffic. One row x 16 blocks (512 columns) per program left it at ~77 GB/s
+# (~28% of the GB10 bandwidth) because every thread moved only a few bytes; 256 blocks
+# (8192 columns) x 16 warps moves 16 KB+ per program and reaches ~225 GB/s (126.7 -> 42.4 ms
+# per call at M=133435, bit-identical output -- scripts_mk2k/bench_quant_sweep.py).
+_SWIGLU_BLOCKS_PER_PROGRAM = 256
+_SWIGLU_NUM_WARPS = 16
 
 
 def _validate_mxfp8_matrix(matrix: torch.Tensor) -> None:
@@ -30,8 +46,16 @@ def _quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor
 
 
 def quantize_mxfp8_weight_blockwise(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prequantize a weight with Quack and return hardware-blocked scales."""
+    """Prequantize a weight and return hardware-blocked scales.
+
+    Prefers Quack's ``to_mx``/``to_blocked`` helpers when they are installed (they
+    match the reference bytes exactly), and otherwise falls back to the Triton
+    quantizer, which writes the same E4M3 values and E8M0 blocked scales. The
+    SM12x Spark image has no Quack, so the fallback is what runs there.
+    """
     _validate_mxfp8_matrix(matrix)
+    if to_mx is None or to_blocked is None:
+        return quantize_mxfp8_blockwise(matrix)
     return _quantize_mxfp8_weight_blockwise(matrix)
 
 
@@ -62,8 +86,9 @@ def _store_mxfp8_blocks(
     scale = tl.maximum(scale_bits.to(tl.float32, bitcast=True), 1.1754943508222875e-38)
 
     scaled_matrix = tl.maximum(tl.minimum(matrix / scale[:, None], 448.0), -448.0)
+    # int64 element offsets: M * K can exceed 2**31 at H3 2K (133435 x 28672 = 3.83e9).
     tl.store(
-        quantized_ptr + row * column_count + columns,
+        quantized_ptr + row.to(tl.int64) * column_count + columns,
         tl.reshape(scaled_matrix.to(tl.float8e4nv), (BLOCKS_PER_PROGRAM * 32, )),
         mask=valid_elements,
     )
@@ -95,7 +120,7 @@ def _quantize_mxfp8_kernel(
     element_offsets = tl.arange(0, BLOCKS_PER_PROGRAM * 32)
     columns = first_block * 32 + element_offsets
     matrix = tl.load(
-        matrix_ptr + row * column_count + columns,
+        matrix_ptr + row.to(tl.int64) * column_count + columns,
         mask=(row < row_count) & (columns < column_count),
         other=0.0,
     ).to(tl.float32)
@@ -128,7 +153,8 @@ def _swiglu_quantize_mxfp8_kernel(
     element_offsets = tl.arange(0, BLOCKS_PER_PROGRAM * 32)
     columns = first_block * 32 + element_offsets
     valid_elements = (row < row_count) & (columns < column_count)
-    packed_row_offset = row * (2 * column_count)
+    # int64: the packed preactivation is M x 2*ffn; at H3 2K this is 3.83e9 elements.
+    packed_row_offset = row.to(tl.int64) * (2 * column_count)
     values = tl.load(
         preactivation_ptr + packed_row_offset + columns,
         mask=valid_elements,
@@ -196,7 +222,7 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
     row_count = preactivation.shape[0]
     column_count = preactivation.shape[1] // 2
     quantized, blocked_scales, scale_column_count = _allocate_mxfp8_outputs(preactivation, column_count)
-    grid = (triton.cdiv(row_count, 128) * 128, triton.cdiv(scale_column_count, _BLOCKS_PER_PROGRAM))
+    grid = (triton.cdiv(row_count, 128) * 128, triton.cdiv(scale_column_count, _SWIGLU_BLOCKS_PER_PROGRAM))
     _swiglu_quantize_mxfp8_kernel[grid](
         preactivation,
         quantized,
@@ -204,10 +230,17 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
         row_count,
         column_count,
         scale_column_count,
-        BLOCKS_PER_PROGRAM=_BLOCKS_PER_PROGRAM,
-        num_warps=8,
+        BLOCKS_PER_PROGRAM=_SWIGLU_BLOCKS_PER_PROGRAM,
+        num_warps=_SWIGLU_NUM_WARPS,
     )
     return quantized, blocked_scales
+
+
+def _as_e8m0_scales(scales: torch.Tensor) -> torch.Tensor:
+    # F.scaled_mm rejects flashinfer's uint8 E8M0 scale buffers; they hold the same bytes as float8_e8m0fnu.
+    if scales.dtype == torch.uint8:
+        return scales.view(torch.float8_e8m0fnu)
+    return scales
 
 
 def mxfp8_scaled_mm(
@@ -221,9 +254,9 @@ def mxfp8_scaled_mm(
     return F.scaled_mm(
         mat_a=activation_values,
         mat_b=weight_values.mT,
-        scale_a=activation_scales,
+        scale_a=_as_e8m0_scales(activation_scales),
         scale_recipe_a=F.ScalingType.BlockWise1x32,
-        scale_b=weight_scales,
+        scale_b=_as_e8m0_scales(weight_scales),
         scale_recipe_b=F.ScalingType.BlockWise1x32,
         swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
         swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,

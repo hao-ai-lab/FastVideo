@@ -12,7 +12,7 @@ parquet that step produces.
 
 ## What you need
 
-| | |
+| Requirement | Value |
 |---|---|
 | GPU | 48GB or more for the LoRA overfit; multi-GPU for full-parameter runs |
 | Disk | ~40GB for the checkpoint (DiT 17GB + Qwen2.5-VL 16GB + ByT5/VAE) |
@@ -145,16 +145,10 @@ a real problem — stop and investigate rather than burning GPU hours.
 ## 4. Scale out
 
 `examples/train/configs/fine_tuning/hunyuan15/t2v.yaml` runs
-full-parameter training across 8 GPUs with FSDP. Full-parameter training
-does not fit one 80GB card:
+full-parameter training across 8 GPUs with FSDP. One 80 GB card cannot hold it:
 
-It reads `data/hunyuan15_preprocessed` (and its `validation_prompts.json`),
-not the overfit directory above — either preprocess into that path (set
-`FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR=data/hunyuan15_preprocessed`) or
-pass `--training.data.data_path` and `--callbacks.validation.dataset_file`.
-
-| | bf16 |
-|---|---|
+| Item | Per rank (bf16) |
+|---|---:|
 | Weights | 16.7 GB |
 | Gradients | 16.7 GB |
 | AdamW `exp_avg` + `exp_avg_sq` | 33.4 GB |
@@ -163,21 +157,27 @@ pass `--training.data.data_path` and `--callbacks.validation.dataset_file`.
 | **Total** | **~80 GB** |
 
 That subtotal is independent of sequence length, so shortening the clip
-(`--training.data.num_latent_t`) barely helps — measured peak memory moved
-by 0.07GB going from 21 latent frames down to 9. Options that do move the
-needle:
+(`--training.data.num_latent_t`) barely helps: measured peak memory moved by
+0.07 GB going from 21 latent frames to 9. Options that do move the needle:
 
-- **LoRA** (what the overfit config uses) — gradients and optimizer state
-  shrink to the adapter parameters, ~30GB total.
-- **FSDP sharding across GPUs** — the 66.8GB subtotal divides by the number
-  of shards.
-- **A memory-light optimizer** — SGD with momentum keeps a single state
-  tensor instead of two. `torch.optim.Adafactor` is smaller still, but is
-  not DTensor-safe: its in-place `.square_()` fails under FSDP2 with
-  `aten.pow_.Scalar: in-place operations that require placement changes
-  are not supported`.
+- **LoRA** (what the overfit config uses): gradients and optimizer state
+  shrink to the adapter parameters, about 30 GB total.
+- **FSDP sharding across GPUs**: the 66.8 GB subtotal divides by the number of
+  shards.
+- **A memory-light optimizer**: SGD with momentum keeps a single state tensor
+  instead of two. `torch.optim.Adafactor` is smaller still, but is not
+  DTensor-safe. Its in-place `.square_()` fails under FSDP2 with
+  `aten.pow_.Scalar: in-place operations that require placement changes are
+  not supported`.
 
-Set `training.dit_precision: bf16` for any single-device run. The default
+The config reads `data/hunyuan15_preprocessed` and its
+`validation_prompts.json`, not the overfit directory above. Either preprocess
+into that path (set
+`FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR=data/hunyuan15_preprocessed`) or
+pass `--training.data.data_path` and `--callbacks.validation.dataset_file`.
+
+The shipped overfit config already sets `training.dit_precision: bf16`. If you
+write your own config, set it for any single-device run. The default
 is fp32, which doubles weights, gradients, and optimizer state.
 
 ## Troubleshooting

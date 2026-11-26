@@ -2,6 +2,7 @@
 # Canonical Slurm CI selection for the golden-gate lane. Environment (HF_HOME
 # and authentication) is the runner's responsibility.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../spark_kernel_sync.sh"
 
 golden_root=./fastvideo/tests/golden_gate
 selected=${FASTVIDEO_GOLDEN_TEST_FILES-}

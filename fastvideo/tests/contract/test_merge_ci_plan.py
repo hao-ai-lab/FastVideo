@@ -230,6 +230,12 @@ def test_fastcheck_lane_script_is_not_repeated_by_merge():
     assert plan.encoded_lanes() == ",none,"
 
 
+def test_spark_kernel_sync_relies_on_the_fastcheck_lanes_that_source_it():
+    plan = PLAN_MERGE_CI.classify_paths([".buildkite/scripts/spark_kernel_sync.sh"])
+
+    assert plan.encoded_lanes() == ",none,"
+
+
 def test_cross_cutting_dependency_change_fails_out_to_every_merge_lane():
     plan = PLAN_MERGE_CI.classify_paths(["uv.lock"])
 

@@ -137,6 +137,11 @@ FAMILY_COVERAGE = (
         ("test_bernini_similarity.py", ),
     ),
     FamilyCoverage(
+        re.compile(r"(^|[/_.-])qwen[_-]?image[_-]?2[._-]?1([/_.-]|$)"),
+        ("test_qwen_image21.py", ),
+        ("test_qwen_image21_similarity.py", ),
+    ),
+    FamilyCoverage(
         re.compile(r"(^|[/_.-])flux[_-]?2([/_.-]|$)"),
         ("test_flux2_klein.py", ),
         ("test_flux2_similarity.py", ),
@@ -524,6 +529,10 @@ def classify_paths(paths: list[str], removed_paths: Iterable[str] = ()) -> Merge
             continue
         if path in {".buildkite/scripts/unit_test.sh", ".buildkite/scripts/pr_test.sh"}:
             plan.reasons.append(f"covered by automatic unit Fastcheck: {path}")
+            continue
+        if path == ".buildkite/scripts/spark_kernel_sync.sh":
+            # Every Spark-capable Fastcheck lane except DreamVerse sources it.
+            plan.reasons.append(f"covered by automatic Fastcheck: {path}")
             continue
         if _matches_any(path, SAFE_PATTERNS):
             plan.reasons.append(f"no additional GPU integration needed: {path}")

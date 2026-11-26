@@ -131,6 +131,9 @@ class VideoGenerationRequest(BaseModel):
     # SGLang's legacy direct-video spellings.
     video_path: str | None = None
     video_url: str | None = None
+    # MiniMax-H3 Ref2VA: the last 5, 22 or 39 frames of an earlier video (URL or local path) that this request
+    # continues; see MiniMaxH3Reference(media_type="continuation").
+    continuation_video: str | None = None
     video_params: VideoParams | None = None
     user: str | None = None
     task: str | None = None
@@ -168,6 +171,11 @@ class VideoGenerationRequest(BaseModel):
 
     lora: dict[str, Any] | None = None
     extra_params: dict[str, Any] | None = None
+    # MiniMax-H3 draft handoff (see fastvideo/pipelines/basic/minimax_h3/draft_bundle.py): a generator keeps the
+    # finished draft's latent + conditioning (GET /v1/videos/{id}/draft_bundle); Open-H3-Regenerate-2K takes one as its
+    # draft (an http(s) URL, a local path under server.media_roots, or a data:application/x-fastvideo-h3-draft URL).
+    return_draft_bundle: bool = False
+    draft_bundle: str | None = None
 
     @field_validator("prompt")
     @classmethod

@@ -12,6 +12,7 @@ from fastvideo.configs.models.vaes.minimax_h3_video import (
 )
 from fastvideo.configs.models.vaes.oobleck import OobleckVAEArchConfig, OobleckVAEConfig
 from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
+from fastvideo.configs.models.vaes.qwen_image21 import QwenImage21VAEArchConfig, QwenImage21VAEConfig
 from fastvideo.models.wan.vae_config import WanVAEConfig
 
 __all__ = [
@@ -31,4 +32,6 @@ __all__ = [
     "OobleckVAEArchConfig",
     "OobleckVAEConfig",
     "Flux2VAEConfig",
+    "QwenImage21VAEArchConfig",
+    "QwenImage21VAEConfig",
 ]

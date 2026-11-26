@@ -80,8 +80,10 @@ def _cache_for(dit, layout, storage="native"):
     return MiniMaxH3PrefixKVCache(len(dit.blocks), frozen_prefix_rows(layout), dit.num_heads, dit.head_dim, storage)
 
 
-def _full(dit, layout, inputs, record=None, video_t=0.7, audio_t=0.4, step_index=0):
+def _full(dit, layout, inputs, record=None, video_t=0.7, audio_t=0.4, step_index=0, text_embeds=None):
     kwargs = {"record_prefix_kv": record} if record is not None else {}
+    if text_embeds is not None:
+        kwargs["precomputed_text_embeds"] = text_embeds
     video, audio = dit.forward_with_cache(inputs["x_v"], inputs["x_a"], inputs["text"], layout=layout,
                                           step_index=step_index, **_step_args(layout, video_t, audio_t), **kwargs)
     mx.eval(video, audio)
@@ -110,6 +112,24 @@ def test_recording_step_matches_the_normal_forward_exactly(tiny_dit) -> None:
         layout.video_indices.shape[0] - layout.num_condition_video_rows)
     expected = estimate_prefix_kv_bytes(len(dit.blocks), cache.rows, dit.num_heads, dit.head_dim, "native", 4)
     assert cache.nbytes == expected
+
+
+def test_precomputed_text_preserves_recorded_prefix_kv(tiny_dit) -> None:
+    """Cached refinement must preserve both visible outputs and later-step K/V."""
+    dit, layout = tiny_dit
+    inputs = _inputs(layout, seed=13)
+    expected_cache = _cache_for(dit, layout)
+    expected = _full(dit, layout, inputs, record=expected_cache)
+    text_embeds = dit.refine_text(inputs["text"])
+    mx.eval(text_embeds)
+    actual_cache = _cache_for(dit, layout)
+    actual = _full(dit, layout, inputs, record=actual_cache, text_embeds=text_embeds)
+    for left, right in zip(expected, actual, strict=True):
+        np.testing.assert_array_equal(left, right)
+    assert actual_cache.complete
+    for layer in range(len(dit.blocks)):
+        for left, right in zip(expected_cache.load(layer), actual_cache.load(layer), strict=True):
+            np.testing.assert_array_equal(np.asarray(left), np.asarray(right))
 
 
 def test_reuse_with_unmoved_inputs_equals_the_full_forward(tiny_dit) -> None:
@@ -290,13 +310,20 @@ class _StubDiT:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.refiner_inputs: list[np.ndarray] = []
+        self.text_embeddings: list[object] = []
 
     def precompute_adaln(self, timesteps, *, drop_weights: bool = True):
         return None
 
+    def refine_text(self, text):
+        self.refiner_inputs.append(np.asarray(text).copy())
+        return text + 1.0
+
     def forward_with_cache(self, x_v, x_a, text, *, layout, step_timesteps, row_timestep_inverse, step_index=0,
-                           record_prefix_kv=None):
+                           record_prefix_kv=None, precomputed_text_embeds=None):
         self.calls.append("record" if record_prefix_kv is not None else "full")
+        self.text_embeddings.append(precomputed_text_embeds)
         return x_v * 0.0 + 1.0, x_a * 0.0 + 1.0
 
     def forward_target_rows(self, x_v, x_a, *, layout, step_timesteps, row_timestep_inverse, prefix_kv, step_index=0):
@@ -336,10 +363,18 @@ def test_denoise_loop_records_then_reuses_and_refreshes(tmp_path: Path) -> None:
     stats = pipeline.last_prefix_kv_stats
     assert stats["enabled"] and stats["recorded_steps"] == [0] and stats["reused_steps"] == [1, 2, 3]
     assert len(pipeline.last_denoise_step_times) == 4
+    assert len(dit.refiner_inputs) == len(dit.text_embeddings) == 1
+    np.testing.assert_array_equal(np.asarray(dit.text_embeddings[0]), dit.refiner_inputs[0] + 1.0)
 
     dit = _StubDiT()
     pipeline = _denoise(tmp_path, dit, num_steps=4, reuse_prefix_kv=True, prefix_kv_refresh_every=2)
     assert dit.calls == ["record", "reuse", "record", "reuse"]
+    assert pipeline.last_prefix_kv_stats["recorded_steps"] == [0, 2]
+    assert len(dit.refiner_inputs) == 1
+    assert len(dit.text_embeddings) == 2
+    # Refreshing transformer K/V does not invalidate timestep-independent text.
+    for embeds in dit.text_embeddings:
+        np.testing.assert_array_equal(np.asarray(embeds), dit.refiner_inputs[0] + 1.0)
 
 
 def test_denoise_default_never_touches_prefix_kv(tmp_path: Path) -> None:
@@ -347,6 +382,10 @@ def test_denoise_default_never_touches_prefix_kv(tmp_path: Path) -> None:
     pipeline = _denoise(tmp_path, dit, num_steps=2)
     assert dit.calls == ["full", "full"]
     assert pipeline.last_prefix_kv_stats["enabled"] is False
+    assert len(dit.refiner_inputs) == 1
+    assert len(dit.text_embeddings) == 2
+    for embeds in dit.text_embeddings:
+        np.testing.assert_array_equal(np.asarray(embeds), dit.refiner_inputs[0] + 1.0)
 
 
 def test_denoise_refuses_a_cache_over_budget(tmp_path: Path) -> None:
@@ -354,6 +393,7 @@ def test_denoise_refuses_a_cache_over_budget(tmp_path: Path) -> None:
     with pytest.raises(PrefixKVBudgetError, match="prefix_kv_cache_max_gib"):
         _denoise(tmp_path, dit, reuse_prefix_kv=True, prefix_kv_cache_max_gib=1e-9)
     assert dit.calls == []
+    assert dit.refiner_inputs == []
 
 
 def test_reuse_needs_references() -> None:

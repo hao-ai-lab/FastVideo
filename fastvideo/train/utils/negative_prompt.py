@@ -11,6 +11,7 @@ sidesteps the deadlock entirely.
 
 from __future__ import annotations
 
+import gc
 import os
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,19 @@ from fastvideo.utils import maybe_download_model
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import TrainingConfig
+
+
+def _release_encoder_memory() -> None:
+    """Free the just-deleted text encoder's weights now instead of at the next full garbage collection.
+
+    Parallel layers store their bound ``weight_loader`` on each parameter (``set_weight_attrs``), so every
+    layer and its parameters form a reference cycle that ``del`` cannot break. ``gc.collect()`` frees the
+    weights (21.2 GiB allocated for the Wan2.1 UMT5 encoder on GB10); ``empty_cache()`` then returns the
+    cached blocks to the device, which on unified memory is also host memory.
+    """
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def encode_negative_prompt(
@@ -94,6 +108,7 @@ def encode_negative_prompt(
         embeds = postprocess_text(outputs).to(device=device, dtype=dtype)
         mask = text_inputs["attention_mask"].to(device=device, dtype=dtype)
 
-    del text_encoder, tokenizer
+    del text_encoder, tokenizer, outputs, text_inputs
+    _release_encoder_memory()
 
     return embeds, mask

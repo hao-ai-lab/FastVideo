@@ -25,7 +25,15 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2va
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_FPS
+from fastvideo.pipelines.basic.minimax_h3.packing import (
+    MINIMAX_H3_AUDIO_LATENTS_PER_SECOND,
+    MINIMAX_H3_FPS,
+    MINIMAX_H3_FRAMES_PER_CHUNK,
+    MINIMAX_H3_LATENTS_PER_CHUNK,
+    MINIMAX_H3_MAX_ALIGNED_FRAMES,
+    MINIMAX_H3_MIN_ALIGNED_FRAMES,
+    audio_latent_num_frames,
+)
 from fastvideo.pipelines.basic.minimax_h3.reference import (
     decode_reference_video,
     prepare_reference_frames,
@@ -60,20 +68,41 @@ def _init_single_process_distributed() -> None:
     maybe_init_distributed_environment_and_model_parallel(1, 1)
 
 
-def load_training_media(path: Path) -> tuple[np.ndarray, torch.Tensor]:
+def native_num_frames(available: int) -> int:
+    """Return the longest H3-native ``17 * n + 5`` frame count within ``available``.
+
+    Counts are capped at the largest accepted bucket, so a long clip trains on
+    its first 15 seconds instead of failing.
+    """
+    if available < MINIMAX_H3_MIN_ALIGNED_FRAMES:
+        raise ValueError(f"Training video has {available} frames at {MINIMAX_H3_FPS} FPS; "
+                         f"at least {MINIMAX_H3_MIN_ALIGNED_FRAMES} are required")
+    num_frames = min(available, MINIMAX_H3_MAX_ALIGNED_FRAMES)
+    while num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
+        num_frames -= 1
+    return num_frames
+
+
+def load_training_media(path: Path, num_frames: int | None = NUM_FRAMES) -> tuple[np.ndarray, torch.Tensor]:
     """Decode paired targets at the geometry and rates consumed by H3.
 
-    The video uses exactly 124 frames, and the audio is capped at the duration
-    of those frames before variational autoencoder (VAE) encoding.
+    With the default ``num_frames`` the video must resolve to the fixed
+    124-frame 768x1344 overfit geometry. ``num_frames=None`` keeps the clip's
+    own canvas (``resolve_canvas_size``) and its longest native frame count.
+    The audio is capped at the duration of the selected frames, and at the
+    samples their ``audio_latent_num_frames`` cover, before VAE encoding.
     """
     decoded_frames, source_fps, soundtrack = decode_reference_video(path)
     resampled_frames = resample_reference_frames(decoded_frames, source_fps)
-    if resampled_frames.shape[0] < NUM_FRAMES:
+    fixed_geometry = num_frames is not None
+    if num_frames is None:
+        num_frames = native_num_frames(resampled_frames.shape[0])
+    if resampled_frames.shape[0] < num_frames:
         raise ValueError(f"Training video {path} has {resampled_frames.shape[0]} frames at {MINIMAX_H3_FPS} FPS; "
-                         f"{NUM_FRAMES} are required")
-    frames = prepare_reference_frames(resampled_frames, NUM_FRAMES)
-    if frames.shape != (NUM_FRAMES, VIDEO_HEIGHT, VIDEO_WIDTH, 3):
-        raise ValueError(f"Training video must resolve to {(NUM_FRAMES, VIDEO_HEIGHT, VIDEO_WIDTH, 3)}, "
+                         f"{num_frames} are required")
+    frames = prepare_reference_frames(resampled_frames, num_frames)
+    if fixed_geometry and frames.shape != (num_frames, VIDEO_HEIGHT, VIDEO_WIDTH, 3):
+        raise ValueError(f"Training video must resolve to {(num_frames, VIDEO_HEIGHT, VIDEO_WIDTH, 3)}, "
                          f"got {tuple(frames.shape)}")
     if soundtrack is None:
         raise ValueError(f"Training video {path} requires a soundtrack")
@@ -82,8 +111,14 @@ def load_training_media(path: Path) -> tuple[np.ndarray, torch.Tensor]:
         waveform,
         source_sample_rate,
         AUDIO_SAMPLE_RATE,
-        max_duration=NUM_FRAMES / MINIMAX_H3_FPS,
+        max_duration=num_frames / MINIMAX_H3_FPS,
     )
+    # The audio VAE pads to whole latents, so audio past the last whole latent
+    # would add one more than inference generates for these frames (e.g. 264
+    # instead of 263 at 158 frames). The packed Ref2VA preprocessor applies the
+    # same cap.
+    samples_per_latent = AUDIO_SAMPLE_RATE // MINIMAX_H3_AUDIO_LATENTS_PER_SECOND
+    waveform = waveform[..., :audio_latent_num_frames(num_frames) * samples_per_latent].contiguous()
     return frames, waveform
 
 
@@ -234,6 +269,9 @@ def build_parquet_record(
     video_latents: torch.Tensor,
     audio_latents: torch.Tensor,
     text_embedding: torch.Tensor,
+    num_frames: int = NUM_FRAMES,
+    height: int = VIDEO_HEIGHT,
+    width: int = VIDEO_WIDTH,
 ) -> dict[str, Any]:
     """Serialize one synchronized H3 sample for the Parquet schema collator.
 
@@ -255,10 +293,10 @@ def build_parquet_record(
         "file_name": file_name,
         "caption": caption,
         "media_type": "video_with_audio",
-        "width": VIDEO_WIDTH,
-        "height": VIDEO_HEIGHT,
-        "num_frames": NUM_FRAMES,
-        "duration_sec": NUM_FRAMES / MINIMAX_H3_FPS,
+        "width": width,
+        "height": height,
+        "num_frames": num_frames,
+        "duration_sec": num_frames / MINIMAX_H3_FPS,
         "fps": float(MINIMAX_H3_FPS),
         "audio_sample_rate": AUDIO_SAMPLE_RATE,
     })

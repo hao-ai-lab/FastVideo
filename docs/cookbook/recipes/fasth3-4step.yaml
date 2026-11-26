@@ -24,6 +24,7 @@ deployments:
       - generator.engine.parallelism.tp_size
       - generator.engine.parallelism.sp_size
       - generator.engine.offload.text_encoder
+      - generator.engine.quantization.transformer_quant
       - generator.engine.offload.vae
       - generator.pipeline.experimental.video_decode_backend
       - generator.pipeline.experimental.h3_vae_nvfp4_decoder

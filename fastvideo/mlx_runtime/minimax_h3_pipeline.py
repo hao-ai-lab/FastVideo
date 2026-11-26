@@ -937,6 +937,10 @@ class MiniMaxH3MLXPipeline:
         elif layout.num_condition_audio_rows:
             raise ValueError("A reference-prefixed layout needs its encoded audio condition rows.")
         text = mx.array(text_rows.astype(np.float32))
+        # The token refiner depends only on this request's conditioning, not
+        # the changing latents or timesteps. A local value also prevents a
+        # resident DiT from reusing embeddings from an earlier request.
+        text_embeds = None
         dit_forward_s = 0.0
         prefix_kv = None
         if reuse_prefix_kv:
@@ -998,6 +1002,9 @@ class MiniMaxH3MLXPipeline:
                 if record_step:
                     pdd_forward_kwargs["record_prefix_kv"] = prefix_kv
                     recorded_steps.append(step_index)
+                if text_embeds is None:
+                    text_embeds = dit.refine_text(text)
+                    mx.eval(text_embeds)
                 video_velocity, audio_velocity = dit.forward_with_cache(
                     x_v,
                     x_a,
@@ -1006,6 +1013,7 @@ class MiniMaxH3MLXPipeline:
                     step_timesteps=unique,
                     row_timestep_inverse=inverse,
                     step_index=step_index,
+                    precomputed_text_embeds=text_embeds,
                     **pdd_forward_kwargs,
                 )
                 video_velocity = video_velocity[layout.num_condition_video_rows:]
@@ -1326,6 +1334,9 @@ class MiniMaxH3MLXPipeline:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
 
+        if vsa_impl in ("sdpa", "nax") and reuse_prefix_kv:
+            raise ValueError(
+                f"{vsa_impl.upper()} VSA does not support prefix K/V reuse; disable reuse or select another backend")
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         if inter_step_cooldown_s < 0:

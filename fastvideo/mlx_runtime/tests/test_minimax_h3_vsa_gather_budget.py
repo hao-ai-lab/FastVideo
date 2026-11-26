@@ -50,5 +50,10 @@ def test_compiled_rotary_matches_uncompiled_fp32_math():
     rotated = mx.concatenate([-second, first], axis=-1)
     out = (x_rot * cos[:, None, :] + rotated * sin[:, None, :]).astype(x.dtype)
     expected = mx.concatenate([out, x[..., rotary_dim:]], axis=-1)
-    np.testing.assert_array_equal(np.array(apply_h3_rotary(x, cos, sin).astype(mx.float32)),
-                                  np.array(expected.astype(mx.float32)))
+    # The compiled kernel may fuse the multiply-add (FMA) where the eager graph rounds each op,
+    # which can move a result by one bf16 ULP on some CPUs. Allow exactly that: rtol 2**-7 is one
+    # bf16 ULP at the bottom of each binade, so a real math error still fails.
+    np.testing.assert_allclose(np.array(apply_h3_rotary(x, cos, sin).astype(mx.float32)),
+                               np.array(expected.astype(mx.float32)),
+                               rtol=2**-7,
+                               atol=0)

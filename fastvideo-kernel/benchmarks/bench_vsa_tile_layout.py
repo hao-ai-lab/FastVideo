@@ -5,7 +5,7 @@ Benchmark the SM100 fused VSA64 tile layout against the legacy scatter/transpose
 Times Wan VSA inference preprocessing through the backend
 (``VideoSparseAttentionImpl.preprocess_qkv``), toggling
 ``FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT``:
-  - legacy: tile scatter into BSHD + four BSHD->BHSD transposes
+  - legacy: tile scatter into BSHD + three contiguous Q/K/V transposes + a gate view
   - fused:  one Triton kernel writing tiled BHSD directly
 
 With ``--include_attn`` the timed region also covers ``forward`` (the
@@ -59,20 +59,20 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def make_step(impl: VideoSparseAttentionImpl, qkvg: torch.Tensor, builder: VideoSparseAttentionMetadataBuilder,
-              build_kwargs: dict, fused: bool, include_attn: bool) -> Callable[[], torch.Tensor]:
+              build_kwargs: dict, fused: bool, include_attn: bool) -> Callable[[], tuple[torch.Tensor, ...]]:
     metadata = builder.build(**build_kwargs)
 
-    def step() -> torch.Tensor:
+    def step() -> tuple[torch.Tensor, ...]:
         # The routing gate reads the switch on every call.
         with envs.FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT.override(not fused):
             tiled = impl.preprocess_qkv(qkvg, metadata)
         q, k, v, gate = tiled.chunk(4)
         if include_attn:
-            return impl.forward(q, k, v, gate, metadata)
+            return (impl.forward(q, k, v, gate, metadata), )
         if metadata.fused_layout_active:
-            return tiled
-        # Legacy route: the transposes forward() applies before video_sparse_attn.
-        return torch.cat([t.transpose(1, 2).contiguous() for t in (q, k, v, gate)])
+            return q, k, v, gate
+        return (q.transpose(1, 2).contiguous(), k.transpose(1, 2).contiguous(), v.transpose(1, 2).contiguous(),
+                gate.transpose(1, 2))
 
     with torch.no_grad():
         step()
@@ -100,7 +100,7 @@ def main() -> None:
     legacy = make_step(impl, qkvg, builder, build_kwargs, fused=False, include_attn=args.include_attn)
     fused = make_step(impl, qkvg, builder, build_kwargs, fused=True, include_attn=args.include_attn)
     with torch.no_grad():
-        if not torch.equal(legacy(), fused()):
+        if not all(torch.equal(old, new) for old, new in zip(legacy(), fused(), strict=True)):
             raise RuntimeError("Fused and legacy outputs differ.")
         legacy_ms = do_bench(legacy, warmup=args.warmup, rep=args.rep, return_mode="median")
         fused_ms = do_bench(fused, warmup=args.warmup, rep=args.rep, return_mode="median")

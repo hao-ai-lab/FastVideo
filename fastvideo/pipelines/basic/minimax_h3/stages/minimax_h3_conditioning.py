@@ -3,16 +3,26 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+import hashlib
 from typing import Any
+from weakref import ReferenceType, ref
 
 import numpy as np
 import torch
 from torch.distributed.tensor import DTensor
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import (
+    get_local_torch_device,
+    get_tp_world_size,
+    get_world_size,
+    model_parallel_is_initialized,
+)
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
 from fastvideo.pipelines.basic.minimax_h3.memo import ContentMemo, image_key
+from fastvideo.pipelines.basic.minimax_h3.prompt_embeds_cache import PromptEmbedsCache
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_IMAGE_PAD_TOKEN,
@@ -23,13 +33,93 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_VISION_START_TOKEN,
 )
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, sample_reference_video_frames
-from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import (
+    MINIMAX_H3_KEYFRAME_ANCHORS_KEY,
+    MINIMAX_H3_KEYFRAMES_KEY,
+    uses_references,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.lazy_module import LazyModule
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 MINIMAX_H3_TEXT_TOKEN_TAGS_KEY = "minimax_h3_text_token_tags"
+
+logger = init_logger(__name__)
+
+_CACHE_FORMAT = 1
+
+
+def _text_encoder_sharded() -> bool:
+    """Whether the Qwen3-VL encoder is tensor-parallel across ranks.
+
+    A per-rank memo hit would let one peer return while another enters the
+    encoder's row-parallel collectives and waits for the missing peer, so the
+    prompt-embeds cache stays off whenever the encoder spans ranks.
+    """
+    if not model_parallel_is_initialized():
+        return False
+    try:
+        return get_tp_world_size() > 1
+    except Exception:  # a probe must never break conditioning
+        return False
+
+
+def text_encoder_cache_settings(fastvideo_args: Any) -> tuple[str, str, str | None]:
+    """The resolved text-encoder identity: checkpoint override, quantization, and configured precision.
+
+    Reads only saved arguments. Touching a deferred conditioner here would materialize Qwen3-VL before the
+    cache lookup, which is the reload the prompt-embeds cache exists to avoid.
+    """
+    override = str(getattr(fastvideo_args, "override_text_encoder_safetensors", None))
+    quant = str(getattr(fastvideo_args, "override_text_encoder_quant", None))
+    pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+    precisions = getattr(pipeline_config, "text_encoder_precisions", None) or ()
+    precision = str(precisions[0]) if precisions else None
+    return override, quant, precision
+
+
+def prompt_embeds_cache_key(batch: Any,
+                            ref2va: bool,
+                            model_path: Any,
+                            device: Any,
+                            encoder_settings: Any = None) -> str | None:
+    """Stable digest of everything the conditioning stage consumes.
+
+    Returns ``None`` for presentations this cache cannot safely key: a video
+    reference gets its block timestamps assigned while presenting, so its
+    output is not a pure function of the prepared object.
+    """
+    parts = [
+        "h3-prompt-embeds",
+        str(_CACHE_FORMAT),
+        "ref2va" if ref2va else "fl2va",
+        str(model_path),
+        str(device),
+        str(encoder_settings),
+        str(batch.prompt),
+    ]
+    anchors = batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, ()) or ()
+    keyframes = batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY, []) or []
+    if len(anchors) != len(keyframes):
+        return None
+    try:
+        for anchor, image in zip(anchors, keyframes, strict=True):
+            parts.append(f"kf:{anchor}:{image_key(image)}")
+    except Exception:
+        return None
+    if ref2va:
+        for reference in batch.references or []:
+            if getattr(reference, "frames", None) is not None or reference.media_type == "video":
+                return None
+            if reference.image is None:
+                return None
+            try:
+                parts.append(f"ref:{reference.media_type}:{bool(reference.has_audio)}:{image_key(reference.image)}")
+            except Exception:
+                return None
+    return hashlib.blake2b("|".join(parts).encode("utf-8"), digest_size=16).hexdigest()
 
 
 def _token_ids(tokenized: Any) -> list[int]:
@@ -109,6 +199,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         *,
         ref2va: bool = False,
         manage_cpu_offload: bool = True,
+        text_conditioning_cache_max_bytes: int = 0,
     ) -> None:
         super().__init__()
         self.conditioner = conditioner
@@ -117,13 +208,77 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         self.ref2va = ref2va
         self.manage_cpu_offload = manage_cpu_offload
         self._ref2va_memo = ContentMemo()
+        self._prompt_embeds_cache = PromptEmbedsCache()
+        if type(text_conditioning_cache_max_bytes) is not int or text_conditioning_cache_max_bytes < 0:
+            raise ValueError("text_conditioning_cache_max_bytes must be a non-negative integer.")
+        self._text_cache_max_bytes = text_conditioning_cache_max_bytes
+        self._text_cache: OrderedDict[tuple, tuple[torch.Tensor, torch.Tensor]] = OrderedDict()
+        self._text_cache_bytes = 0
+        self._text_cache_owner: ReferenceType[MiniMaxH3Qwen3VLConditioner] | None = None
+        self._text_cache_revision: tuple[int, torch.dtype, str, bool, torch.dtype | None, str] | None = None
+        if self._text_cache_max_bytes:
+            if ref2va:
+                raise ValueError("Text conditioning reuse supports pure MiniMax-H3 T2VA, not Ref2VA.")
+            self._require_single_rank_text_cache()
+
+    @staticmethod
+    def _require_single_rank_text_cache() -> None:
+        try:
+            world_size = get_world_size()
+        except AssertionError as exc:
+            raise ValueError("Text conditioning reuse requires an initialized single-rank runtime.") from exc
+        if world_size != 1:
+            raise ValueError("Text conditioning reuse supports a single-rank runtime only.")
+
+    def _clear_text_cache(self) -> None:
+        self._text_cache.clear()
+        self._text_cache_bytes = 0
+
+    def _encode_text_tokens(
+        self,
+        token_ids: list[int],
+        token_tags: list[int],
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self._text_cache_max_bytes:
+            return self._encode_tokens(token_ids, token_tags, device)
+        self._require_single_rank_text_cache()
+        # A LazyModule proxy can outlive several real encoder instances.
+        owner = self.conditioner.materialize() if isinstance(self.conditioner, LazyModule) else self.conditioner
+        if owner.training or torch.is_grad_enabled():
+            self._clear_text_cache()
+            return self._encode_tokens(token_ids, token_tags, device)
+        autocast = torch.is_autocast_enabled(device.type)
+        revision = (owner.conditioning_revision, owner.dtype, str(device), autocast,
+                    torch.get_autocast_dtype(device.type) if autocast else None, torch.get_float32_matmul_precision())
+        same_owner = self._text_cache_owner is not None and self._text_cache_owner() is owner
+        if not same_owner or self._text_cache_revision != revision:
+            self._clear_text_cache()
+            self._text_cache_owner = ref(owner)
+            self._text_cache_revision = revision
+        key = (tuple(token_ids), tuple(token_tags))
+        cached = self._text_cache.get(key)
+        if cached is not None:
+            self._text_cache.move_to_end(key)
+            return cached[0].to(device=device, copy=True), cached[1].clone()
+        result = self._encode_tokens(token_ids, token_tags, device)
+        size = sum(value.numel() * value.element_size() for value in result)
+        if size <= self._text_cache_max_bytes:
+            while self._text_cache and (len(self._text_cache) >= 8
+                                        or self._text_cache_bytes + size > self._text_cache_max_bytes):
+                _, evicted = self._text_cache.popitem(last=False)
+                self._text_cache_bytes -= sum(value.numel() * value.element_size() for value in evicted)
+            self._text_cache[key] = (
+                result[0].detach().to(device="cpu", copy=True),
+                result[1].detach().to(device="cpu", copy=True),
+            )
+            self._text_cache_bytes += size
+        return result
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
-        if self.ref2va:
-            result.add_check("references", batch.references, V.list_not_empty)
-        else:
+        if not uses_references(self.ref2va, batch):
             result.add_check("keyframes", batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY), V.is_list)
         return result
 
@@ -191,6 +346,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         prompt_ids = _token_ids(self.tokenizer(batch.prompt, add_special_tokens=False))
         token_ids.extend(prompt_ids)
         token_tags.extend([MINIMAX_H3_TEXT_TAG] * len(prompt_ids))
+        if self._text_cache_max_bytes and not images and not getattr(batch, "references", None):
+            return self._encode_text_tokens(token_ids, token_tags, device)
         return self._encode_tokens(
             token_ids,
             token_tags,
@@ -273,10 +430,32 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             video_grid_thw=video_grid_thw,
         )
 
+    def _before_text_encoder(self) -> None:
+        """Hook for subclasses: runs once the cache has missed and the encoder is about to be used."""
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
+        # Stages built without __init__ (tests, subclasses) have no cache; treat that as off.
+        cache = getattr(self, "_prompt_embeds_cache", None)
+        cache_usable = cache is not None and cache.enabled and not _text_encoder_sharded()
+        cache_key: str | None = None
+        if cache_usable:
+            settings = text_encoder_cache_settings(fastvideo_args)
+            model_path = getattr(fastvideo_args, "model_path", None)
+            cache_key = prompt_embeds_cache_key(batch, uses_references(self.ref2va, batch), model_path, device,
+                                                settings)
+            cached = cache.get(cache_key)
+            if cached is not None:
+                cached_embeds, cached_tags = cached
+                batch.prompt_embeds = [cached_embeds.to(device=device)]
+                batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = cached_tags
+                # Never touch self.conditioner here: the deferred text encoder stays
+                # unmaterialized, so an identical request skips its multi-GiB reload.
+                logger.info("MiniMax-H3 conditioning cache hit (%s); Qwen3-VL stays unmaterialized", cache_key)
+                return batch
+        self._before_text_encoder()
         first_param = next(self.conditioner.parameters(), None)
         moved_for_forward = (getattr(self, "manage_cpu_offload", True) and fastvideo_args.text_encoder_cpu_offload
                              and first_param is not None and not isinstance(first_param, DTensor)
@@ -287,7 +466,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             # Keep both H3 prompt-presentation modes under one text-encoding
             # range so Nsight Systems exposes their complete conditioning cost.
             with nvtx_range("minimax_h3.text_encoding"):
-                if self.ref2va:
+                if uses_references(self.ref2va, batch):
                     prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
                 else:
                     prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
@@ -296,6 +475,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags
+        if cache_usable:
+            cache.put(cache_key, prompt_embeds, text_token_tags)
         return batch
 
 
@@ -303,4 +484,6 @@ __all__ = [
     "MINIMAX_H3_TEXT_TOKEN_TAGS_KEY",
     "MiniMaxH3ConditioningStage",
     "build_ref2va_presentation",
+    "prompt_embeds_cache_key",
+    "text_encoder_cache_settings",
 ]

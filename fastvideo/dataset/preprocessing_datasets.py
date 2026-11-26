@@ -5,17 +5,17 @@ import os
 import random
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from os.path import join as opj
 from typing import Any
 
 import numpy as np
 import torch
-import torchvision
 from einops import rearrange
 from PIL import Image
 from transformers import AutoTokenizer
 
+from fastvideo.dataset.utils import read_video_tchw
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -258,8 +258,7 @@ class VideoTransformStage(DatasetStage):
         assert os.path.exists(batch.path), f"file {batch.path} do not exist!"
         assert batch.sample_frame_index is not None, "Frame indices must be set before transformation"
 
-        torchvision_video, _, metadata = torchvision.io.read_video(batch.path, output_format="TCHW")
-        video = torchvision_video[batch.sample_frame_index]
+        video = read_video_tchw(batch.path)[batch.sample_frame_index]
         if self.transform is not None:
             video = self.transform(video)
         video = rearrange(video, "t c h w -> c t h w")
@@ -514,7 +513,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
 
     def _get_item(self, idx: int) -> dict:
         """Get a single processed data item."""
-        batch = self.processed_batches[idx]
+        batch = replace(self.processed_batches[idx])
 
         # Apply transformation stages
         batch = self.video_transform_stage.process(batch)
