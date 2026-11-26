@@ -439,6 +439,34 @@
       ]
     },
     {
+      "id": "fastpan2-ti2v",
+      "family": "pan2",
+      "stage": "inference",
+      "task": "Text or image to video",
+      "label": "FastPAN2 (8 calls)",
+      "summary": "Generate a 5-second, 704 × 1248 video at 24 fps from text in 8 transformer calls with VSA2 sparse attention, or set IMAGE_PATH in the maintained example to condition on a first frame. Needs a B200, GB200 or B300 GPU.",
+      "model": "IFM/FastPAN2",
+      "source": "examples/inference/basic/basic_fastpan2.py",
+      "serving": {
+        "source": "examples/serving/openai_fastpan2.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "task": "Text to video",
+        "limitations": [
+          "This server walkthrough sends a text prompt only. The server API also accepts an image reference (image_reference or input_reference) and then runs image-to-video from that first frame, but the checked-in clients do not upload one."
+        ]
+      },
+      "command": "python examples/inference/basic/basic_fastpan2.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video under video_samples_fastpan2/",
+      "limitations": [
+        "VSA2 sparse attention runs on sm_100a / sm_103a GPUs (B200, GB200, B300) only, and its kernels build from fastvideo-kernel/vsa2_train in a source checkout on first use.",
+        "The example keeps the 29B DiT resident in bf16 and offloads only the text encoder; set FASTPAN2_NUM_GPUS to shard tokens with sequence parallelism, which does not shard the DiT weights."
+      ],
+      "related": ["pan2-ti2v"]
+    },
+    {
       "id": "flux2-klein-t2i",
       "family": "flux",
       "stage": "inference",

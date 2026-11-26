@@ -223,7 +223,7 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(40);
+  await expect(cards).toHaveCount(41);
   await expect(cards.first()).toContainText("FastH3 Omni v1");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
@@ -276,7 +276,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(40);
+  await expect(page.locator(".recipe-card")).toHaveCount(41);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -474,7 +474,9 @@ test("source-backed serving pages expose their actual server settings", async ({
 test("PAN 2 has a family card with the IFM logo and an editable serving deployment", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   await page.getByLabel("Search recipes").fill("PAN 2");
-  const pan2 = page.locator(".recipe-card");
+  // The family holds PAN 2 and its distilled student FastPAN2.
+  await expect(page.locator(".recipe-card")).toHaveCount(2);
+  const pan2 = page.locator(".recipe-card").filter({ has: page.locator(".recipe-card-title", { hasText: /^PAN 2$/ }) });
   await expect(pan2).toHaveCount(1);
   await expect(pan2.locator("img")).toHaveAttribute("src", /\/ifm\.webp$/);
   await expect(pan2.locator(".recipe-card-kicker")).toHaveText("IFM");
@@ -489,6 +491,22 @@ test("PAN 2 has a family card with the IFM logo and an editable serving deployme
   await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"model_path": "IFM\/PAN2"/);
   await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"dit_layerwise": false/);
   await expect(page.getByRole("button", { name: "Download YAML", exact: false })).toBeEnabled();
+});
+
+test("FastPAN2 has its own IFM card and an editable serving deployment", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Search recipes").fill("FastPAN2");
+  const card = page.locator(".recipe-card");
+  await expect(card).toHaveCount(1);
+  await expect(card.locator(".recipe-card-kicker")).toHaveText("IFM");
+  await card.click();
+  await expect(page).toHaveURL(/cookbook\/pan\/fastpan2$/);
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("FastPAN2");
+  await settings(page, "Serving");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"model_path": "IFM\/FastPAN2"/);
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText(/"num_inference_steps": 8/);
 });
 
 test("source model hardware preferences survive hydration and reload", async ({ page }) => {
@@ -809,7 +827,7 @@ test("MLX Omni discovery and its original route expose the MLX launch command", 
 
 test("category counts match visible cards and exclude retired Preview", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
-  await expect(page.locator(".recipe-card")).toHaveCount(40);
+  await expect(page.locator(".recipe-card")).toHaveCount(41);
   for (const category of ["All models", "Video", "Image", "Audio", "World"]) {
     const button = page.getByRole("button", { name: category, exact: true });
     const count = Number(await button.locator(".recipe-filter-count").innerText());

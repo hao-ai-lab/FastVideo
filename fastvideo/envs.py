@@ -759,6 +759,11 @@ FASTVIDEO_WAN22_VAE_DECODE_DIR = EnvPath("",
                                          "(fastvideo-kernel/wan22_vae_decode) that AutoencoderKLWan loads, and builds "
                                          "on first use, when its config sets decode_kernel. Empty takes the copy in "
                                          "this checkout.")
+FASTVIDEO_VSA2_TRAIN_DIR = EnvPath("",
+                                   category="attention",
+                                   doc="Directory of the VSA2 kernels (fastvideo-kernel/vsa2_train) that the VSA-H3 "
+                                   "backend's vsa2 variant (FastPAN2) loads, and builds on first use. Empty takes "
+                                   "the copy in this checkout.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "

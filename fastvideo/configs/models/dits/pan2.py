@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.layers.pdd import validate_pdd_steps
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -16,9 +17,12 @@ def is_refiner_block(n: str, m) -> bool:
 @dataclass
 class PAN2ArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_transformer_block, is_refiner_block])
+    # VIDEO_SPARSE_ATTN_H3 runs the joint [video; text] attention block-sparse over the video tiles, as the FastPAN2
+    # student was trained (its fastvideo_inference.json selects it); the text refiner never routes to it.
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.FLASH_ATTN,
         AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,
     )
 
     # Diffusers PAN2Transformer3DModel keys -> native keys. The per-stream Q/K/V projections are fused on load.
@@ -70,9 +74,15 @@ class PAN2ArchConfig(DiTArchConfig):
     cast_prompt_embeds_to_dit_dtype: bool = True
     exclude_lora_layers: list[str] = field(
         default_factory=lambda: ["x_embedder", "time_embedder", "context_norm", "context_proj", "context_refiner"])
+    # Parallel Decoding Distillation (PDD) students such as FastPAN2 widen ``proj_out`` to this many fine-grid heads
+    # (``fastvideo.layers.pdd``). ``None`` is the released single-head transformer; a PDD export records the key in its
+    # transformer ``config.json``.
+    pdd_steps: int | None = None
 
     def __post_init__(self):
         super().__post_init__()
+        if self.pdd_steps is not None:
+            validate_pdd_steps(self.pdd_steps, "PAN2 pdd_steps")
         self.patch_size = tuple(self.patch_size)
         self.rope_axes_dim = tuple(self.rope_axes_dim)
         self.hidden_size: int = self.attention_head_dim * self.num_attention_heads

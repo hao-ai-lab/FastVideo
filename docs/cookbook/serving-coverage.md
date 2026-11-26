@@ -50,6 +50,7 @@ never deleted. See `examples/serving/README.md`.
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va` | Source-backed |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | `t2v` | CUDA REST | `kandinsky6-ti2va-distilled` | Source-backed |
 | `openai_pan2.yaml` | PAN 2 | `t2v` (a reference switches to image-to-video) | CUDA REST | `pan2/cuda-rest` | Source-backed; no recorded run |
+| `openai_fastpan2.yaml` | FastPAN2 | `t2v` (a reference switches to image-to-video) | CUDA REST | `fastpan2/cuda-rest` | Source-backed; B200 / GB200 / B300 only; no recorded HTTP run |
 | `openai_ltx2_distilled.yaml` | LTX2 Distilled | `t2v` | CUDA REST | `ltx2-distilled/cuda-rest` | Source-backed |
 | `streaming_demo.yaml` | LTX2 Distilled | `t2v` | CUDA streaming | `ltx2-distilled/cuda-streaming` | Source-backed |
 | `mlx_fasth3.yaml` | FastH3 V1 converted | `t2v` | MLX REST | none (legacy catalog only) | Source runtime; T2VA only |

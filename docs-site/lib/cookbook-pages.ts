@@ -85,6 +85,15 @@ export const recipePages = [
     tags: ["Text or image to video", "29B"],
   },
   {
+    id: "fastpan2",
+    family: "PAN 2",
+    title: "FastPAN2",
+    mark: "PAN",
+    path: "/cookbook/pan/fastpan2",
+    description: "The 8-call distilled student of the 29B PAN 2 model, with VSA2 sparse attention on Blackwell GPUs.",
+    tags: ["Text or image to video", "29B", "8-step"],
+  },
+  {
     id: "ltx2-distilled",
     family: "LTX",
     title: "LTX2 Distilled",
@@ -149,6 +158,7 @@ const backendModels: Record<string, string> = {
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
   "IFM/PAN2": "pan2",
+  "IFM/FastPAN2": "fastpan2",
 };
 const hiddenBackends = new Set(["fasth3-preview"]);
 

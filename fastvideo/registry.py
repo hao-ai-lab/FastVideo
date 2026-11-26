@@ -1230,16 +1230,17 @@ def _register_configs() -> None:
         pipeline_cls_name="MiniMaxH3ModularPipeline",
     )
 
-    # PAN2: one pipeline runs text-to-video, and image-to-video when the request carries a first frame.
+    # PAN2: one pipeline runs text-to-video, and image-to-video when the request carries a first frame. FastPAN2, its
+    # 8-call distilled student, is the same pipeline; its fastvideo_inference.json selects the PDD sampler.
     def _is_pan2(name: str) -> bool:
         name = name.lower()
-        return "pan2modularpipeline" in name or re.search(r"(^|[/_-])pan-?2([/_.-]|$)", name) is not None
+        return "pan2modularpipeline" in name or re.search(r"(^|[/_-])(fast)?pan-?2([/_.-]|$)", name) is not None
 
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=PAN2PipelineConfig,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=["IFM/PAN2"],
+        hf_model_paths=["IFM/PAN2", "IFM/FastPAN2"],
         model_detectors=[_is_pan2],
         model_family="pan2",
         default_preset="pan2_t2v",

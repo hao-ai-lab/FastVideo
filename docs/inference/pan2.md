@@ -9,6 +9,7 @@ leave it out for text only.
 | Hub repo | Pipeline | Workloads | Example |
 |---|---|---|---|
 | `IFM/PAN2` | `PAN2ModularPipeline` | T2V, I2V | [`basic_pan2.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_pan2.py) |
+| `IFM/FastPAN2` | `PAN2ModularPipeline` | T2V, I2V | [`basic_fastpan2.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fastpan2.py), see [FastPAN2](#fastpan2) |
 
 PAN2 checkpoints use the Modular Diffusers layout (`modular_model_index.json`). Any repo id or local directory whose
 name contains `pan2` (or whose manifest declares `PAN2ModularPipeline`) resolves to this pipeline. The defaults come
@@ -76,7 +77,8 @@ guardrails are on.
 ## Parallelism
 
 With `num_gpus > 1`, FastVideo runs Ulysses sequence parallelism: the video tokens are sharded across ranks and the
-text tokens are replicated. The number of GPUs must divide the 32 attention heads. Sequence-parallel padding of the
+text tokens are replicated (FastPAN2 shards them too; see [FastPAN2](#fastpan2)). The number of GPUs must divide the
+32 attention heads. Sequence-parallel padding of the
 video tokens is trimmed before attention, so no attention mask is needed.
 
 Padding is always excluded, without an opt-in setting. At 704x1248 with 313 frames, the 67,782 video tokens need
@@ -118,3 +120,93 @@ they have not been validated for FastVideo.
 - The Cache-DiT `quality` policy and CFG-parallel execution are vLLM-Omni serving features and are not ported.
 - The text encoder is a FastVideo-native Qwen3.5 port. Its Gated DeltaNet layers use a PyTorch chunked delta rule
   instead of the `fla` kernels.
+
+## FastPAN2
+
+[`IFM/FastPAN2`](https://huggingface.co/IFM/FastPAN2) is a distilled student of PAN 2 that generates a video in 8
+transformer calls, against the 100 of PAN 2's 50 guided steps. It was trained from PAN 2's weights with Distribution
+Matching Distillation together with Parallel Decoding Distillation (PDD), and its attention is VSA2 block-sparse
+attention. It runs through the same `PAN2ModularPipeline`, text-to-video and first-frame image-to-video, at
+704x1248 and 24 fps for 5-20 s clips.
+
+| | FastPAN2 | PAN 2 |
+|---|---|---|
+| Transformer calls | 8, one per fused PDD block | 100 (50 steps, conditional and unconditional) |
+| Guidance and negative prompt | None: the teacher's guidance 2.5 is distilled in | CFG 2.5 with the structured negative caption |
+| Attention | VSA2, 90% sparsity on 128-token tiles (4x4x8 latent tokens) | Dense (FlashAttention or Torch SDPA) |
+| GPUs | B200, GB200, B300 (sm_100a / sm_103a) | Any CUDA GPU that holds the DiT |
+
+Under sequence parallelism FastPAN2 also shards the refined text tokens across the ranks, as it was trained, so the
+text stream's per-token layers run once per token rather than once per rank.
+
+Everything else is PAN 2's: the 44-block transformer (with `proj_out` widened to 32 PDD heads and a learned VSA
+compression gate per block), the Qwen3.5 text encoder, the Wan2.2 VAE and the scheduler.
+
+### How it samples
+
+The checkpoint's `fastvideo_inference.json` holds its sampler and attention settings, and FastVideo reads it when the
+pipeline loads (`PAN2PipelineConfig.resolve_checkpoint_settings`):
+
+- **PDD sampling.** `proj_out` has one head per interval of a fixed 32-interval fine time grid (scheduler shift 9).
+  Each call fuses four consecutive heads into their integration-weighted mean velocity and advances the fp32 latents
+  by that block's whole sigma increment, so eight calls cover the grid (`PAN2PDDDenoisingStage`).
+- **No guidance.** A request that leaves `num_inference_steps` and `guidance_scale` unset gets 8 and 1; a request that
+  sets another value is refused. A negative prompt has no effect.
+- **VSA2.** The joint `[video; text]` attention runs on the fused VSA2 kernels of
+  [`fastvideo-kernel/vsa2_train`](https://github.com/hao-ai-lab/FastVideo/tree/main/fastvideo-kernel/vsa2_train)
+  (`VIDEO_SPARSE_ATTN_H3` with its `vsa2` variant): a gradient-free router keeps, per head, the top 10% of video tile
+  pairs plus the diagonal, the text keys stay dense, and a gated pooled branch covers the rest. A partial time tile is
+  placed first, so with 4k+1 latent frames the image-conditioned first frame has a tile row of its own. The attention
+  backend, tile size and tile layout are fixed by the checkpoint, and a different `attention_backend` or
+  `VSA_tile_size` is refused. `VSA_sparsity` may be changed, with a warning.
+
+### Hardware
+
+VSA2 runs on data-center Blackwell GPUs only: B200 and GB200 (sm_100a) and B300 (sm_103a). On any other GPU, loading
+FastPAN2 raises an error naming the GPU. The kernels are not part of the `fastvideo-kernel` wheel: like the Wan2.2
+decoder, they build from the source checkout on first use, in about 20 s, into `VSA2_TRAIN_BUILD_DIR` (default
+`~/.cache/fastvideo/vsa2_train`, one directory per local rank). `FASTVIDEO_VSA2_TRAIN_DIR` points FastVideo at another
+copy of `fastvideo-kernel/vsa2_train`. The 29B DiT is held in bf16 on every GPU; on one GPU the example offloads the
+text encoder to the CPU between requests.
+
+Warm generation time per request on B300 GPUs at 704x1248 (writing the MP4 file adds about 1 s on 8 GPUs):
+
+| Clip | Frames | FastPAN2, 8 GPUs | FastPAN2, 1 GPU | PAN 2, 50 steps CFG 2.5, 8 GPUs |
+|---|---|---|---|---|
+| 5 s | 121 | 2.2 s | 9.4 s | 17.9 s |
+| 10 s | 241 | 3.8 s | 19.5 s | 41.2 s |
+| 20 s | 481 | 7.7 s | 42.4 s | 113.0 s |
+
+### Usage
+
+Prompts are PAN 2's structured JSON captions, as for the teacher. The number of frames is
+`4 * ceil(seconds * 24 / 4) + 1`: 121 for 5 s, 241 for 10 s and 481 for 20 s.
+
+```bash
+python examples/inference/basic/basic_fastpan2.py                       # one GPU, 5 s
+FASTPAN2_NUM_GPUS=8 python examples/inference/basic/basic_fastpan2.py   # sequence parallelism over 8 GPUs
+```
+
+```python
+from fastvideo import VideoGenerator
+
+generator = VideoGenerator.from_pretrained(
+    "IFM/FastPAN2",
+    num_gpus=1,
+    dit_cpu_offload=False,
+    dit_layerwise_offload=False,
+    text_encoder_cpu_offload=True,
+)
+generator.generate_video(
+    prompt,               # PAN 2's structured JSON caption, serialized as one line
+    image_path=None,      # or the path of a first frame for image-to-video
+    height=704,
+    width=1248,
+    num_frames=241,       # 10 s at 24 fps
+    output_path="video_samples_fastpan2",
+)
+```
+
+Do not pass `num_inference_steps`, `guidance_scale` or a negative prompt. The guardrails, the performance switches and
+the parallelism above apply to FastPAN2 as to PAN 2. `examples/serving/openai_fastpan2.yaml` serves it through the
+OpenAI-compatible `/v1/videos` routes; see the [PAN 2 cookbook](../cookbook/pan.md).

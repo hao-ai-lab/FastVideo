@@ -8,6 +8,10 @@ for image-to-video. The defaults are 704×1248, 313 frames (13 s at 24 fps),
 50 steps, guidance 2.5 and PAN 2's default negative prompt. See [PAN 2 Text/Image to Video](../inference/pan2.md)
 for the model, sampler and parallelism details.
 
+`IFM/FastPAN2` is PAN 2's 8-call distilled student: the same pipeline and
+inputs, 8 transformer calls without guidance or a negative prompt, and VSA2
+sparse attention on B200, GB200 and B300 GPUs. See [FastPAN2](#fastpan2) below.
+
 ## Run on a GPU
 
 Follow the [CUDA installation guide](../getting_started/installation/gpu.md), then run
@@ -67,10 +71,49 @@ The cookbook's generated serving clients send a text prompt only. The image
 request above is the supported way to supply a first frame over HTTP, and no
 recorded generation backs it yet.
 
+## FastPAN2
+
+FastPAN2 needs a B200, GB200 or B300 GPU (sm_100a / sm_103a): its VSA2 sparse
+attention kernels build from `fastvideo-kernel/vsa2_train` on first use, so run
+from a source checkout. The example renders a 5 s text-to-video clip at
+704×1248 on one GPU; set `IMAGE_PATH` in the script for image-to-video and
+`FASTPAN2_NUM_GPUS=8` for sequence parallelism. Install the guardrails first, as
+for PAN 2.
+
+```bash
+pip install git+https://github.com/ifm-ai/pan2-guardrail
+python examples/inference/basic/basic_fastpan2.py
+```
+
+The checkpoint fixes the sampler, so leave `num_inference_steps`,
+`guidance_scale` and the negative prompt unset. Frames follow
+`4 * ceil(seconds * 24 / 4) + 1` (121, 241 and 481 for 5, 10 and 20 s). On 8
+B300 GPUs a 5, 10 and 20 s clip takes 2.2, 3.8 and 7.7 s, against 17.9, 41.2 and
+113.0 s for PAN 2 with 50 guided steps; on one B300 it takes 9.4, 19.5 and 42.4 s.
+See [FastPAN2](../inference/pan2.md#fastpan2) for how it samples.
+
+`examples/serving/openai_fastpan2.yaml` serves it on the same `/v1/videos`
+routes, with the alias `fastpan2` and a 5 s default clip:
+
+```bash
+fastvideo serve --config examples/serving/openai_fastpan2.yaml --server.host 127.0.0.1
+curl --fail-with-body http://127.0.0.1:8000/v1/videos \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "fastpan2", "prompt": "A red fox trots through fresh snow in a pine forest at dawn."}'
+```
+
+A first frame in `image_reference` switches the request to image-to-video, as
+for PAN 2.
+
 ## Evidence
 
-Both recipes are **Source-backed**: the model ID, example and serving YAML are
+The PAN 2 recipes are **Source-backed**: the model ID, example and serving YAML are
 checked against each other, and the serving defaults are tested against the
 registered `pan2_t2v` preset. No GPU generation, memory measurement or HTTP
 client run is recorded, so hardware fit and throughput are unknown. Numerical
 parity with the reference implementation is checked by the PAN 2 parity tests.
+
+The FastPAN2 recipes are **Source-backed** as well. Their example and the
+8-GPU sampler were run on B300 GPUs from the Hub checkpoint (the timings above,
+and renders that match the reference implementation's); the HTTP serving path
+has no recorded run.
