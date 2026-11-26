@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from functools import wraps
+from functools import lru_cache, wraps
 
 import torch
 import torch.nn as nn
@@ -15,6 +15,33 @@ from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+
+
+@lru_cache(maxsize=32)
+def _joint_sequence_index(main_local: int, secondary_local: int, main_len: int, secondary_len: int,
+                          device: torch.device) -> torch.Tensor:
+    """Rows of ``[main[:main_len]; secondary[:secondary_len]]`` in the head-scattering all-to-all of per-rank shards.
+
+    Every rank sends its ``[main; secondary]`` shard of ``main_local + secondary_local`` rows, and the all-to-all
+    concatenates the shards in rank order, so main row ``i`` arrives at ``(i // main_local) * chunk + i % main_local``
+    and secondary row ``j`` at ``(j // secondary_local) * chunk + main_local + j % secondary_local``. The rows past
+    ``main_len`` and ``secondary_len`` are sequence-parallel padding and are left out.
+    """
+    chunk = main_local + secondary_local
+    main = torch.arange(main_len, device=device)
+    secondary = torch.arange(secondary_len, device=device)
+    return torch.cat([(main // main_local) * chunk + main % main_local,
+                      (secondary // secondary_local) * chunk + main_local + secondary % secondary_local])
+
+
+def _gather_joint_rows(x: torch.Tensor, joint_index: torch.Tensor) -> torch.Tensor:
+    """``[B, P * chunk, H/P, D]`` all-to-all output -> ``[B, main_len + secondary_len, H/P, D]`` joint rows."""
+    return x.index_select(1, joint_index)
+
+
+def _scatter_joint_rows(x: torch.Tensor, joint_index: torch.Tensor, padded_len: int) -> torch.Tensor:
+    """Inverse of :func:`_gather_joint_rows`; padding rows come back as zeros so they stay finite downstream."""
+    return torch.index_copy(x.new_zeros(x.shape[0], padded_len, *x.shape[2:]), 1, joint_index, x)
 
 
 def _attention_compile_disabled() -> bool:
@@ -117,9 +144,13 @@ class DistributedAttention(nn.Module):
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
         attn_metadata: AttentionMetadata | None = None,
+        secondary_q: torch.Tensor | None = None,
+        secondary_k: torch.Tensor | None = None,
+        secondary_v: torch.Tensor | None = None,
+        secondary_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
-        
+
         Args:
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
@@ -128,14 +159,30 @@ class DistributedAttention(nn.Module):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            
+            secondary_q (Optional[torch.Tensor]): Query shard of a second sequence that is sharded across the
+                sequence-parallel ranks like the main one (padded to the same multiple), typically text tokens. It
+                rides the same all-to-all and joins after the main rows as ``[main; secondary]``; RoPE applies to
+                the main rows only. Exclusive with the replicated tensors.
+            secondary_k (Optional[torch.Tensor]): Secondary key shard
+            secondary_v (Optional[torch.Tensor]): Secondary value shard
+            secondary_seq_len (Optional[int]): Original (unpadded) full length of the secondary sequence
+
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
                 - o (torch.Tensor): Output tensor after attention for the main sequence
-                - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
+                - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, or this rank's shard of
+                  the secondary output, if either is provided
         """
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+        secondary_local = 0
+        if secondary_q is not None:
+            assert secondary_k is not None and secondary_v is not None and secondary_seq_len is not None, (
+                "Secondary Q, K, V and its sequence length go together")
+            secondary_local = secondary_q.shape[1]
+            q = torch.cat([q, secondary_q], dim=1)
+            k = torch.cat([k, secondary_k], dim=1)
+            v = torch.cat([v, secondary_v], dim=1)
         # Stack QKV
         qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
         return self.forward_stacked(
@@ -146,6 +193,8 @@ class DistributedAttention(nn.Module):
             replicated_v=replicated_v,
             freqs_cis=freqs_cis,
             attn_metadata=attn_metadata,
+            secondary_local=secondary_local,
+            secondary_seq_len=secondary_seq_len,
         )
 
     def forward_stacked(
@@ -157,6 +206,8 @@ class DistributedAttention(nn.Module):
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
         attn_metadata: AttentionMetadata | None = None,
+        secondary_local: int = 0,
+        secondary_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Attention over a pre-stacked ``[3*batch, seq_len, num_heads, head_dim]`` QKV buffer.
 
@@ -164,12 +215,20 @@ class DistributedAttention(nn.Module):
         prologue that already wrote the stack (e.g. MiniMax H3's MotionKernel
         prologue) can skip that copy. Sequence-parallel redistribution,
         ``freqs_cis``, replicated tokens and backend pre/post-processing are
-        handled exactly as in :meth:`forward`.
+        handled exactly as in :meth:`forward`. ``secondary_local`` trailing
+        rows of each shard are a secondary sequence (see :meth:`forward`) of
+        full length ``secondary_seq_len``.
         """
-        stacked, _, num_heads, _ = qkv.shape
+        stacked, shard_len, num_heads, _ = qkv.shape
         batch_size = stacked // 3
         local_rank = get_sp_parallel_rank()
         world_size = get_sp_world_size()
+        has_secondary = secondary_local > 0
+        if has_secondary:
+            assert secondary_seq_len is not None, "A secondary sequence needs its original length"
+            assert replicated_q is None, "A secondary sequence and replicated tokens are exclusive"
+            assert original_seq_len is not None, "A secondary sequence needs the main sequence's original length"
+        main_local = shard_len - secondary_local
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = attn_metadata if attn_metadata is not None else forward_context.attn_metadata
@@ -179,13 +238,22 @@ class DistributedAttention(nn.Module):
 
         # After all-to-all, each rank has the full sequence but only a subset of heads.
         # Trim away SP padding for attention compute, then pad back before returning.
-        original_seq_len = original_seq_len or qkv.shape[1]
-        pad_seq_len = qkv.shape[1] - original_seq_len
-        qkv = qkv[:, :original_seq_len, :, :]
+        padded_len = qkv.shape[1]
+        if has_secondary:
+            joint_index = _joint_sequence_index(main_local, secondary_local, original_seq_len, secondary_seq_len,
+                                                qkv.device)
+            qkv = _gather_joint_rows(qkv, joint_index)
+        else:
+            original_seq_len = original_seq_len or qkv.shape[1]
+            qkv = qkv[:, :original_seq_len, :, :]
+        pad_seq_len = padded_len - original_seq_len
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkv[:batch_size * 2, :original_seq_len] = _apply_rotary_emb(qkv[:batch_size * 2, :original_seq_len],
+                                                                        cos,
+                                                                        sin,
+                                                                        is_neox_style=False)
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -213,6 +281,12 @@ class DistributedAttention(nn.Module):
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
+        if has_secondary:
+            # Back to every rank's padded [main; secondary] shard: the secondary output returns sharded.
+            output = _scatter_joint_rows(output, joint_index, padded_len)
+            output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
+            return output[:, :main_local], output[:, main_local:]
+
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 
         output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
@@ -237,6 +311,10 @@ class DistributedAttention_VSA(DistributedAttention):
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
         attn_metadata: AttentionMetadata | None = None,
+        secondary_q: torch.Tensor | None = None,
+        secondary_k: torch.Tensor | None = None,
+        secondary_v: torch.Tensor | None = None,
+        secondary_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -249,14 +327,31 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            
+            secondary_q, secondary_k, secondary_v, secondary_seq_len: a second sequence sharded across the
+                sequence-parallel ranks like the main one, as in :meth:`DistributedAttention.forward`. Its rows have
+                no compression gate.
+
+        Replicated or secondary (text) tokens join the all-to-all'd video tokens as ``[video; text]`` before the
+        backend tiles the packed sequence, so the metadata must describe that whole sequence. Only the H3 backend
+        tiles a packed sequence; the Wan backend tiles the video tokens alone and rejects text tokens.
+        
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
                 - o (torch.Tensor): Output tensor after attention for the main sequence
-                - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
+                - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, or this rank's shard of
+                  the secondary output, if either is provided
         """
-        # Check text tokens are not supported for VSA now
-        assert replicated_q is None and replicated_k is None and replicated_v is None, "Replicated QKV is not supported for VSA now"
+        has_replicated = replicated_q is not None
+        has_secondary = secondary_q is not None
+        if has_replicated:
+            assert replicated_k is not None and replicated_v is not None, "Replicated Q, K and V go together"
+        if has_secondary:
+            assert secondary_k is not None and secondary_v is not None and secondary_seq_len is not None, (
+                "Secondary Q, K, V and its sequence length go together")
+            assert not has_replicated, "A secondary sequence and replicated tokens are exclusive"
+        if has_replicated or has_secondary:
+            assert self.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3, (
+                "Text tokens need a VSA backend that tiles a packed sequence (VIDEO_SPARSE_ATTN_H3)")
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
@@ -271,9 +366,22 @@ class DistributedAttention_VSA(DistributedAttention):
             q, k, v = q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)
             if gate_compress is not None:
                 gate_compress = gate_compress.to(torch.bfloat16)
+            if has_replicated:
+                replicated_q, replicated_k, replicated_v = (replicated_q.to(torch.bfloat16),
+                                                            replicated_k.to(torch.bfloat16),
+                                                            replicated_v.to(torch.bfloat16))
+            if has_secondary:
+                secondary_q, secondary_k, secondary_v = (secondary_q.to(torch.bfloat16), secondary_k.to(torch.bfloat16),
+                                                         secondary_v.to(torch.bfloat16))
         # Stack QKV (a caller with a structurally-zero gate passes None and
         # skips the gate's share of the all-to-all/tile traffic)
         stack = [q, k, v] if gate_compress is None else [q, k, v, gate_compress]
+        if has_secondary:
+            # The secondary rows ride the same all-to-all; a text row has no compression gate (its tile is dense).
+            secondary = [secondary_q, secondary_k, secondary_v]
+            if gate_compress is not None:
+                secondary.append(torch.zeros_like(secondary_v))
+            stack = [torch.cat([main, extra], dim=1) for main, extra in zip(stack, secondary, strict=True)]
         qkvg = torch.cat(stack, dim=0)  # [3or4*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
@@ -282,12 +390,32 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg, scatter_dim=2, gather_dim=1)
 
         # After all-to-all, each rank has the full sequence but only a subset of heads
-        pad_seq_len = qkvg.shape[1] - original_seq_len
-        qkvg = qkvg[:, :original_seq_len, :, :]
+        padded_len = qkvg.shape[1]
+        pad_seq_len = padded_len - original_seq_len
+        if has_secondary:
+            joint_index = _joint_sequence_index(seq_len, stack[0].shape[1] - seq_len, original_seq_len,
+                                                secondary_seq_len, qkvg.device)
+            qkvg = _gather_joint_rows(qkvg, joint_index)
+        else:
+            qkvg = qkvg[:, :original_seq_len, :, :]
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkvg[:batch_size * 2, :original_seq_len] = _apply_rotary_emb(qkvg[:batch_size * 2, :original_seq_len],
+                                                                         cos,
+                                                                         sin,
+                                                                         is_neox_style=False)
+
+        if has_replicated:
+            # Every rank holds the replicated rows for its head shard only. The rows join after the video's RoPE, which
+            # does not apply to them, and a replicated row has no compression gate (its tile is dense).
+            heads_per_rank = num_heads // get_sp_world_size()
+            local_rank = get_sp_parallel_rank()
+            replicated = torch.cat([replicated_q, replicated_k, replicated_v], dim=0)
+            if gate_compress is not None:
+                replicated = torch.cat([replicated, torch.zeros_like(replicated_v)], dim=0)
+            replicated = replicated[:, :, local_rank * heads_per_rank:(local_rank + 1) * heads_per_rank]
+            qkvg = torch.cat([qkvg, replicated], dim=1)
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
@@ -297,11 +425,20 @@ class DistributedAttention_VSA(DistributedAttention):
             q, k, v, gate_compress = qkvg.chunk(4, dim=0)
         output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 
-        # Redistribute back if using sequence parallelism
-        replicated_output = None
-
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
+
+        if has_secondary:
+            # Back to every rank's padded [main; secondary] shard: the secondary output returns sharded.
+            output = _scatter_joint_rows(output, joint_index, padded_len)
+            output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
+            return output[:, :seq_len], output[:, seq_len:]
+
+        # The replicated rows trail the sequence-parallel video rows; their heads gather back across ranks.
+        replicated_output = None
+        if has_replicated:
+            replicated_output = sequence_model_parallel_all_gather(output[:, original_seq_len:].contiguous(), dim=2)
+            output = output[:, :original_seq_len]
 
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 

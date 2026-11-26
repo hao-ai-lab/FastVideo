@@ -323,6 +323,9 @@ surfaces:
       dit_fused_kernels:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      vsa_heads_first_tile:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       enable_guardrails:
         sources:
           - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
@@ -513,13 +516,17 @@ surfaces:
       coords_style: "MagiHuman internal data-proxy coordinate convention."
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
-      pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      pdd_step_indices: "MiniMax-H3 and PAN2 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
       pika_denoising_steps: "Pika H3 Flex six-forward re-noise ladder fixed by the adapter contract; check_pipeline_config rejects any other value."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
       vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
+      vsa_tile_policy: "PAN2 PDD student's trained VSA tile placement per (t, h, w) axis; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      vsa_compress_text_keys: "PAN2 PDD student's trained VSA compression-key choice; resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      vsa_variant: "PAN2 PDD student's trained sparse-attention algorithm (vsa or vsa2); resolve_checkpoint_settings sets it from fastvideo_inference.json."
+      vsa_dense_layers: "PAN2 PDD student's trained dense VSA blocks; resolve_checkpoint_settings sets it from fastvideo_inference.json."
       video_scheduler_shift: "MiniMax-H3 training-time video noise clock; inference samples with the checkpoint's scheduler config."
       audio_scheduler_shift: "MiniMax-H3 training-time audio noise clock; inference samples with the checkpoint's scheduler config."
       z_dim: "MagiHuman internal VAE latent channel setting."

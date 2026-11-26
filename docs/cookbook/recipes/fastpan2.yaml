@@ -1,0 +1,39 @@
+title: FastPAN2
+summary: >-
+  Text-to-video and first-frame image-to-video in 8 transformer calls from FastPAN2, the distilled student of the
+  29B PAN 2, with VSA2 sparse attention on B200 / GB200 / B300 GPUs.
+guide: docs/inference/pan2.md
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    defaults: examples/serving/openai_fastpan2.yaml
+    requirements:
+      # From docs/inference/pan2.md (FastPAN2) and the serving baseline's comments.
+      - >-
+        VSA2 sparse attention runs on data-center Blackwell GPUs only (B200, GB200, B300; sm_100a / sm_103a).
+        Its kernels build from fastvideo-kernel/vsa2_train on first use, so run from a source checkout.
+      - >-
+        The checkpoint fixes the sampler: 8 transformer calls and no classifier-free guidance or negative prompt.
+        Requests that set another num_inference_steps or guidance_scale are refused.
+      - >-
+        Requests without a reference run text-to-video. Add image_reference or input_reference
+        to condition on a first frame; the same server and pipeline handle both.
+      - >-
+        To use more than one GPU, set sp_size equal to num_gpus (Ulysses sequence parallelism).
+        It must divide the 32 attention heads, and each rank still holds the full DiT weights.
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.*
+      - "!generator.engine.parallelism.hsdp_*"
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - default_request.sampling.num_frames
+    overrides:
+      default_request.sampling.num_frames:
+        default: 121
+        minimum: 121
+        maximum: 481
+        description: 4 * ceil(seconds * 24 / 4) + 1 for 5-20 s at 24 fps (121, 241, 481 for 5, 10, 20 s).

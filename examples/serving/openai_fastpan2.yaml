@@ -1,0 +1,40 @@
+# OpenAI-compatible server for FastPAN2, the 8-call distilled student of PAN 2: text-to-video and first-frame
+# image-to-video.
+#   fastvideo serve --config examples/serving/openai_fastpan2.yaml
+# Omit image_reference for text-to-video; send it (or input_reference) for image-to-video.
+# The checkpoint's fastvideo_inference.json fixes the sampler (8 transformer calls, no classifier-free guidance, no
+# negative prompt) and its VSA2 sparse attention, which runs on B200 / GB200 / B300 GPUs only.
+generator:
+  model_path: IFM/FastPAN2
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      vae: false
+      text_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: t2v
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_fastpan2
+  served_model_name: fastpan2
+
+default_request:
+  sampling:
+    height: 704
+    width: 1248
+    # 5 s at 24 fps; frames = 4 * ceil(seconds * 24 / 4) + 1, 5-20 s (121-481 frames).
+    num_frames: 121
+    fps: 24
+    num_inference_steps: 8  # the eight fused PDD blocks of fastvideo_inference.json; another value is refused
+    guidance_scale: 1.0  # the teacher's guidance is distilled in; another value is refused
+  output:
+    return_frames: false

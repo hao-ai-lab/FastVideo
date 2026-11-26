@@ -16,6 +16,7 @@ from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.parser import parse_config
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.schema import GenerationRequest, ServeConfig
+from fastvideo.configs.pipelines.pan2 import PAN2PipelineConfig
 from fastvideo.entrypoints.openai.media_policy import MediaPolicy
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
@@ -39,6 +40,7 @@ BASELINES = {
     "openai_kandinsky6_ti2va_distilled.yaml": "t2v",
     "openai_ltx2_distilled.yaml": "t2v",
     "openai_pan2.yaml": "t2v",
+    "openai_fastpan2.yaml": "t2v",
     "openai_flux1_dev.yaml": "t2i",
     "openai_flux2_dev.yaml": "t2i",
     "openai_flux2_klein.yaml": "t2i",
@@ -139,6 +141,27 @@ def test_pan2_serving_matches_its_preset_and_runs_image_to_video_from_a_referenc
         assert adapted.sampling.num_frames == 313
         assert adapted.inputs.image_path == (str(image) if reference else None)
         assert adapted.output.output_path.endswith(".mp4")
+
+
+def test_fastpan2_serving_samples_the_students_eight_calls_without_guidance(tmp_path: Path) -> None:
+    config = _load("openai_fastpan2.yaml")
+    assert config.generator.model_path == "IFM/FastPAN2"
+    assert config.generator.engine.offload.dit is False
+    request = VideoGenerationRequest(prompt="a red fox")
+    adapted = build_generation_request(
+        "fastpan2_request",
+        request,
+        _args(config, "t2v"),
+        served_model_name=config.server.served_model_name or "",
+        output_dir=str(tmp_path),
+        default_request=config.default_request,
+    )
+    assert (adapted.sampling.height, adapted.sampling.width, adapted.sampling.num_frames) == (704, 1248, 121)
+    # The student's contract (eight fused blocks, no guidance) accepts the served defaults unchanged.
+    student = PAN2PipelineConfig(pdd_step_indices=(0, 4, 8, 12, 16, 20, 24, 28, 32))
+    preset = SamplingParam(num_inference_steps=50, guidance_scale=2.5)  # the PAN 2 preset the family resolves to
+    sampled = student.apply_request_constraints(adapted, preset)
+    assert (sampled.num_inference_steps, sampled.guidance_scale) == (8, 1.0)
 
 
 def test_stable_audio_seconds_override_produces_wav(tmp_path: Path) -> None:

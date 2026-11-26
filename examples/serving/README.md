@@ -91,6 +91,7 @@ uncovered registry families.
 | `openai_kandinsky6_ti2va.yaml` | Kandinsky 6 Pro TI2VA | text/image-to-video with audio | 1 |
 | `openai_kandinsky6_ti2va_distilled.yaml` | Kandinsky 6 Pro-distill TI2VA | text/image-to-video with audio | 1 |
 | `openai_pan2.yaml` | PAN 2 | text/image-to-video | 1 |
+| `openai_fastpan2.yaml` | FastPAN2 (8 calls, VSA2; B200 / GB200 / B300) | text/image-to-video | 1 |
 | `openai_ltx2_distilled.yaml` | LTX2 Distilled | text-to-video with audio | 4 |
 | `openai_flux1_dev.yaml` | FLUX.1-dev | text-to-image | 1 |
 | `openai_flux2_dev.yaml` | FLUX.2-dev | text-to-image | 1 |

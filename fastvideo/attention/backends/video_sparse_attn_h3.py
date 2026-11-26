@@ -51,10 +51,19 @@ postprocessing restores their shape with zero output rows.
 Inference at tile 128 prefers the native forward; when the extension or device
 cannot run it, each 128-token tile splits into two contiguous 64-token halves
 on the Triton kernels, and the call fails closed if those are missing too.
+
+The ``vsa2`` variant (``MiniMaxH3VSAMetadataBuilder.build(variant="vsa2")``) runs VSA2 instead, on the fused
+kernels of ``fastvideo-kernel/vsa2_train`` (router, coarse and fine branches and the gated merge in one call). It
+serves PAN2's joint ``[video; text]`` attention for the FastPAN2 student, needs sm_100a / sm_103a (B200 / GB200,
+B300) and raises on any other GPU; the extension builds on first use.
 """
 
 import functools
+import importlib.util
+import itertools
 import math
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -253,11 +262,66 @@ def _validate_h3_segment_geometry(
                          f"pad-slot hit={maps_into_pad} (segments={segments}).")
 
 
+# Where a grid axis that is not a multiple of its tile puts the shortfall: ``last`` (one short tile at the end, the
+# upstream VSA layout and the default), ``first`` (one short tile at the start, e.g. a lone image-conditioned latent
+# frame) or ``center`` (the deficit spread one row at a time over the middle tiles, so no tile is much shorter than
+# the rest). The partition is metadata only: every tile is still padded to the tile volume for the kernels.
+VSA_H3_AXIS_POLICIES = ("last", "first", "center")
+_DEFAULT_AXIS_POLICY = ("last", "last", "last")
+
+
+def _axis_tile_sizes(length: int, tile: int, policy: str) -> tuple[int, ...]:
+    """Token counts of the ``ceil(length / tile)`` tiles along one axis under ``policy``."""
+    num_tiles = math.ceil(length / tile)
+    deficit = num_tiles * tile - length
+    sizes = [tile] * num_tiles
+    if deficit == 0:
+        return tuple(sizes)
+    if policy == "last":
+        sizes[-1] = tile - deficit
+    elif policy == "first":
+        sizes[0] = tile - deficit
+    elif policy == "center":
+        base, extra = divmod(deficit, num_tiles)
+        start = (num_tiles - extra) // 2
+        sizes = [tile - base - int(start <= index < start + extra) for index in range(num_tiles)]
+    else:
+        raise ValueError(f"VSA-H3 axis policy must be one of {VSA_H3_AXIS_POLICIES}, got {policy!r}")
+    return tuple(sizes)
+
+
+def _policy_tile_partition(
+    grid: tuple[int, int, int],
+    tile_shape: tuple[int, int, int],
+    axis_policy: tuple[str, str, str],
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Raster-to-tile permutation and per-tile token counts of one video region under per-axis policies.
+
+    Tiles are enumerated t-major with w fastest and each tile's rows stay in raster order, as
+    ``get_tile_partition_indices`` and ``construct_variable_block_sizes`` lay out the ``last`` policy.
+    """
+    sizes = [
+        _axis_tile_sizes(length, tile, policy)
+        for length, tile, policy in zip(grid, tile_shape, axis_policy, strict=True)
+    ]
+    bounds = [[0, *itertools.accumulate(axis_sizes)] for axis_sizes in sizes]
+    raster = torch.arange(math.prod(grid), device=device, dtype=torch.long).reshape(grid)
+    parts = [
+        raster[t0:t1, h0:h1, w0:w1].flatten() for t0, t1 in itertools.pairwise(bounds[0])
+        for h0, h1 in itertools.pairwise(bounds[1]) for w0, w1 in itertools.pairwise(bounds[2])
+    ]
+    t_sizes, h_sizes, w_sizes = (torch.tensor(axis_sizes, dtype=torch.long, device=device) for axis_sizes in sizes)
+    block_sizes = (t_sizes[:, None, None] * h_sizes[None, :, None] * w_sizes[None, None, :]).reshape(-1)
+    return torch.cat(parts), block_sizes
+
+
 @functools.lru_cache(maxsize=10)
 def _h3_segment_tile_geometry(
     segments: tuple[int | tuple[int, int, int], ...],
     device: torch.device,
     tile_shape: tuple[int, int, int] = VSA_H3_TILE_SIZE,
+    axis_policy: tuple[str, str, str] = _DEFAULT_AXIS_POLICY,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int, tuple[tuple[int, int], ...]]:
     """Tile a packed sequence of interleaved dense segments and video regions.
 
@@ -266,7 +330,8 @@ def _h3_segment_tile_geometry(
     every dense chunk lands in the leading prefix tiles and each video region
     contributes one contiguous run of 3-D tiles, wherever the dense segments
     sit in the packed sequence. Dense chunks never straddle a segment
-    boundary.
+    boundary. ``axis_policy`` places each video axis's partial tile
+    (``VSA_H3_AXIS_POLICIES``); the default is the upstream layout.
 
     Returns (tile_partition_indices, variable_block_sizes,
     untile_combined_index, num_prefix_tiles, num_video_tiles,
@@ -299,9 +364,13 @@ def _h3_segment_tile_geometry(
     tile_cursor = num_prefix_tiles
     for start, grid in video_entries:
         t, h, w = grid
-        num_tiles = (math.ceil(t / ts_t), math.ceil(h / ts_h), math.ceil(w / ts_w))
-        region_sizes = construct_variable_block_sizes(grid, num_tiles, device, tile_shape)
-        video_index_parts.append(get_tile_partition_indices(grid, tile_shape, device) + start)
+        if axis_policy == _DEFAULT_AXIS_POLICY:
+            num_tiles = (math.ceil(t / ts_t), math.ceil(h / ts_h), math.ceil(w / ts_w))
+            region_sizes = construct_variable_block_sizes(grid, num_tiles, device, tile_shape)
+            region_index = get_tile_partition_indices(grid, tile_shape, device)
+        else:
+            region_index, region_sizes = _policy_tile_partition(grid, tile_shape, axis_policy, device)
+        video_index_parts.append(region_index + start)
         video_size_parts.append(region_sizes)
         video_tile_spans.append((tile_cursor, tile_cursor + int(region_sizes.numel())))
         tile_cursor += int(region_sizes.numel())
@@ -320,6 +389,147 @@ def _h3_segment_tile_geometry(
     _validate_h3_segment_geometry(segments, variable_block_sizes, untile_combined_index, tile_elems)
     return (tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles,
             tuple(video_tile_spans))
+
+
+# The sparse-attention algorithms this backend runs. ``vsa`` is VSA-H3 as described above. ``vsa2`` is VSA2 (Zhang et
+# al., "Improving Video Sparse Attention with Fine-grained Router and Sparse Rebasing", ICML 2026) on the fused
+# training kernels of fastvideo-kernel/vsa2_train (sm_100a / sm_103a): a gradient-free router over 2 x 2 x 2 windows
+# that keeps, per head, the N_v * topk video tile pairs it scores highest plus every diagonal pair; a coarse branch
+# over every block's pooled rows, the dense prefix included; the fine branch; and the gated merge, in one call. Its
+# kernels fix their own layout (``_vsa2_segment_geometry``): uniform 4 x 4 x 8 tiles padded at the end of each axis.
+VSA_H3_VARIANTS = ("vsa", "vsa2")
+_VSA2_TILE_SHAPE = VSA_H3_TILE_SHAPES[128]
+
+
+def _vsa2_row_valid(num_prefix_tiles: int, dense_rows: int, extent: tuple[int, int, int],
+                    device: torch.device) -> torch.Tensor:
+    """[(P + N_v) * 128] bool: the rows of VSA2's layout that hold a token, as its kernels derive them from the
+    geometry alone (vsa2_train/reference.py, ``row_valid``)."""
+    rows = math.prod(_VSA2_TILE_SHAPE)
+    bt, bh, bw = _VSA2_TILE_SHAPE
+    nt, nh, nw = (math.ceil(n / b) for n, b in zip(extent, _VSA2_TILE_SHAPE, strict=True))
+    tile = torch.arange(nt * nh * nw, device=device)
+    slot = torch.arange(rows, device=device)
+    origin = torch.stack([tile // (nh * nw) * bt, tile // nw % nh * bh, tile % nw * bw], -1)
+    local = torch.stack([slot // (bh * bw), slot // bw % bh, slot % bw], -1)
+    video = ((origin[:, None, :] + local[None, :, :]) < torch.tensor(extent, device=device)).all(-1).reshape(-1)
+    return torch.cat([torch.arange(num_prefix_tiles * rows, device=device) < dense_rows, video])
+
+
+@functools.lru_cache(maxsize=10)
+def _vsa2_segment_geometry(
+    segments: tuple[int | tuple[int, int, int], ...],
+    device: torch.device,
+    reverse_time: bool,
+) -> tuple[torch.Tensor, torch.Tensor, int, int]:
+    """VSA2's layout of a packed sequence of dense segments and one video region (vsa2_train/reference.py).
+
+    The dense segments' rows come first, in packed order, as one run cut into 128-row blocks, the last one padded at
+    its end; then the video's 4 x 4 x 8 tiles in raster order of the tile grid, every token at its own slot of its
+    tile (raster order of the tile), and the latent padded up to whole tiles at the end of each axis. Unlike VSA-H3's
+    layouts, a partial tile keeps its padding where the latent's edge cuts it instead of packing its tokens first.
+    ``reverse_time`` enumerates the frames last to first, so that the short tile along time holds the first frames
+    (VSA-H3's ``first`` policy, which keeps an image-conditioned first latent frame in a tile of its own) while the
+    kernels pad the end of the axis: attention does not depend on the order of the tiles or of a tile's rows, only on
+    the partition into tiles and router windows.
+
+    Returns (variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles): each block's token
+    count, and the row of the tiled sequence of each packed row.
+    """
+    rows = math.prod(_VSA2_TILE_SHAPE)
+    videos = [segment for segment in segments if isinstance(segment, tuple)]
+    if len(videos) != 1:
+        raise ValueError(f"VSA2 tiles exactly one video region, got {len(videos)}.")
+    extent = videos[0]
+    t, h, w = extent
+    bt, bh, bw = _VSA2_TILE_SHAPE
+    nt, nh, nw = (math.ceil(n / b) for n, b in zip(extent, _VSA2_TILE_SHAPE, strict=True))
+    dense_rows = sum(segment for segment in segments if not isinstance(segment, tuple))
+    num_prefix_tiles = math.ceil(dense_rows / rows)
+    num_video_tiles = nt * nh * nw
+
+    ti = torch.arange(t, device=device, dtype=torch.long)
+    if reverse_time:
+        ti = t - 1 - ti
+    hi = torch.arange(h, device=device, dtype=torch.long)
+    wi = torch.arange(w, device=device, dtype=torch.long)
+    tile = ((ti // bt)[:, None, None] * nh + (hi // bh)[None, :, None]) * nw + (wi // bw)[None, None, :]
+    slot = ((ti % bt)[:, None, None] * bh + (hi % bh)[None, :, None]) * bw + (wi % bw)[None, None, :]
+    video_rows = ((num_prefix_tiles + tile) * rows + slot).reshape(-1)
+    parts: list[torch.Tensor] = []
+    dense_cursor = 0
+    for segment in segments:
+        if isinstance(segment, tuple):
+            parts.append(video_rows)
+        else:
+            parts.append(torch.arange(dense_cursor, dense_cursor + segment, device=device, dtype=torch.long))
+            dense_cursor += segment
+    untile_combined_index = torch.cat(parts)
+
+    full, rem = divmod(dense_rows, rows)
+    prefix_sizes = torch.tensor([rows] * full + ([rem] if rem else []), dtype=torch.long, device=device)
+    ct, ch, cw = (torch.tensor([min(b, n - b * i) for i in range(math.ceil(n / b))], dtype=torch.long, device=device)
+                  for n, b in zip(extent, _VSA2_TILE_SHAPE, strict=True))
+    video_sizes = (ct[:, None, None] * ch[None, :, None] * cw[None, None, :]).reshape(-1)
+    variable_block_sizes = torch.cat([prefix_sizes, video_sizes])
+
+    # One-time (lru-cached) synchronous check: the packed rows land one to one on the rows the kernels take as tokens.
+    valid = _vsa2_row_valid(num_prefix_tiles, dense_rows, extent, device)
+    hit = torch.zeros_like(valid)
+    hit[untile_combined_index] = True
+    if (untile_combined_index.numel() != dense_rows + t * h * w or not torch.equal(hit, valid)
+            or int(valid.sum()) != untile_combined_index.numel()):
+        raise ValueError(f"VSA2 geometry for {segments} does not map the packed rows one to one onto its token rows.")
+    return variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles
+
+
+# The GPUs the fused VSA2 kernels are built for: data-center Blackwell (B200 / GB200 at sm_100a, B300 at sm_103a). They
+# use tcgen05 tensor memory, TMA and cluster launch control, so a build for any other architecture cannot run them.
+_VSA2_CAPABILITIES = ((10, 0), (10, 3))
+
+
+def require_vsa2_device(device_index: int | None = None) -> None:
+    """Raise a clear error unless the CUDA device (default: the current one) can run the VSA2 kernels."""
+    if not torch.cuda.is_available():
+        raise RuntimeError("VSA2 sparse attention (vsa_variant='vsa2', e.g. FastPAN2) needs a CUDA sm_100a / sm_103a "
+                           "GPU (B200, GB200, B300); no CUDA device is available.")
+    _require_vsa2_device(torch.cuda.current_device() if device_index is None else device_index)
+
+
+@functools.cache
+def _require_vsa2_device(device_index: int) -> None:
+    """Raise a clear error when the CUDA device cannot run the VSA2 kernels, instead of letting them build and trap."""
+    capability = torch.cuda.get_device_capability(device_index)
+    if capability not in _VSA2_CAPABILITIES:
+        name = torch.cuda.get_device_name(device_index)
+        raise RuntimeError(f"VSA2 sparse attention (vsa_variant='vsa2', e.g. FastPAN2) runs only on sm_100a / sm_103a "
+                           f"GPUs (B200, GB200, B300); {name} is sm_{capability[0]}{capability[1]}.")
+
+
+@functools.cache
+def _vsa2_attention() -> Any:
+    """``vsa2_attention`` of fastvideo-kernel/vsa2_train (``FASTVIDEO_VSA2_TRAIN_DIR``, by default this checkout's),
+    whose extension builds on first use (see its ``_module``). The module registers its custom ops on import, so it is
+    loaded once per process, as ``vsa2_train``, which is also how its own tests import it."""
+    module = sys.modules.get("vsa2_train")
+    if module is None:
+        root = envs.FASTVIDEO_VSA2_TRAIN_DIR.get() or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            "fastvideo-kernel", "vsa2_train")
+        path = os.path.join(root, "vsa2_train.py")
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                f"VSA2 needs fastvideo-kernel/vsa2_train; {path} does not exist (FASTVIDEO_VSA2_TRAIN_DIR).")
+        spec = importlib.util.spec_from_file_location("vsa2_train", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["vsa2_train"] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules["vsa2_train"]
+            raise
+    return module.vsa2_attention
 
 
 class MiniMaxH3VSABackend(AttentionBackend):
@@ -389,6 +599,22 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     # populated the allocation so a same-shaped geometry change can clear
     # stale pad rows once while steady-state denoising reuses the buffer.
     tile_buf_holder: _MiniMaxH3VSATileBufferHolder | None = None
+    # Whether the pooled compression branch also attends to the dense prefix
+    # tiles. False keeps the prefix (PAN2's text, which the fine branch
+    # already attends exactly) out of the compression keys; the prefix rows'
+    # own compression output is unaffected because their gate is zero.
+    compress_prefix_keys: bool = True
+    # The sparse-attention algorithm (``VSA_H3_VARIANTS``). For ``vsa2`` the
+    # rows are VSA2's layout and ``vsa2_thw`` / ``vsa2_text`` are the video's
+    # extent in tokens and the dense rows its kernels take.
+    variant: str = "vsa"
+    vsa2_thw: tuple[int, int, int] = (0, 0, 0)
+    vsa2_text: int = 0
+    vsa2_topk: int = 0
+    # Scatter rows straight into the heads-first layout the 64/128-token kernels read, as
+    # ``FASTVIDEO_H3_VSA_HEADS_FIRST_TILE`` does process-wide: bit-identical, no-grad uncompiled CUDA only. A pipeline
+    # turns it on for its own sampling (PAN2: ``PAN2PipelineConfig.vsa_heads_first_tile``).
+    heads_first_tile: bool = False
 
     def __post_init__(self) -> None:
         if type(self.pad_tokens) is not int or self.pad_tokens < 0:
@@ -422,6 +648,10 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         tile_size: int = _TILE_ELEMS,
         ref_keep_rate: float | None = None,
         pad_tokens: int = 0,
+        video_tile_policy: tuple[str, str, str] | None = None,
+        compress_prefix_keys: bool = True,
+        variant: str = "vsa",
+        heads_first_tile: bool = False,
         **kwargs: dict[str, Any],
     ) -> MiniMaxH3VSAMetadata:
         """Build per-step metadata for one packed H3 sequence.
@@ -433,9 +663,34 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         a reference video and keeps ``ref_keep_rate`` of its tiles, which a
         build with reference-video regions requires. ``exempt=False``
         (compete mode) supports only the generated-video region.
+        ``video_tile_policy`` places each video axis's partial tile (one of
+        ``VSA_H3_AXIS_POLICIES`` per ``(t, h, w)`` axis; default ``last``).
+        ``compress_prefix_keys`` is described on :class:`MiniMaxH3VSAMetadata`. ``variant`` picks the algorithm
+        (``VSA_H3_VARIANTS``): ``vsa2`` needs 128-token tiles, one video
+        region, exempt prefix keys that also enter the compression branch, and
+        a ``video_tile_policy`` of ``last`` or ``first`` along time and
+        ``last`` along height and width, which its kernels' layout can hold.
         """
         if type(pad_tokens) is not int or pad_tokens < 0:
             raise ValueError("VSA-H3 pad_tokens must be a non-negative integer")
+        axis_policy = _DEFAULT_AXIS_POLICY if video_tile_policy is None else tuple(str(p) for p in video_tile_policy)
+        if len(axis_policy) != 3 or any(policy not in VSA_H3_AXIS_POLICIES for policy in axis_policy):
+            raise ValueError(f"VSA-H3 video_tile_policy must give one of {VSA_H3_AXIS_POLICIES} per (t, h, w) axis, "
+                             f"got {video_tile_policy!r}")
+        if variant not in VSA_H3_VARIANTS:
+            raise ValueError(f"VSA-H3 variant must be one of {VSA_H3_VARIANTS}, got {variant!r}")
+        if variant == "vsa2":
+            if int(tile_size) != 128:
+                raise ValueError(f"VSA2 runs 128-token (4, 4, 8) tiles; got tile_size={tile_size!r}")
+            if axis_policy[0] not in ("last", "first") or axis_policy[1:] != ("last", "last"):
+                raise ValueError("VSA2's kernels pad the end of each axis: video_tile_policy must be last or first "
+                                 f"along time and last along height and width, got {axis_policy}")
+            if ref_keep_rate is not None or not exempt:
+                raise ValueError("VSA2 has one video region and exempt prefix keys: ref_keep_rate and compete mode "
+                                 "are VSA-H3 only")
+            if not compress_prefix_keys:
+                raise ValueError("VSA2's compression branch pools every block, the dense prefix included; "
+                                 "compress_prefix_keys=False is VSA-H3 only")
         if ref_keep_rate is not None and not 0.0 < float(ref_keep_rate) <= 1.0:
             raise ValueError("VSA-H3 ref_keep_rate must be in (0, 1]")
         tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
@@ -466,8 +721,23 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             reference_sparsities = (1.0 - float(ref_keep_rate), ) * (num_regions - 1)
         total_seq_length = sum(math.prod(s) if isinstance(s, tuple) else s for s in token_segments)
 
-        (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles,
-         video_tile_spans) = _h3_segment_tile_geometry(tuple(token_segments), device, tile_shape)
+        vsa2_thw, vsa2_text, vsa2_topk = (0, 0, 0), 0, 0
+        video_tile_spans: tuple[tuple[int, int], ...]
+        if variant == "vsa2":
+            variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles = _vsa2_segment_geometry(
+                tuple(token_segments), device, axis_policy[0] == "first")
+            video_tile_spans = ((num_prefix_tiles, num_prefix_tiles + num_video_tiles), )
+            vsa2_thw = next(segment for segment in token_segments if isinstance(segment, tuple))
+            vsa2_text = sum(segment for segment in token_segments if not isinstance(segment, tuple))
+            # The video tiles each query tile keeps on average; a dense build keeps them all.
+            vsa2_topk = compute_topk(max(float(VSA_sparsity), 0.0), num_video_tiles)
+            if device.type == "cuda":
+                _require_vsa2_device(device.index if device.index is not None else torch.cuda.current_device())
+            # Register the kernels' custom ops before anything traces a forward (the extension builds on first call).
+            _vsa2_attention()
+        else:
+            (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles,
+             video_tile_spans) = _h3_segment_tile_geometry(tuple(token_segments), device, tile_shape, axis_policy)
 
         # A dense build (sparsity 0: dense steps) keeps every region dense,
         # whatever the reference keep rate.
@@ -493,6 +763,12 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             tile_elems=int(tile_size),
             dense_layers=dense_layers,
             tile_buf_holder=self._tile_buf_holder,
+            compress_prefix_keys=bool(compress_prefix_keys),
+            variant=variant,
+            vsa2_thw=vsa2_thw,
+            vsa2_text=vsa2_text,
+            vsa2_topk=vsa2_topk,
+            heads_first_tile=bool(heads_first_tile),
         )
 
 
@@ -567,6 +843,19 @@ def _pool_tiles(x: torch.Tensor, variable_block_sizes: torch.Tensor, tile_elems:
     pooled = x.view(batch, n_tiles, tile_elems, heads, dim).sum(dim=2, dtype=torch.float32)
     pooled = pooled / variable_block_sizes.view(1, -1, 1, 1)
     return pooled.permute(0, 2, 1, 3)
+
+
+def _compression_scores(scores: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
+    """The pooled scores the compression branch softmaxes: without the prefix columns unless the metadata keeps them.
+
+    Excluding them keeps rows that the fine branch already attends exactly (the dense prefix) from being counted a
+    second time through their pooled means. Selection always uses the unmodified ``scores``.
+    """
+    num_prefix_tiles = attn_metadata.num_prefix_tiles
+    if attn_metadata.compress_prefix_keys or num_prefix_tiles == 0:
+        return scores
+    prefix_columns = torch.arange(scores.shape[-1], device=scores.device) < num_prefix_tiles
+    return scores.masked_fill(prefix_columns, float("-inf"))
 
 
 def _build_block_mask(
@@ -804,9 +1093,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             ptx_blackwell_requested = grad_mode and envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
         else:
             ptx_blackwell_requested = envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
-        # Tile 128 has no route other than the ptx_blackwell CUDA kernel.
-        ptx_blackwell_route = attn_metadata.tile_elems == 128 or (attn_metadata.tile_elems == 64
-                                                                  and ptx_blackwell_requested)
+        # Tile 128 has no route other than the ptx_blackwell CUDA kernel. VSA2's kernels take any tile count, so
+        # they need no partner tile.
+        ptx_blackwell_route = attn_metadata.variant == "vsa" and (attn_metadata.tile_elems == 128 or
+                                                                  (attn_metadata.tile_elems == 64
+                                                                   and ptx_blackwell_requested))
         if regional_compiling:
             # Pad arithmetically so odd and even tile counts share one graph.
             needs_ptx_blackwell_pair, kernel_tiles = False, n_tiles + n_tiles % 2
@@ -835,7 +1126,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         if holder is None:
             raise RuntimeError("VSA-H3 metadata has no builder-owned tile buffer holder")
         if (not compiling and attn_metadata.tile_elems in _PTX_BLACKWELL_TILE_ELEMS
-                and envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get()
+                and (getattr(attn_metadata, "heads_first_tile", False) or envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get())
                 and supports_heads_first_scatter(x, attn_metadata.untile_combined_index)):
             return self._tile_heads_first(x, attn_metadata, holder, kernel_tiles, needs_ptx_blackwell_pair)
         buffer_matches = (holder.buffer is not None and holder.buffer.shape == target_shape
@@ -880,6 +1171,45 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         real_output = output[:, attn_metadata.untile_combined_index]
         return torch.nn.functional.pad(real_output, (0, 0, 0, 0, 0, attn_metadata.pad_tokens))
 
+    def _forward_vsa2(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        gate_compress: torch.Tensor | None,
+        attn_metadata: MiniMaxH3VSAMetadata,
+    ) -> torch.Tensor:
+        """VSA2 on the fused vsa2_train kernels: the router, both branches and the gated merge in one call.
+
+        The rows are VSA2's layout (``_vsa2_segment_geometry``), whose padding rows ``tile()`` leaves zero. The
+        kernels read heads first, so query, key, value and gate go to ``[B, H, S, D]`` bf16 (no copy when ``tile()``
+        wrote them heads first). A layer in ``dense_layers``, or a dense build, keeps every video tile pair; without
+        a gate the compression branch is computed and multiplied by zero. The kernels are the custom op
+        ``torch.ops.vsa2_train.forward`` (registered by the metadata build), so torch.compile, fullgraph included,
+        holds them as one opaque call with symbolic geometry.
+        """
+        seq_len = attn_metadata.variable_block_sizes.numel() * attn_metadata.tile_elems
+        for name, tensor in (("query", query), ("key", key), ("value", value), ("gate", gate_compress)):
+            if tensor is not None and tensor.shape[1] != seq_len:
+                raise ValueError(f"VSA2 tiled {name} has length {tensor.shape[1]}, expected {seq_len}.")
+        if self.fine_attention_override is not None:
+            raise ValueError("FASTVIDEO_H3_VSA_FINE_ATTENTION replaces VSA-H3's fine kernel; VSA2 fuses its own.")
+        if not query.is_cuda:
+            raise RuntimeError("VSA2 sparse attention runs only on CUDA sm_100a / sm_103a GPUs.")
+        if not torch.compiler.is_compiling():
+            _require_vsa2_device(query.device.index if query.device.index is not None else torch.cuda.current_device())
+        topk = attn_metadata.vsa2_topk
+        if attn_metadata.dense_layers and self.layer_idx in attn_metadata.dense_layers:
+            topk = attn_metadata.num_video_tiles
+        q, k, v = (x.transpose(1, 2).to(torch.bfloat16).contiguous() for x in (query, key, value))
+        gate = (torch.zeros_like(q)
+                if gate_compress is None else gate_compress.transpose(1, 2).to(torch.bfloat16).contiguous())
+        if not torch.compiler.is_compiling():
+            logger.info_once("MiniMax-H3 VSA2 forward: fused vsa2_train kernels")
+        t, h, w = attn_metadata.vsa2_thw
+        out, _, _ = torch.ops.vsa2_train.forward(q, k, v, gate, t, h, w, attn_metadata.vsa2_text, topk)
+        return out.transpose(1, 2).to(query.dtype).contiguous()
+
     def forward(  # type: ignore[override]
         self,
         query: torch.Tensor,
@@ -890,6 +1220,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     ) -> torch.Tensor:
         compiling = torch.compiler.is_compiling()
         regional_compiling = compiling and self._regional_compile_ptx_blackwell_enabled is True
+        if attn_metadata.variant == "vsa2":
+            return self._forward_vsa2(query, key, value, gate_compress, attn_metadata)
 
         tile_elems = attn_metadata.tile_elems
         if regional_compiling and tile_elems != 64:
@@ -1177,7 +1509,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # (zero-initialized for H3 => branch contributes nothing until
             # finetuned; the model layer skips it entirely for all-zero gates).
             v_pooled = _pool_tiles(logical_value, attn_metadata.variable_block_sizes, tile_elems)
-            out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)  # [B, H, n_tiles, D]
+            out_c = torch.matmul(torch.softmax(_compression_scores(scores, attn_metadata), dim=-1),
+                                 v_pooled)  # [B, H, n_tiles, D]
             out_c = out_c.permute(0, 2, 1, 3).to(out.dtype)  # [B, n_tiles, H, D]
             batch, seq_len, heads, dim = out.shape
             out_tiled = out.view(batch, n_tiles, tile_elems, heads, dim)

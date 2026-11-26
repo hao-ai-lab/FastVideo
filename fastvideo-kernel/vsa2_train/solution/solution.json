@@ -1,0 +1,10 @@
+{
+  "languages": ["cuda_cpp"],
+  "entry_point": "binding.cpp::run",
+  "destination_passing_style": true,
+  "compile_options": {
+    "cflags": ["-O3"],
+    "cuda_cflags": ["-O3", "--use_fast_math"],
+    "ld_flags": ["-lcuda"]
+  }
+}

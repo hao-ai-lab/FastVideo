@@ -3,11 +3,15 @@
 
 import contextlib
 import importlib
+import json
+import os
 import sys
+from typing import Any
 
 import torch
 
 from fastvideo import envs
+from fastvideo.configs.pipelines.pan2 import PAN2_INFERENCE_FILE
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.pan2.guardrails import (
@@ -15,6 +19,7 @@ from fastvideo.pipelines.basic.pan2.guardrails import (
     PAN2PromptGuardrailStage,
     PAN2VideoGuardrailStage,
 )
+from fastvideo.pipelines.basic.pan2.pdd_denoising import PAN2PDDDenoisingStage
 from fastvideo.pipelines.basic.pan2.stages import (
     PAN2ConditioningStage,
     PAN2DenoisingStage,
@@ -53,7 +58,12 @@ def flash_attention_4_by_default() -> bool:
 
 class PAN2Pipeline(ComposedPipelineBase):
     """One stage chain serves both modes: a request with ``image_path`` (or a PIL ``pil_image``) runs image-to-video
-    from that first frame, and one without runs text-to-video."""
+    from that first frame, and one without runs text-to-video.
+
+    A PDD student export such as FastPAN2 (its ``fastvideo_inference.json`` read by
+    ``PAN2PipelineConfig.resolve_checkpoint_settings``) denoises with ``PAN2PDDDenoisingStage``: one forward per trained
+    fused block, without guidance.
+    """
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
@@ -72,8 +82,27 @@ class PAN2Pipeline(ComposedPipelineBase):
                     importlib.import_module(name)
             super().__init__(*args, **kwargs)
 
+    def _load_config(self, model_path: str) -> dict[str, Any]:
+        config = super()._load_config(model_path)
+        # A widened PDD transformer samples only with its trained partition, which only its inference file records.
+        config_path = os.path.join(self.model_path, "transformer", "config.json")
+        widened = None
+        if os.path.isfile(config_path):
+            with open(config_path, encoding="utf-8") as handle:
+                widened = json.load(handle).get("pdd_steps")
+        if widened and getattr(self.fastvideo_args.pipeline_config, "pdd_step_indices", None) is None:
+            raise ValueError(f"{config_path} sets pdd_steps, but {self.model_path} has no PAN2 PDD "
+                             f"{PAN2_INFERENCE_FILE}; a PDD student samples only with its trained partition.")
+        return config
+
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         pipeline_config = getattr(fastvideo_args, "pipeline_config", None)
+        pdd = getattr(pipeline_config, "pdd_step_indices", None) is not None
+        denoising_stage_cls = PAN2PDDDenoisingStage if pdd else PAN2DenoisingStage
+        if pdd and getattr(pipeline_config, "vsa_variant", None) == "vsa2":
+            # Fail at load, not at the first request, on a GPU the VSA2 kernels cannot run on.
+            from fastvideo.attention.backends.video_sparse_attn_h3 import require_vsa2_device
+            require_vsa2_device()
         # The guardrails are on unless the config turns them off.
         guardrails = None
         if getattr(pipeline_config, "enable_guardrails", True):
@@ -96,9 +125,9 @@ class PAN2Pipeline(ComposedPipelineBase):
                                                     latent_dtype=torch.float32))
         self.add_stage(stage_name="conditioning_stage", stage=PAN2ConditioningStage(vae=self.get_module("vae")))
         self.add_stage(stage_name="denoising_stage",
-                       stage=PAN2DenoisingStage(transformer=self.get_module("transformer"),
-                                                scheduler=self.get_module("scheduler"),
-                                                pipeline=self))
+                       stage=denoising_stage_cls(transformer=self.get_module("transformer"),
+                                                 scheduler=self.get_module("scheduler"),
+                                                 pipeline=self))
         # The performance switches of PAN2PipelineConfig: the DiT's fused kernels and the VAE's decode kernel.
         transformer = self.get_module("transformer")
         if hasattr(transformer, "set_fused_kernels"):
