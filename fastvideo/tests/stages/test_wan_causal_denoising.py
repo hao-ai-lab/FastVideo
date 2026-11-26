@@ -4,6 +4,7 @@
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import FlowUniPCMultistepScheduler
@@ -79,3 +80,90 @@ def test_causal_samplers_share_cache_layout_not_sampling_inheritance():
     assert issubclass(CausalDenoisingStage, WanCausalDenoisingBase)
     assert issubclass(CausalDMDDenosingStage, WanCausalDenoisingBase)
     assert not issubclass(CausalDenoisingStage, CausalDMDDenosingStage)
+
+
+@pytest.mark.parametrize("active_model", ["high", "low"])
+def test_dual_transformer_context_populates_cache_unused_by_denoising(monkeypatch, env_overrides, active_model):
+    _patch_denoising_module(monkeypatch, env_overrides, "1.0")
+    from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
+    from fastvideo.models.wan.causal_transformer import CausalWanSelfAttention
+    from fastvideo.pipelines.basic.wan.stages import causal_denoising
+
+    monkeypatch.setattr(causal_denoising, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(causal_denoising, "set_forward_context", lambda **kwargs: nullcontext())
+
+    class CacheWritingDenoiser(TinyCausalDenoiser):
+        local_attn_size = 9
+
+        def __init__(self):
+            super().__init__()
+            self.chunk_flags = []
+
+        def forward(self, latents, prompts, timestep, *, kv_cache, crossattn_cache, current_start, start_frame,
+                    is_chunk_start=None):
+            self.chunk_flags.append(is_chunk_start)
+            key = latents.permute(0, 2, 3, 4, 1).reshape(latents.shape[0], -1, 1, 2)
+            current_end = current_start + key.shape[1]
+            for cache in kv_cache:
+                _, end = CausalWanSelfAttention._write_in_place(
+                    cache, key, key, current_end=current_end, global_end_index=cache["global_end_index"],
+                    local_end_index_prev=cache["local_end_index"], is_chunk_start=is_chunk_start,
+                )
+                CausalWanSelfAttention._update_cache_counters(cache, current_end, end)
+            return super().forward(
+                latents, prompts, timestep, kv_cache=kv_cache, crossattn_cache=crossattn_cache,
+                current_start=current_start, start_frame=start_frame,
+            )
+
+    high, low = CacheWritingDenoiser(), CacheWritingDenoiser()
+    stage = causal_denoising.CausalDMDDenosingStage(
+        high, SelfForcingFlowMatchScheduler(num_inference_steps=1000), transformer_2=low,
+    )
+    stage.progress_bar = lambda **kwargs: NullProgressBar()
+    args = _args()
+    args.enable_causal_cuda_graph = True  # Unsupported dual-model execution must preserve ordinary cache writes.
+    args.pipeline_config.text_encoder_configs = [SimpleNamespace(arch_config=SimpleNamespace(text_len=8))]
+    args.pipeline_config.dit_config.boundary_ratio = 0.5
+    args.pipeline_config.dmd_denoising_steps = [1000, 750] if active_model == "high" else [400, 250]
+    args.pipeline_config.warp_denoising_step = False
+    batch = _batch(steps=2, cfg=False)
+    batch.latents = batch.latents.repeat(1, 1, 3, 1, 1)
+    batch.generator = [torch.Generator().manual_seed(123)]
+    result = stage.forward(batch, args)
+    assert torch.isfinite(result.latents).all()
+    assert "causal_cuda_graph" not in result.extra
+    active, inactive = (high, low) if active_model == "high" else (low, high)
+    assert len(active.calls) == 9  # Three blocks, each with two denoising calls and one context write.
+    assert len(inactive.calls) == 3  # Its first cache write in each block is the clean-context call.
+    for model in (high, low):
+        assert all(flag is None for flag in model.chunk_flags)
+        for cache in model.calls[-1][2]:
+            assert cache["global_end_index"] == cache["local_end_index"] == 7 * stage.frame_seq_length
+
+
+@pytest.mark.parametrize("sampler", ["standard", "dmd"])
+@pytest.mark.parametrize("interrupt_after_first", [False, True])
+def test_interruption_stops_before_context_write(monkeypatch, env_overrides, sampler, interrupt_after_first):
+    _patch_denoising_module(monkeypatch, env_overrides, "1.0")
+    from fastvideo.pipelines.basic.wan.stages import causal_denoising
+    from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
+    monkeypatch.setattr(causal_denoising, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(causal_denoising, "set_forward_context", lambda **kwargs: nullcontext())
+    model, scheduler = TinyCausalDenoiser(), RecordingUniPC()
+    stage = (causal_denoising.CausalDenoisingStage(model, scheduler) if sampler == "standard"
+             else causal_denoising.CausalDMDDenosingStage(model, FlowMatchEulerDiscreteScheduler()))
+    stage.progress_bar = lambda **kwargs: NullProgressBar()
+    stage.interrupt = not interrupt_after_first
+    if interrupt_after_first:
+        model.register_forward_hook(lambda *args: setattr(stage, "interrupt", True))
+    args = _args()
+    args.pipeline_config.text_encoder_configs = [SimpleNamespace(arch_config=SimpleNamespace(text_len=8))]
+    args.pipeline_config.dmd_denoising_steps = [1000, 750, 500, 250]
+    args.pipeline_config.warp_denoising_step = False
+    batch = _batch(steps=4, cfg=False)
+    batch.generator = [torch.Generator().manual_seed(123)]
+    original = batch.latents.clone()
+    torch.testing.assert_close(stage.forward(batch, args).latents, original, atol=0, rtol=0)
+    assert len(model.calls) == int(interrupt_after_first)
+    if sampler == "standard":
+        assert scheduler.resets == int(interrupt_after_first)
