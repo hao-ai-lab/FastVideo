@@ -28,9 +28,10 @@ import pytest
 import fastvideo.worker.multiproc_executor as multiproc_executor
 from fastvideo.worker.multiproc_executor import WorkerMultiprocProc
 
-# The spawn context reimports PyTorch and FastVideo in every child. That takes
-# nearly five seconds even on the local GB10 and can take longer on a loaded ARM
-# CI node, so a five-second startup deadline makes the signal contract flaky.
+# Spawn reimports PyTorch/FastVideo before entering the probe, which can take
+# tens of seconds on a cold shared filesystem. Bound that preparation separately
+# from reaching the signal point and reporting/terminating after a real signal.
+_PROCESS_STARTUP_TIMEOUT_SECONDS = 120
 _SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
@@ -53,7 +54,9 @@ class _ParentlessProcess:
         return None
 
 
-def _run_real_signal_probe(ready_pipe, log_queue, signal_point, entered_signal_point, shutdown_called) -> None:
+def _run_real_signal_probe(ready_pipe, log_queue, signal_point, probe_started, entered_signal_point,
+                           shutdown_called) -> None:
+    probe_started.set()
 
     class SignalWaitingWorker:
 
@@ -171,6 +174,7 @@ def test_worker_main_preserves_unrelated_system_exit(monkeypatch: pytest.MonkeyP
 @pytest.mark.parametrize("signal_point", ["worker_construction", "worker_loop"])
 def test_worker_main_forwards_real_signal_traceback_across_processes(signum: int, signal_point: str) -> None:
     context = mp.get_context("spawn")
+    probe_started = context.Event()
     entered_signal_point = context.Event()
     shutdown_called = context.Event()
     parent_ready_pipe, child_ready_pipe = context.Pipe(duplex=False)
@@ -178,12 +182,13 @@ def test_worker_main_forwards_real_signal_traceback_across_processes(signum: int
 
     process = context.Process(
         target=_run_real_signal_probe,
-        args=(child_ready_pipe, log_queue, signal_point, entered_signal_point, shutdown_called),
+        args=(child_ready_pipe, log_queue, signal_point, probe_started, entered_signal_point, shutdown_called),
     )
     process.start()
     child_ready_pipe.close()
 
     try:
+        assert probe_started.wait(timeout=_PROCESS_STARTUP_TIMEOUT_SECONDS), "spawn child did not enter the signal probe"
         reached_signal_point = entered_signal_point.wait(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         assert reached_signal_point, "child did not reach the requested signal point"
         if signal_point == "worker_loop":
