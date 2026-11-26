@@ -1,0 +1,148 @@
+# PromptRL milestone 1 (prompt-only): train the Qwen prompt-refiner LoRA
+# while Wan2.1 T2V 1.3B stays frozen.
+#
+# Canonical layout: 8 training GPUs (sp_size=1, hsdp_shard_dim=8; the
+# 3B refiner is replicated with synchronized LoRA gradients via DDP) and
+# a ninth GPU running the VideoScore2 reward service:
+#
+#   # reward host (ninth GPU):
+#   CUDA_VISIBLE_DEVICES=0 python -m \
+#       fastvideo.train.methods.rl.promptrl.rewards.serve --port 8100
+#
+#   # training host (eight GPUs):
+#   torchrun --nproc_per_node=8 -m fastvideo.train.entrypoint.train \
+#       --config examples/train/configs/rl/wan/promptrl_prompt_only.yaml
+#
+# The student's LoRA block is present (but never updated in prompt-only
+# mode) so the joint milestone starts from an identical models section.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanPromptRLModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules: [to_q, to_k, to_v, to_out]
+  refiner:
+    _target_: fastvideo.train.roles.qwen_refiner.QwenPromptRefinerRole
+    init_from: Qwen/Qwen2.5-VL-3B-Instruct
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+method:
+  _target_: fastvideo.train.methods.rl.promptrl.PromptRLMethod
+  mode: prompt_only
+  group_size: 8
+  retained_originals: 2
+  format_reward_weight: 1.0
+  video_reward_weight: 1.0
+  refiner_kl_beta: 0.01
+  student_kl_beta: 0.01
+  ppo_clip: 0.0001
+
+  rollout:
+    num_steps: 20
+    sde_steps: 8
+    noise_scale: 0.8
+    loss_microbatch_size: 1
+    flow_shift: inherit
+
+  data:
+    # Raw prompt dataset: JSONL or Parquet with required `prompt` field
+    # and optional `id` / `reward_tag` fields.
+    data_path: data/promptrl_prompts.jsonl
+    prompt_key: prompt
+    id_key: id
+    reward_tag_key: reward_tag
+
+  reward:
+    endpoint_url: http://127.0.0.1:8100
+    timeout_sec: 300
+    retries: 2
+    fps: 16
+
+  refiner:
+    max_new_tokens: 256
+    temperature: 1.0
+    top_p: 1.0
+    template_version: v1
+
+  refiner_optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    lr_scheduler: constant
+
+  generator_optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    lr_scheduler: constant
+
+  validation:
+    every_steps: 50
+    num_steps: 20
+    num_prompts: 8
+    batch_size: 8
+    log_samples: true
+    seed: 42
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: ""  # prompts come from method.data.data_path
+    train_batch_size: 1
+    dataloader_num_workers: 0
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 20
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    # Unused by PromptRL (per-role optimizer blocks live under method);
+    # kept at defaults for config-schema completeness.
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+
+  loop:
+    max_train_steps: 1000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_promptrl_prompt_only
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 4
+
+  tracker:
+    project_name: promptrl_wan
+    run_name: wan2.1_promptrl_prompt_only
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  promptrl_export:
+    output_dir: outputs/wan2.1_promptrl_prompt_only/bundle
+    every_steps: 0  # export once at train end
+
+pipeline:
+  flow_shift: 8

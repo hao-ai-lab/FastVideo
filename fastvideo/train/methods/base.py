@@ -10,7 +10,7 @@ import torch
 
 from fastvideo import envs
 from fastvideo.logger import init_logger
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.roles.base import TrainRoleBase
 from fastvideo.train.utils.checkpoint import _RoleModuleContainer
 from fastvideo.train.utils.optimizer import seed_adamw_parameter_state
 from fastvideo.training.checkpointing_utils import (
@@ -53,11 +53,11 @@ class TrainingMethod(torch.nn.Module, ABC):
         self,
         *,
         cfg: Any,
-        role_models: dict[str, ModelBase],
+        role_models: dict[str, TrainRoleBase],
     ) -> None:
         super().__init__()
         self.tracker: Any | None = None
-        self._role_models: dict[str, ModelBase] = dict(role_models)
+        self._role_models: dict[str, TrainRoleBase] = dict(role_models)
 
         self.student = role_models["student"]
         self.training_config = cfg.training
@@ -67,13 +67,13 @@ class TrainingMethod(torch.nn.Module, ABC):
             validation = (getattr(cfg, "callbacks", {}) or {}).get("validation", {})
         self.validation_config: dict[str, Any] = dict(validation or {})
 
-        # Build nn.ModuleDict for FSDP / checkpoint visibility.
+        # Build nn.ModuleDict for FSDP / checkpoint visibility.  Roles
+        # expose their modules through ``TrainRoleBase.checkpoint_modules``
+        # so non-diffusion roles (e.g. language models) register the same
+        # way diffusion roles register their transformer.
         self.role_modules = torch.nn.ModuleDict()
         for role, model in role_models.items():
-            mods: dict[str, torch.nn.Module] = {}
-            transformer = getattr(model, "transformer", None)
-            if isinstance(transformer, torch.nn.Module):
-                mods["transformer"] = transformer
+            mods = model.checkpoint_modules() if isinstance(model, TrainRoleBase) else {}
             if mods:
                 self.role_modules[role] = torch.nn.ModuleDict(mods)
 
@@ -135,7 +135,9 @@ class TrainingMethod(torch.nn.Module, ABC):
                 continue
 
             modules: dict[str, torch.nn.Module] = {}
-            if model.transformer is not None:
+            if isinstance(model, TrainRoleBase):
+                modules = model.checkpoint_modules()
+            elif getattr(model, "transformer", None) is not None:
                 modules["transformer"] = model.transformer
 
             container = _RoleModuleContainer(modules)
