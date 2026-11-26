@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
+import psutil
 import pytest
 import torch
 
@@ -466,87 +468,179 @@ def test_worker_non_output_rank_clears_latents_audio_and_trajectories():
     assert result.trajectory_decoded is None
 
 
-@pytest.mark.parametrize("mode", ["success", "rank-failure"])
-def test_external_launcher_real_two_process_lifecycle(mode, env_overrides):
+def _wait_for_smoke_ready(process, control_dir, timeout, phase="ready"):
+    deadline = time.monotonic() + timeout
+    while not all((control_dir / f"rank-{rank}.{phase}").exists() for rank in range(2)):
+        if process.poll() is not None:
+            raise AssertionError(f"torchrun exited during smoke {phase} startup: {process.returncode}")
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(0.05)
+
+
+def _run_two_process_smoke(mode, env_overrides, tmp_path, *, operation_timeout=30):
     helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
     repo_root = Path(__file__).resolve().parents[3]
     # The helper forces the CPU platform itself; the child inherits this
     # environment with PYTHONPATH pointed at the checkout.
     env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            "--nproc-per-node=2",
-            str(helper),
-            "--mode",
-            mode,
-        ],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=45,
-        check=False,
-    )
+    command = [
+        sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc-per-node=2",
+        str(helper), "--mode", mode, "--control-dir", str(tmp_path),
+    ]
+    stdout_path, stderr_path = tmp_path / "stdout.log", tmp_path / "stderr.log"
+    children = []
+    with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
+        process = subprocess.Popen(command, cwd=repo_root, stdout=stdout, stderr=stderr, text=True)
+        try:
+            # Cold torch/FastVideo imports and rendezvous are not fault-response
+            # latency. They have their own bounded preparation deadline. Neither
+            # rank can inject a fault before the parent starts the original
+            # 30-second operation budget (45 seconds for the success cases).
+            # torchrun starts one launcher interpreter before both rank imports.
+            startup_deadline = time.monotonic() + 300
+            _wait_for_smoke_ready(process, tmp_path, timeout=300, phase="imported")
+            (tmp_path / "initialize").touch()
+            _wait_for_smoke_ready(process, tmp_path, timeout=max(0, startup_deadline - time.monotonic()))
+            children = psutil.Process(process.pid).children(recursive=True)
+            operation_deadline = time.monotonic() + operation_timeout
+            (tmp_path / "run").touch()
+            process.wait(timeout=max(0, operation_deadline - time.monotonic()))
+        except (AssertionError, subprocess.TimeoutExpired) as error:
+            raise AssertionError(
+                f"{mode} smoke failed: {error}\n{stdout_path.read_text()}{stderr_path.read_text()}"
+            ) from error
+        finally:
+            # Killing only torchrun on a timeout leaves ranks running in their
+            # own sessions. Snapshot descendants before killing the supervisor.
+            if process.poll() is None:
+                try:
+                    children = psutil.Process(process.pid).children(recursive=True)
+                except psutil.NoSuchProcess:
+                    pass
+                for child in children:
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                process.kill()
+                process.wait(timeout=5)
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            psutil.wait_procs(children, timeout=5)
+    return subprocess.CompletedProcess(command, process.returncode, stdout_path.read_text(), stderr_path.read_text())
+
+
+def test_smoke_preparation_does_not_consume_operation_deadline(monkeypatch, env_overrides, tmp_path):
+    clock = [0.0]
+    process = SimpleNamespace(pid=-1, args=["smoke"], returncode=None)
+
+    def wait(*, timeout):
+        assert (tmp_path / "run").exists()
+        assert all((tmp_path / f"rank-{rank}.ready").exists() for rank in range(2))
+        assert timeout == 30  # Independent of launcher and rank imports.
+        process.returncode = 0
+        return 0
+
+    def advance(_):
+        clock[0] += 5
+        if clock[0] >= 145:
+            for rank in range(2):
+                (tmp_path / f"rank-{rank}.imported").touch()
+                if (tmp_path / "initialize").exists():
+                    (tmp_path / f"rank-{rank}.ready").touch()
+
+    process.poll, process.wait = lambda: process.returncode, wait
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(psutil, "Process", lambda _: SimpleNamespace(children=lambda **kwargs: []))
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=advance))
+
+    completed = _run_two_process_smoke("rank-exit", env_overrides, tmp_path)
+
+    assert completed.returncode == 0
+    assert clock[0] == 150  # 145s imports plus 5s rendezvous leave the fault budget intact.
+
+
+@pytest.mark.parametrize("phase", ["startup", "operation"])
+def test_smoke_deadlines_fail_and_kill_supervisor_and_ranks(phase, monkeypatch, env_overrides, tmp_path):
+    clock = [0.0]
+    process = SimpleNamespace(pid=-1, args=["smoke"], returncode=None)
+    child = SimpleNamespace(kill=Mock(), is_running=lambda: False)
+    if phase == "operation":
+        for rank in range(2):
+            (tmp_path / f"rank-{rank}.imported").touch()
+            (tmp_path / f"rank-{rank}.ready").touch()
+
+    def kill():
+        process.returncode = -9
+
+    def wait(*, timeout):
+        if process.returncode is None:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        assert timeout == 5
+        return process.returncode
+
+    def advance(_):
+        clock[0] += 30
+
+    process.poll = lambda: process.returncode
+    process.kill, process.wait = Mock(side_effect=kill), wait
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(psutil, "Process", lambda _: SimpleNamespace(children=lambda **kwargs: [child]))
+    reaped = Mock()
+    monkeypatch.setattr(psutil, "wait_procs", reaped)
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=advance))
+
+    with pytest.raises(AssertionError, match="rank-exit smoke failed") as exc_info:
+        _run_two_process_smoke("rank-exit", env_overrides, tmp_path)
+
+    assert isinstance(exc_info.value.__cause__, subprocess.TimeoutExpired)
+    assert exc_info.value.__cause__.timeout == (300 if phase == "startup" else 30)
+    assert (tmp_path / "run").exists() is (phase == "operation")
+    process.kill.assert_called_once_with()
+    child.kill.assert_called_once_with()
+    reaped.assert_called_once_with([child], timeout=5)
+
+
+def test_smoke_startup_exit_reports_logs_without_releasing_faults(monkeypatch, env_overrides, tmp_path):
+    process = SimpleNamespace(pid=-1, args=["smoke"], returncode=23, poll=lambda: 23)
+
+    def launch(*args, **kwargs):
+        kwargs["stderr"].write("injected startup failure")
+        kwargs["stderr"].flush()
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    with pytest.raises(AssertionError, match="injected startup failure") as exc_info:
+        _run_two_process_smoke("rank-exit", env_overrides, tmp_path)
+
+    assert "startup: 23" in str(exc_info.value)
+    assert not (tmp_path / "initialize").exists()
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("mode", ["success", "rank-failure"])
+def test_external_launcher_real_two_process_lifecycle(mode, env_overrides, tmp_path):
+    completed = _run_two_process_smoke(mode, env_overrides, tmp_path, operation_timeout=45)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     marker = "lifecycle_ok" if mode == "success" else "coordinated_failure"
     assert completed.stdout.count(marker) == 2
 
 
-def test_external_launcher_real_two_process_peer_exit_is_bounded(env_overrides):
-    helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
-    repo_root = Path(__file__).resolve().parents[3]
-    # The helper forces the CPU platform itself; the child inherits this
-    # environment with PYTHONPATH pointed at the checkout.
-    env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            "--nproc-per-node=2",
-            str(helper),
-            "--mode",
-            "rank-exit",
-        ],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+def test_external_launcher_real_two_process_peer_exit_is_bounded(env_overrides, tmp_path):
+    completed = _run_two_process_smoke("rank-exit", env_overrides, tmp_path)
 
     assert completed.returncode != 0
     assert "injected pre-request rank exit" in completed.stderr
 
 
-def test_external_launcher_real_two_process_missing_collective_honors_dist_timeout(env_overrides):
-    helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
-    repo_root = Path(__file__).resolve().parents[3]
-    # The helper forces the CPU platform itself; the child inherits this
-    # environment with PYTHONPATH pointed at the checkout.
-    env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            "--nproc-per-node=2",
-            str(helper),
-            "--mode",
-            "collective-timeout",
-        ],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+def test_external_launcher_real_two_process_missing_collective_honors_dist_timeout(env_overrides, tmp_path):
+    completed = _run_two_process_smoke("collective-timeout", env_overrides, tmp_path)
 
     assert completed.returncode != 0
     assert "collective_timeout rank=0" in completed.stdout, completed.stdout + completed.stderr

@@ -179,9 +179,17 @@ class _SpawnOutputWorker:
         return {"status": "shutdown", "calls": self.calls, "source_device": output.device.type}
 
 
-def _run_output_worker(pipe, device):
+# Spawn reimports PyTorch/FastVideo before entering the worker, which can take
+# tens of seconds on a cold shared filesystem. Bound that preparation separately
+# from the response deadline of each request.
+_PROCESS_STARTUP_TIMEOUT_SECONDS = 120
+_RESPONSE_TIMEOUT_SECONDS = 30
+
+
+def _run_output_worker(pipe, device, worker_started):
     # This top-level target is importable by a spawned interpreter. Pass only
     # the device name into it: passing an MPS tensor would fail before the test.
+    worker_started.set()
     proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
     proc.rank = 0
     proc.pipe = pipe
@@ -216,17 +224,19 @@ def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
 
     context = mp.get_context("spawn")
     parent_pipe, child_pipe = context.Pipe()
-    process = context.Process(target=_run_output_worker, args=(child_pipe, device))
+    worker_started = context.Event()
+    process = context.Process(target=_run_output_worker, args=(child_pipe, device, worker_started))
     process.start()
     child_pipe.close()
     response = output = metadata = metric = None
     try:
+        assert worker_started.wait(timeout=_PROCESS_STARTUP_TIMEOUT_SECONDS), "Spawned worker did not start"
         for call in (1, 2):
             parent_pipe.send({
                 "method": "execute_forward",
                 "kwargs": {"forward_batch": None, "fastvideo_args": SimpleNamespace(output_type="pil")},
             })
-            assert parent_pipe.poll(30), "Spawned worker did not return a response"
+            assert parent_pipe.poll(_RESPONSE_TIMEOUT_SECONDS), "Spawned worker did not return a response"
             response = parent_pipe.recv()
             assert _RPC_ERROR_KEY not in response, response.get("error")
             output = response["output_batch"]
@@ -246,7 +256,7 @@ def test_execute_forward_response_survives_spawn_and_repeated_requests(device):
             response = output = metadata = metric = None
 
         parent_pipe.send({"method": "shutdown"})
-        assert parent_pipe.poll(30), "Spawned worker did not shut down"
+        assert parent_pipe.poll(_RESPONSE_TIMEOUT_SECONDS), "Spawned worker did not shut down"
         assert parent_pipe.recv() == {"status": "shutdown", "calls": 2, "source_device": device}
         process.join(timeout=10)
         assert process.exitcode == 0

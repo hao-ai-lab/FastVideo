@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import socket
 import shutil
+import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -285,6 +287,161 @@ def test_mlx_http_rejects_reference_media_and_image_routes(local_server):
     assert "/v1/images" not in spec["paths"]
 
 
+def _client_bootstrap_command(script, runner, ready, release, base_url):
+    """Load the SDK before acknowledging readiness, then run the shipped client."""
+    if script.suffix == ".py":
+        bootstrap = (
+            "import runpy,time\n"
+            "from pathlib import Path\n"
+            "from openai import OpenAI\n"
+            f"with OpenAI(base_url={base_url!r}, api_key='local', max_retries=0) as client:\n"
+            "    client.videos\n"
+            f"Path({str(ready)!r}).touch()\n"
+            "deadline=time.monotonic()+120\n"
+            f"while not Path({str(release)!r}).exists():\n"
+            "    if time.monotonic()>=deadline:\n"
+            "        raise TimeoutError('Test runner did not release the client')\n"
+            "    time.sleep(0.01)\n"
+            f"runpy.run_path({str(script)!r}, run_name='__main__')\n"
+        )
+        return [runner, "-c", bootstrap]
+    if script.suffix == ".mjs":
+        sdk_url = (script.parent / "node_modules/openai/index.mjs").as_uri()
+        bootstrap = (
+            "import {existsSync,writeFileSync} from 'node:fs';\n"
+            f"const {{default:OpenAI}}=await import({json.dumps(sdk_url)});\n"
+            f"const client=new OpenAI({{baseURL:{json.dumps(base_url)},apiKey:'local',maxRetries:0}});\n"
+            "void client.videos;\n"
+            f"writeFileSync({json.dumps(str(ready))},'');\n"
+            "const deadline=performance.now()+120000;\n"
+            f"while(!existsSync({json.dumps(str(release))})){{\n"
+            "  if(performance.now()>=deadline) throw new Error('Test runner did not release the client');\n"
+            "  await new Promise(resolve=>setTimeout(resolve,10));\n"
+            "}\n"
+            f"await import({json.dumps(script.as_uri())});\n"
+        )
+        return [runner, "--input-type=module", "--eval", bootstrap]
+    bootstrap = (
+        f"touch {shlex.quote(str(ready))}\n"
+        "client_deadline=$((SECONDS+120))\n"
+        f"until [ -e {shlex.quote(str(release))} ]; do\n"
+        "  if [ \"$SECONDS\" -ge \"$client_deadline\" ]; then exit 124; fi\n"
+        "  sleep 0.01\n"
+        "done\n"
+        f"exec bash {shlex.quote(str(script))}"
+    )
+    return [runner, "-c", bootstrap]
+
+
+def _run_cookbook_client(script, runner, env, directory):
+    ready, release = directory / "client.ready", directory / "client.run"
+    command = _client_bootstrap_command(script, runner, ready, release, env["FASTVIDEO_BASE_URL"])
+    stdout_path, stderr_path = directory / "client.stdout", directory / "client.stderr"
+    with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
+        process = subprocess.Popen(command, env=env, cwd=directory, stdout=stdout, stderr=stderr,
+                                   text=True, start_new_session=os.name == "posix")
+        try:
+            deadline = time.monotonic() + 120
+            while not ready.exists() and process.poll() is None:
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(command, 120)
+                time.sleep(0.05)
+            if process.poll() is None:
+                # Keep the original request/poll/download budget after SDK imports.
+                deadline = time.monotonic() + 15
+                release.touch()
+                process.wait(timeout=max(0, deadline - time.monotonic()))
+        finally:
+            if process.poll() is None:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=5)
+    return subprocess.CompletedProcess(command, process.returncode, stdout_path.read_text(), stderr_path.read_text())
+
+
+def test_client_sdk_preparation_keeps_the_request_budget(monkeypatch, tmp_path):
+    clock = [0.0]
+    process = SimpleNamespace(returncode=None, poll=lambda: process.returncode)
+
+    def advance(_):
+        clock[0] += 5
+        if clock[0] == 45:
+            (tmp_path / "client.ready").touch()
+
+    def wait(*, timeout):
+        assert timeout == 15
+        assert (tmp_path / "client.run").exists()
+        process.returncode = 0
+
+    process.wait = wait
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=advance))
+
+    result = _run_cookbook_client(tmp_path / "video.py", sys.executable,
+                                 {"FASTVIDEO_BASE_URL": "http://127.0.0.1:8000/v1"}, tmp_path)
+
+    assert result.returncode == 0
+    assert clock[0] == 45
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group cleanup")
+@pytest.mark.parametrize("phase", ["startup", "request"])
+def test_client_deadlines_fail_and_reap_the_process_group(monkeypatch, tmp_path, phase):
+    from unittest.mock import Mock
+
+    clock = [0.0]
+    process = SimpleNamespace(pid=12345, returncode=None, poll=lambda: process.returncode)
+    if phase == "request":
+        (tmp_path / "client.ready").touch()
+
+    def advance(_):
+        clock[0] += 30
+
+    def wait(*, timeout):
+        if process.returncode is None:
+            raise subprocess.TimeoutExpired("client", timeout)
+        assert timeout == 5
+
+    def kill_group(pid, signum):
+        assert pid == process.pid and signum == signal.SIGKILL
+        process.returncode = -9
+
+    process.wait = wait
+    kill = Mock(side_effect=kill_group)
+    monkeypatch.setattr(os, "killpg", kill)
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=advance))
+
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        _run_cookbook_client(tmp_path / "video.py", sys.executable,
+                             {"FASTVIDEO_BASE_URL": "http://127.0.0.1:8000/v1"}, tmp_path)
+
+    assert error.value.timeout == (120 if phase == "startup" else 15)
+    assert (tmp_path / "client.run").exists() is (phase == "request")
+    kill.assert_called_once_with(process.pid, signal.SIGKILL)
+
+
+def test_client_startup_failure_preserves_diagnostics(monkeypatch, tmp_path):
+    process = SimpleNamespace(returncode=23, poll=lambda: 23)
+
+    def launch(*args, **kwargs):
+        kwargs["stderr"].write("SDK import failed")
+        kwargs["stderr"].flush()
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    result = _run_cookbook_client(tmp_path / "video.py", sys.executable,
+                                 {"FASTVIDEO_BASE_URL": "http://127.0.0.1:8000/v1"}, tmp_path)
+
+    assert result.returncode == 23 and result.stderr == "SDK import failed"
+    assert not (tmp_path / "client.run").exists()
+
+
 @pytest.mark.parametrize("filename,runner", [("video.py", sys.executable), ("video.sh", "bash"), ("video.mjs", "node")])
 @pytest.mark.parametrize("fail", [False, True])
 def test_cookbook_clients_handle_completion_and_failure(local_server, tmp_path, filename, runner, fail):
@@ -297,10 +454,7 @@ def test_cookbook_clients_handle_completion_and_failure(local_server, tmp_path, 
     _, generator, base_url = local_server
     generator.fail = fail
     env = dict(os.environ, FASTVIDEO_BASE_URL=base_url, FASTVIDEO_MODEL="fasth3", FASTVIDEO_API_KEY="local")
-    result = subprocess.run(
-        [runner, str(ROOT / "examples/serving/clients" / filename)],
-        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15,
-    )
+    result = _run_cookbook_client(ROOT / "examples/serving/clients" / filename, runner, env, tmp_path)
     outputs = list(tmp_path.glob("*.mp4"))
     if fail:
         assert result.returncode != 0

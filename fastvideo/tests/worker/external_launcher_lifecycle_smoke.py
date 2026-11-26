@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 from datetime import timedelta
+from functools import partial
 import os
+from pathlib import Path
 import time
 from types import SimpleNamespace
 
@@ -25,13 +27,14 @@ from fastvideo.worker.gpu_worker import Worker
 
 class _SmokeWorkerWrapper:
 
-    def __init__(self, fastvideo_args, rpc_rank):
+    def __init__(self, fastvideo_args, rpc_rank, control_dir=None):
         self.fastvideo_args = fastvideo_args
         self.rpc_rank = rpc_rank
         self.rank = rpc_rank
         self.device = torch.device("cpu")
         self.worker = self
         self._shutdown = False
+        self.control_dir = control_dir
 
     def init_worker(self, all_kwargs):
         kwargs = all_kwargs[self.rpc_rank]
@@ -39,6 +42,10 @@ class _SmokeWorkerWrapper:
         self.local_rank = kwargs["local_rank"]
 
     def init_device(self):
+        if self.control_dir is not None:
+            # A rank importing more slowly must not consume its peer's real
+            # three-second Gloo timeout before it can even join rendezvous.
+            _wait_for_parent(self.control_dir, self.rank, "imported", "initialize")
         timeout = (timedelta(seconds=self.fastvideo_args.dist_timeout)
                    if self.fastvideo_args.dist_timeout is not None else None)
         init_distributed_environment(
@@ -75,13 +82,23 @@ class _SmokeWorkerWrapper:
             cleanup_dist_env_and_memory()
 
 
-def _run(mode: str) -> None:
+def _wait_for_parent(control_dir: Path, rank: int, phase: str, release: str) -> None:
+    """Keep imports/rendezvous and fault injection behind separate handshakes."""
+    (control_dir / f"rank-{rank}.{phase}").touch()
+    deadline = time.monotonic() + 300
+    while not (control_dir / release).exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("parent did not release the prepared smoke workers")
+        time.sleep(0.01)
+
+
+def _run(mode: str, control_dir: Path | None = None) -> None:
     # Keep this lifecycle test CPU/Gloo-only even when the host exposes GPUs.
     # Platform selection is lazy but another imported module may have already
     # resolved it, so replace both the cached platform and device resolver.
     platforms._current_platform = CpuPlatform()
     parallel_state.get_local_torch_device = lambda: torch.device("cpu")
-    external_launcher.WorkerWrapperBase = _SmokeWorkerWrapper
+    external_launcher.WorkerWrapperBase = partial(_SmokeWorkerWrapper, control_dir=control_dir)
     external_launcher.torch.cuda.is_available = lambda: False
 
     world_size = int(os.environ["WORLD_SIZE"])
@@ -92,6 +109,8 @@ def _run(mode: str) -> None:
     executor = external_launcher.ExternalLauncherExecutor(args)
     assert external_launcher.get_world_group().timeout == timedelta(seconds=3)
     try:
+        if control_dir is not None:
+            _wait_for_parent(control_dir, executor.rank, "ready", "run")
         generator = VideoGenerator.__new__(VideoGenerator)
         generator.executor = executor
 
@@ -188,8 +207,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("success", "rank-failure", "rank-exit", "collective-timeout"),
                         required=True)
+    parser.add_argument("--control-dir", type=Path)
     parsed = parser.parse_args()
-    _run(parsed.mode)
+    _run(parsed.mode, parsed.control_dir)
 
 
 if __name__ == "__main__":

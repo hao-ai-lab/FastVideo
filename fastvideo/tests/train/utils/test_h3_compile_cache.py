@@ -20,7 +20,9 @@ class Block(torch.nn.Module):
     def forward(self, x, tag):
         # A different equal-length tag forces a new replay guard without changing
         # the mathematical graph or its saved tensors.
-        return (x * self.weight).sin() * len(REPLAY_TAG) * len(tag)
+        # Small dyadic inputs keep polynomial outputs and gradient reductions
+        # exactly representable in FP32 across eager and Inductor.
+        return (x * self.weight).square() * len(REPLAY_TAG) * len(tag)
 
 
 @pytest.mark.parametrize('exhaust', ['per_call', 'accumulated'])
@@ -46,8 +48,8 @@ def test_exhaustion_with_outstanding_checkpoints_and_new_replay_guard(exhaust, c
     try:
         with torch._dynamo.config.patch(accumulated_recompile_limit=1 if exhaust == 'accumulated' else 256):
             pending = []
-            for tag in ['x', 'yy', 'zzz', 'x']:
-                x = torch.randn(1, 3, 2, requires_grad=True)
+            for offset, tag in enumerate(['x', 'yy', 'zzz', 'x']):
+                x = ((torch.arange(6, dtype=torch.float32).reshape(1, 3, 2) - 2 - offset) / 8).requires_grad_()
                 ref_x = x.detach().clone().requires_grad_()
                 pending.append((wrapped(x, tag), reference(ref_x, tag), x, ref_x))
             assert cache.calls['eager_fallbacks'] == 2
@@ -60,7 +62,9 @@ def test_exhaustion_with_outstanding_checkpoints_and_new_replay_guard(exhaust, c
                 expected.sum().backward()
                 torch.testing.assert_close(actual, expected, atol=0, rtol=0)
                 torch.testing.assert_close(x.grad, ref_x.grad, atol=0, rtol=0)
+                assert torch.count_nonzero(x.grad) > 0
             torch.testing.assert_close(block.weight.grad, reference.weight.grad, atol=0, rtol=0)
+            assert torch.count_nonzero(block.weight.grad) == block.weight.numel()
             assert cache.calls['eager_replays'] == 4 and cache.calls['compiled_replays'] == 4
             assert backend.frame_count == 2  # One forward graph + one emergency replay graph.
             assert cache.active.get() is None
@@ -71,7 +75,7 @@ def test_exhaustion_with_outstanding_checkpoints_and_new_replay_guard(exhaust, c
             assert cache.calls['eager_fallbacks'] == before and backend.frame_count == 2
             # Dense no-grad execution must also survive exhaustion.
             with torch.no_grad():
-                x = torch.randn(1, 3, 2)
+                x = torch.arange(6, dtype=torch.float32).reshape(1, 3, 2) / 8
                 torch.testing.assert_close(wrapped(x, 'teacher'), reference(x, 'teacher'), atol=0, rtol=0)
         assert list(block.parameters()) == parameters
     finally:
