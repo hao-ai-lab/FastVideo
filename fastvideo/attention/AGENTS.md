@@ -10,7 +10,9 @@ Backend registry + selector wrapping FlashAttn / SageAttn / SageAttn3 / SDPA / V
 attention/
 ├── __init__.py            # Exports DistributedAttention, LocalAttention, get_attn_backend
 ├── layer.py               # DistributedAttention, DistributedAttention_VSA, LocalAttention
+├── ring_attention.py      # RingAttention (Ring / USP hybrid), see below
 ├── selector.py            # get_attn_backend (cached) + _component_attention_backend_scope
+├── ring/                  # Vendored Ring FlashAttention kernel (ring_flash_attn_func)
 ├── backends/
 │   ├── abstract.py        #   AttentionBackend / AttentionMetadata / AttentionMetadataBuilder
 │   ├── flash_attn.py      #   FA2/FA3
@@ -109,6 +111,20 @@ up to four levels deep, so they cannot yet read the decision off their own
 config. Thread the request alongside that tuple, one model family at a time —
 Wan, LTX-2 and Kandinsky5 first, since those carry per-role requests — and the
 scope goes away when the last family lands. Do not build on it.
+
+## Ring Attention / USP Ownership Boundary
+
+- `RingAttention` (`ring_attention.py`) owns every Ring/USP decision: input
+  validation, the Ulysses-within-ring all-to-all, Ring-local RoPE slicing, and
+  the direct call into the vendored FA2 Ring kernel (it bypasses
+  `self.attn_impl`). `DistributedAttention` only dispatches to it and rejects
+  Ring for subclasses that override `forward()`.
+- `fastvideo/distributed/usp_topology.py` owns the Ring x Ulysses mesh;
+  `parallel_state.py` only stores the resulting `USPTopology` and exposes
+  accessors.
+
+Put new Ring/USP logic in those two modules, not in `layer.py` or
+`parallel_state.py`.
 
 ## Adding a Backend
 
