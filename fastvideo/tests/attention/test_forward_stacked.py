@@ -30,6 +30,7 @@ def test_forward_cats_then_delegates_to_forward_stacked():
         # compiler-policy flag and the patched ``forward_stacked``.
         dummy = object.__new__(DistributedAttention)
         dummy._compile_forward_enabled = False
+        dummy._ring_attention = None
         out, replicated = DistributedAttention.forward(dummy, q, k, v, original_seq_len=3)
     finally:
         DistributedAttention.forward_stacked = original
@@ -38,3 +39,35 @@ def test_forward_cats_then_delegates_to_forward_stacked():
     assert rec.qkv.shape == (6, 3, 4, 5)
     assert torch.equal(rec.qkv[:2], q) and torch.equal(rec.qkv[2:4], k) and torch.equal(rec.qkv[4:], v)
     assert rec.kwargs["original_seq_len"] == 3
+
+
+def test_forward_stacked_dispatches_ring_without_copying_qkv():
+    calls = []
+
+    class RingRecorder:
+        def forward(self, q, k, v, **kwargs):
+            calls.append((q, k, v, kwargs))
+            return q, None
+
+    attention = object.__new__(DistributedAttention)
+    torch.nn.Module.__init__(attention)
+    attention._ring_attention = RingRecorder()
+    attention._compile_forward_enabled = True
+    attention.eval()
+    qkv = torch.randn(6, 3, 4, 5)
+    freqs = (torch.ones(3, 5), torch.zeros(3, 5))
+    output, replicated = attention.forward_stacked(qkv, original_seq_len=5, freqs_cis=freqs)
+
+    q, k, v, kwargs = calls.pop()
+    assert output is q and replicated is None
+    for actual, expected in zip((q, k, v), qkv.chunk(3, dim=0)):
+        assert torch.equal(actual, expected)
+        assert actual.data_ptr() == expected.data_ptr()
+    assert kwargs['training'] is False
+    assert kwargs['original_seq_len'] == 5
+    assert kwargs['freqs_cis'] is freqs
+
+    attention(q, k, v, original_seq_len=5, freqs_cis=freqs)
+    direct_q, direct_k, direct_v, direct_kwargs = calls.pop()
+    assert direct_q is q and direct_k is k and direct_v is v
+    assert direct_kwargs == kwargs
