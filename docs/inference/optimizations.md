@@ -483,8 +483,8 @@ The Wan result below measures the existing generic
 but it is **not** a benchmark or numerical gate for the stricter regional
 fullgraph path above.
 
-| Config                                            | Effect                                                       |
-| ------------------------------------------------- | ------------------------------------------------------------ |
+| Config | Effect |
+|---|---|
 | Wan2.1-T2V-1.3B, A100-80GB, 480×832×81f, 50 steps | end-to-end **259.7s → 198.1s (−23.7%)**; per-step **4.91 → 3.78 s/it** |
 
 The speedup is **configuration-dependent** — it varies with model,
@@ -621,11 +621,11 @@ remaining steps. The technique is the LinearAG variant of Adaptive Guidance
 
 Set the `FASTVIDEO_CFG_GATE_STEP` environment variable to a float in `[0, 1]`:
 
-| Value           | Behavior                                                     |
-| --------------- | ------------------------------------------------------------ |
-| `1.0` (default) | Disabled — legacy two-pass CFG every step.                   |
-| `0.5`           | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
-| `0.0`           | Cache from the very first step (most aggressive).            |
+| Value | Behavior |
+|-------|----------|
+| `1.0` (default) | Disabled — legacy two-pass CFG every step. |
+| `0.5` | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
+| `0.0` | Cache from the very first step (most aggressive). |
 
 ```bash
 export FASTVIDEO_CFG_GATE_STEP=0.5

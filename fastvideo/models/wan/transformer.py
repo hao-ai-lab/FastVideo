@@ -295,8 +295,6 @@ class WanSelfAttention(nn.Module):
         self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-        # A kernel must be supported by both this layer and the calling model.
-        # Unscoped callers retain the shared Wan family's capabilities.
         if supported_attention_backends is None:
             supported_attention_backends = WanVideoConfig()._supported_attention_backends
         cross_backends = tuple(backend for backend in self._supported_attention_backends
@@ -743,7 +741,6 @@ class WanTransformerBlock_VSA(nn.Module):
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
-    # Model-level opt-in: shared arch configs retain the family defaults.
     _supported_attention_backends = (
         AttentionBackendEnum.SAGE_ATTN,
         AttentionBackendEnum.FLASH_ATTN,
